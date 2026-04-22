@@ -977,8 +977,8 @@ export default function App() {
                   <h2 className="text-[28px] font-bold tracking-tight text-text-primary">
                     Welcome {user?.fullName?.split(' ')[0]}! 👋
                   </h2>
-                  <p className="text-[14px] text-text-secondary font-medium italic">
-                    Hope you have a productive day ahead in your healthcare operations.
+                  <p className="text-[14px] text-text-secondary font-medium">
+                    This is your Operation Command Center. Have a productive day managing your clinic's excellence.
                   </p>
                 </div>
 
@@ -1366,7 +1366,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
+                <div className={cn("grid gap-6", isAddingNote ? "grid-cols-1 lg:grid-cols-[380px_1fr]" : "grid-cols-1")}>
                   {isAddingNote && (
                     <motion.div 
                       initial={{ opacity: 0, x: -20 }}

@@ -13,12 +13,18 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
+export async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(cors());
   app.use(express.json());
+
+  // Diagnosis Middleware
+  app.use((req, res, next) => {
+    console.log(`[HTTP] ${req.method} ${req.url}`);
+    next();
+  });
 
   const initialTasks = [
     {"id":"qos-followup","category":"Quality of Service","title":"Follow up – referred cases","frequency":"DAILY","description":"Excel follow up for referred cases only."},
@@ -50,8 +56,9 @@ async function startServer() {
 
   // Google Sheets Setup
   const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || "1z41IbJtvILMYHz9EqvpflzZD3kTFLF0R9q-0OnzzQFE";
-  const SERVICE_ACCOUNT_EMAIL = "araofficesynbot@gen-lang-client-0504198581.iam.gserviceaccount.com";
-  const HARDCODED_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+  const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "araofficesynbot@gen-lang-client-0504198581.iam.gserviceaccount.com";
+  // For the private key, we handle both newlines and escaped newlines (\n) which are common in env vars
+  const PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, '\n') || `-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCl+QjMqgu7Vq/Y
 SqF1C8AlrCHgqqcFE8I/ejzxwgwDwwreF2+sv47DKQSTPh4DJAg53IxNAp0o1gtv
 XlDzfLY0WMWmeQRlGVs5iir2CbNxdmvcjQpOTXf5nNBf7WLrC+0eNVrVC0JX8Ufv
@@ -118,7 +125,7 @@ N8gKncAa0H6OPxGehbOw6A==
       console.log(`📡 Attempting to connect to Google Sheet ID: ${SPREADSHEET_ID}`);
       const serviceAccountAuth = new JWT({
         email: SERVICE_ACCOUNT_EMAIL,
-        key: HARDCODED_PRIVATE_KEY,
+        key: PRIVATE_KEY,
         scopes: ["https://www.googleapis.com/auth/spreadsheets"],
       });
 
@@ -212,10 +219,14 @@ N8gKncAa0H6OPxGehbOw6A==
     }
   }
 
-  await initializeGoogleSheets();
+  // API Routes Router
+  const apiRouter = express.Router();
 
-  // API Routes
-  app.get("/api/status", (req, res) => {
+  apiRouter.get("/ping", (req, res) => {
+    res.json({ pong: true, time: new Date().toISOString() });
+  });
+
+  apiRouter.get("/status", (req, res) => {
     res.json({ 
       connected: !!doc, 
       error: connectionError,
@@ -224,7 +235,7 @@ N8gKncAa0H6OPxGehbOw6A==
     });
   });
 
-  app.post("/api/reconnect", async (req, res) => {
+  apiRouter.post("/api/reconnect", async (req, res) => {
     await initializeGoogleSheets();
     res.json({ 
       connected: !!doc, 
@@ -233,7 +244,7 @@ N8gKncAa0H6OPxGehbOw6A==
   });
 
   // Auth Routes
-  app.post("/api/login", async (req, res) => {
+  apiRouter.post("/login", async (req, res) => {
     const { email, password } = req.body;
     if (doc) {
       try {
@@ -277,7 +288,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(401).json({ error: "Invalid email or password" });
   });
 
-  app.post("/api/change-password", async (req, res) => {
+  apiRouter.post("/change-password", async (req, res) => {
     const { email, currentPassword, newPassword } = req.body;
     if (doc) {
       try {
@@ -311,7 +322,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(400).json({ error: "Incorrect current password" });
   });
 
-  app.patch("/api/profile", async (req, res) => {
+  apiRouter.patch("/profile", async (req, res) => {
     const { email, fullName, profilePic, location } = req.body;
     if (doc) {
       try {
@@ -333,7 +344,7 @@ N8gKncAa0H6OPxGehbOw6A==
   });
 
   // User Management Routes (Superadmin only)
-  app.get("/api/users", async (req, res) => {
+  apiRouter.get("/users", async (req, res) => {
     if (doc) {
       try {
         const sheet = doc.sheetsByTitle["Users"];
@@ -354,7 +365,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.json([]);
   });
 
-  app.post("/api/users/reset-password", async (req, res) => {
+  apiRouter.post("/users/reset-password", async (req, res) => {
     const { email } = req.body;
     if (doc) {
       try {
@@ -376,7 +387,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.post("/api/users", async (req, res) => {
+  apiRouter.post("/users", async (req, res) => {
     const { email, fullName, role, password, location } = req.body;
     if (doc) {
       try {
@@ -401,7 +412,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.delete("/api/users/:email", async (req, res) => {
+  apiRouter.delete("/users/:email", async (req, res) => {
     const { email } = req.params;
     if (doc) {
       try {
@@ -419,12 +430,12 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(404).json({ error: "User not found" });
   });
 
-  app.post("/api/sync", async (req, res) => {
+  apiRouter.post("/sync", async (req, res) => {
     await initializeGoogleSheets();
     res.json({ connected: !!doc, error: connectionError });
   });
 
-  app.get("/api/tasks", async (req, res) => {
+  apiRouter.get("/tasks", async (req, res) => {
     if (doc) {
       try {
         const sheet = doc.sheetsByTitle["Tasks"] || (await doc.addSheet({ 
@@ -451,7 +462,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.post("/api/tasks", async (req, res) => {
+  apiRouter.post("/tasks", async (req, res) => {
     const newTask = { ...req.body, id: Date.now().toString(), createdAt: new Date().toISOString() };
     if (doc) {
       try {
@@ -486,7 +497,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.patch("/api/tasks/:id", async (req, res) => {
+  apiRouter.patch("/tasks/:id", async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     if (doc) {
@@ -513,7 +524,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.delete("/api/tasks/:id", async (req, res) => {
+  apiRouter.delete("/tasks/:id", async (req, res) => {
     const { id } = req.params;
     if (doc) {
       try {
@@ -533,7 +544,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.get("/api/history", async (req, res) => {
+  apiRouter.get("/history", async (req, res) => {
     if (doc) {
       try {
         const sheet = doc.sheetsByTitle["History"] || (await doc.addSheet({ 
@@ -556,7 +567,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.get("/api/categories", async (req, res) => {
+  apiRouter.get("/categories", async (req, res) => {
     if (doc) {
       try {
         const sheet = doc.sheetsByTitle["Categories"] || (await doc.addSheet({ 
@@ -577,7 +588,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.post("/api/categories", async (req, res) => {
+  apiRouter.post("/categories", async (req, res) => {
     const newCategory = req.body;
     if (doc) {
       try {
@@ -595,7 +606,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.post("/api/history", async (req, res) => {
+  apiRouter.post("/history", async (req, res) => {
     const { taskId, title, remarks } = req.body;
     const now = new Date();
     const dateStr = now.toISOString().split("T")[0];
@@ -652,7 +663,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.patch("/api/history", async (req, res) => {
+  apiRouter.patch("/history", async (req, res) => {
     const { taskId, dateCompleted, remarks } = req.body;
     // Only allow editing if it's today
     const entryDate = new Date(dateCompleted);
@@ -680,7 +691,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.delete("/api/history/:taskId", async (req, res) => {
+  apiRouter.delete("/history/:taskId", async (req, res) => {
     const { taskId } = req.params;
     const { dateCompleted } = req.query;
     
@@ -726,7 +737,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.get("/api/notes", async (req, res) => {
+  apiRouter.get("/notes", async (req, res) => {
     if (doc) {
       try {
         const sheet = doc.sheetsByTitle["Notes"] || (await doc.addSheet({ 
@@ -759,7 +770,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.post("/api/notes", async (req, res) => {
+  apiRouter.post("/notes", async (req, res) => {
     const { title, content, duedate } = req.body;
     const newNote = { 
       id: Date.now().toString(), 
@@ -784,7 +795,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.patch("/api/notes/:id", async (req, res) => {
+  apiRouter.patch("/notes/:id", async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     if (doc) {
@@ -810,7 +821,7 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  app.delete("/api/notes/:id", async (req, res) => {
+  apiRouter.delete("/notes/:id", async (req, res) => {
     const { id } = req.params;
     if (doc) {
       try {
@@ -831,24 +842,63 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
+  // Mount API Router
+  app.use("/api", apiRouter);
+
+  // Catch-all for undefined /api routes
+  apiRouter.all("*", (req, res) => {
+    res.status(404).json({ error: `API endpoint ${req.method} ${req.url} not found` });
+  });
+
+  // Start initialization in background
+  initializeGoogleSheets().catch(err => {
+    console.error("❌ Background initialization failed:", err);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
+    // Ensure API routes come BEFORE vite.middlewares
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: false }));
+    
     app.get("*", (req, res) => {
+      // Final fallback for SPA
+      if (req.url.startsWith("/api/")) {
+        return res.status(404).json({ error: `API route ${req.method} ${req.url} not found (SPA Fallback)` });
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (process.env.VERCEL === undefined) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
+
+  return app;
 }
 
-startServer();
+const appPromise = startServer();
+export default async (req: any, res: any) => {
+  const app = await appPromise;
+  
+  // Vercel rewrites /api/tasks to /server.ts. 
+  // If the URL comes in without the /api prefix, prepend it so Express router matches.
+  if (req.url && !req.url.startsWith('/api/') && req.url !== '/api') {
+    // Only prepend if it's not a root request or an obviously static file request
+    if (req.url === '/' || !req.url.includes('.')) {
+      const oldUrl = req.url;
+      req.url = '/api' + (req.url === '/' ? '' : req.url);
+      console.log(`[Vercel] Routed ${oldUrl} -> ${req.url}`);
+    }
+  }
+
+  app(req, res);
+};
