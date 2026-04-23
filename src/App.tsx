@@ -47,6 +47,7 @@ interface Task {
   category: Category;
   description?: string;
   frequency?: string;
+  frequencyDetail?: string;
   subtasks?: (string | Subtask)[];
   completed: boolean;
   deadline?: string;
@@ -1426,7 +1427,11 @@ export default function App() {
                               {task.frequency && (
                                 <span className="bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                                   <Clock className="w-3 h-3" />
-                                  {task.frequency.replace(/_/g, ' ')}
+                                  {task.frequency} {task.frequencyDetail && (
+                                    <span className="opacity-70">
+                                      ({task.frequency === "Weekly" ? task.frequencyDetail : `Date ${task.frequencyDetail}`})
+                                    </span>
+                                  )}
                                 </span>
                               )}
                             </div>
@@ -1972,18 +1977,48 @@ export default function App() {
                         onChange={(e) => setEditingTask({ ...editingTask, frequency: e.target.value })}
                         className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
                       >
-                        <option value="DAILY">Daily</option>
-                        <option value="WEEKLY_FRIDAY">Weekly (Friday)</option>
-                        <option value="TWICE_WEEKLY">Twice Weekly</option>
-                        <option value="MONTHLY">Monthly</option>
-                        <option value="MONTHLY_2ND_FRI">Monthly (2nd Fri)</option>
-                        <option value="MONTHLY_3RD_4TH_FRI">Monthly (3rd/4th Fri)</option>
-                        <option value="2_MONTHLY">2-Monthly</option>
-                        <option value="WHEN_NEEDED">When Needed</option>
-                        <option value="UPON_SUGGESTION">Upon Suggestion</option>
+                        <option value="Daily">Daily</option>
+                        <option value="Weekly">Weekly</option>
+                        <option value="Twice Weekly">Twice Weekly</option>
+                        <option value="Monthly">Monthly</option>
+                        <option value="2-Monthly">2-Monthly</option>
+                        <option value="3-Monthly">3-Monthly</option>
+                        <option value="When Needed">When Needed</option>
+                        <option value="Upon Suggestion">Upon Suggestion</option>
                       </select>
                     </div>
                   </div>
+
+                  {/* Conditional frequency sub-options */}
+                  {editingTask.frequency === "Weekly" && (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Day</label>
+                      <select 
+                        value={editingTask.frequencyDetail || "Monday"}
+                        onChange={(e) => setEditingTask({ ...editingTask, frequencyDetail: e.target.value })}
+                        className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
+                      >
+                        {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(day => (
+                          <option key={day} value={day}>{day}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {["Monthly", "2-Monthly", "3-Monthly"].includes(editingTask.frequency || "") && (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Date</label>
+                      <select 
+                        value={editingTask.frequencyDetail || "1"}
+                        onChange={(e) => setEditingTask({ ...editingTask, frequencyDetail: e.target.value })}
+                        className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map(date => (
+                          <option key={date} value={date.toString()}>Date {date}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Subtasks (one per line)</label>
