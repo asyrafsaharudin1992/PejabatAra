@@ -676,36 +676,36 @@ export default function App() {
 
   const isTaskDueToday = (task: Task) => {
     const date = new Date();
-    const freq = task.frequency || "Daily";
+    const rawFreq = (task.frequency || "Daily").toLowerCase();
     const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
     const dayOfMonth = date.getDate();
     const month = date.getMonth(); // 0-11
     
-    if (freq === "Daily") return true;
-    if (freq === "When Needed" || freq === "Upon Suggestion") return false;
+    if (rawFreq === "daily") return true;
+    if (rawFreq === "when needed" || rawFreq === "upon suggestion") return false;
     
-    if (freq === "Weekly") {
+    if (rawFreq === "weekly") {
       return task.frequencyDetail === dayName;
     }
     
-    if (freq === "Twice Weekly") {
-      // Default to Mon/Thu if no detail, or handle if we want more specific
+    if (rawFreq === "twice weekly") {
       return [1, 4].includes(date.getDay());
     }
     
-    if (freq === "Monthly") {
+    if (rawFreq === "monthly") {
       return task.frequencyDetail === dayOfMonth.toString();
     }
     
-    if (freq === "2-Monthly") {
-      // Every 2 months (e.g. Feb, Apr, Jun...) on specific date
+    if (rawFreq === "2-monthly") {
       return task.frequencyDetail === dayOfMonth.toString() && month % 2 === 1;
     }
 
-    if (freq === "3-Monthly") {
-      // Every 3 months (Mar, Jun, Sep, Dec) on specific date
+    if (rawFreq === "3-monthly") {
       return task.frequencyDetail === dayOfMonth.toString() && (month + 1) % 3 === 0;
     }
+
+    // Handle legacy upper case with underscores if any remain
+    if (rawFreq === "weekly_friday" && dayName === "Friday") return true;
 
     return false;
   };
@@ -932,11 +932,11 @@ export default function App() {
     };
   });
 
-  const completionRate = tasks.length > 0 
-    ? Math.round((history.filter(h => isSameDay(new Date(h.dateCompleted), new Date())).length / tasks.length) * 100) 
+  const completionRate = todayTasks.length > 0 
+    ? Math.round((history.filter(h => isSameDay(new Date(h.dateCompleted), new Date())).length / todayTasks.length) * 100) 
     : 0;
 
-  const upcomingDeadlines = tasks.filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date()))).length;
+  const upcomingDeadlines = remainingTodayTasks.length;
 
   if (!user) {
     return (
