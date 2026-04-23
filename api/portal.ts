@@ -67,6 +67,33 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    if (req.method === 'PATCH') {
+      const { id } = req.query;
+      let body = req.body;
+      if (typeof body === 'string') body = JSON.parse(body);
+      if (!id) return res.status(400).json({ error: "ID is required" });
+
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:A`;
+      const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const getData = await getRes.json();
+      const ids = getData.values || [];
+      const rowIndex = ids.findIndex((row: any) => row[0].toString() === id.toString());
+
+      if (rowIndex !== -1) {
+        const rowNum = rowIndex + 1;
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!B${rowNum}:D${rowNum}?valueInputOption=RAW`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            values: [[body.folder, body.title, body.url]]
+          })
+        });
+        return res.status(200).json({ success: true });
+      }
+      return res.status(404).json({ error: "Link not found" });
+    }
+
     if (req.method === 'DELETE') {
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: "ID is required" });
