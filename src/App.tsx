@@ -24,7 +24,11 @@ import {
   AlertCircle,
   Trash2,
   Loader2,
-  Calendar
+  Calendar,
+  FolderOpen,
+  ExternalLink,
+  PlusCircle,
+  Globe
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth } from "date-fns";
@@ -55,6 +59,14 @@ interface Note {
   content: string;
   updatedAt: string;
   duedate: string;
+}
+
+interface PortalLink {
+  id: string;
+  title: string;
+  folder: string;
+  url: string;
+  createdAt: string;
 }
 
 interface HistoryEntry {
@@ -134,6 +146,13 @@ export default function App() {
   const [noteSearchQuery, setNoteSearchQuery] = useState("");
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [portalLinks, setPortalLinks] = useState<PortalLink[]>([]);
+  const [isPortalLoading, setIsPortalLoading] = useState(false);
+  const [isAddingPortal, setIsAddingPortal] = useState(false);
+  const [newPortalTitle, setNewPortalTitle] = useState("");
+  const [newPortalUrl, setNewPortalUrl] = useState("");
+  const [newPortalFolder, setNewPortalFolder] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -271,12 +290,13 @@ export default function App() {
     };
 
     try {
-      const [status, tasksData, notesData, historyData, taskCategoriesData] = await Promise.all([
+      const [status, tasksData, notesData, historyData, taskCategoriesData, portalData] = await Promise.all([
         fetchJson("/api/status"),
         fetchJson("/api/tasks"),
         fetchJson("/api/notes"),
         fetchJson("/api/history"),
-        fetchJson("/api/categories")
+        fetchJson("/api/categories"),
+        fetchJson("/api/portal")
       ]);
       
       setConnectionStatus(status);
@@ -284,6 +304,7 @@ export default function App() {
       if (Array.isArray(notesData)) setNotes(notesData);
       if (Array.isArray(historyData)) setHistory(historyData);
       if (Array.isArray(taskCategoriesData)) setTaskCategories(taskCategoriesData);
+      if (Array.isArray(portalData)) setPortalLinks(portalData);
 
       if (user.role === "Superadmin") {
         try {
@@ -775,6 +796,63 @@ export default function App() {
     setIsEditModalOpen(true);
   };
 
+  const addPortalLink = async () => {
+    if (!newPortalTitle.trim() || !newPortalUrl.trim()) return;
+    
+    setIsPortalLoading(true);
+    const folder = newPortalFolder.trim() || "General";
+    
+    try {
+      const res = await fetch("/api/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newPortalTitle,
+          url: newPortalUrl.startsWith("http") ? newPortalUrl : `https://${newPortalUrl}`,
+          folder: folder
+        }),
+      });
+      
+      if (res.ok) {
+        const newLink = await res.json();
+        setPortalLinks([newLink, ...portalLinks]);
+        setNewPortalTitle("");
+        setNewPortalUrl("");
+        setNewPortalFolder("");
+        setIsAddingPortal(false);
+        showNotification("Link added to portal");
+      }
+    } catch (error) {
+      showNotification("Failed to add link", "error");
+    } finally {
+      setIsPortalLoading(false);
+    }
+  };
+
+  const deletePortalLink = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this link?")) return;
+    try {
+      await fetch(`/api/portal?id=${id}`, { method: "DELETE" });
+      setPortalLinks(portalLinks.filter(l => l.id !== id));
+      showNotification("Link removed");
+    } catch (error) {
+      showNotification("Failed to delete link", "error");
+    }
+  };
+
+  const toggleFolder = (folderName: string) => {
+    setExpandedFolders(prev => 
+      prev.includes(folderName) ? prev.filter(f => f !== folderName) : [...prev, folderName]
+    );
+  };
+
+  const groupedPortalLinks = portalLinks.reduce((acc, link) => {
+    const folder = link.folder || "General";
+    if (!acc[folder]) acc[folder] = [];
+    acc[folder].push(link);
+    return acc;
+  }, {} as Record<string, PortalLink[]>);
+
   const todayTasks = tasks.filter(t => isTaskDueToday(t));
   const remainingTodayTasks = todayTasks.filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())));
 
@@ -897,6 +975,7 @@ export default function App() {
             { id: "Calendar", icon: Calendar, roles: ["Superadmin", "Staff"] },
             { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
             { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
+            { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
             { id: "Users", icon: User, roles: ["Superadmin"] },
             { id: "Profile", icon: User, roles: ["Superadmin", "Staff"] },
           ].filter(item => item.roles.includes(user?.role || "Staff")).map((item) => (
@@ -1412,6 +1491,149 @@ export default function App() {
                   onUpdateRemark={updateHistoryRemark} 
                   onUndo={undoTaskCompletion}
                 />
+              </div>
+            )}
+
+            {activeTab === "Portal" && (
+              <div className="flex flex-col gap-6">
+                <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+                    <div>
+                      <h4 className="text-[24px] font-bold tracking-tight mb-1">Ara Resources Portal</h4>
+                      <p className="text-[14px] text-text-secondary font-medium">Internal links and essential clinical resources</p>
+                    </div>
+                    <button 
+                      onClick={() => setIsAddingPortal(!isAddingPortal)}
+                      className="bg-accent-blue text-white px-6 py-3 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2"
+                    >
+                      <PlusCircle className="w-5 h-5" />
+                      <span>{isAddingPortal ? "Cancel" : "Add Link"}</span>
+                    </button>
+                  </div>
+
+                  {isAddingPortal && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="bg-[#F8F9FA] border border-border-apple rounded-[20px] p-6 mb-8 overflow-hidden"
+                    >
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Title</label>
+                          <input 
+                            type="text"
+                            value={newPortalTitle}
+                            onChange={(e) => setNewPortalTitle(e.target.value)}
+                            placeholder="Link name (e.g. CME Plato)"
+                            className="w-full bg-white border border-border-apple rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">URL</label>
+                          <input 
+                            type="text"
+                            value={newPortalUrl}
+                            onChange={(e) => setNewPortalUrl(e.target.value)}
+                            placeholder="google.com/..."
+                            className="w-full bg-white border border-border-apple rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Folder Name</label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="text"
+                              value={newPortalFolder}
+                              onChange={(e) => setNewPortalFolder(e.target.value)}
+                              placeholder="e.g. CME"
+                              className="flex-1 bg-white border border-border-apple rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all"
+                            />
+                            <button 
+                              onClick={addPortalLink}
+                              disabled={isPortalLoading}
+                              className="bg-accent-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:shadow-lg transition-all disabled:opacity-50"
+                            >
+                              {isPortalLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  <div className="grid gap-4">
+                    {Object.entries(groupedPortalLinks).length > 0 ? (
+                      Object.entries(groupedPortalLinks).map(([folder, links]) => {
+                        const folderLinks = links as PortalLink[];
+                        return (
+                          <div key={folder} className="bg-[#F8F9FA] rounded-[24px] border border-border-apple overflow-hidden">
+                            <button 
+                              onClick={() => toggleFolder(folder)}
+                              className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center border border-border-apple">
+                                  <FolderOpen className={cn("w-5 h-5 transition-colors", expandedFolders.includes(folder) ? "text-accent-blue" : "text-text-secondary")} />
+                                </div>
+                                <div className="text-left">
+                                  <h6 className="text-[16px] font-bold text-text-primary">{folder}</h6>
+                                  <p className="text-[11px] font-bold text-text-secondary uppercase tracking-widest">{folderLinks.length} Resources</p>
+                                </div>
+                              </div>
+                              <ChevronRight className={cn("w-5 h-5 text-text-secondary transition-transform duration-300", expandedFolders.includes(folder) && "rotate-90")} />
+                            </button>
+                            
+                            <AnimatePresence>
+                              {expandedFolders.includes(folder) && (
+                                <motion.div 
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="bg-white border-t border-border-apple"
+                                >
+                                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {folderLinks.map((link: PortalLink) => (
+                                      <div key={link.id} className="group relative bg-[#F8F9FA] border border-border-apple rounded-xl p-4 flex items-center justify-between hover:border-accent-blue/30 hover:bg-white hover:shadow-apple transition-all duration-300">
+                                        <a 
+                                          href={link.url} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          className="flex flex-1 items-center gap-3 overflow-hidden"
+                                        >
+                                          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-border-apple text-accent-blue group-hover:bg-accent-blue group-hover:text-white transition-all">
+                                            <ExternalLink className="w-4 h-4" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <h6 className="text-[13px] font-bold text-text-primary truncate">{link.title}</h6>
+                                            <p className="text-[11px] text-text-secondary truncate">{link.url}</p>
+                                          </div>
+                                        </a>
+                                        {user?.role === "Superadmin" && (
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); deletePortalLink(link.id); }}
+                                            className="p-2 ml-2 text-text-secondary hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="py-20 flex flex-col items-center justify-center text-center opacity-60">
+                        <Globe className="w-12 h-12 mb-4 text-text-secondary" />
+                        <h6 className="text-[18px] font-bold">No internal resources yet</h6>
+                        <p className="text-sm font-medium">Add frequently used links, dashboards, or spreadsheets here</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
