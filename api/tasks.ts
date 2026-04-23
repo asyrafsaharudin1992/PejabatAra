@@ -19,22 +19,24 @@ export default async function handler(req: any, res: any) {
     const tokenResponse = await client.getAccessToken();
     const token = tokenResponse.token;
 
+    // A=id, B=category, C=title, D=description, E=frequency, F=status, G=subtasks, H=createdAt
+    const SHEET_NAME = 'Tasks';
+
     if (req.method === 'GET') {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:G`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:H`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       const rows = data.values || [];
 
-      // A:id, B:category, C:title, D:description, E:frequency, F:status, G:subtasks
       const tasks = rows.slice(1).map((row: any) => ({
         id: row[0],
         category: row[1],
         title: row[2],
-        description: row[3],
-        frequency: row[4],
+        description: row[3] || "",
+        frequency: row[4] || "DAILY",
         completed: row[5] === "Completed",
         subtasks: row[6] ? JSON.parse(row[6]) : [],
-        createdAt: new Date().toISOString() // Fallback
+        createdAt: row[7] || new Date().toISOString()
       }));
 
       return res.status(200).json(tasks);
@@ -44,77 +46,110 @@ export default async function handler(req: any, res: any) {
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
       
-      const newTask = {
-        id: Date.now().toString(),
-        category: body.category,
-        title: body.title,
-        description: body.description || "",
-        frequency: body.frequency || "N/A",
-        status: body.completed ? "Completed" : "Pending",
-        subtasks: JSON.stringify(body.subtasks || [])
-      };
+      const newTaskRow = [
+        Date.now().toString(), // id
+        body.category || "General",
+        body.title || "Untitled Task",
+        body.description || "",
+        body.frequency || "DAILY",
+        body.completed ? "Completed" : "Pending",
+        JSON.stringify(body.subtasks || []),
+        new Date().toISOString() // createdAt
+      ];
 
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:G:append?valueInputOption=RAW`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:H:append?valueInputOption=RAW`;
       await fetch(url, {
         method: 'POST',
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values: [[newTask.id, newTask.category, newTask.title, newTask.description, newTask.frequency, newTask.status, newTask.subtasks]] })
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [newTaskRow] })
       });
 
-      return res.status(200).json(newTask);
+      return res.status(200).json({
+        id: newTaskRow[0],
+        category: newTaskRow[1],
+        title: newTaskRow[2],
+        description: newTaskRow[3],
+        frequency: newTaskRow[4],
+        completed: body.completed,
+        subtasks: body.subtasks || [],
+        createdAt: newTaskRow[7]
+      });
     }
 
     if (req.method === 'PATCH') {
-      const { id } = req.query; // Vercel puts [id] in req.query
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: "ID is required" });
+      
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
 
-      // Find row index
-      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:A`;
+      // Step 1: Find Row
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:A`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
       const getData = await getRes.json();
       const ids = getData.values || [];
-      const rowIndex = ids.findIndex((row: string[]) => row[0] === id);
+      const rowIndex = ids.findIndex((row: any) => row[0] === id);
 
-      if (rowIndex !== -1) {
-        // We update specific columns. Index in Sheets is rowIndex + 1.
-        // Columns: A=1, B=2, C=3, D=4, E=5, F=6, G=7
-        if (body.completed !== undefined) {
-          const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!F${rowIndex + 1}?valueInputOption=RAW`;
-          await fetch(updateUrl, {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: [[body.completed ? "Completed" : "Pending"]] })
-          });
-        }
-        // Add other field updates if needed...
-        return res.status(200).json({ success: true });
-      }
-      return res.status(404).json({ error: "Task not found" });
+      if (rowIndex === -1) return res.status(404).json({ error: "Task not found" });
+
+      // Step 2: Update (Cols B to G)
+      // We skip A (id) and H (createdAt)
+      const updateRow = [
+        body.category,
+        body.title,
+        body.description || "",
+        body.frequency || "DAILY",
+        body.completed === undefined ? undefined : (body.completed ? "Completed" : "Pending"),
+        body.subtasks ? JSON.stringify(body.subtasks) : undefined
+      ];
+
+      // Update specific cells based on what's provided
+      // Alternatively, update the whole range B:G for that row
+      const currentRowRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A${rowIndex + 1}:G${rowIndex + 1}`, {
+         headers: { Authorization: `Bearer ${token}` }
+      });
+      const currentRowData = await currentRowRes.json();
+      const currentRow = currentRowData.values[0];
+
+      const finalRow = [
+        body.category || currentRow[1],
+        body.title || currentRow[2],
+        body.description !== undefined ? body.description : currentRow[3],
+        body.frequency || currentRow[4],
+        body.completed !== undefined ? (body.completed ? "Completed" : "Pending") : currentRow[5],
+        body.subtasks ? JSON.stringify(body.subtasks) : currentRow[6]
+      ];
+
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!B${rowIndex + 1}:G${rowIndex + 1}?valueInputOption=RAW`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [finalRow] })
+      });
+
+      return res.status(200).json({ success: true });
     }
 
     if (req.method === 'DELETE') {
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: "ID is required" });
 
-      // Find row index
-      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:A`;
+      // Step A: Get sheetId
+      const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const sheetInfo = await sheetInfoRes.json();
+      const sheet = sheetInfo.sheets.find((s: any) => s.properties.title === SHEET_NAME);
+      const sheetId = sheet.properties.sheetId;
+
+      // Step B: Find rowIndex
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:A`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
       const getData = await getRes.json();
       const ids = getData.values || [];
-      const rowIndex = ids.findIndex((row: string[]) => row[0].toString() === id.toString());
+      const rowIndex = ids.findIndex((row: any) => row[0].toString() === id.toString());
 
       if (rowIndex !== -1) {
-        const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const sheetInfo = await sheetInfoRes.json();
-        const tasksSheet = sheetInfo.sheets.find((s: any) => s.properties.title === 'Tasks');
-        const sheetId = tasksSheet.properties.sheetId;
-
+        // Step C: deleteDimension
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

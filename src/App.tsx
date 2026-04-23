@@ -694,7 +694,7 @@ export default function App() {
 
     setIsSyncing(true);
     try {
-      await fetch(`/api/history?taskId=${taskId}&dateCompleted=${encodeURIComponent(dateCompleted)}`, {
+      await fetch(`/api/history?id=${taskId}&date=${encodeURIComponent(dateCompleted)}`, {
         method: "DELETE"
       });
     } catch (error) {
@@ -711,7 +711,7 @@ export default function App() {
     if (!editingTask) return;
 
     try {
-      await fetch(`/api/tasks/${editingTask.id}`, {
+      await fetch(`/api/tasks?id=${editingTask.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editingTask),

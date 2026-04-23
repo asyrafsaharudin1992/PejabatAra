@@ -17,8 +17,10 @@ export default async function handler(req: any, res: any) {
     const tokenResponse = await client.getAccessToken();
     const token = tokenResponse.token;
 
+    const SHEET_NAME = 'Users';
+
     if (req.method === 'GET') {
-      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Users!A:G`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:G`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       const rows = data.values || [];
       return res.status(200).json(rows.slice(1).map((r: any) => ({
@@ -30,20 +32,23 @@ export default async function handler(req: any, res: any) {
       const { email } = req.query;
       if (!email) return res.status(400).json({ error: "Email is required" });
 
-      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Users!A:A`;
+      // Step A: Get sheetId
+      const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const sheetInfo = await sheetInfoRes.json();
+      const sheet = sheetInfo.sheets.find((s: any) => s.properties.title === SHEET_NAME);
+      const sheetId = sheet.properties.sheetId;
+
+      // Step B: Find Row
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:A`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
       const getData = await getRes.json();
       const emails = getData.values || [];
       const rowIndex = emails.findIndex((row: string[]) => row[0]?.toLowerCase() === (email as string).toLowerCase());
 
       if (rowIndex !== -1) {
-        const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const sheetInfo = await sheetInfoRes.json();
-        const usersSheet = sheetInfo.sheets.find((s: any) => s.properties.title === 'Users');
-        const sheetId = usersSheet.properties.sheetId;
-
+        // Step C: batchUpdate deleteDimension
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
