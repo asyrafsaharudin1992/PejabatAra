@@ -1,9 +1,8 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import { fileURLToPath } from "url";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { JWT } from "google-auth-library";
 import bcrypt from "bcryptjs";
@@ -12,50 +11,45 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const distPath = path.join(process.cwd(), "dist");
 
-export async function startServer() {
-  const app = express();
-  const PORT = 3000;
+// Initialize Express App at top level
+const app = express();
+const PORT = 3000;
 
-  // 1. Core Middleware
-  app.use(cors());
-  app.use(express.json());
+// 1. Core Middleware
+app.use(cors());
+app.use(express.json());
 
-  // 2. Comprehensive Logging & API Path Patching (Resilient)
-  app.use((req, res, next) => {
-    const incomingUrl = req.url || '';
-    if (incomingUrl.startsWith('/api/') || incomingUrl === '/api') {
-      return next();
-    }
+// 2. Comprehensive Logging
+app.use((req, res, next) => {
+  const incomingUrl = req.url || "";
+  // Check if it's an API request - handle both /api/ and /api
+  const isApi = incomingUrl.startsWith("/api/") || incomingUrl === "/api" || incomingUrl.startsWith("/api?");
+  if (isApi) {
+    console.log(`[API REQUEST] ${req.method} ${incomingUrl}`);
+  } else if (!incomingUrl.includes(".")) {
+    console.log(`[PAGE REQUEST] ${req.method} ${incomingUrl}`);
+  }
+  next();
+});
 
-    const apiEndpoints = ['ping', 'status', 'login', 'tasks', 'notes', 'history', 'categories', 'users', 'sync', 'change-password', 'profile', 'reconnect'];
-    const pathPart = incomingUrl.split('?')[0];
-    const firstSegment = pathPart.split('/').filter(Boolean)[0];
+// 3. API Router Definition
+const apiRouter = express.Router();
 
-    if (apiEndpoints.includes(firstSegment) || (!pathPart.includes('.') && firstSegment)) {
-      const oldUrl = req.url;
-      req.url = '/api' + (incomingUrl.startsWith('/') ? '' : '/') + incomingUrl;
-      console.log(`[Express Patch] ${oldUrl} -> ${req.url}`);
-    }
-    next();
+// 4. API Endpoints
+apiRouter.get("/ping", (req, res) => {
+  res.json({ pong: "ok", time: new Date().toISOString() });
+});
+
+apiRouter.get("/status", (req, res) => {
+  res.json({
+    connected: !!doc,
+    error: connectionError,
+    spreadsheetId: SPREADSHEET_ID,
+    serviceAccount: SERVICE_ACCOUNT_EMAIL
   });
-
-  // 3. API Router Definition
-  const apiRouter = express.Router();
-
-  // Route registration...
-  apiRouter.get("/ping", (req, res) => {
-    res.json({ pong: "router", time: new Date().toISOString() });
-  });
-
-  apiRouter.get("/status", (req, res) => {
-    res.json({ 
-      connected: !!doc, 
-      error: connectionError,
-      spreadsheetId: SPREADSHEET_ID,
-      serviceAccount: SERVICE_ACCOUNT_EMAIL
-    });
-  });
+});
 
   apiRouter.post("/reconnect", async (req, res) => {
     await initializeGoogleSheets();
@@ -873,102 +867,76 @@ N8gKncAa0H6OPxGehbOw6A==
     res.status(503).json({ error: "Database not connected" });
   });
 
-  // Mount API Router ONLY after all routes are registered
-  app.use("/api", apiRouter);
-
-  // Final catch-all for apiRouter to prevent falling through to main app
   apiRouter.all("*", (req, res) => {
-    console.log(`[404 apiRouter] ${req.method} ${req.url} (Matched Prefix /api)`);
-    res.status(404).json({ error: `API endpoint ${req.method} ${req.url} not found (apiRouter)` });
+    console.log(`[API 404] ${req.method} ${req.url}`);
+    res.status(404).json({ error: `Endpoint ${req.method} ${req.url} not found` });
   });
 
-  // Final Catch-all for undefined /api routes on the main app
-  app.all("/api/*", (req, res) => {
-    console.log(`[404 Main App] ${req.method} ${req.url} (Bypassed Router)`);
-    res.status(404).json({ 
-      error: `Main app /api catch-all: ${req.method} ${req.url} not found`,
-      path: req.path,
-      originalUrl: req.originalUrl
+// 5. Mount API Router
+app.use("/api", apiRouter);
+
+// 6. Global Error Handler (For API errors)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const isApi = req.url.startsWith("/api/") || req.url === "/api" || req.url.startsWith("/api?");
+  if (isApi) {
+    console.error(`[API FATAL ERROR] ${req.method} ${req.url}:`, err);
+    return res.status(err.status || 500).json({ error: err.message || "Internal Server Error" });
+  }
+  next(err);
+});
+
+// 7. Security Catch-all for API paths (if not caught by router)
+app.all("/api*", (req, res) => {
+  console.log(`[API LEAK GUARD] ${req.method} ${req.url}`);
+  res.status(404).json({ error: "Invalid API route" });
+});
+
+// Start Google Sheets in background
+initializeGoogleSheets().catch(err => {
+  console.error("❌ Background initialization failed:", err);
+});
+
+// ==========================================
+// VERCEL SERVERLESS EXPORT
+// ==========================================
+export default async (req: any, res: any) => {
+  // Pass the request directly to Express
+  await new Promise<void>((resolve) => {
+    app(req, res, () => {
+      res.status(404).json({ error: "Not found" });
+      resolve();
     });
   });
+};
 
-  // Global Error Handler (Must return JSON for all API calls)
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(`[Global Error] ${req.method} ${req.url}:`, err);
-    if (req.url.startsWith('/api') || req.headers.accept?.includes('application/json')) {
-      return res.status(err.status || 500).json({
-        error: err.message || "Internal Server Error",
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+// SERVING FRONTEND
+async function setupServer() {
+  if (process.env.NODE_ENV !== "production" && process.env.VERCEL === undefined) {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
       });
+      app.use(vite.middlewares);
+      console.log("✅ Vite middleware attached");
+    } catch (e) {
+      console.error("Vite failed, falling back to static", e);
     }
-    next(err);
-  });
-
-  // Start initialization in background
-  initializeGoogleSheets().catch(err => {
-    console.error("❌ Background initialization failed:", err);
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    // Ensure API routes come BEFORE vite.middlewares
-    app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath, { index: false }));
-    
+    // Production / Static serving
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      // Final fallback for SPA
-      const isApiRequest = req.path.startsWith("/api/") || req.url.startsWith("/api/");
-      const prefersJson = req.headers.accept?.includes("application/json");
-
-      if (isApiRequest || prefersJson) {
-        console.log(`[SPA Fallback Blocked] API request for ${req.url} was going to get index.html`);
-        return res.status(404).json({ 
-          error: `API route ${req.method} ${req.url} not found (SPA Fallback Blocked)`,
-          isApiRequest,
-          prefersJson
-        });
-      }
       res.sendFile(path.join(distPath, "index.html"));
     });
+    console.log("✅ Serving static files from dist");
   }
 
-  if (process.env.VERCEL === undefined) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
-
-  return app;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server running on http://localhost:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+  });
 }
 
-const appPromise = startServer();
-export default async (req: any, res: any) => {
-  const app = await appPromise;
-  
-  // Vercel Path Patching (Critical)
-  const incomingUrl = req.url || '';
-  console.log(`[Vercel Handler] Initial: ${req.method} ${incomingUrl}`);
-
-  // If Vercel rewrites or environment oddities strip /api, we restore it for Express
-  if (!incomingUrl.startsWith('/api')) {
-    // Determine if this is an API call attempting to reach server.ts
-    // In vercel.json, /api/(.*) points here.
-    // If it hits here and doesn't start with /api, we must restore it.
-    const pathPart = incomingUrl.split('?')[0];
-    const isStatic = pathPart.includes('.');
-    
-    if (!isStatic) {
-      const oldUrl = req.url;
-      req.url = '/api' + (incomingUrl.startsWith('/') ? '' : '/') + incomingUrl;
-      console.log(`[Vercel Handler] Patched: ${oldUrl} -> ${req.url}`);
-    }
-  }
-
-  app(req, res);
-};
+if (process.env.VERCEL === undefined) {
+  setupServer();
+}
