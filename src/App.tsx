@@ -676,36 +676,45 @@ export default function App() {
 
   const isTaskDueToday = (task: Task) => {
     const date = new Date();
-    const rawFreq = (task.frequency || "Daily").toLowerCase();
+    // Normalize frequency: lowercase, replace underscores with spaces, trim
+    const freq = (task.frequency || "Daily").toLowerCase().replace(/_/g, ' ').trim();
     const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
     const dayOfMonth = date.getDate();
     const month = date.getMonth(); // 0-11
     
-    if (rawFreq === "daily") return true;
-    if (rawFreq === "when needed" || rawFreq === "upon suggestion") return false;
+    if (freq === "daily") return true;
+    if (freq === "when needed" || freq === "upon suggestion") return false;
     
-    if (rawFreq === "weekly") {
-      return task.frequencyDetail === dayName;
+    if (freq.startsWith("weekly")) {
+      // Handle "weekly" with detail in separate field
+      if (freq === "weekly") return task.frequencyDetail === dayName;
+      // Handle legacy "weekly monday" etc
+      const parts = freq.split(" ");
+      if (parts.length > 1) {
+        const targetDay = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
+        return dayName === targetDay;
+      }
+      return false;
     }
     
-    if (rawFreq === "twice weekly") {
+    if (freq === "twice weekly") {
       return [1, 4].includes(date.getDay());
     }
     
-    if (rawFreq === "monthly") {
+    if (freq === "monthly") {
+      if (!task.frequencyDetail) return dayOfMonth === 1;
       return task.frequencyDetail === dayOfMonth.toString();
     }
     
-    if (rawFreq === "2-monthly") {
-      return task.frequencyDetail === dayOfMonth.toString() && month % 2 === 1;
+    if (freq === "2-monthly" || freq === "2 monthly") {
+      const targetDate = task.frequencyDetail || "1";
+      return dayOfMonth.toString() === targetDate && month % 2 === 1;
     }
 
-    if (rawFreq === "3-monthly") {
-      return task.frequencyDetail === dayOfMonth.toString() && (month + 1) % 3 === 0;
+    if (freq === "3-monthly" || freq === "3 monthly") {
+      const targetDate = task.frequencyDetail || "1";
+      return dayOfMonth.toString() === targetDate && (month + 1) % 3 === 0;
     }
-
-    // Handle legacy upper case with underscores if any remain
-    if (rawFreq === "weekly_friday" && dayName === "Friday") return true;
 
     return false;
   };
@@ -912,8 +921,14 @@ export default function App() {
   const remainingTodayTasks = todayTasks.filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())));
 
   const departmentLoad = taskCategories.map(cat => {
-    const total = todayTasks.filter(t => t.category === cat.name).length;
-    const completed = todayTasks.filter(t => t.category === cat.name && history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date()))).length;
+    const tasksDueToday = todayTasks.filter(t => t.category === cat.name);
+    const tasksCompletedToday = tasks.filter(t => 
+      t.category === cat.name && 
+      history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date()))
+    );
+
+    const total = Math.max(tasksDueToday.length, tasksCompletedToday.length);
+    const completed = tasksCompletedToday.length;
     
     let barColor = "bg-accent-blue";
     if (cat.name === "TeamARA") barColor = "bg-orange-500";
@@ -932,8 +947,9 @@ export default function App() {
     };
   });
 
-  const completionRate = todayTasks.length > 0 
-    ? Math.round((history.filter(h => isSameDay(new Date(h.dateCompleted), new Date())).length / todayTasks.length) * 100) 
+  const totalCompletedToday = history.filter(h => isSameDay(new Date(h.dateCompleted), new Date())).length;
+  const completionRate = (todayTasks.length > 0 || totalCompletedToday > 0)
+    ? Math.round((totalCompletedToday / Math.max(todayTasks.length, totalCompletedToday)) * 100) 
     : 0;
 
   const upcomingDeadlines = remainingTodayTasks.length;
