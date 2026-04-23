@@ -33,10 +33,12 @@ export async function startServer() {
     const pathSegments = pathPart.split('/').filter(Boolean);
     const firstSegment = pathSegments[0];
 
-    if (!incomingUrl.startsWith('/api/') && incomingUrl !== '/api') {
+    // If it DOES NOT start with /api, check if it should
+    if (!incomingUrl.startsWith('/api')) {
       if (apiEndpoints.includes(firstSegment) || (!pathPart.includes('.') && firstSegment)) {
+        const oldUrl = req.url;
         req.url = '/api' + (incomingUrl.startsWith('/') ? '' : '/') + incomingUrl;
-        console.log(`[Express Patch] ${incomingUrl} -> ${req.url}`);
+        console.log(`[Express Patch] ${oldUrl} -> ${req.url}`);
       }
     }
     next();
@@ -45,7 +47,7 @@ export async function startServer() {
   // 3. API Router Definition
   const apiRouter = express.Router();
 
-  // Redirect /api/x to /x for the router
+  // Mount API Router early
   app.use("/api", apiRouter);
 
   apiRouter.get("/ping", (req, res) => {
@@ -72,45 +74,52 @@ export async function startServer() {
   // Auth Routes
   apiRouter.post("/login", async (req, res) => {
     const { email, password } = req.body;
-    if (doc) {
-      try {
-        const sheet = doc.sheetsByTitle["Users"];
-        const rows = await sheet.getRows();
-        const row = rows.find(r => r.get("Email").toLowerCase() === email.toLowerCase());
-        
-        if (row) {
-          const storedPassword = row.get("Password");
-          let isMatch = false;
+    console.log(`[Login Attempt] ${email}`);
+    
+    if (!doc) {
+      console.error("[Login Error] Database not connected");
+      return res.status(503).json({ error: "Database connecting... please try again in a few seconds", code: "DATABASE_PENDING" });
+    }
 
-          // 1. Check Plain Text
-          if (storedPassword === password) {
-            isMatch = true;
-          } else {
-            // 2. Check Hashed
-            try {
-              isMatch = await bcrypt.compare(password, storedPassword);
-            } catch (e) {
-              isMatch = false;
-            }
-          }
+    try {
+      const sheet = doc.sheetsByTitle["Users"];
+      const rows = await sheet.getRows();
+      const row = rows.find(r => r.get("Email").toLowerCase() === email.toLowerCase());
+      
+      if (row) {
+        const storedPassword = row.get("Password");
+        let isMatch = false;
 
-          if (isMatch) {
-            row.set("LastLogin", new Date().toISOString());
-            await row.save();
-            return res.json({
-              email: row.get("Email"),
-              fullName: row.get("FullName"),
-              role: row.get("Role"),
-              status: row.get("Status") || "Active",
-              location: row.get("Location") || "N/A",
-              profilePic: row.get("ProfilePic") || ""
-            });
+        // 1. Check Plain Text
+        if (storedPassword === password) {
+          isMatch = true;
+        } else {
+          // 2. Check Hashed
+          try {
+            isMatch = await bcrypt.compare(password, storedPassword);
+          } catch (e) {
+            isMatch = false;
           }
         }
-      } catch (e) {
-        console.error(e);
+
+        if (isMatch) {
+          row.set("LastLogin", new Date().toISOString());
+          await row.save();
+          return res.json({
+            email: row.get("Email"),
+            fullName: row.get("FullName"),
+            role: row.get("Role"),
+            status: row.get("Status") || "Active",
+            location: row.get("Location") || "N/A",
+            profilePic: row.get("ProfilePic") || ""
+          });
+        }
       }
+    } catch (e) {
+      console.error("[Login Error] Exception:", e);
+      return res.status(500).json({ error: "Internal server error during login" });
     }
+
     res.status(401).json({ error: "Invalid email or password" });
   });
 
@@ -866,12 +875,13 @@ N8gKncAa0H6OPxGehbOw6A==
 
   // Final catch-all for apiRouter to prevent falling through to main app
   apiRouter.all("*", (req, res) => {
+    console.log(`[404 apiRouter] ${req.method} ${req.url} (Matched Prefix /api)`);
     res.status(404).json({ error: `API endpoint ${req.method} ${req.url} not found (apiRouter)` });
   });
 
   // Final Catch-all for undefined /api routes on the main app
   app.all("/api/*", (req, res) => {
-    console.log(`[404 Main App] ${req.method} ${req.url}`);
+    console.log(`[404 Main App] ${req.method} ${req.url} (Bypassed Router)`);
     res.status(404).json({ 
       error: `Main app /api catch-all: ${req.method} ${req.url} not found`,
       path: req.path,
@@ -943,7 +953,7 @@ export default async (req: any, res: any) => {
   console.log(`[Vercel Handler] Initial: ${req.method} ${incomingUrl}`);
 
   // If Vercel rewrites or environment oddities strip /api, we restore it for Express
-  if (!incomingUrl.startsWith('/api/') && incomingUrl !== '/api') {
+  if (!incomingUrl.startsWith('/api')) {
     // Determine if this is an API call attempting to reach server.ts
     // In vercel.json, /api/(.*) points here.
     // If it hits here and doesn't start with /api, we must restore it.
