@@ -141,6 +141,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskCategory, setNewTaskCategory] = useState<string>("Quality of Service");
+  const [newTaskFrequency, setNewTaskFrequency] = useState<string>("Daily");
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteDueDate, setNewNoteDueDate] = useState("");
@@ -162,6 +163,7 @@ export default function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("bg-blue-100 text-blue-600");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isQuickPickOpen, setIsQuickPickOpen] = useState(false);
   const [user, setUser] = useState<UserData | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -485,6 +487,7 @@ export default function App() {
     const task = {
       title: newTaskTitle,
       category: newTaskCategory,
+      frequency: newTaskFrequency,
       completed: false,
     };
 
@@ -673,32 +676,38 @@ export default function App() {
 
   const isTaskDueToday = (task: Task) => {
     const date = new Date();
-    const freq = (task.frequency || "DAILY").toUpperCase();
-    const dayName = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][date.getDay()];
+    const freq = task.frequency || "Daily";
+    const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
     const dayOfMonth = date.getDate();
+    const month = date.getMonth(); // 0-11
     
-    if (freq === "DAILY") return true;
-    if (freq === "WHEN_NEEDED" || freq === "UPON_SUGGESTION") return true;
-    if (freq.startsWith("WEEKLY_")) {
-      const targetDay = freq.split("_")[1];
-      return dayName === targetDay;
-    }
-    if (freq === "TWICE_WEEKLY") return [1, 4].includes(date.getDay());
-    if (freq === "MONTHLY") return dayOfMonth === 1;
-    if (freq === "2_MONTHLY") return dayOfMonth === 1 && date.getMonth() % 2 === 0;
+    if (freq === "Daily") return true;
+    if (freq === "When Needed" || freq === "Upon Suggestion") return false;
     
-    if (freq === "MONTHLY_2ND_FRI") {
-      if (dayName !== "FRIDAY") return false;
-      const weekNum = Math.ceil(dayOfMonth / 7);
-      return weekNum === 2;
+    if (freq === "Weekly") {
+      return task.frequencyDetail === dayName;
     }
-    if (freq === "MONTHLY_3RD_4TH_FRI") {
-      if (dayName !== "FRIDAY") return false;
-      const weekNum = Math.ceil(dayOfMonth / 7);
-      return weekNum === 3 || weekNum === 4;
+    
+    if (freq === "Twice Weekly") {
+      // Default to Mon/Thu if no detail, or handle if we want more specific
+      return [1, 4].includes(date.getDay());
+    }
+    
+    if (freq === "Monthly") {
+      return task.frequencyDetail === dayOfMonth.toString();
+    }
+    
+    if (freq === "2-Monthly") {
+      // Every 2 months (e.g. Feb, Apr, Jun...) on specific date
+      return task.frequencyDetail === dayOfMonth.toString() && month % 2 === 1;
     }
 
-    return true;
+    if (freq === "3-Monthly") {
+      // Every 3 months (Mar, Jun, Sep, Dec) on specific date
+      return task.frequencyDetail === dayOfMonth.toString() && (month + 1) % 3 === 0;
+    }
+
+    return false;
   };
 
   const updateHistoryRemark = async (taskId: string, dateCompleted: string, remarks: string) => {
@@ -1206,15 +1215,50 @@ export default function App() {
                         <h4 className="text-[18px] font-bold tracking-tight">Today's Focus</h4>
                         <span className="text-[12px] font-medium text-text-secondary">{remainingTodayTasks.length} tasks remaining</span>
                       </div>
+                      <div className="flex items-center gap-2 relative">
+                        {isQuickPickOpen && (
+                          <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-border-apple rounded-2xl shadow-2xl z-50 p-4 animate-in fade-in slide-in-from-top-2">
+                            <h6 className="text-[12px] font-bold text-text-secondary uppercase tracking-widest mb-3 px-2">Pick Other Task</h6>
+                            <div className="max-h-60 overflow-y-auto flex flex-col gap-1">
+                              {tasks
+                                .filter(t => !isTaskDueToday(t))
+                                .filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())))
+                                .map(task => (
+                                  <button
+                                    key={task.id}
+                                    onClick={() => {
+                                      completeTaskForToday(task);
+                                      setIsQuickPickOpen(false);
+                                    }}
+                                    className="w-full text-left p-3 rounded-xl hover:bg-blue-50 transition-colors flex flex-col"
+                                  >
+                                    <span className="text-[13px] font-bold text-text-primary">{task.title}</span>
+                                    <span className="text-[10px] text-text-secondary font-medium">{task.category} • {task.frequency}</span>
+                                  </button>
+                                ))}
+                              {tasks.filter(t => !isTaskDueToday(t)).length === 0 && (
+                                <p className="text-[12px] text-text-secondary text-center py-4">No other tasks to pick from.</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <button 
+                          onClick={() => setIsQuickPickOpen(!isQuickPickOpen)} 
+                          className="bg-white border border-border-apple text-text-primary px-4 py-2 rounded-xl text-[13px] font-bold hover:bg-gray-50 transition-all shadow-apple flex items-center gap-2"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add Task
+                        </button>
                         {user?.role === "Superadmin" && (
                           <button 
                             onClick={() => setActiveTab("All Tasks")} 
-                            className="bg-white border border-border-apple text-text-primary px-4 py-2 rounded-xl text-[13px] font-bold hover:bg-gray-50 transition-all shadow-apple flex items-center gap-2"
+                            className="bg-accent-blue text-white px-4 py-2 rounded-xl text-[13px] font-bold hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2"
                           >
-                            <Plus className="w-4 h-4" />
-                            New Task
+                            <Edit2 className="w-4 h-4" />
+                            Manage
                           </button>
                         )}
+                      </div>
                     </div>
                     
                     <div className="grid grid-cols-1 gap-4">
@@ -1336,7 +1380,7 @@ export default function App() {
               <div className="flex flex-col gap-6">
                 <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
                   <h4 className="text-[20px] font-bold tracking-tight mb-6">Create New Task</h4>
-                  <form onSubmit={addTask} className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] gap-4">
+                  <form onSubmit={addTask} className="grid grid-cols-1 md:grid-cols-[1fr_200px_200px_160px] gap-4">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Task Title</label>
                       <input 
@@ -1355,6 +1399,23 @@ export default function App() {
                         className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
                       >
                         {taskCategories && taskCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Frequency</label>
+                      <select 
+                        value={newTaskFrequency}
+                        onChange={(e) => setNewTaskFrequency(e.target.value)}
+                        className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
+                      >
+                        <option value="Daily">Daily</option>
+                        <option value="Weekly">Weekly</option>
+                        <option value="Twice Weekly">Twice Weekly</option>
+                        <option value="Monthly">Monthly</option>
+                        <option value="2-Monthly">2-Monthly</option>
+                        <option value="3-Monthly">3-Monthly</option>
+                        <option value="When Needed">When Needed</option>
+                        <option value="Upon Suggestion">Upon Suggestion</option>
                       </select>
                     </div>
                     <div className="flex items-end">
