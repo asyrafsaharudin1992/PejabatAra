@@ -1099,11 +1099,11 @@ export default function App() {
                           </div>
                           
                           {task.subtasks && task.subtasks.length > 0 && (
-                            <div className="ml-10 mb-3 flex flex-wrap gap-2">
+                            <div className="ml-10 mb-5 space-y-3">
                               {task.subtasks.map((st, idx) => (
-                                <div key={idx} className="flex items-center gap-1.5 bg-gray-50 border border-border-apple/40 px-2 py-1 rounded-lg">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-accent-blue/40" />
-                                  <span className="text-[11px] font-medium text-text-secondary">{st}</span>
+                                <div key={idx} className="flex items-center gap-3">
+                                  <div className="w-5 h-5 rounded-full border-2 border-border-apple/60 group-hover:border-accent-blue/30 transition-colors" />
+                                  <span className="text-[13px] font-medium text-text-secondary leading-tight">{st}</span>
                                 </div>
                               ))}
                             </div>
@@ -1288,6 +1288,17 @@ export default function App() {
                             )}
                           </div>
                         </div>
+
+                        {task.subtasks && task.subtasks.length > 0 && (
+                          <div className="mb-4 space-y-2.5">
+                            {task.subtasks.map((st, idx) => (
+                              <div key={idx} className="flex items-center gap-3">
+                                <div className="w-4 h-4 rounded-full border border-border-apple/60" />
+                                <span className="text-[13px] font-medium text-text-secondary leading-tight">{st}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         
                         <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-2xl p-4 flex-grow">
                           <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">Remarks / Description</p>
