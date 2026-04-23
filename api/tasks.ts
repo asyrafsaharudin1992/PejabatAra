@@ -93,6 +93,46 @@ export default async function handler(req: any, res: any) {
       return res.status(404).json({ error: "Task not found" });
     }
 
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: "ID is required" });
+
+      // Find row index
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:A`;
+      const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const getData = await getRes.json();
+      const ids = getData.values || [];
+      const rowIndex = ids.findIndex((row: string[]) => row[0].toString() === id.toString());
+
+      if (rowIndex !== -1) {
+        const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const sheetInfo = await sheetInfoRes.json();
+        const tasksSheet = sheetInfo.sheets.find((s: any) => s.properties.title === 'Tasks');
+        const sheetId = tasksSheet.properties.sheetId;
+
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{
+              deleteDimension: {
+                range: {
+                  sheetId: sheetId,
+                  dimension: 'ROWS',
+                  startIndex: rowIndex,
+                  endIndex: rowIndex + 1
+                }
+              }
+            }]
+          })
+        });
+        return res.status(200).json({ success: true });
+      }
+      return res.status(404).json({ error: "Task not found" });
+    }
+
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

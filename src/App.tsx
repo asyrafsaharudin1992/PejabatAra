@@ -352,7 +352,7 @@ export default function App() {
 
     try {
       if (action === "delete") {
-        const res = await fetch(`/api/users/${targetEmail}`, {
+        const res = await fetch(`/api/users?email=${targetEmail}`, {
           method: "DELETE",
         });
         if (res.ok) {
@@ -468,7 +468,7 @@ export default function App() {
 
   const toggleTask = async (id: string, completed: boolean) => {
     try {
-      await fetch(`/api/tasks/${id}`, {
+      await fetch(`/api/tasks?id=${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ completed: !completed }),
@@ -536,7 +536,7 @@ export default function App() {
 
   const updateNoteStatus = async (id: string, status: "Pending" | "Done") => {
     try {
-      await fetch(`/api/notes/${id}`, {
+      await fetch(`/api/notes?id=${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -558,7 +558,7 @@ export default function App() {
       targetEmail: "",
       onConfirm: async () => {
         try {
-          await fetch(`/api/notes/${id}`, { method: "DELETE" });
+          await fetch(`/api/notes?id=${id}`, { method: "DELETE" });
           setNotes(notes.filter(n => n.id !== id));
           showNotification("Note deleted");
         } catch (error) {
@@ -572,7 +572,7 @@ export default function App() {
   const deleteTask = async (id: string) => {
     if (!confirm("Are you sure you want to delete this task?")) return;
     try {
-      await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+      await fetch(`/api/tasks?id=${id}`, { method: "DELETE" });
       setTasks(tasks.filter(t => t.id !== id));
     } catch (error) {
       console.error("Delete task error:", error);
@@ -588,7 +588,7 @@ export default function App() {
     debounceTimer.current = setTimeout(async () => {
       setIsSyncing(true);
       try {
-        await fetch(`/api/tasks/${id}`, {
+        await fetch(`/api/tasks?id=${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ description: remark }),
@@ -694,7 +694,7 @@ export default function App() {
 
     setIsSyncing(true);
     try {
-      await fetch(`/api/history/${taskId}?dateCompleted=${encodeURIComponent(dateCompleted)}`, {
+      await fetch(`/api/history?taskId=${taskId}&dateCompleted=${encodeURIComponent(dateCompleted)}`, {
         method: "DELETE"
       });
     } catch (error) {

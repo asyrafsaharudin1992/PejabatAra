@@ -35,6 +35,95 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ id: newNote[0], title: newNote[1], content: newNote[2], updatedAt: newNote[3], duedate: newNote[4] });
     }
 
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: "ID is required" });
+
+      // Find row index
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:A`;
+      const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const getData = await getRes.json();
+      const ids = getData.values || [];
+      const rowIndex = ids.findIndex((row: string[]) => row[0].toString() === id.toString());
+
+      if (rowIndex !== -1) {
+        // Get the sheet ID for Notes to perform a batchUpdate delete
+        const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const sheetInfo = await sheetInfoRes.json();
+        const notesSheet = sheetInfo.sheets.find((s: any) => s.properties.title === 'Notes');
+        const sheetId = notesSheet.properties.sheetId;
+
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{
+              deleteDimension: {
+                range: {
+                  sheetId: sheetId,
+                  dimension: 'ROWS',
+                  startIndex: rowIndex,
+                  endIndex: rowIndex + 1
+                }
+              }
+            }]
+          })
+        });
+        return res.status(200).json({ success: true });
+      }
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    if (req.method === 'PATCH') {
+      const { id } = req.query;
+      let body = req.body;
+      if (typeof body === 'string') body = JSON.parse(body);
+
+      // Find row index
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:A`;
+      const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const getData = await getRes.json();
+      const ids = getData.values || [];
+      const rowIndex = ids.findIndex((row: string[]) => row[0].toString() === id?.toString());
+
+      if (rowIndex !== -1) {
+        // We update specific columns. Index in Sheets is rowIndex + 1.
+        // Columns: A=id, B=title, C=content, D=updatedAt, E=duedate
+        if (body.title !== undefined) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!B${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[body.title]] })
+          });
+        }
+        if (body.content !== undefined) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!C${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[body.content]] })
+          });
+        }
+        if (body.duedate !== undefined) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!E${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[body.duedate]] })
+          });
+        }
+        // Update timestamp
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!D${rowIndex + 1}?valueInputOption=RAW`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [[new Date().toISOString()]] })
+        });
+        
+        return res.status(200).json({ success: true });
+      }
+      return res.status(404).json({ error: "Note not found" });
+    }
+
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 }
