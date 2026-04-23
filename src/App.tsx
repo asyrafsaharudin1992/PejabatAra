@@ -345,8 +345,14 @@ export default function App() {
     });
   };
 
-  const handleConfirmAction = async () => {
-    const { action, targetEmail } = confirmModal;
+    const handleConfirmAction = async () => {
+    const { action, targetEmail, onConfirm } = confirmModal;
+    
+    if (onConfirm) {
+      await onConfirm();
+      return;
+    }
+
     console.log("✅ Confirming action:", action, "for:", targetEmail);
     if (!action || !targetEmail) return;
 
@@ -382,6 +388,7 @@ export default function App() {
       setConfirmModal(prev => ({ ...prev, isOpen: false, action: null }));
     }
   };
+
 
   const changePassword = async (passwords: any) => {
     try {
@@ -572,8 +579,14 @@ export default function App() {
   const deleteTask = async (id: string) => {
     if (!confirm("Are you sure you want to delete this task?")) return;
     try {
-      await fetch(`/api/tasks?id=${id}`, { method: "DELETE" });
-      setTasks(tasks.filter(t => t.id !== id));
+      // MESTI GUNA ?id= BUKAN /${id}
+      const res = await fetch(`/api/tasks?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setTasks(tasks.filter(t => t.id !== id));
+        showNotification("Task deleted");
+      } else {
+         showNotification("Failed to delete task", "error");
+      }
     } catch (error) {
       console.error("Delete task error:", error);
     }
