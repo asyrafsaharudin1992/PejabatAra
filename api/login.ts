@@ -21,7 +21,10 @@ export default async function handler(req: any, res: any) {
     const auth = new GoogleAuth({
       credentials: {
         client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n').replace(/^"(.*)"$/, '$1'),
+        private_key: (process.env.GOOGLE_PRIVATE_KEY || "")
+          .replace(/^"/, '') // Buang tanda petikan di awal
+          .replace(/"$/, '') // Buang tanda petikan di akhir
+          .replace(/\\n/g, '\n'), // Tukar \n kepada baris baru
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });

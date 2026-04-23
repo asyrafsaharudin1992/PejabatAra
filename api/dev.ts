@@ -10,6 +10,15 @@ app.use(express.json());
 // Mocking Vercel's file-based routing for local development
 app.all('/api/:route', async (req, res) => {
   const { route } = req.params;
+  
+  // Ensure dummy environment vars are cleaned for local dev if they were copied with quotes
+  if (process.env.GOOGLE_PRIVATE_KEY) {
+    process.env.GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY
+      .replace(/^"/, '')
+      .replace(/"$/, '')
+      .replace(/\\n/g, '\n');
+  }
+
   try {
     // Dynamically import the handler file
     const module = await import(`./${route}.ts`);
