@@ -32,13 +32,18 @@ import { cn } from "./lib/utils";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
 
+interface Subtask {
+  text: string;
+  completed: boolean;
+}
+
 interface Task {
   id: string;
   title: string;
   category: Category;
   description?: string;
   frequency?: string;
-  subtasks?: string[];
+  subtasks?: (string | Subtask)[];
   completed: boolean;
   deadline?: string;
   createdAt: string;
@@ -483,6 +488,34 @@ export default function App() {
       setTasks(tasks.map(t => t.id === id ? { ...t, completed: !completed } : t));
     } catch (error) {
       console.error("Toggle task error:", error);
+    }
+  };
+
+  const toggleSubtask = async (taskId: string, subtaskIndex: number) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !task.subtasks) return;
+
+    const updatedSubtasks = task.subtasks.map((st, idx) => {
+      if (idx !== subtaskIndex) return st;
+      const isObject = typeof st !== 'string';
+      return {
+        text: isObject ? st.text : st,
+        completed: isObject ? !st.completed : true
+      };
+    });
+
+    // Optimistic update
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, subtasks: updatedSubtasks } : t));
+
+    try {
+      await fetch(`/api/tasks?id=${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtasks: updatedSubtasks }),
+      });
+    } catch (error) {
+      console.error("Toggle subtask error:", error);
+      fetchData(); // Rollback
     }
   };
 
@@ -1100,12 +1133,34 @@ export default function App() {
                           
                           {task.subtasks && task.subtasks.length > 0 && (
                             <div className="ml-10 mb-5 space-y-3">
-                              {task.subtasks.map((st, idx) => (
-                                <div key={idx} className="flex items-center gap-3">
-                                  <div className="w-5 h-5 rounded-full border-2 border-border-apple/60 group-hover:border-accent-blue/30 transition-colors" />
-                                  <span className="text-[13px] font-medium text-text-secondary leading-tight">{st}</span>
-                                </div>
-                              ))}
+                              {task.subtasks.map((st, idx) => {
+                                const isObj = typeof st !== 'string';
+                                const text = isObj ? st.text : st;
+                                const completed = isObj ? st.completed : false;
+                                
+                                return (
+                                  <button 
+                                    key={idx} 
+                                    onClick={() => toggleSubtask(task.id, idx)}
+                                    className="flex items-center gap-3 group/st w-full text-left"
+                                  >
+                                    <div className={cn(
+                                      "w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center",
+                                      completed 
+                                        ? "bg-accent-blue border-accent-blue" 
+                                        : "border-border-apple/60 group-hover/st:border-accent-blue/40"
+                                    )}>
+                                      {completed && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                    </div>
+                                    <span className={cn(
+                                      "text-[13px] font-medium leading-tight transition-all",
+                                      completed ? "text-text-secondary/50 line-through" : "text-text-secondary"
+                                    )}>
+                                      {text}
+                                    </span>
+                                  </button>
+                                );
+                              })}
                             </div>
                           )}
                           
@@ -1291,12 +1346,28 @@ export default function App() {
 
                         {task.subtasks && task.subtasks.length > 0 && (
                           <div className="mb-4 space-y-2.5">
-                            {task.subtasks.map((st, idx) => (
-                              <div key={idx} className="flex items-center gap-3">
-                                <div className="w-4 h-4 rounded-full border border-border-apple/60" />
-                                <span className="text-[13px] font-medium text-text-secondary leading-tight">{st}</span>
-                              </div>
-                            ))}
+                            {task.subtasks.map((st, idx) => {
+                              const isObj = typeof st !== 'string';
+                              const text = isObj ? st.text : st;
+                              const completed = isObj ? st.completed : false;
+                              
+                              return (
+                                <div key={idx} className="flex items-center gap-3">
+                                  <div className={cn(
+                                    "w-4 h-4 rounded-full border transition-all flex items-center justify-center",
+                                    completed ? "bg-accent-blue border-accent-blue" : "border-border-apple/60"
+                                  )}>
+                                    {completed && <div className="w-1 h-1 bg-white rounded-full" />}
+                                  </div>
+                                  <span className={cn(
+                                    "text-[13px] font-medium leading-tight",
+                                    completed ? "text-text-secondary/50 line-through" : "text-text-secondary"
+                                  )}>
+                                    {text}
+                                  </span>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         
