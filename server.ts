@@ -21,25 +21,21 @@ export async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // 2. Comprehensive Logging & API Path Patching
+  // 2. Comprehensive Logging & API Path Patching (Resilient)
   app.use((req, res, next) => {
     const incomingUrl = req.url || '';
-    console.log(`[Express Incoming] ${req.method} ${incomingUrl} (Original: ${req.originalUrl || 'N/A'})`);
-    
-    // API Path Patching: If a request hits this server but is missing the /api prefix,
-    // and it matches a known API endpoint, we restore the prefix for the router.
+    if (incomingUrl.startsWith('/api/') || incomingUrl === '/api') {
+      return next();
+    }
+
     const apiEndpoints = ['ping', 'status', 'login', 'tasks', 'notes', 'history', 'categories', 'users', 'sync', 'change-password', 'profile', 'reconnect'];
     const pathPart = incomingUrl.split('?')[0];
-    const pathSegments = pathPart.split('/').filter(Boolean);
-    const firstSegment = pathSegments[0];
+    const firstSegment = pathPart.split('/').filter(Boolean)[0];
 
-    // If it DOES NOT start with /api, check if it should
-    if (!incomingUrl.startsWith('/api')) {
-      if (apiEndpoints.includes(firstSegment) || (!pathPart.includes('.') && firstSegment)) {
-        const oldUrl = req.url;
-        req.url = '/api' + (incomingUrl.startsWith('/') ? '' : '/') + incomingUrl;
-        console.log(`[Express Patch] ${oldUrl} -> ${req.url}`);
-      }
+    if (apiEndpoints.includes(firstSegment) || (!pathPart.includes('.') && firstSegment)) {
+      const oldUrl = req.url;
+      req.url = '/api' + (incomingUrl.startsWith('/') ? '' : '/') + incomingUrl;
+      console.log(`[Express Patch] ${oldUrl} -> ${req.url}`);
     }
     next();
   });
@@ -47,9 +43,7 @@ export async function startServer() {
   // 3. API Router Definition
   const apiRouter = express.Router();
 
-  // Mount API Router early
-  app.use("/api", apiRouter);
-
+  // Route registration...
   apiRouter.get("/ping", (req, res) => {
     res.json({ pong: "router", time: new Date().toISOString() });
   });
@@ -72,9 +66,11 @@ export async function startServer() {
   });
 
   // Auth Routes
+  apiRouter.options("/login", cors()); // Explicit preflight handling
   apiRouter.post("/login", async (req, res) => {
     const { email, password } = req.body;
-    console.log(`[Login Attempt] ${email}`);
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    console.log(`[Login Attempt] Email: ${email}, IP: ${clientIp}`);
     
     if (!doc) {
       console.error("[Login Error] Database not connected");
@@ -83,6 +79,10 @@ export async function startServer() {
 
     try {
       const sheet = doc.sheetsByTitle["Users"];
+      if (!sheet) {
+        console.error("[Login Error] 'Users' sheet not found in spreadsheet");
+        return res.status(500).json({ error: "Configuration error: Users table missing" });
+      }
       const rows = await sheet.getRows();
       const row = rows.find(r => r.get("Email").toLowerCase() === email.toLowerCase());
       
@@ -872,6 +872,9 @@ N8gKncAa0H6OPxGehbOw6A==
     }
     res.status(503).json({ error: "Database not connected" });
   });
+
+  // Mount API Router ONLY after all routes are registered
+  app.use("/api", apiRouter);
 
   // Final catch-all for apiRouter to prevent falling through to main app
   apiRouter.all("*", (req, res) => {
