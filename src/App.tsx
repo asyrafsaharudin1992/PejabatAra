@@ -151,6 +151,7 @@ export default function App() {
   const [newNoteCategory, setNewNoteCategory] = useState<string>("Quality of Service");
   const [noteSearchQuery, setNoteSearchQuery] = useState("");
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [portalLinks, setPortalLinks] = useState<PortalLink[]>([]);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
@@ -516,6 +517,25 @@ export default function App() {
     }
   };
 
+  const deleteCategory = async (name: string) => {
+    if (!confirm(`Are you sure you want to delete the "${name}" category?`)) return;
+    
+    // Optimistic update
+    setTaskCategories(taskCategories.filter(c => c.name !== name));
+    
+    try {
+      const res = await fetch(`/api/categories?name=${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete category");
+      showNotification("Category deleted successfully");
+    } catch (error: any) {
+      console.error("Delete category error:", error);
+      showNotification(error.message || "Failed to delete category", "error");
+      fetchData(); // Rollback
+    }
+  };
+
   function getCategoryColor(catName: string) {
     if (!taskCategories) return "bg-gray-100 text-gray-600";
     const cat = taskCategories.find(c => c.name === catName);
@@ -622,27 +642,53 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newNoteData),
-      });
-      
-      if (!res.ok) throw new Error("Failed to save note to Google Sheets");
-      
-      const savedNote = await res.json();
-      setNotes(prev => [savedNote, ...prev]);
+      if (editingNote) {
+        const res = await fetch(`/api/notes?id=${editingNote.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newNoteData),
+        });
+        
+        if (!res.ok) throw new Error("Failed to update note");
+        
+        setNotes(prev => prev.map(n => n.id === editingNote.id ? { ...n, ...newNoteData, updatedAt: new Date().toISOString() } : n));
+        showNotification("Note updated successfully");
+      } else {
+        const res = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newNoteData),
+        });
+        
+        if (!res.ok) throw new Error("Failed to save note to Google Sheets");
+        
+        const savedNote = await res.json();
+        setNotes(prev => [savedNote, ...prev]);
+        showNotification("Note saved successfully");
+      }
+
       setNewNoteTitle("");
       setNewNoteContent("");
       setNewNoteDueDate("");
       setIsAddingNote(false);
-      showNotification("Note saved successfully");
+      setEditingNote(null);
     } catch (error: any) {
-      console.error("Add note error:", error);
+      console.error("Save note error:", error);
       showNotification(error.message || "Failed to save note", "error");
     } finally {
       setIsSavingNote(false);
     }
+  };
+
+  const openNoteEdit = (note: Note) => {
+    setEditingNote(note);
+    setNewNoteTitle(note.title);
+    setNewNoteContent(note.content);
+    setNewNoteDueDate(note.duedate || "");
+    setNewNoteCategory(note.category || "Quality of Service");
+    setIsAddingNote(true);
+    // Scroll to form if needed
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const updateNoteStatus = async (id: string, status: "Pending" | "Done") => {
@@ -2012,7 +2058,7 @@ export default function App() {
                       animate={{ opacity: 1, x: 0 }}
                       className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50 h-fit sticky top-6"
                     >
-                      <h5 className="text-[16px] font-bold mb-6">Create Reminder</h5>
+                      <h5 className="text-[16px] font-bold mb-6">{editingNote ? "Edit Note" : "Create Reminder"}</h5>
                       <div className="flex flex-col gap-5">
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Title</label>
@@ -2054,7 +2100,13 @@ export default function App() {
                         </div>
                         <div className="flex gap-3 pt-2">
                           <button 
-                            onClick={() => setIsAddingNote(false)}
+                            onClick={() => {
+                              setIsAddingNote(false);
+                              setEditingNote(null);
+                              setNewNoteTitle("");
+                              setNewNoteContent("");
+                              setNewNoteDueDate("");
+                            }}
                             className="flex-1 px-4 py-3 rounded-xl font-bold text-sm border border-border-apple text-text-secondary hover:bg-gray-50 transition-all"
                           >
                             Cancel
@@ -2072,7 +2124,7 @@ export default function App() {
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 Saving...
                               </>
-                            ) : "Save Note"}
+                            ) : (editingNote ? "Update Note" : "Save Note")}
                           </button>
                         </div>
                       </div>
@@ -2125,6 +2177,12 @@ export default function App() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => openNoteEdit(note)}
+                                    className="w-8 h-8 rounded-full flex items-center justify-center bg-[#F8F9FA] text-text-secondary hover:bg-blue-50 hover:text-accent-blue transition-all"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
                                   <button 
                                     onClick={() => deleteNote(note.id)}
                                     className="w-8 h-8 rounded-full flex items-center justify-center bg-[#F8F9FA] text-text-secondary hover:bg-red-50 hover:text-red-500 transition-all"
@@ -2365,6 +2423,33 @@ export default function App() {
                     >
                       Add Category
                     </button>
+                  </div>
+
+                  {/* List of existing custom categories to allow deletion */}
+                  <div className="mt-8 pt-6 border-t border-border-apple/50">
+                    <h4 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-4 ml-1">Existing Categories</h4>
+                    <div className="max-h-[200px] overflow-y-auto pr-1 flex flex-col gap-2 custom-scrollbar">
+                      {taskCategories.filter(cat => cat.name !== "General").map((cat) => (
+                        <div key={cat.name} className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9FA] group transition-all border border-transparent hover:border-border-apple/30">
+                          <div className="flex items-center gap-3">
+                            <div className={cn("w-3 h-3 rounded-full", cat.color.split(' ')[0])} />
+                            <span className="text-[13px] font-medium">{cat.name}</span>
+                          </div>
+                          <button 
+                            onClick={() => deleteCategory(cat.name)}
+                            className="p-1.5 rounded-lg text-text-secondary hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                            title="Delete category"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      {taskCategories.filter(cat => cat.name !== "General").length === 0 && (
+                        <p className="text-[11px] text-text-secondary italic text-center py-4 bg-[#F8F9FA] rounded-xl border border-dashed border-border-apple/50">
+                          No custom categories yet.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
