@@ -521,18 +521,24 @@ export default function App() {
     if (!confirm(`Are you sure you want to delete the "${name}" category?`)) return;
     
     // Optimistic update
-    setTaskCategories(taskCategories.filter(c => c.name !== name));
+    setTaskCategories(prev => prev.filter(c => c.name !== name));
     
     try {
       const res = await fetch(`/api/categories?name=${encodeURIComponent(name)}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete category");
+      
+      // If 404, it might be a hardcoded category that hasn't been saved to sheets yet
+      // We don't want to rollback in that case, because the optimistic update already removed it.
+      if (!res.ok && res.status !== 404) {
+        throw new Error("Failed to delete category");
+      }
+      
       showNotification("Category deleted successfully");
     } catch (error: any) {
       console.error("Delete category error:", error);
       showNotification(error.message || "Failed to delete category", "error");
-      fetchData(); // Rollback
+      fetchData(); // Rollback on actual error
     }
   };
 
@@ -1047,10 +1053,14 @@ export default function App() {
   const dynamicCategories = useMemo(() => {
     const categoriesFromTasks = Array.from(new Set(tasks.map(t => t.category))).filter((cat: any): cat is string => !!cat && typeof cat === 'string' && cat !== "General" && cat.trim() !== "");
     const categoriesFromNotes = Array.from(new Set(notes.map(n => n.category))).filter((cat: any): cat is string => !!cat && typeof cat === 'string' && cat !== "General" && cat.trim() !== "");
-    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]));
+    const allUsedCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]));
     
-    // Include initial categories to ensure common ones are always there or have priority colors
-    const mergedCategories = Array.from(new Set([...INITIAL_CATEGORIES.map(c => c.name), ...allCategories]));
+    // Use taskCategories as the source of truth for categories that should exist
+    // Plus any used categories in case they were orphaned
+    const mergedCategories = Array.from(new Set([
+      ...taskCategories.map(c => c.name), 
+      ...allUsedCategories
+    ])).filter(cat => cat !== "General");
     
     return mergedCategories.map(cat => {
       const original = taskCategories.find(c => c.name === cat) || INITIAL_CATEGORIES.find(c => c.name === cat);
