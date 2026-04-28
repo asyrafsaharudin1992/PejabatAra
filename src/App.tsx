@@ -205,6 +205,7 @@ export default function App() {
     return quotes[Math.floor(Math.random() * quotes.length)];
   }, []);
 
+  const [selectedForTodayIds, setSelectedForTodayIds] = useState<string[]>([]);
   const [user, setUser] = useState<UserData | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -349,7 +350,7 @@ export default function App() {
       if (Array.isArray(tasksData)) setTasks(tasksData);
       if (Array.isArray(notesData)) setNotes(notesData);
       if (Array.isArray(historyData)) setHistory(historyData);
-      if (Array.isArray(taskCategoriesData)) setTaskCategories(taskCategoriesData);
+      if (Array.isArray(taskCategoriesData)) setTaskCategories(taskCategoriesData.filter(c => c && c.name && c.name !== "General"));
       if (Array.isArray(portalData)) setPortalLinks(portalData);
 
       if (user.role === "Superadmin") {
@@ -718,24 +719,23 @@ export default function App() {
   };
 
   const isTaskDueToday = (task: Task) => {
-    // Check if task has a deadline that is today
-    if (task.deadline) {
-      try {
-        const d = new Date(task.deadline);
-        if (!isNaN(d.getTime()) && isSameDay(d, new Date())) return true;
-      } catch (e) {}
-    }
-
-    const date = new Date();
-    // Normalize frequency: lowercase, replace underscores with spaces, trim
-    const freq = (task.frequency || "Daily").toLowerCase().replace(/_/g, ' ').trim();
+    const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+    const date = currentTime;
     const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
     const dayOfMonth = date.getDate();
     const month = date.getMonth(); // 0-11
     
+    // Check if task has a deadline that is today
+    if (task.deadline) {
+      try {
+        const d = new Date(task.deadline);
+        if (!isNaN(d.getTime()) && isSameDay(d, date)) return true;
+      } catch (e) {}
+    }
+
     if (freq === "daily") return true;
     // "When Needed" tasks don't automatically appear in daily list unless explicitly added or due by schedule
-    if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary") {
+    if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") {
       return false; 
     }
     
@@ -971,8 +971,20 @@ export default function App() {
     return acc;
   }, {} as Record<string, PortalLink[]>);
 
-  const todayTasks = tasks.filter(t => isTaskDueToday(t));
-  const todayNotes = notes.filter(n => n.duedate && isSameDay(new Date(n.duedate), new Date()));
+  const todayTasks = useMemo(() => {
+    return tasks.filter(t => 
+      isTaskDueToday(t) || 
+      selectedForTodayIds.includes(t.id) ||
+      history.some(h => {
+        try {
+          const d = new Date(h.dateCompleted);
+          return h.taskId === t.id && isSameDay(d, currentTime);
+        } catch (e) { return false; }
+      })
+    );
+  }, [tasks, history, currentTime, isTaskDueToday, selectedForTodayIds]);
+
+  const todayNotes = notes.filter(n => n.duedate && isSameDay(new Date(n.duedate), currentTime));
   
   const combinedTodayItems = [
     ...todayTasks.map(t => ({ ...t, type: 'task' as const })),
@@ -981,16 +993,15 @@ export default function App() {
 
   const remainingTodayItems = combinedTodayItems.filter(item => {
     if (item.type === 'task') {
-      return !history.some(h => h.taskId === item.id && isSameDay(new Date(h.dateCompleted), new Date()));
+      return !history.some(h => h.taskId === item.id && isSameDay(new Date(h.dateCompleted), currentTime));
     }
     return !item.completed;
   });
 
   const dynamicCategories = useMemo(() => {
-    const categoriesFromTasks = Array.from(new Set(tasks.map(t => t.category))).filter(Boolean);
-    const categoriesFromNotes = Array.from(new Set(notes.map(n => n.category))).filter(Boolean);
-    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]))
-      .filter(cat => cat !== "General");
+    const categoriesFromTasks = Array.from(new Set(tasks.map(t => t.category))).filter((cat: any): cat is string => !!cat && typeof cat === 'string' && cat !== "General" && cat.trim() !== "");
+    const categoriesFromNotes = Array.from(new Set(notes.map(n => n.category))).filter((cat: any): cat is string => !!cat && typeof cat === 'string' && cat !== "General" && cat.trim() !== "");
+    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]));
     
     // Include initial categories to ensure common ones are always there or have priority colors
     const mergedCategories = Array.from(new Set([...INITIAL_CATEGORIES.map(c => c.name), ...allCategories]));
@@ -1011,19 +1022,21 @@ export default function App() {
     
     // Tasks due today or "When Needed" tasks that are pending
     const tasksDueToday = categoryTasks.filter(t => isTaskDueToday(t));
-    const notesDueToday = categoryNotes.filter(n => n.duedate && isSameDay(new Date(n.duedate), new Date()));
+    const notesDueToday = categoryNotes.filter(n => n.duedate && isSameDay(new Date(n.duedate), currentTime));
     
     // Tasks completed today (from history)
     const tasksCompletedToday = categoryTasks.filter(t => 
-      history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date()))
+      history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), currentTime))
     );
     
     // Notes completed (from note status)
-    const notesCompletedToday = categoryNotes.filter(n => n.completed && n.duedate && isSameDay(new Date(n.duedate), new Date()));
+    const notesCompletedToday = categoryNotes.filter(n => n.completed && n.duedate && isSameDay(new Date(n.duedate), currentTime));
 
     const total = Math.max(tasksDueToday.length + notesDueToday.length, tasksCompletedToday.length + notesCompletedToday.length);
     const completed = tasksCompletedToday.length + notesCompletedToday.length;
     
+    if (cat.name === "General") return null;
+
     let barColor = "bg-accent-blue";
     if (cat.name === "TeamARA") barColor = "bg-orange-500";
     else if (cat.name === "Marketing") barColor = "bg-pink-500";
@@ -1041,7 +1054,7 @@ export default function App() {
     };
   });
 
-  const totalCompletedToday = history.filter(h => isSameDay(new Date(h.dateCompleted), new Date())).length;
+  const totalCompletedToday = history.filter(h => isSameDay(new Date(h.dateCompleted), currentTime)).length;
   const completionRate = (todayTasks.length > 0 || totalCompletedToday > 0)
     ? Math.round((totalCompletedToday / Math.max(todayTasks.length, totalCompletedToday)) * 100) 
     : 0;
@@ -1352,13 +1365,13 @@ export default function App() {
                             <h6 className="text-[12px] font-bold text-text-secondary uppercase tracking-widest mb-3 px-2">Pick Other Task</h6>
                             <div className="max-h-60 overflow-y-auto flex flex-col gap-1">
                               {tasks
-                                .filter(t => !isTaskDueToday(t))
-                                .filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())))
+                                .filter(t => !isTaskDueToday(t) && !selectedForTodayIds.includes(t.id))
+                                .filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), currentTime)))
                                 .map(task => (
                                   <button
                                     key={task.id}
                                     onClick={() => {
-                                      completeTaskForToday(task);
+                                      setSelectedForTodayIds(prev => [...prev, task.id]);
                                       setIsQuickPickOpen(false);
                                     }}
                                     className="w-full text-left p-3 rounded-xl hover:bg-blue-50 transition-colors flex flex-col"
@@ -1757,6 +1770,7 @@ export default function App() {
                   history={history} 
                   onUpdateRemark={updateHistoryRemark} 
                   onUndo={undoTaskCompletion}
+                  today={currentTime}
                 />
               </div>
             )}
@@ -2878,13 +2892,14 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: {
   );
 }
 
-function HistoryCalendar({ history, onUpdateRemark, onUndo }: { 
+function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: { 
   history: HistoryEntry[], 
   onUpdateRemark: (taskId: string, date: string, remark: string) => void,
-  onUndo: (taskId: string, date: string) => void
+  onUndo: (taskId: string, date: string) => void,
+  today: Date
 }) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [currentMonth, setCurrentMonth] = useState(today);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(today);
   
   const start = startOfWeek(startOfMonth(currentMonth));
   const end = endOfWeek(endOfMonth(currentMonth));
@@ -2920,7 +2935,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo }: {
             <div key={d} className="text-center text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">{d}</div>
           ))}
           {days.map((day, i) => {
-            const isTodayDay = isSameDay(day, new Date());
+            const isTodayDay = isSameDay(day, today);
             const isSelected = selectedDate && isSameDay(day, selectedDate);
             
             const hasCompletions = history.some(h => {
