@@ -32,6 +32,124 @@ export default async function handler(req: any, res: any) {
       return letter;
     };
 
+    const isTaskOnDay = (task: any, date: Date) => {
+      const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+      const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
+      const dayOfMonth = date.getDate();
+      const month = date.getMonth(); // 0-11
+      
+      if (task.deadline) {
+        const d = new Date(task.deadline);
+        if (!isNaN(d.getTime()) && d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth() && d.getDate() === date.getDate()) {
+          return true;
+        }
+      }
+
+      if (freq === "daily") return true;
+      if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") return false;
+      
+      if (freq.startsWith("weekly")) {
+        const targetDay = freq.split(' ')[1];
+        return dayName.toLowerCase() === (targetDay || "").toLowerCase();
+      }
+      
+      if (freq.startsWith("monthly on the")) {
+        const dayStr = freq.match(/\d+/)?.[0];
+        return dayOfMonth === parseInt(dayStr || "0");
+      }
+
+      if (freq.startsWith("yearly on")) {
+        const parts = freq.split(' ');
+        const monthName = parts[2];
+        const dayStr = parts[3];
+        const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+        return months[month] === monthName?.toLowerCase() && dayOfMonth === parseInt(dayStr || "0");
+      }
+      return false;
+    };
+
+    const syncTrackerFormatting = async (token: string) => {
+      try {
+        const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, { headers: { Authorization: `Bearer ${token}` } });
+        const sheetInfo = await sheetInfoRes.json();
+        const trackerSheet = sheetInfo.sheets?.find((s: any) => s.properties.title === TRACKER_SHEET);
+        if (!trackerSheet) return;
+        const trackerSheetId = trackerSheet.properties.sheetId;
+
+        const tasksRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:Z`, { headers: { Authorization: `Bearer ${token}` } });
+        const tasksData = await tasksRes.json();
+        const taskRows = tasksData.values || [];
+        const taskHeaders = taskRows[0] || [];
+        const taskList = taskRows.slice(1).map((r: any) => {
+          const obj: any = {};
+          taskHeaders.forEach((h: string, i: number) => obj[h.toLowerCase()] = r[i]);
+          return obj;
+        });
+
+        const trackerRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!A:ZZ`, { headers: { Authorization: `Bearer ${token}` } });
+        const trackerData = await trackerRes.json();
+        const matrixRows = trackerData.values || [];
+        if (matrixRows.length < 2) return;
+
+        const dateRows = matrixRows.slice(1);
+        const taskCols = matrixRows[0].slice(1);
+
+        const requests: any[] = [];
+        
+        // Reset all to white first or just update specific cells
+        // Using updateCells for the entire data range
+        const rowsToUpdate: any[] = [];
+
+        for (let r = 0; r < dateRows.length; r++) {
+          const dateStr = dateRows[r][0];
+          const date = new Date(dateStr);
+          if (isNaN(date.getTime())) {
+            rowsToUpdate.push({ values: [{ userEnteredValue: { stringValue: dateStr } }, ...taskCols.map(() => ({}))] });
+            continue;
+          }
+
+          const rowValues: any[] = [{ userEnteredValue: { stringValue: dateStr } }];
+          
+          for (let c = 0; c < taskCols.length; c++) {
+            const title = taskCols[c];
+            const task = taskList.find((t: any) => t.title?.trim().toLowerCase() === title?.trim().toLowerCase());
+            const isScheduled = task ? isTaskOnDay(task, date) : true; 
+            const cellValue = matrixRows[r + 1][c + 1] || "";
+
+            rowValues.push({
+              userEnteredValue: cellValue ? { stringValue: cellValue } : undefined,
+              userEnteredFormat: {
+                backgroundColor: isScheduled ? { red: 1, green: 1, blue: 1 } : { red: 0.9, green: 0.9, blue: 0.9 }
+              }
+            });
+          }
+          rowsToUpdate.push({ values: rowValues });
+        }
+
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{
+              updateCells: {
+                range: {
+                  sheetId: trackerSheetId,
+                  startRowIndex: 1,
+                  endRowIndex: 1 + rowsToUpdate.length,
+                  startColumnIndex: 0,
+                  endColumnIndex: 1 + taskCols.length
+                },
+                rows: rowsToUpdate,
+                fields: 'userEnteredFormat.backgroundColor,userEnteredValue'
+              }
+            }]
+          })
+        });
+      } catch (e) {
+        console.error("Sync tracker formatting failed:", e);
+      }
+    };
+
     if (req.method === 'GET') {
       const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:D`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) {
@@ -102,6 +220,9 @@ export default async function handler(req: any, res: any) {
             body: JSON.stringify({ values: [['DONE']] })
           });
           if (!updateRes.ok) console.error("Failed to update Tracker matrix cell:", await updateRes.text());
+          
+          // Trigger formatting sync
+          await syncTrackerFormatting(token);
         } else {
           console.error("Failed to fetch Tracker sheet:", await tResponse.text());
         }
@@ -195,6 +316,9 @@ export default async function handler(req: any, res: any) {
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ values: [['']] })
               });
+              
+              // Trigger sync
+              await syncTrackerFormatting(token);
             }
           }
         } catch (e) {
