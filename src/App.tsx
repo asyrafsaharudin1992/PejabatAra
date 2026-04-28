@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   LayoutDashboard, 
   CheckSquare, 
@@ -28,7 +28,8 @@ import {
   FolderOpen,
   ExternalLink,
   PlusCircle,
-  Globe
+  Globe,
+  Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth } from "date-fns";
@@ -60,6 +61,8 @@ interface Note {
   content: string;
   updatedAt: string;
   duedate: string;
+  category?: string;
+  completed?: boolean;
 }
 
 interface PortalLink {
@@ -145,6 +148,7 @@ export default function App() {
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteDueDate, setNewNoteDueDate] = useState("");
+  const [newNoteCategory, setNewNoteCategory] = useState<string>("Quality of Service");
   const [noteSearchQuery, setNoteSearchQuery] = useState("");
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
@@ -574,7 +578,9 @@ export default function App() {
     const newNoteData = { 
       title: newNoteTitle,
       content: newNoteContent,
-      duedate: newNoteDueDate
+      duedate: newNoteDueDate,
+      category: newNoteCategory,
+      completed: false
     };
 
     try {
@@ -675,6 +681,14 @@ export default function App() {
   };
 
   const isTaskDueToday = (task: Task) => {
+    // Check if task has a deadline that is today
+    if (task.deadline) {
+      try {
+        const d = new Date(task.deadline);
+        if (!isNaN(d.getTime()) && isSameDay(d, new Date())) return true;
+      } catch (e) {}
+    }
+
     const date = new Date();
     // Normalize frequency: lowercase, replace underscores with spaces, trim
     const freq = (task.frequency || "Daily").toLowerCase().replace(/_/g, ' ').trim();
@@ -683,7 +697,9 @@ export default function App() {
     const month = date.getMonth(); // 0-11
     
     if (freq === "daily") return true;
-    if (freq === "when needed" || freq === "upon suggestion") return false;
+    if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary") {
+      return !task.completed;
+    }
     
     if (freq.startsWith("weekly")) {
       // Handle "weekly" with detail in separate field
@@ -918,17 +934,56 @@ export default function App() {
   }, {} as Record<string, PortalLink[]>);
 
   const todayTasks = tasks.filter(t => isTaskDueToday(t));
-  const remainingTodayTasks = todayTasks.filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())));
+  const todayNotes = notes.filter(n => n.duedate && isSameDay(new Date(n.duedate), new Date()));
+  
+  const combinedTodayItems = [
+    ...todayTasks.map(t => ({ ...t, type: 'task' as const })),
+    ...todayNotes.map(n => ({ ...n, type: 'note' as const, id: n.id, title: n.title, category: n.category || 'General' }))
+  ];
 
-  const departmentLoad = taskCategories.map(cat => {
-    const tasksDueToday = todayTasks.filter(t => t.category === cat.name);
-    const tasksCompletedToday = tasks.filter(t => 
-      t.category === cat.name && 
+  const remainingTodayItems = combinedTodayItems.filter(item => {
+    if (item.type === 'task') {
+      return !history.some(h => h.taskId === item.id && isSameDay(new Date(h.dateCompleted), new Date()));
+    }
+    return !item.completed;
+  });
+
+  const dynamicCategories = useMemo(() => {
+    const categoriesFromTasks = Array.from(new Set(tasks.map(t => t.category))).filter(Boolean);
+    const categoriesFromNotes = Array.from(new Set(notes.map(n => n.category))).filter(Boolean);
+    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]));
+    
+    // Include initial categories to ensure common ones are always there or have priority colors
+    const mergedCategories = Array.from(new Set([...INITIAL_CATEGORIES.map(c => c.name), ...allCategories]));
+    
+    return mergedCategories.map(cat => {
+      const original = taskCategories.find(c => c.name === cat) || INITIAL_CATEGORIES.find(c => c.name === cat);
+      return {
+        name: cat,
+        color: original ? original.color : "bg-blue-100 text-blue-600"
+      };
+    });
+  }, [tasks, notes, taskCategories]);
+
+  const departmentLoad = dynamicCategories.map(cat => {
+    // For "ALL tasks" including "When Necessary", we look at all tasks in category
+    const categoryTasks = tasks.filter(t => t.category === cat.name);
+    const categoryNotes = notes.filter(n => n.category === cat.name);
+    
+    // Tasks due today or "When Needed" tasks that are pending
+    const tasksDueToday = categoryTasks.filter(t => isTaskDueToday(t));
+    const notesDueToday = categoryNotes.filter(n => n.duedate && isSameDay(new Date(n.duedate), new Date()));
+    
+    // Tasks completed today (from history)
+    const tasksCompletedToday = categoryTasks.filter(t => 
       history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date()))
     );
+    
+    // Notes completed (from note status)
+    const notesCompletedToday = categoryNotes.filter(n => n.completed && n.duedate && isSameDay(new Date(n.duedate), new Date()));
 
-    const total = Math.max(tasksDueToday.length, tasksCompletedToday.length);
-    const completed = tasksCompletedToday.length;
+    const total = Math.max(tasksDueToday.length + notesDueToday.length, tasksCompletedToday.length + notesCompletedToday.length);
+    const completed = tasksCompletedToday.length + notesCompletedToday.length;
     
     let barColor = "bg-accent-blue";
     if (cat.name === "TeamARA") barColor = "bg-orange-500";
@@ -952,7 +1007,7 @@ export default function App() {
     ? Math.round((totalCompletedToday / Math.max(todayTasks.length, totalCompletedToday)) * 100) 
     : 0;
 
-  const upcomingDeadlines = remainingTodayTasks.length;
+  const upcomingDeadlines = remainingTodayItems.length;
 
   if (!user) {
     return (
@@ -1045,7 +1100,7 @@ export default function App() {
             { id: "All Tasks", icon: CheckSquare, roles: ["Superadmin"] },
             { id: "Calendar", icon: Calendar, roles: ["Superadmin", "Staff"] },
             { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
-            { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
+            { id: "Tracker", icon: Clock, roles: ["Superadmin", "Staff"] },
             { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
             { id: "Users", icon: User, roles: ["Superadmin"] },
             { id: "Profile", icon: User, roles: ["Superadmin", "Staff"] },
@@ -1229,7 +1284,7 @@ export default function App() {
                     <div className="flex justify-between items-center px-2">
                       <div className="flex flex-col">
                         <h4 className="text-[18px] font-bold tracking-tight">Today's Focus</h4>
-                        <span className="text-[12px] font-medium text-text-secondary">{remainingTodayTasks.length} tasks remaining</span>
+                        <span className="text-[12px] font-medium text-text-secondary">{remainingTodayItems.length} items remaining</span>
                       </div>
                       <div className="flex items-center gap-2 relative">
                         {isQuickPickOpen && (
@@ -1278,47 +1333,61 @@ export default function App() {
                     </div>
                     
                     <div className="grid grid-cols-1 gap-4">
-                      {todayTasks
-                        .filter(t => !history.some(h => h.taskId === t.id && isSameDay(new Date(h.dateCompleted), new Date())))
-                        .map(task => (
-                        <div key={task.id} className="bg-white p-5 rounded-[20px] shadow-apple border border-border-apple/50 hover:shadow-apple-hover transition-all duration-300 group">
+                      {remainingTodayItems.map((item) => (
+                        <div key={`${item.type}-${item.id}`} className="bg-white p-5 rounded-[20px] shadow-apple border border-border-apple/50 hover:shadow-apple-hover transition-all duration-300 group">
                           <div className="flex justify-between items-start mb-4">
                             <div className="flex items-center gap-4 flex-1">
                               <button 
-                                onClick={() => completeTaskForToday(task)}
+                                onClick={() => {
+                                  if (item.type === 'task') {
+                                    completeTaskForToday(item as Task);
+                                  } else {
+                                    const note = item as Note;
+                                    updateNoteStatus(note.id, "Done");
+                                  }
+                                }}
                                 className="w-6 h-6 rounded-lg border-2 border-border-apple hover:border-accent-blue hover:bg-accent-blue/5 flex items-center justify-center transition-all group/tick"
                               >
                                 <CheckCircle2 className="w-4 h-4 text-transparent group-hover/tick:text-accent-blue/30" />
                               </button>
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className={cn("px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider", getCategoryColor(task.category))}>
-                                    {task.category}
+                                  <span className={cn("px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider", 
+                                    item.type === 'note' ? 'bg-orange-100 text-orange-600' : getCategoryColor(item.category))}>
+                                    {item.category || 'General'}
                                   </span>
-                                  {task.frequency && (
+                                  {item.type === 'task' && (item as Task).frequency && (
                                     <span className="bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                                       <Clock className="w-3 h-3" />
-                                      {task.frequency.replace(/_/g, ' ')}
+                                      {(item as Task).frequency.replace(/_/g, ' ')}
+                                    </span>
+                                  )}
+                                  {item.type === 'note' && (
+                                    <span className="bg-orange-50 text-orange-500 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                                      <StickyNote className="w-3 h-3" />
+                                      Note
                                     </span>
                                   )}
                                 </div>
-                                <h5 className="text-[16px] font-bold text-text-primary leading-tight">{task.title}</h5>
+                                <h5 className="text-[16px] font-bold text-text-primary leading-tight">{item.title}</h5>
                               </div>
                             </div>
-                            <button 
-                              onClick={() => user?.role === "Superadmin" && openEditModal(task)}
-                              className={cn(
-                                "p-2 hover:bg-gray-50 rounded-xl transition-all text-text-secondary hover:text-text-primary hover:scale-110 active:scale-95",
-                                user?.role !== "Superadmin" && "opacity-0 pointer-events-none"
-                              )}
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
+                            {item.type === 'task' && (
+                              <button 
+                                onClick={() => user?.role === "Superadmin" && openEditModal(item as Task)}
+                                className={cn(
+                                  "p-2 hover:bg-gray-50 rounded-xl transition-all text-text-secondary hover:text-text-primary hover:scale-110 active:scale-95",
+                                  user?.role !== "Superadmin" && "opacity-0 pointer-events-none"
+                                )}
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                           
-                          {task.subtasks && task.subtasks.length > 0 && (
+                          {item.type === 'task' && (item as Task).subtasks && (item as Task).subtasks.length > 0 && (
                             <div className="ml-10 mb-5 space-y-3">
-                              {task.subtasks.map((st, idx) => {
+                              {(item as Task).subtasks.map((st, idx) => {
                                 const isObj = typeof st !== 'string';
                                 const text = isObj ? st.text : st;
                                 const completed = isObj ? st.completed : false;
@@ -1326,7 +1395,7 @@ export default function App() {
                                 return (
                                   <button 
                                     key={idx} 
-                                    onClick={() => toggleSubtask(task.id, idx)}
+                                    onClick={() => toggleSubtask(item.id, idx)}
                                     className="flex items-center gap-3 group/st w-full text-left"
                                   >
                                     <div className={cn(
@@ -1349,17 +1418,28 @@ export default function App() {
                             </div>
                           )}
                           
-                          <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-xl p-3 mb-1 ml-10">
+                          {item.type === 'task' && (
+                            <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-xl p-3 mb-1 ml-10">
                               <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-1">Remarks</p>
                               <textarea 
-                                value={task.description || ""}
-                                onChange={(e) => updateTaskRemark(task.id, e.target.value)}
+                                value={(item as Task).description || ""}
+                                onChange={(e) => updateTaskRemark(item.id, e.target.value)}
                                 placeholder="Add specific remarks for today..."
                                 className="w-full bg-transparent text-[13px] text-text-primary/80 leading-relaxed italic border-none focus:ring-0 p-0 resize-none min-h-[40px] cursor-text"
                               />
                             </div>
+                          )}
                         </div>
                       ))}
+                      {remainingTodayItems.length === 0 && (
+                        <div className="bg-[#F8F9FA] border border-dashed border-border-apple p-12 rounded-[24px] flex flex-col items-center justify-center text-center">
+                          <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-apple mb-4">
+                            <Zap className="w-8 h-8 text-accent-blue opacity-20" />
+                          </div>
+                          <p className="text-[15px] font-bold text-text-primary mb-1">Queue Clear!</p>
+                          <p className="text-[13px] font-medium text-text-secondary">You're all caught up for today.</p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1414,7 +1494,7 @@ export default function App() {
                         onChange={(e) => setNewTaskCategory(e.target.value)}
                         className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
                       >
-                        {taskCategories && taskCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                        {dynamicCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1.5">
@@ -1455,7 +1535,7 @@ export default function App() {
                   >
                     All
                   </button>
-                  {taskCategories && taskCategories.map((cat) => (
+                  {dynamicCategories.map((cat) => (
                     <button
                       key={cat.name}
                       onClick={() => setSelectedCategory(cat.name)}
@@ -1599,12 +1679,12 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === "History" && (
+            {activeTab === "Tracker" && (
               <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
                 <div className="flex items-center justify-between mb-8">
                   <div>
-                    <h4 className="text-[22px] font-bold tracking-tight">Task History</h4>
-                    <p className="text-[14px] text-text-secondary font-medium">Review and edit your daily completions</p>
+                    <h4 className="text-[22px] font-bold tracking-tight">Sheet Tracker</h4>
+                    <p className="text-[14px] text-text-secondary font-medium">Synced with Tracker Spreadsheet Matrix</p>
                   </div>
                   <div className="flex items-center gap-3 bg-[#F8F9FA] p-1 rounded-xl border border-border-apple/50">
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg shadow-sm border border-border-apple/40">
@@ -1614,6 +1694,7 @@ export default function App() {
                   </div>
                 </div>
                 <HistoryCalendar 
+                  tasks={tasks}
                   history={history} 
                   onUpdateRemark={updateHistoryRemark} 
                   onUndo={undoTaskCompletion}
@@ -1880,6 +1961,16 @@ export default function App() {
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Category</label>
+                          <select 
+                            value={newNoteCategory}
+                            onChange={(e) => setNewNoteCategory(e.target.value)}
+                            className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all"
+                          >
+                            {dynamicCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Due Date (Optional)</label>
                           <input 
                             type="date"
@@ -2041,10 +2132,10 @@ export default function App() {
                         <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Category</label>
                         <select 
                           value={editingTask.category}
-                          onChange={(e) => setEditingTask({ ...editingTask, category: e.target.value })}
+                          onChange={(e) => setEditingTask({ ...editingTask, category: e.target.value as Category })}
                           className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
                         >
-                          {taskCategories && taskCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                          {dynamicCategories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                         </select>
                       </div>
                     <div className="flex flex-col gap-1.5">
@@ -2728,7 +2819,8 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: {
   );
 }
 
-function HistoryCalendar({ history, onUpdateRemark, onUndo }: { 
+function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: { 
+  tasks: Task[],
   history: HistoryEntry[], 
   onUpdateRemark: (taskId: string, date: string, remark: string) => void,
   onUndo: (taskId: string, date: string) => void
@@ -2756,6 +2848,13 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo }: {
       })
     : [];
 
+  const pendingForDate = selectedDate
+    ? tasks.filter(t => {
+        if (!isTaskOnDay(t, selectedDate)) return false;
+        return !completionsForDate.some(c => c.taskId === t.id);
+      })
+    : [];
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10">
       <div className="bg-[#F8F9FA] p-8 rounded-[24px] border border-border-apple/60">
@@ -2771,17 +2870,19 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo }: {
             <div key={d} className="text-center text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">{d}</div>
           ))}
           {days.map((day, i) => {
-            const isToday = isSameDay(day, new Date());
+            const isTodayDay = isSameDay(day, new Date());
             const isSelected = selectedDate && isSameDay(day, selectedDate);
-            const hasCompletions = history.some(h => {
+            
+            const itemsCompleted = history.filter(h => {
               try {
                 const d = new Date(h.dateCompleted);
-                if (isNaN(d.getTime())) return false;
-                return isSameDay(d, day);
-              } catch (e) {
-                return false;
-              }
-            });
+                return !isNaN(d.getTime()) && isSameDay(d, day);
+              } catch { return false; }
+            }).length;
+            
+            const itemsDue = tasks.filter(t => isTaskOnDay(t, day)).length;
+            const allDone = itemsDue > 0 && itemsCompleted >= itemsDue;
+            const partialDone = itemsCompleted > 0 && itemsCompleted < itemsDue;
             
             return (
               <button
@@ -2795,14 +2896,16 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo }: {
                   !isSameMonth(day, currentMonth) && "opacity-20"
                 )}
               >
-                <span className={cn("text-[15px] font-bold", isToday && !isSelected && "text-accent-blue")}>
+                <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
                   {format(day, "d")}
                 </span>
-                {hasCompletions && (
-                  <div className={cn(
-                    "w-1.5 h-1.5 rounded-full mt-1",
-                    isSelected ? "bg-white" : "bg-accent-green"
-                  )} />
+                {itemsDue > 0 && (
+                  <div className="flex gap-0.5 mt-1">
+                    <div className={cn(
+                      "w-1 h-1 rounded-full",
+                      isSelected ? "bg-white" : (allDone ? "bg-accent-green" : partialDone ? "bg-orange-400" : "bg-gray-300")
+                    )} />
+                  </div>
                 )}
               </button>
             );
@@ -2815,12 +2918,33 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo }: {
           <h5 className="text-[18px] font-bold tracking-tight">
             {selectedDate ? format(selectedDate, "MMMM d, yyyy") : "Select a date"}
           </h5>
-          <div className="bg-accent-green/10 text-accent-green px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider">
-            {completionsForDate.length} Done
+          <div className="flex gap-2">
+            <div className="bg-accent-green/10 text-accent-green px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+              {completionsForDate.length} Done
+            </div>
+            {pendingForDate.length > 0 && (
+              <div className="bg-red-50 text-red-500 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                {pendingForDate.length} Pending
+              </div>
+            )}
           </div>
         </div>
 
                 <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+          {pendingForDate.map((task, i) => (
+            <div key={`pending-${i}`} className="bg-red-50/30 p-5 rounded-[20px] border border-red-100 shadow-sm opacity-80 italic">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+                    <Circle className="w-4 h-4 text-red-400" />
+                  </div>
+                  <h6 className="text-[15px] font-bold text-text-primary/70">{task.title}</h6>
+                </div>
+                <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest">Pending</span>
+              </div>
+            </div>
+          ))}
+
           {completionsForDate.length > 0 ? (
             completionsForDate.map((entry, i) => {
               let isTodayEntry = false;

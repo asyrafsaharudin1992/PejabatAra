@@ -18,21 +18,36 @@ export default async function handler(req: any, res: any) {
   const { email, password } = body;
 
   try {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+      console.error('[Login API Error]: Missing Google credentials');
+      return res.status(500).json({ 
+        error: 'Configuration error', 
+        message: 'Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY in environment variables.' 
+      });
+    }
+
     const auth = new GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        client_email: (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
         private_key: (process.env.GOOGLE_PRIVATE_KEY || "")
-          .replace(/^"/, '') // Buang tanda petikan di awal
-          .replace(/"$/, '') // Buang tanda petikan di akhir
-          .replace(/\\n/g, '\n'), // Tukar \n kepada baris baru
+          .replace(/^"/, '') // Remove starting quotes
+          .replace(/"$/, '') // Remove ending quotes
+          .replace(/\\n/g, '\n'), // Replace literal \n with newlines
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 
+    console.log('[Login API]: Authenticating...');
     const client = await auth.getClient();
     const tokenResponse = await client.getAccessToken();
     const token = tokenResponse.token;
-    const spreadsheetId = process.env.GOOGLE_SHEET_ID || "1z41IbJtvILMYHz9EqvpflzZD3kTFLF0R9q-0OnzzQFE";
+    
+    if (!token) {
+      throw new Error('Failed to retrieve access token from Google');
+    }
+
+    const spreadsheetId = (process.env.GOOGLE_SHEET_ID || "1z41IbJtvILMYHz9EqvpflzZD3kTFLF0R9q-0OnzzQFE").trim();
+    console.log('[Login API]: Fetching data from spreadsheet:', spreadsheetId);
 
     // Fetch Users sheet: Col A=Email, B=FullName, C=Role, D=Password, E=LastLogin, F=Status, G=Location, H=ProfilePic
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Users!A:H`;

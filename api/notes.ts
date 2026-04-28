@@ -18,24 +18,47 @@ export default async function handler(req: any, res: any) {
     const token = tokenResponse.token;
 
     if (req.method === 'GET') {
-      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:E`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:G`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       const rows = data.values || [];
       return res.status(200).json(rows.slice(1).map((r: any) => ({
-        id: r[0], title: r[1], content: r[2], updatedAt: r[3], duedate: r[4]
+        id: r[0], 
+        title: r[1], 
+        content: r[2], 
+        updatedAt: r[3], 
+        duedate: r[4],
+        category: r[5] || 'General',
+        completed: r[6] === 'Completed'
       })));
     }
 
     if (req.method === 'POST') {
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
-      const newNote = [Date.now().toString(), body.title || "", body.content || "", new Date().toISOString(), body.duedate || ""];
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:E:append?valueInputOption=RAW`, {
+      // A=id, B=title, C=content, D=updatedAt, E=duedate, F=category, G=status
+      const newNote = [
+        Date.now().toString(), 
+        body.title || "", 
+        body.content || "", 
+        new Date().toISOString(), 
+        body.duedate || "",
+        body.category || "General",
+        body.completed ? "Completed" : "Pending"
+      ];
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!A:G:append?valueInputOption=RAW`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: [newNote] })
       });
-      return res.status(200).json({ id: newNote[0], title: newNote[1], content: newNote[2], updatedAt: newNote[3], duedate: newNote[4] });
+      return res.status(200).json({ 
+        id: newNote[0], 
+        title: newNote[1], 
+        content: newNote[2], 
+        updatedAt: newNote[3], 
+        duedate: newNote[4],
+        category: newNote[5],
+        completed: body.completed || false
+      });
     }
 
     if (req.method === 'DELETE') {
@@ -113,6 +136,20 @@ export default async function handler(req: any, res: any) {
             method: 'PUT',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ values: [[body.duedate]] })
+          });
+        }
+        if (body.category !== undefined) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!F${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[body.category]] })
+          });
+        }
+        if (body.completed !== undefined) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Notes!G${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[body.completed ? "Completed" : "Pending"]] })
           });
         }
         // Update timestamp
