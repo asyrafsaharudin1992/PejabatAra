@@ -32,7 +32,7 @@ import {
   Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
@@ -168,6 +168,44 @@ export default function App() {
   const [newCategoryColor, setNewCategoryColor] = useState("bg-blue-100 text-blue-600");
   const [isSyncing, setIsSyncing] = useState(false);
   const [isQuickPickOpen, setIsQuickPickOpen] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getHijriDate = () => {
+    try {
+      return new Intl.DateTimeFormat('en-u-ca-islamic-uma-nu-latn', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }).format(currentTime);
+    } catch (e) {
+      return format(currentTime, "d MMMM yyyy");
+    }
+  };
+
+  const getQuotes = () => {
+    const quotes = [
+      "The best of people are those that are most beneficial to people.",
+      "Work for this world as if you will live forever, and for the Hereafter as if you will die tomorrow.",
+      "Indeed, with hardship comes ease.",
+      "The most beloved of deeds to Allah are those that are most consistent, even if they are small.",
+      "O you who have believed, seek help through patience and prayer.",
+      "Your wealth and your children are but a trial, and Allah has with Him a great reward.",
+      "He who has a thousand friends has not a friend to spare, and he who has one enemy will meet him everywhere.",
+      "Patience is the key to paradise.",
+      "The tongue is like a lion, if you let it loose, it will wound someone.",
+      "A man's worth is proportional to his ambitions."
+    ];
+    const dayOfYear = Math.floor((currentTime.getTime() - new Date(currentTime.getFullYear(), 0, 0).getTime()) / 86400000);
+    return quotes[dayOfYear % quotes.length];
+  };
+
   const [user, setUser] = useState<UserData | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -1100,7 +1138,7 @@ export default function App() {
             { id: "All Tasks", icon: CheckSquare, roles: ["Superadmin"] },
             { id: "Calendar", icon: Calendar, roles: ["Superadmin", "Staff"] },
             { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
-            { id: "Tracker", icon: Clock, roles: ["Superadmin", "Staff"] },
+            { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
             { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
             { id: "Users", icon: User, roles: ["Superadmin"] },
             { id: "Profile", icon: User, roles: ["Superadmin", "Staff"] },
@@ -1196,6 +1234,27 @@ export default function App() {
             <h2 className="text-2xl font-semibold tracking-tight">{activeTab}</h2>
           </div>
           <div className="flex items-center space-x-4">
+            <div className="hidden lg:flex flex-col items-end gap-0.5 border-r border-border-apple/40 pr-4 mr-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-bold text-text-primary tracking-tight">
+                  {format(currentTime, "EEEE, d MMM yyyy")}
+                </span>
+                <span className="text-[11px] font-bold text-accent-blue bg-accent-blue/5 px-2 py-0.5 rounded-lg uppercase tracking-tight">
+                  {getHijriDate()}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[16px] font-mono font-bold text-text-primary tabular-nums tracking-tighter">
+                  {format(currentTime, "HH:mm:ss")}
+                </span>
+                <span className="text-[9px] font-bold text-text-secondary uppercase tracking-widest bg-gray-100 px-1.5 py-0.5 rounded">
+                  GMT+8 (KL)
+                </span>
+              </div>
+              <p className="text-[10px] text-text-secondary italic font-medium mt-1 opacity-80 max-w-[350px] text-right">
+                "{getQuotes()}"
+              </p>
+            </div>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
               <input 
@@ -1679,12 +1738,12 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === "Tracker" && (
+            {activeTab === "History" && (
               <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
                 <div className="flex items-center justify-between mb-8">
                   <div>
-                    <h4 className="text-[22px] font-bold tracking-tight">Sheet Tracker</h4>
-                    <p className="text-[14px] text-text-secondary font-medium">Synced with Tracker Spreadsheet Matrix</p>
+                    <h4 className="text-[22px] font-bold tracking-tight">Task History</h4>
+                    <p className="text-[14px] text-text-secondary font-medium">Review and edit your daily completions</p>
                   </div>
                   <div className="flex items-center gap-3 bg-[#F8F9FA] p-1 rounded-xl border border-border-apple/50">
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg shadow-sm border border-border-apple/40">
@@ -1694,7 +1753,6 @@ export default function App() {
                   </div>
                 </div>
                 <HistoryCalendar 
-                  tasks={tasks}
                   history={history} 
                   onUpdateRemark={updateHistoryRemark} 
                   onUndo={undoTaskCompletion}
@@ -2819,8 +2877,7 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: {
   );
 }
 
-function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: { 
-  tasks: Task[],
+function HistoryCalendar({ history, onUpdateRemark, onUndo }: { 
   history: HistoryEntry[], 
   onUpdateRemark: (taskId: string, date: string, remark: string) => void,
   onUndo: (taskId: string, date: string) => void
@@ -2828,10 +2885,9 @@ function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   
-  const days = eachDayOfInterval({
-    start: startOfMonth(currentMonth),
-    end: endOfMonth(currentMonth),
-  });
+  const start = startOfWeek(startOfMonth(currentMonth));
+  const end = endOfWeek(endOfMonth(currentMonth));
+  const days = eachDayOfInterval({ start, end });
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
@@ -2845,13 +2901,6 @@ function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: {
         } catch (e) {
           return false;
         }
-      })
-    : [];
-
-  const pendingForDate = selectedDate
-    ? tasks.filter(t => {
-        if (!isTaskOnDay(t, selectedDate)) return false;
-        return !completionsForDate.some(c => c.taskId === t.id);
       })
     : [];
 
@@ -2873,16 +2922,12 @@ function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: {
             const isTodayDay = isSameDay(day, new Date());
             const isSelected = selectedDate && isSameDay(day, selectedDate);
             
-            const itemsCompleted = history.filter(h => {
+            const hasCompletions = history.some(h => {
               try {
                 const d = new Date(h.dateCompleted);
                 return !isNaN(d.getTime()) && isSameDay(d, day);
               } catch { return false; }
-            }).length;
-            
-            const itemsDue = tasks.filter(t => isTaskOnDay(t, day)).length;
-            const allDone = itemsDue > 0 && itemsCompleted >= itemsDue;
-            const partialDone = itemsCompleted > 0 && itemsCompleted < itemsDue;
+            });
             
             return (
               <button
@@ -2899,13 +2944,11 @@ function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: {
                 <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
                   {format(day, "d")}
                 </span>
-                {itemsDue > 0 && (
-                  <div className="flex gap-0.5 mt-1">
-                    <div className={cn(
-                      "w-1 h-1 rounded-full",
-                      isSelected ? "bg-white" : (allDone ? "bg-accent-green" : partialDone ? "bg-orange-400" : "bg-gray-300")
-                    )} />
-                  </div>
+                {hasCompletions && (
+                  <div className={cn(
+                    "w-1.5 h-1.5 rounded-full mt-1",
+                    isSelected ? "bg-white" : "bg-accent-green"
+                  )} />
                 )}
               </button>
             );
@@ -2918,33 +2961,12 @@ function HistoryCalendar({ tasks, history, onUpdateRemark, onUndo }: {
           <h5 className="text-[18px] font-bold tracking-tight">
             {selectedDate ? format(selectedDate, "MMMM d, yyyy") : "Select a date"}
           </h5>
-          <div className="flex gap-2">
-            <div className="bg-accent-green/10 text-accent-green px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
-              {completionsForDate.length} Done
-            </div>
-            {pendingForDate.length > 0 && (
-              <div className="bg-red-50 text-red-500 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
-                {pendingForDate.length} Pending
-              </div>
-            )}
+          <div className="bg-accent-green/10 text-accent-green px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider">
+            {completionsForDate.length} Done
           </div>
         </div>
 
                 <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
-          {pendingForDate.map((task, i) => (
-            <div key={`pending-${i}`} className="bg-red-50/30 p-5 rounded-[20px] border border-red-100 shadow-sm opacity-80 italic">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
-                    <Circle className="w-4 h-4 text-red-400" />
-                  </div>
-                  <h6 className="text-[15px] font-bold text-text-primary/70">{task.title}</h6>
-                </div>
-                <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest">Pending</span>
-              </div>
-            </div>
-          ))}
-
           {completionsForDate.length > 0 ? (
             completionsForDate.map((entry, i) => {
               let isTodayEntry = false;
