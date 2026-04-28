@@ -189,7 +189,7 @@ export default function App() {
     }
   };
 
-  const getQuotes = () => {
+  const quote = useMemo(() => {
     const quotes = [
       "The best of people are those that are most beneficial to people.",
       "Work for this world as if you will live forever, and for the Hereafter as if you will die tomorrow.",
@@ -202,9 +202,8 @@ export default function App() {
       "The tongue is like a lion, if you let it loose, it will wound someone.",
       "A man's worth is proportional to his ambitions."
     ];
-    const dayOfYear = Math.floor((currentTime.getTime() - new Date(currentTime.getFullYear(), 0, 0).getTime()) / 86400000);
-    return quotes[dayOfYear % quotes.length];
-  };
+    return quotes[Math.floor(Math.random() * quotes.length)];
+  }, []);
 
   const [user, setUser] = useState<UserData | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -735,8 +734,9 @@ export default function App() {
     const month = date.getMonth(); // 0-11
     
     if (freq === "daily") return true;
+    // "When Needed" tasks don't automatically appear in daily list unless explicitly added or due by schedule
     if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary") {
-      return !task.completed;
+      return false; 
     }
     
     if (freq.startsWith("weekly")) {
@@ -976,7 +976,7 @@ export default function App() {
   
   const combinedTodayItems = [
     ...todayTasks.map(t => ({ ...t, type: 'task' as const })),
-    ...todayNotes.map(n => ({ ...n, type: 'note' as const, id: n.id, title: n.title, category: n.category || 'General' }))
+    ...todayNotes.map(n => ({ ...n, type: 'note' as const, id: n.id, title: n.title, category: n.category || '' }))
   ];
 
   const remainingTodayItems = combinedTodayItems.filter(item => {
@@ -989,7 +989,8 @@ export default function App() {
   const dynamicCategories = useMemo(() => {
     const categoriesFromTasks = Array.from(new Set(tasks.map(t => t.category))).filter(Boolean);
     const categoriesFromNotes = Array.from(new Set(notes.map(n => n.category))).filter(Boolean);
-    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]));
+    const allCategories = Array.from(new Set([...categoriesFromTasks, ...categoriesFromNotes]))
+      .filter(cat => cat !== "General");
     
     // Include initial categories to ensure common ones are always there or have priority colors
     const mergedCategories = Array.from(new Set([...INITIAL_CATEGORIES.map(c => c.name), ...allCategories]));
@@ -1252,7 +1253,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-[10px] text-text-secondary italic font-medium mt-1 opacity-80 max-w-[350px] text-right">
-                "{getQuotes()}"
+                "{quote}"
               </p>
             </div>
             <div className="relative">
@@ -1413,7 +1414,7 @@ export default function App() {
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className={cn("px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider", 
                                     item.type === 'note' ? 'bg-orange-100 text-orange-600' : getCategoryColor(item.category))}>
-                                    {item.category || 'General'}
+                                    {item.category || ''}
                                   </span>
                                   {item.type === 'task' && (item as Task).frequency && (
                                     <span className="bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">

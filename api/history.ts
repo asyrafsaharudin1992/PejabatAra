@@ -20,6 +20,16 @@ export default async function handler(req: any, res: any) {
     const token = tokenResponse.token;
 
     const SHEET_NAME = 'History';
+    const TRACKER_SHEET = 'Tracker';
+
+    const getColLetter = (index: number) => {
+      let letter = '';
+      while (index >= 0) {
+        letter = String.fromCharCode((index % 26) + 65) + letter;
+        index = Math.floor(index / 26) - 1;
+      }
+      return letter;
+    };
 
     if (req.method === 'GET') {
       const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:D`, { headers: { Authorization: `Bearer ${token}` } });
@@ -33,12 +43,56 @@ export default async function handler(req: any, res: any) {
     if (req.method === 'POST') {
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
-      const entry = [body.taskId, body.title, new Date().toISOString(), body.remarks || ""];
+      const { taskId, title } = body;
+      const todayIso = new Date().toISOString();
+      const todayDate = todayIso.split('T')[0];
+
+      // 1. Update History Sheet (List)
+      const entry = [taskId, title, todayIso, body.remarks || ""];
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:D:append?valueInputOption=RAW`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: [entry] })
       });
+
+      // 2. Update Tracker Sheet (Matrix)
+      try {
+        const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!A:ZZ`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await response.json();
+        let rows = data.values || [["Date"]];
+
+        // Find/Add Task Column
+        let colIndex = rows[0].indexOf(title);
+        if (colIndex === -1) {
+          colIndex = rows[0].length;
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}1?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[title]] })
+          });
+        }
+
+        // Find/Add Date Row
+        let rowIndex = rows.findIndex((r: any) => r[0] === todayDate);
+        if (rowIndex === -1) {
+          rowIndex = rows.length;
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!A${rowIndex + 1}?valueInputOption=RAW`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [[todayDate]] })
+          });
+        }
+
+        // Set "DONE"
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${rowIndex + 1}?valueInputOption=RAW`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [['DONE']] })
+        });
+      } catch (e) {
+        console.error("Tracker update failed:", e);
+      }
+
       return res.status(200).json({ taskId: entry[0], title: entry[1], dateCompleted: entry[2], remarks: entry[3] });
     }
 
@@ -68,23 +122,21 @@ export default async function handler(req: any, res: any) {
       const { id, date } = req.query; 
       if (!id || !date) return res.status(400).json({ error: "id and date are required" });
 
-      // Step A: Get sheetId
+      // 1. Delete from History (List)
       const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const sheetInfo = await sheetInfoRes.json();
-      const sheet = sheetInfo.sheets.find((s: any) => s.properties.title === SHEET_NAME);
-      const sheetId = sheet.properties.sheetId;
+      const hSheet = sheetInfo.sheets.find((s: any) => s.properties.title === SHEET_NAME);
+      const hSheetId = hSheet.properties.sheetId;
 
-      // Step B: Find rowIndex
       const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:C`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
       const getData = await getRes.json();
-      const rows = getData.values || [];
-      const rowIndex = rows.findIndex((row: any) => row[0]?.toString() === id.toString() && row[2] === date);
+      const hRows = getData.values || [];
+      const hRowIndex = hRows.findIndex((row: any) => row[0]?.toString() === id.toString() && row[2] === date);
 
-      if (rowIndex !== -1) {
-        // Step C: deleteDimension
+      if (hRowIndex !== -1) {
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -92,15 +144,43 @@ export default async function handler(req: any, res: any) {
             requests: [{
               deleteDimension: {
                 range: {
-                  sheetId: sheetId,
+                  sheetId: hSheetId,
                   dimension: 'ROWS',
-                  startIndex: rowIndex,
-                  endIndex: rowIndex + 1
+                  startIndex: hRowIndex,
+                  endIndex: hRowIndex + 1
                 }
               }
             }]
           })
         });
+
+        // 2. Clear from Tracker (Matrix)
+        try {
+          const dateStr = (date as string).split('T')[0];
+          const tasksResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:C`, { headers: { Authorization: `Bearer ${token}` } });
+          const tasksData = await tasksResponse.json();
+          const taskRows = tasksData.values || [];
+          const task = taskRows.find((r: any) => r[0] === id);
+          const title = task ? task[2] : id;
+
+          const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!A:ZZ`, { headers: { Authorization: `Bearer ${token}` } });
+          const data = await response.json();
+          const rows = data.values || [];
+
+          const colIndex = rows[0]?.indexOf(title);
+          const rowIndex = rows.findIndex((r: any) => r[0] === dateStr);
+
+          if (colIndex !== -1 && rowIndex !== -1) {
+            await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${rowIndex + 1}?valueInputOption=RAW`, {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ values: [['']] })
+            });
+          }
+        } catch (e) {
+          console.error("Tracker clear failed:", e);
+        }
+
         return res.status(200).json({ success: true });
       }
       return res.status(404).json({ error: "History entry not found" });
