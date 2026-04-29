@@ -785,7 +785,7 @@ export default function App() {
       } catch (e) {}
     }
 
-    if (freq === "daily") return true;
+    if (freq === "daily" || freq === "") return true;
     // "When Needed" tasks don't automatically appear in daily list unless explicitly added or due by schedule
     if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") {
       return false; 

@@ -33,7 +33,7 @@ export default async function handler(req: any, res: any) {
     };
 
     const isTaskOnDay = (task: any, date: Date) => {
-      const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+      const freq = (task.frequency || "daily").toLowerCase().replace(/_/g, ' ').trim();
       const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
       const dayOfMonth = date.getDate();
       const month = date.getMonth(); // 0-11
@@ -45,7 +45,7 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (freq === "daily") return true;
+      if (freq === "daily" || freq === "") return true;
       if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") return false;
       
       if (freq.startsWith("weekly")) {
@@ -213,11 +213,12 @@ export default async function handler(req: any, res: any) {
             });
           }
 
-          // Set "DONE"
+          // Set "DONE" or "Done: remarks"
+          const cellValue = body.remarks ? `Done: ${body.remarks}` : 'DONE';
           const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${rowIndex + 1}?valueInputOption=RAW`, {
             method: 'PUT',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: [['DONE']] })
+            body: JSON.stringify({ values: [[cellValue]] })
           });
           if (!updateRes.ok) console.error("Failed to update Tracker matrix cell:", await updateRes.text());
           
@@ -250,6 +251,37 @@ export default async function handler(req: any, res: any) {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ values: [[remarks]] })
         });
+
+        // Also update Tracker matrix cell
+        try {
+          const tTasksRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:C`, { headers: { Authorization: `Bearer ${token}` } });
+          const tTasksData = await tTasksRes.ok ? await tTasksRes.json() : { values: [] };
+          const tRows = tTasksData.values || [];
+          const task = tRows.find((r: any) => r[0] === taskId);
+          const title = task ? task[2] : taskId;
+
+          const tMatrixRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!A:ZZ`, { headers: { Authorization: `Bearer ${token}` } });
+          if (tMatrixRes.ok) {
+            const data = await tMatrixRes.json();
+            const rows = data.values || [];
+            const searchTitle = title.trim().toLowerCase();
+            const colIndex = rows[0]?.findIndex((h: string) => h && h.trim().toLowerCase() === searchTitle);
+            const dateStr = dateCompleted.split('T')[0];
+            const tRowIndex = rows.findIndex((r: any) => r[0] === dateStr);
+
+            if (colIndex !== undefined && colIndex !== -1 && tRowIndex !== -1) {
+              const cellValue = remarks ? `Done: ${remarks}` : 'DONE';
+              await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${tRowIndex + 1}?valueInputOption=RAW`, {
+                method: 'PUT',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ values: [[cellValue]] })
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Tracker remark sync failed:", e);
+        }
+
         return res.status(200).json({ success: true });
       }
       return res.status(404).json({ error: "Entry not found" });
