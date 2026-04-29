@@ -697,15 +697,15 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const updateNoteStatus = async (id: string, status: "Pending" | "Done") => {
+  const updateNoteStatus = async (id: string, completed: boolean) => {
     try {
       await fetch(`/api/notes?id=${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ completed }),
       });
-      setNotes(notes.map(n => n.id === id ? { ...n, status } : n));
-      showNotification(`Note marked as ${status}`);
+      setNotes(notes.map(n => n.id === id ? { ...n, completed } : n));
+      showNotification(`Note marked as ${completed ? "completed" : "pending"}`);
     } catch (error) {
       console.error("Update note error:", error);
       showNotification("Failed to update note", "error");
@@ -1111,8 +1111,12 @@ export default function App() {
   });
 
   const totalCompletedToday = history.filter(h => isSameDay(new Date(h.dateCompleted), currentTime)).length;
-  const completionRate = (todayTasks.length > 0 || totalCompletedToday > 0)
-    ? Math.round((totalCompletedToday / Math.max(todayTasks.length, totalCompletedToday)) * 100) 
+  const totalNotesCompletedToday = todayNotes.filter(n => n.completed).length;
+  const totalCompletedTodayCount = totalCompletedToday + totalNotesCompletedToday;
+  const totalItemsTodayCount = todayTasks.length + todayNotes.length;
+
+  const completionRate = (totalItemsTodayCount > 0 || totalCompletedTodayCount > 0)
+    ? Math.round((totalCompletedTodayCount / Math.max(totalItemsTodayCount, totalCompletedTodayCount)) * 100) 
     : 0;
 
   const upcomingDeadlines = remainingTodayItems.length;
@@ -1472,7 +1476,7 @@ export default function App() {
                                     completeTaskForToday(item as Task);
                                   } else {
                                     const note = item as Note;
-                                    updateNoteStatus(note.id, "Done");
+                                    updateNoteStatus(note.id, true);
                                   }
                                 }}
                                 className="w-6 h-6 rounded-lg border-2 border-border-apple hover:border-accent-blue hover:bg-accent-blue/5 flex items-center justify-center transition-all group/tick"
@@ -2187,6 +2191,18 @@ export default function App() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => updateNoteStatus(note.id, !note.completed)}
+                                    className={cn(
+                                      "w-8 h-8 rounded-full flex items-center justify-center transition-all",
+                                      note.completed 
+                                        ? "bg-green-50 text-green-600 hover:bg-green-100" 
+                                        : "bg-[#F8F9FA] text-text-secondary hover:bg-green-50 hover:text-green-600"
+                                    )}
+                                    title={note.completed ? "Mark as Pending" : "Mark as Done"}
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  </button>
                                   <button 
                                     onClick={() => openNoteEdit(note)}
                                     className="w-8 h-8 rounded-full flex items-center justify-center bg-[#F8F9FA] text-text-secondary hover:bg-blue-50 hover:text-accent-blue transition-all"
