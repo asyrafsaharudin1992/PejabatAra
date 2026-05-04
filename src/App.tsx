@@ -85,6 +85,15 @@ interface CategoryData {
   color: string;
 }
 
+interface StaffSettings {
+  email: string;
+  name: string;
+  offdays: string[];
+  leavestart: string;
+  leaveend: string;
+  updatedat: string;
+}
+
 interface UserData {
   email: string;
   fullName: string;
@@ -135,6 +144,7 @@ const INITIAL_TASKS: Task[] = [
 export default function App() {
   const [taskCategories, setTaskCategories] = useState<CategoryData[]>(INITIAL_CATEGORIES);
   const [activeTab, setActiveTab] = useState("Overview");
+  const [staffSettings, setStaffSettings] = useState<StaffSettings[]>([]);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -338,13 +348,14 @@ export default function App() {
     };
 
     try {
-      const [status, tasksData, notesData, historyData, taskCategoriesData, portalData] = await Promise.all([
+      const [status, tasksData, notesData, historyData, taskCategoriesData, portalData, staffSettingsData] = await Promise.all([
         fetchJson("/api/status"),
         fetchJson("/api/tasks"),
         fetchJson("/api/notes"),
         fetchJson("/api/history"),
         fetchJson("/api/categories"),
-        fetchJson("/api/portal")
+        fetchJson("/api/portal"),
+        fetchJson("/api/staff-settings")
       ]);
       
       setConnectionStatus(status);
@@ -353,6 +364,7 @@ export default function App() {
       if (Array.isArray(historyData)) setHistory(historyData);
       if (Array.isArray(taskCategoriesData)) setTaskCategories(taskCategoriesData.filter(c => c && c.name && c.name !== "General"));
       if (Array.isArray(portalData)) setPortalLinks(portalData);
+      if (Array.isArray(staffSettingsData)) setStaffSettings(staffSettingsData);
 
       if (user.role === "Superadmin") {
         try {
@@ -614,6 +626,30 @@ export default function App() {
     }
   };
 
+  const isStaffMemberOnLeave = (staffEmail: string, date: Date) => {
+    const staff = staffSettings.find(s => s.email === staffEmail);
+    if (!staff) return false;
+    
+    // Check recurring off-days
+    const dayName = format(date, "EEEE");
+    if (staff.offdays && staff.offdays.includes(dayName)) return true;
+    
+    // Check specific leave dates
+    if (staff.leavestart && staff.leaveend) {
+      try {
+        const start = new Date(staff.leavestart);
+        const end = new Date(staff.leaveend);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+          const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+          const sDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+          const eDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          return checkDate >= sDate && checkDate <= eDate;
+        }
+      } catch (e) {}
+    }
+    return false;
+  };
+
   const getCalendarEvents = (tasks: Task[], notes: Note[], history: HistoryEntry[]) => {
     const events: any[] = [];
     if (tasks && Array.isArray(tasks)) {
@@ -699,11 +735,34 @@ export default function App() {
 
   const updateNoteStatus = async (id: string, completed: boolean) => {
     try {
+      const note = notes.find(n => n.id === id);
+      
       await fetch(`/api/notes?id=${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ completed }),
       });
+
+      // If marking as completed, also add to history so it shows up in history/tracker
+      if (completed && note) {
+        try {
+          await fetch("/api/history", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskId: note.id,
+              title: note.title,
+              remarks: "Note Completed",
+              dateCompleted: new Date().toISOString()
+            })
+          });
+          // Refresh data to show new history entry
+          fetchData(true);
+        } catch (historyError) {
+          console.error("Failed to add note to history:", historyError);
+        }
+      }
+
       setNotes(notes.map(n => n.id === id ? { ...n, completed } : n));
       showNotification(`Note marked as ${completed ? "completed" : "pending"}`);
     } catch (error) {
@@ -877,6 +936,28 @@ export default function App() {
       console.error("Complete task error:", error);
       // Rollback
       setHistory(history);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const saveStaffSettings = async (email: string, name: string, offDays: string[], leaveStart: string, leaveEnd: string) => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch("/api/staff-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name, offDays, leaveStart, leaveEnd }),
+      });
+      if (res.ok) {
+        showNotification("Profile settings saved");
+        fetchData(true);
+      } else {
+        showNotification("Failed to save settings", "error");
+      }
+    } catch (error) {
+      console.error("Save staff settings error:", error);
+      showNotification("Connection error", "error");
     } finally {
       setIsSyncing(false);
     }
@@ -1070,6 +1151,10 @@ export default function App() {
       };
     });
   }, [tasks, notes, taskCategories]);
+
+  const staffOnLeaveToday = useMemo(() => {
+    return staffSettings.filter(s => isStaffMemberOnLeave(s.email, currentTime));
+  }, [staffSettings, currentTime]);
 
   const departmentLoad = dynamicCategories.map(cat => {
     // For "ALL tasks" including "When Necessary", we look at all tasks in category
@@ -1409,6 +1494,26 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {staffOnLeaveToday.length > 0 && (
+                    <div className="mt-8 pt-6 border-t border-border-apple/30">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+                        <h5 className="text-[13px] font-bold text-text-primary uppercase tracking-wider">Staff on Leave Today</h5>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {staffOnLeaveToday.map(staff => (
+                          <div key={staff.email} className="flex items-center gap-2 bg-orange-50 border border-orange-100 px-3 py-1.5 rounded-xl">
+                            <div className="w-6 h-6 rounded-lg bg-orange-100 flex items-center justify-center">
+                              <User className="w-3.5 h-3.5 text-orange-600" />
+                            </div>
+                            <span className="text-[12px] font-bold text-orange-700">{staff.name}</span>
+                            <span className="text-[10px] font-medium text-orange-500 italic">On Leave</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-[1fr_340px] gap-6 flex-grow">
@@ -1579,7 +1684,13 @@ export default function App() {
                   <div className="flex flex-col gap-6">
                     {/* Calendar Card */}
                     <div className="bg-white p-6 rounded-[20px] shadow-apple border border-border-apple/50">
-                      <CalendarView mini events={getCalendarEvents(tasks, notes, history)} categories={taskCategories} />
+                      <CalendarView 
+                        mini 
+                        events={getCalendarEvents(tasks, notes, history)} 
+                        categories={taskCategories} 
+                        staffSettings={staffSettings}
+                        allUsers={allUsers}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1602,6 +1713,8 @@ export default function App() {
                 onUpdateProfile={updateProfile} 
                 onChangePassword={changePassword} 
                 onLogout={handleLogout}
+                staffSettings={staffSettings}
+                onSaveStaffSettings={saveStaffSettings}
               />
             )}
 
@@ -2027,7 +2140,12 @@ export default function App() {
                     <p className="text-text-secondary font-bold uppercase tracking-widest text-[11px]">Loading Calendar...</p>
                   </div>
                 ) : (
-                  <CalendarView events={getCalendarEvents(tasks, notes, history)} categories={taskCategories} />
+                  <CalendarView 
+                    events={getCalendarEvents(tasks, notes, history)} 
+                    categories={taskCategories} 
+                    staffSettings={staffSettings}
+                    allUsers={allUsers}
+                  />
                 )}
               </div>
             )}
@@ -2738,17 +2856,25 @@ function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, is
   );
 }
 
-function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: { 
+function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSettings, onSaveStaffSettings }: { 
   user: UserData | null, 
   onUpdateProfile: (data: any) => Promise<any>,
   onChangePassword: (passwords: any) => Promise<any>,
-  onLogout: () => void
+  onLogout: () => void,
+  staffSettings: StaffSettings[],
+  onSaveStaffSettings: (email: string, name: string, offDays: string[], leaveStart: string, leaveEnd: string) => Promise<void>
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [location, setLocation] = useState(user?.location || "Main Office");
   const [passwords, setPasswords] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [message, setMessage] = useState({ text: "", type: "" });
+  
+  // Leave system state
+  const currentSettings = useMemo(() => staffSettings.find(s => s.email === user?.email), [staffSettings, user]);
+  const [offDays, setOffDays] = useState<string[]>([]);
+  const [leaveStart, setLeaveStart] = useState("");
+  const [leaveEnd, setLeaveEnd] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -2756,6 +2882,23 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: {
       setLocation(user.location || "Main Office");
     }
   }, [user]);
+
+  useEffect(() => {
+    if (currentSettings) {
+      setOffDays(currentSettings.offdays || []);
+      setLeaveStart(currentSettings.leavestart || "");
+      setLeaveEnd(currentSettings.leaveend || "");
+    }
+  }, [currentSettings]);
+
+  const toggleOffDay = (day: string) => {
+    setOffDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  };
+
+  const handleSaveLeaveSettings = async () => {
+    if (!user) return;
+    await onSaveStaffSettings(user.email, user.fullName, offDays, leaveStart, leaveEnd);
+  };
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2878,6 +3021,69 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout }: {
                   <LayoutDashboard className="w-5 h-5 text-blue-600" />
                 </div>
                 <span className="text-[16px] font-bold text-text-primary">{user?.location || "Main Office"}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Leave & Off-Days Section */}
+          <div className="mt-12 bg-[#F8F9FA] p-8 rounded-[32px] border border-border-apple/40">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h4 className="text-[20px] font-bold tracking-tight">Recurring Off-Days</h4>
+                <p className="text-[13px] text-text-secondary font-medium">Select your mandatory weekly rest days</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap gap-3 mb-10">
+              {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(day => (
+                <button
+                  key={day}
+                  onClick={() => toggleOffDay(day)}
+                  className={cn(
+                    "px-6 py-3 rounded-2xl text-[14px] font-bold transition-all border",
+                    offDays.includes(day)
+                      ? "bg-accent-blue text-white border-accent-blue shadow-lg shadow-accent-blue/20"
+                      : "bg-white text-text-secondary border-border-apple hover:border-accent-blue/30"
+                  )}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              <div>
+                <h4 className="text-[20px] font-bold tracking-tight mb-2">Specific Leave</h4>
+                <p className="text-[13px] text-text-secondary font-medium mb-6">Plan your upcoming absence dates</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Start Date</label>
+                    <input 
+                      type="date"
+                      value={leaveStart}
+                      onChange={(e) => setLeaveStart(e.target.value)}
+                      className="w-full bg-white border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">End Date</label>
+                    <input 
+                      type="date"
+                      value={leaveEnd}
+                      onChange={(e) => setLeaveEnd(e.target.value)}
+                      className="w-full bg-white border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-end justify-end">
+                <button 
+                  onClick={handleSaveLeaveSettings}
+                  className="bg-accent-blue text-white px-10 py-4 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2"
+                >
+                  <Cloud className="w-5 h-5" />
+                  Save Leave Profile
+                </button>
               </div>
             </div>
           </div>
@@ -3170,7 +3376,7 @@ const isTaskOnDay = (task: Task, day: Date) => {
   const dayOfWeek = format(day, "EEEE"); // e.g. "Friday"
   const dayOfMonth = day.getDate();
   
-  switch (task.frequency) {
+  switch (task.frequency?.toUpperCase()) {
     case "DAILY": return true;
     case "WEEKLY_FRIDAY": return dayOfWeek === "Friday";
     case "TWICE_WEEKLY": return dayOfWeek === "Tuesday" || dayOfWeek === "Thursday";
@@ -3207,10 +3413,12 @@ const isTaskOnDay = (task: Task, day: Date) => {
   }
 };
 
-function CalendarView({ mini, events = [], categories = [] }: { 
+function CalendarView({ mini, events = [], categories = [], staffSettings = [], allUsers = [] }: { 
   mini?: boolean, 
   events?: any[], 
-  categories?: CategoryData[]
+  categories?: CategoryData[],
+  staffSettings?: StaffSettings[],
+  allUsers?: UserData[]
 }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
@@ -3221,6 +3429,26 @@ function CalendarView({ mini, events = [], categories = [] }: {
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+
+  const isStaffOff = (email: string, date: Date) => {
+    const staff = staffSettings.find(s => s.email === email);
+    if (!staff) return false;
+    const dayName = format(date, "EEEE");
+    if (staff.offdays && staff.offdays.includes(dayName)) return true;
+    if (staff.leavestart && staff.leaveend) {
+      try {
+        const start = new Date(staff.leavestart);
+        const end = new Date(staff.leaveend);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+          const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+          const sDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+          const eDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          return checkDate >= sDate && checkDate <= eDate;
+        }
+      } catch (e) {}
+    }
+    return false;
+  };
 
   const getTaskColor = (catName: string) => {
     const cat = categories.find(c => c.name === catName);
@@ -3273,6 +3501,7 @@ function CalendarView({ mini, events = [], categories = [] }: {
           const dayTasks = dayEvents.filter(e => e.calendarType === 'task');
           const dayNotes = dayEvents.filter(e => e.calendarType === 'note');
           const dayHistory = dayEvents.filter(e => e.calendarType === 'history');
+          const staffOnLeave = staffSettings.filter(s => isStaffOff(s.email, day));
           const isTodayDay = isToday(day);
           
           return (
@@ -3280,50 +3509,51 @@ function CalendarView({ mini, events = [], categories = [] }: {
               key={day.toString()} 
               className={cn(
                 "aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all group",
-                isTodayDay ? "bg-accent-blue text-white" : "hover:bg-gray-50"
+                isTodayDay ? "bg-accent-blue text-white" : "hover:bg-gray-50",
+                staffOnLeave.length > 0 && !isTodayDay && "bg-orange-50/30"
               )}
             >
               <span className={cn("text-[13px] font-medium z-10")}>{format(day, "d")}</span>
               
               <div className="flex gap-0.5 mt-1">
-                {dayTasks.slice(0, 3).map((t, idx) => (
+                {staffOnLeave.length > 0 && (
+                  <div className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : "bg-orange-400 rotate-45")} />
+                )}
+                {dayTasks.slice(0, 2).map((t, idx) => (
                   <div 
                     key={`t-${idx}`} 
                     className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : getTaskColor(t.category))} 
                   />
                 ))}
-                {dayNotes.length > 0 && (
-                  <div className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : "bg-orange-500")} />
-                )}
-                {dayHistory.length > 0 && (
-                  <div className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : "bg-green-500")} />
-                )}
               </div>
 
               {/* Tooltip on hover */}
-              {!mini && (dayTasks.length > 0 || dayNotes.length > 0 || dayHistory.length > 0) && (
+              {!mini && (dayTasks.length > 0 || dayNotes.length > 0 || dayHistory.length > 0 || staffOnLeave.length > 0) && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-2xl border border-border-apple p-3 opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50">
-                  <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">Schedule</p>
-                  <div className="space-y-2">
-                    {dayTasks.map(t => (
-                      <div key={`tt-${t.id}`} className="flex items-center gap-2">
-                        <div className={cn("w-1.5 h-1.5 rounded-full", getTaskColor(t.category))} />
-                        <span className="text-[11px] font-medium text-text-primary truncate">{t.title}</span>
+                  {staffOnLeave.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-1">On Leave</p>
+                      {staffOnLeave.map(s => (
+                        <div key={s.email} className="flex items-center gap-1.5 mb-1 last:mb-0">
+                          <div className="w-1 h-1 rounded-full bg-orange-500" />
+                          <span className="text-[11px] font-bold text-orange-700">OFF - {s.name.split(' ')[0]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(dayTasks.length > 0 || dayNotes.length > 0 || dayHistory.length > 0) && (
+                    <>
+                      <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2 border-t border-gray-100 pt-2">Schedule</p>
+                      <div className="space-y-2">
+                        {dayTasks.map(t => (
+                          <div key={`tt-${t.id}`} className="flex items-center gap-2">
+                            <div className={cn("w-1.5 h-1.5 rounded-full", getTaskColor(t.category))} />
+                            <span className="text-[11px] font-medium text-text-primary truncate">{t.title}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {dayNotes.map(n => (
-                      <div key={`tn-${n.id}`} className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                        <span className="text-[11px] font-medium text-text-primary truncate">{n.title}</span>
-                      </div>
-                    ))}
-                    {dayHistory.map((h, i) => (
-                      <div key={`th-${i}`} className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                        <span className="text-[11px] font-medium text-text-primary truncate">{h.title || 'Completed'}</span>
-                      </div>
-                    ))}
-                  </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

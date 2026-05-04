@@ -79,10 +79,10 @@ export default async function handler(req: any, res: any) {
         const tasksRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Tasks!A:Z`, { headers: { Authorization: `Bearer ${token}` } });
         const tasksData = await tasksRes.json();
         const taskRows = tasksData.values || [];
-        const taskHeaders = taskRows[0] || [];
+        const taskHeaders = (taskRows[0] || []).map((h: string) => h.toLowerCase().trim());
         const taskList = taskRows.slice(1).map((r: any) => {
           const obj: any = {};
-          taskHeaders.forEach((h: string, i: number) => obj[h.toLowerCase()] = r[i]);
+          taskHeaders.forEach((h: string, i: number) => obj[h] = r[i]);
           return obj;
         });
 
