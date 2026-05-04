@@ -21,26 +21,86 @@ export default async function handler(req: any, res: any) {
 
     const SHEET_NAME = 'StaffSettings';
 
+    // Helper to ensure sheet exists and has headers
+    const ensureSheet = async () => {
+      const metadataUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+      const metadataRes = await fetch(metadataUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const metadata = await metadataRes.json();
+      
+      if (metadata.error) {
+        console.error('Error fetching spreadsheet metadata:', metadata.error);
+        throw new Error(`Failed to fetch spreadsheet metadata: ${metadata.error.message}`);
+      }
+      
+      const sheet = metadata.sheets?.find((s: any) => s.properties.title === SHEET_NAME);
+      if (!sheet) {
+        console.log(`Sheet "${SHEET_NAME}" not found. Attempting to create...`);
+        // Create the sheet
+        const createUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+        const createRes = await fetch(createUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{ addSheet: { properties: { title: SHEET_NAME } } }]
+          })
+        });
+        const createData = await createRes.json();
+        if (createData.error) {
+          console.error('Error creating sheet:', createData.error);
+          throw new Error(`Failed to create "${SHEET_NAME}" sheet: ${createData.error.message}`);
+        }
+        
+        console.log(`Sheet "${SHEET_NAME}" created successfully. Adding headers...`);
+        // Add headers
+        const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1?valueInputOption=RAW`;
+        const headRes = await fetch(headersUrl, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeaveStart', 'LeaveEnd', 'UpdatedAt']] })
+        });
+        const headData = await headRes.json();
+        if (headData.error) {
+          console.error('Error adding headers:', headData.error);
+        }
+      } else {
+        // Check if headers exist
+        const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1`;
+        const checkRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${token}` } });
+        const checkData = await checkRes.json();
+        if (!checkData.values || checkData.values.length === 0) {
+          const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1?valueInputOption=RAW`;
+          await fetch(headersUrl, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeaveStart', 'LeaveEnd', 'UpdatedAt']] })
+          });
+        }
+      }
+    };
+
     if (req.method === 'GET') {
+      await ensureSheet();
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:F`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       
-      if (data.error && data.error.status === 'NOT_FOUND') {
-        // Sheet might not exist yet, return empty list
-        return res.status(200).json([]);
-      }
-
       const rows = data.values || [];
-      if (rows.length === 0) return res.status(200).json([]);
+      if (rows.length <= 1) return res.status(200).json([]);
 
-      const headers = rows[0].map((h: string) => h.toLowerCase());
+      const headers = rows[0].map((h: string) => h.toLowerCase().trim());
       const settings = rows.slice(1).map((row: any) => {
         const obj: any = {};
         headers.forEach((h: string, i: number) => {
           let val = row[i];
           if (h === 'offdays' && val) {
-            try { val = JSON.parse(val); } catch (e) { val = []; }
+            try { 
+              // Handle if it's already a JSON string or a comma separated list
+              if (val.startsWith('[') || val.startsWith('{')) {
+                val = JSON.parse(val); 
+              } else {
+                val = val.split(',').map((s: string) => s.trim());
+              }
+            } catch (e) { val = []; }
           }
           obj[h] = val;
         });
@@ -51,6 +111,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'POST') {
+      await ensureSheet();
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
       

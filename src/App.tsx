@@ -627,7 +627,7 @@ export default function App() {
   };
 
   const isStaffMemberOnLeave = (staffEmail: string, date: Date) => {
-    const staff = staffSettings.find(s => s.email === staffEmail);
+    const staff = staffSettings.find(s => s.email?.toLowerCase() === staffEmail?.toLowerCase());
     if (!staff) return false;
     
     // Check recurring off-days
@@ -2871,10 +2871,14 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
   const [message, setMessage] = useState({ text: "", type: "" });
   
   // Leave system state
-  const currentSettings = useMemo(() => staffSettings.find(s => s.email === user?.email), [staffSettings, user]);
+  const currentSettings = useMemo(() => {
+    if (!user?.email) return null;
+    return staffSettings.find(s => s.email?.toLowerCase() === user.email.toLowerCase());
+  }, [staffSettings, user]);
   const [offDays, setOffDays] = useState<string[]>([]);
   const [leaveStart, setLeaveStart] = useState("");
   const [leaveEnd, setLeaveEnd] = useState("");
+  const [isSavingLeave, setIsSavingLeave] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -2897,7 +2901,12 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
 
   const handleSaveLeaveSettings = async () => {
     if (!user) return;
-    await onSaveStaffSettings(user.email, user.fullName, offDays, leaveStart, leaveEnd);
+    setIsSavingLeave(true);
+    try {
+      await onSaveStaffSettings(user.email, user.fullName, offDays, leaveStart, leaveEnd);
+    } finally {
+      setIsSavingLeave(false);
+    }
   };
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
@@ -3079,10 +3088,18 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
               <div className="flex items-end justify-end">
                 <button 
                   onClick={handleSaveLeaveSettings}
-                  className="bg-accent-blue text-white px-10 py-4 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2"
+                  disabled={isSavingLeave}
+                  className={cn(
+                    "bg-accent-blue text-white px-10 py-4 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2",
+                    isSavingLeave && "opacity-70 cursor-not-allowed"
+                  )}
                 >
-                  <Cloud className="w-5 h-5" />
-                  Save Leave Profile
+                  {isSavingLeave ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Cloud className="w-5 h-5" />
+                  )}
+                  {isSavingLeave ? "Saving Settings..." : "Save Leave Profile"}
                 </button>
               </div>
             </div>
@@ -3431,7 +3448,7 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
 
   const isStaffOff = (email: string, date: Date) => {
-    const staff = staffSettings.find(s => s.email === email);
+    const staff = staffSettings.find(s => s.email?.toLowerCase() === email?.toLowerCase());
     if (!staff) return false;
     const dayName = format(date, "EEEE");
     if (staff.offdays && staff.offdays.includes(dayName)) return true;
