@@ -829,61 +829,8 @@ export default function App() {
     }, 2000);
   };
 
-  const isTaskDueToday = (task: Task) => {
-    const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
-    const date = currentTime;
-    const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
-    const dayOfMonth = date.getDate();
-    const month = date.getMonth(); // 0-11
+  const isTaskDueToday = (task: Task) => isTaskOnDay(task, currentTime);
     
-    // Check if task has a deadline that is today
-    if (task.deadline) {
-      try {
-        const d = new Date(task.deadline);
-        if (!isNaN(d.getTime()) && isSameDay(d, date)) return true;
-      } catch (e) {}
-    }
-
-    if (freq === "daily" || freq === "") return true;
-    // "When Needed" tasks don't automatically appear in daily list unless explicitly added or due by schedule
-    if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") {
-      return false; 
-    }
-    
-    if (freq.startsWith("weekly")) {
-      // Handle "weekly" with detail in separate field
-      if (freq === "weekly") return task.frequencyDetail === dayName;
-      // Handle legacy "weekly monday" etc
-      const parts = freq.split(" ");
-      if (parts.length > 1) {
-        const targetDay = parts[1].charAt(0).toUpperCase() + parts[1].slice(1).toLowerCase();
-        return dayName === targetDay;
-      }
-      return false;
-    }
-    
-    if (freq === "twice weekly") {
-      return [1, 4].includes(date.getDay());
-    }
-    
-    if (freq === "monthly") {
-      if (!task.frequencyDetail) return dayOfMonth === 1;
-      return task.frequencyDetail === dayOfMonth.toString();
-    }
-    
-    if (freq === "2-monthly" || freq === "2 monthly") {
-      const targetDate = task.frequencyDetail || "1";
-      return dayOfMonth.toString() === targetDate && month % 2 === 1;
-    }
-
-    if (freq === "3-monthly" || freq === "3 monthly") {
-      const targetDate = task.frequencyDetail || "1";
-      return dayOfMonth.toString() === targetDate && (month + 1) % 3 === 0;
-    }
-
-    return false;
-  };
-
   const updateHistoryRemark = async (taskId: string, dateCompleted: string, remarks: string) => {
     // Optimistic update
     setHistory(history.map(h => 
@@ -3380,7 +3327,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: {
   );
 }
 
-const isTaskOnDay = (task: Task, day: Date) => {
+function isTaskOnDay(task: Task, day: Date) {
   if (task.deadline) {
     try {
       const d = new Date(task.deadline);
@@ -3390,44 +3337,79 @@ const isTaskOnDay = (task: Task, day: Date) => {
     }
   }
   
-  const dayOfWeek = format(day, "EEEE"); // e.g. "Friday"
+  const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+  const dayName = format(day, "EEEE"); // e.g. "Friday"
   const dayOfMonth = day.getDate();
+  const month = day.getMonth(); // 0-11
   
-  switch (task.frequency?.toUpperCase()) {
-    case "DAILY": return true;
-    case "WEEKLY_FRIDAY": return dayOfWeek === "Friday";
-    case "TWICE_WEEKLY": return dayOfWeek === "Tuesday" || dayOfWeek === "Thursday";
-    case "MONTHLY": return dayOfMonth === 1; // Default to 1st of month
-    case "MONTHLY_2ND_FRI": {
-      if (dayOfWeek !== "Friday") return false;
-      const firstDay = startOfMonth(day);
-      let count = 0;
-      for (let d = 0; d < 31; d++) {
-        const checkDate = new Date(firstDay.getFullYear(), firstDay.getMonth(), d + 1);
-        if (checkDate.getMonth() !== firstDay.getMonth()) break;
-        if (format(checkDate, "EEEE") === "Friday") {
-          count++;
-          if (count === 2 && isSameDay(checkDate, day)) return true;
-        }
-      }
-      return false;
-    }
-    case "MONTHLY_3RD_4TH_FRI": {
-      if (dayOfWeek !== "Friday") return false;
-      const firstDay = startOfMonth(day);
-      let count = 0;
-      for (let d = 0; d < 31; d++) {
-        const checkDate = new Date(firstDay.getFullYear(), firstDay.getMonth(), d + 1);
-        if (checkDate.getMonth() !== firstDay.getMonth()) break;
-        if (format(checkDate, "EEEE") === "Friday") {
-          count++;
-          if ((count === 3 || count === 4) && isSameDay(checkDate, day)) return true;
-        }
-      }
-      return false;
-    }
-    default: return false;
+  if (freq === "daily" || freq === "") return true;
+
+  if (freq === "when needed" || freq === "upon suggestion" || freq === "when necessary" || freq === "when required") {
+    return false;
   }
+
+  if (freq === "weekly") {
+    if (!task.frequencyDetail) return false;
+    return task.frequencyDetail.trim().toLowerCase() === dayName.toLowerCase();
+  }
+
+  if (freq.startsWith("weekly ")) {
+    const target = freq.replace("weekly ", "").trim().toLowerCase();
+    return dayName.toLowerCase() === target;
+  }
+
+  if (freq === "weekly_friday" || freq === "weekly friday") return dayName === "Friday";
+  
+  if (freq === "twice weekly" || freq === "twice_weekly") {
+    return dayName === "Tuesday" || dayName === "Thursday";
+  }
+
+  if (freq === "monthly") {
+    const target = task.frequencyDetail || "1";
+    return dayOfMonth.toString() === target;
+  }
+
+  if (freq === "2-monthly" || freq === "2 monthly" || freq === "2_monthly") {
+    const target = task.frequencyDetail || "1";
+    return dayOfMonth.toString() === target && month % 2 === 1;
+  }
+
+  if (freq === "3-monthly" || freq === "3 monthly" || freq === "3_monthly") {
+    const target = task.frequencyDetail || "1";
+    return dayOfMonth.toString() === target && (month + 1) % 3 === 0;
+  }
+
+  if (freq === "monthly_2nd_fri") {
+     if (dayName !== "Friday") return false;
+     const firstDay = startOfMonth(day);
+     let count = 0;
+     for (let d = 0; d < 31; d++) {
+       const checkDate = new Date(firstDay.getFullYear(), firstDay.getMonth(), d + 1);
+       if (checkDate.getMonth() !== firstDay.getMonth()) break;
+       if (format(checkDate, "EEEE") === "Friday") {
+         count++;
+         if (count === 2 && isSameDay(checkDate, day)) return true;
+       }
+     }
+     return false;
+  }
+
+  if (freq === "monthly_3rd_4th_fri") {
+     if (dayName !== "Friday") return false;
+     const firstDay = startOfMonth(day);
+     let count = 0;
+     for (let d = 0; d < 31; d++) {
+       const checkDate = new Date(firstDay.getFullYear(), firstDay.getMonth(), d + 1);
+       if (checkDate.getMonth() !== firstDay.getMonth()) break;
+       if (format(checkDate, "EEEE") === "Friday") {
+         count++;
+         if ((count === 3 || count === 4) && isSameDay(checkDate, day)) return true;
+       }
+     }
+     return false;
+  }
+
+  return false;
 };
 
 function CalendarView({ mini, events = [], categories = [], staffSettings = [], allUsers = [] }: { 
