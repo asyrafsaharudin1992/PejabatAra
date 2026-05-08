@@ -662,20 +662,36 @@ export default function App() {
   const getCalendarEvents = (tasks: Task[], notes: Note[], history: HistoryEntry[]) => {
     const events: any[] = [];
     
-    // Add leave events for all staff
+    // Add leave events for all staff - expanding ranges to daily events
     staffSettings.forEach(staff => {
-      if (staff.leaveperiods) {
+      if (staff.leaveperiods && Array.isArray(staff.leaveperiods)) {
         staff.leaveperiods.forEach(p => {
           if (!p.start || !p.end) return;
-          events.push({
-            id: `leave-${staff.email}-${p.start}`,
-            title: `OFF: ${staff.name.split(' ')[0]}`,
-            category: "Leave",
-            calendarType: 'history', // Use history type to show in list but maybe distinguish later
-            dateCompleted: p.start, // Simplified for single day dots if needed, but let's see
-            isLeave: true,
-            staffName: staff.name
-          });
+          try {
+            const start = new Date(p.start);
+            const end = new Date(p.end);
+            if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+            
+            const intervalDays = eachDayOfInterval({ 
+              start: new Date(start.getFullYear(), start.getMonth(), start.getDate()), 
+              end: new Date(end.getFullYear(), end.getMonth(), end.getDate()) 
+            });
+            
+            intervalDays.forEach(day => {
+              const dateStr = format(day, "yyyy-MM-dd");
+              events.push({
+                id: `leave-${staff.email}-${dateStr}`,
+                title: `OFF: ${staff.name.split(' ')[0]}`,
+                category: "Leave" as Category,
+                calendarType: 'history',
+                dateCompleted: dateStr,
+                isLeave: true,
+                staffName: staff.name
+              });
+            });
+          } catch (e) {
+            console.error("Error expanding leave period:", e);
+          }
         });
       }
     });
@@ -3319,15 +3335,24 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
 
   const completionsForDate = selectedDate 
-    ? history.filter(h => {
-        try {
-          const d = new Date(h.dateCompleted);
-          if (isNaN(d.getTime())) return false;
-          return isSameDay(d, selectedDate);
-        } catch (e) {
-          return false;
-        }
-      })
+    ? [
+        ...history.filter(h => {
+          try {
+            const d = new Date(h.dateCompleted);
+            if (isNaN(d.getTime())) return false;
+            return isSameDay(d, selectedDate);
+          } catch (e) {
+            return false;
+          }
+        }),
+        ...staffOnLeaveOnSelectedDate.map(staff => ({
+          taskId: `leave-${staff.email}`,
+          title: `${staff.name} is on Leave`,
+          dateCompleted: format(selectedDate, "yyyy-MM-dd"),
+          remarks: "Scheduled Leave Period",
+          isLeave: true
+        }))
+      ]
     : [];
 
   return (
@@ -3365,16 +3390,23 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                     ? "bg-accent-blue text-white border-accent-blue shadow-lg shadow-accent-blue/20" 
                     : "bg-white hover:bg-gray-50 border-border-apple/40 hover:border-border-apple",
                   !isSameMonth(day, currentMonth) && "opacity-20",
-                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-orange-50/40"
+                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-orange-50/50"
                 )}
               >
-                <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
-                  {format(day, "d")}
-                </span>
-                <div className="flex gap-1 mt-1">
+                <div className="flex flex-col items-center">
+                  <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
+                    {format(day, "d")}
+                  </span>
                   {staffSettings.some(s => isStaffOff(s.email, day)) && (
-                    <div className={cn("w-1 h-1 rounded-full", isSelected ? "bg-white" : "bg-orange-400")} />
+                    <span className={cn(
+                      "text-[8px] font-bold uppercase tracking-widest mt-0.5",
+                      isSelected ? "text-white/80" : "text-orange-500"
+                    )}>
+                      Off
+                    </span>
                   )}
+                </div>
+                <div className="flex gap-1 mt-1">
                   {hasCompletions && (
                     <div className={cn(
                       "w-1 h-1 rounded-full",
@@ -3421,24 +3453,39 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
             </div>
           )}
           {completionsForDate.length > 0 ? (
-            completionsForDate.map((entry, i) => {
+            completionsForDate.map((entry: any, i) => {
               let isTodayEntry = false;
-              try {
-                const d = new Date(entry.dateCompleted);
-                if (!isNaN(d.getTime())) {
-                  isTodayEntry = isSameDay(d, new Date());
-                }
-              } catch (e) {}
+              if (!entry.isLeave) {
+                try {
+                  const d = new Date(entry.dateCompleted);
+                  if (!isNaN(d.getTime())) {
+                    isTodayEntry = isSameDay(d, new Date());
+                  }
+                } catch (e) {}
+              }
               return (
-                <div key={i} className="bg-white p-5 rounded-[20px] border border-border-apple/50 shadow-sm">
+                <div key={i} className={cn(
+                  "p-5 rounded-[20px] border shadow-sm",
+                  entry.isLeave ? "bg-orange-50/50 border-orange-100" : "bg-white border-border-apple/50"
+                )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-accent-green/10 rounded-lg flex items-center justify-center">
-                        <CheckCircle2 className="w-4 h-4 text-accent-green" />
+                      <div className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center",
+                        entry.isLeave ? "bg-orange-100" : "bg-accent-green/10"
+                      )}>
+                        {entry.isLeave ? (
+                          <Calendar className="w-4 h-4 text-orange-600" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 text-accent-green" />
+                        )}
                       </div>
-                      <h6 className="text-[15px] font-bold text-text-primary">{entry.title}</h6>
+                      <h6 className={cn(
+                        "text-[15px] font-bold",
+                        entry.isLeave ? "text-orange-900" : "text-text-primary"
+                      )}>{entry.title}</h6>
                     </div>
-                    {isTodayEntry && (
+                    {isTodayEntry && !entry.isLeave && (
                       <button 
                         onClick={() => onUndo(entry.taskId, entry.dateCompleted)}
                         className="text-[10px] font-bold text-accent-blue uppercase tracking-widest hover:underline"
@@ -3447,9 +3494,15 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                       </button>
                     )}
                   </div>
-                  <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-xl p-3">
-                    <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-1">Remarks</p>
-                    {isTodayEntry ? (
+                  <div className={cn(
+                    "border rounded-xl p-3",
+                    entry.isLeave ? "bg-white/60 border-orange-200/50" : "bg-[#F8F9FA] border-border-apple/60"
+                  )}>
+                    <p className={cn(
+                      "text-[10px] font-bold uppercase tracking-widest mb-1",
+                      entry.isLeave ? "text-orange-500" : "text-text-secondary"
+                    )}>Remarks</p>
+                    {isTodayEntry && !entry.isLeave ? (
                       <textarea 
                         value={entry.remarks || ""}
                         onChange={(e) => onUpdateRemark(entry.taskId, entry.dateCompleted, e.target.value)}
@@ -3457,12 +3510,15 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                         className="w-full bg-transparent text-[13px] text-text-primary/80 leading-relaxed italic border-none focus:ring-0 p-0 resize-none min-h-[40px]"
                       />
                     ) : (
-                      <p className="text-[13px] text-text-primary/80 leading-relaxed italic">
+                      <p className={cn(
+                        "text-[13px] leading-relaxed italic",
+                        entry.isLeave ? "text-orange-700/80" : "text-text-primary/80"
+                      )}>
                         {entry.remarks || "No remarks recorded."}
                       </p>
                     )}
                   </div>
-                  {!isTodayEntry && (
+                  {!isTodayEntry && !entry.isLeave && (
                     <div className="mt-3 flex items-center gap-1.5 text-text-secondary">
                       <Clock className="w-3 h-3" />
                       <span className="text-[10px] font-bold uppercase tracking-widest">Locked</span>
@@ -3669,15 +3725,22 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
               className={cn(
                 "aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all group",
                 isTodayDay ? "bg-accent-blue text-white" : "hover:bg-gray-50",
-                staffOnLeave.length > 0 && !isTodayDay && "bg-orange-50/30"
+                staffOnLeave.length > 0 && !isTodayDay && "bg-orange-50/50"
               )}
             >
-              <span className={cn("text-[13px] font-medium z-10")}>{format(day, "d")}</span>
-              
-              <div className="flex gap-0.5 mt-1">
+              <div className="flex flex-col items-center z-10">
+                <span className={cn("text-[13px] font-bold")}>{format(day, "d")}</span>
                 {staffOnLeave.length > 0 && (
-                  <div className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : "bg-orange-400 rotate-45")} />
+                  <span className={cn(
+                    "text-[7px] font-black uppercase tracking-tighter",
+                    isTodayDay ? "text-white/90" : "text-orange-500"
+                  )}>
+                    Off
+                  </span>
                 )}
+              </div>
+              
+              <div className="flex gap-0.5 mt-0.5">
                 {staffOnLeave.length === 0 && dayTasks.slice(0, 3).map((t, idx) => (
                   <div 
                     key={`t-${idx}`} 
