@@ -52,11 +52,11 @@ export default async function handler(req: any, res: any) {
         
         console.log(`Sheet "${SHEET_NAME}" created successfully. Adding headers...`);
         // Add headers
-        const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1?valueInputOption=RAW`;
+        const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:E1?valueInputOption=RAW`;
         const headRes = await fetch(headersUrl, {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeaveStart', 'LeaveEnd', 'UpdatedAt']] })
+          body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeavePeriods', 'UpdatedAt']] })
         });
         const headData = await headRes.json();
         if (headData.error) {
@@ -64,15 +64,15 @@ export default async function handler(req: any, res: any) {
         }
       } else {
         // Check if headers exist
-        const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1`;
+        const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:E1`;
         const checkRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${token}` } });
         const checkData = await checkRes.json();
         if (!checkData.values || checkData.values.length === 0) {
-          const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:F1?valueInputOption=RAW`;
+          const headersUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A1:E1?valueInputOption=RAW`;
           await fetch(headersUrl, {
             method: 'PUT',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeaveStart', 'LeaveEnd', 'UpdatedAt']] })
+            body: JSON.stringify({ values: [['Email', 'Name', 'OffDays', 'LeavePeriods', 'UpdatedAt']] })
           });
         }
       }
@@ -80,7 +80,7 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'GET') {
       await ensureSheet();
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:F`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:E`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       
@@ -92,7 +92,7 @@ export default async function handler(req: any, res: any) {
         const obj: any = {};
         headers.forEach((h: string, i: number) => {
           let val = row[i];
-          if (h === 'offdays' && val) {
+          if ((h === 'offdays' || h === 'leaveperiods') && val) {
             try { 
               // Handle if it's already a JSON string or a comma separated list
               if (val.startsWith('[') || val.startsWith('{')) {
@@ -115,7 +115,7 @@ export default async function handler(req: any, res: any) {
       let body = req.body;
       if (typeof body === 'string') body = JSON.parse(body);
       
-      const { email, name, offDays, leaveStart, leaveEnd } = body;
+      const { email, name, offDays, leavePeriods } = body;
       if (!email) return res.status(400).json({ error: "Email is required" });
 
       // Check if row already exists
@@ -130,14 +130,13 @@ export default async function handler(req: any, res: any) {
         email,
         name || "",
         JSON.stringify(offDays || []),
-        leaveStart || "",
-        leaveEnd || "",
+        JSON.stringify(leavePeriods || []),
         new Date().toISOString()
       ];
 
       if (rowIndex === -1) {
         // Append
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:F:append?valueInputOption=RAW`;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:E:append?valueInputOption=RAW`;
         await fetch(url, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -145,7 +144,7 @@ export default async function handler(req: any, res: any) {
         });
       } else {
         // Update
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A${rowIndex + 1}:F${rowIndex + 1}?valueInputOption=RAW`;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A${rowIndex + 1}:E${rowIndex + 1}?valueInputOption=RAW`;
         await fetch(url, {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

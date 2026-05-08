@@ -85,12 +85,16 @@ interface CategoryData {
   color: string;
 }
 
+interface LeavePeriod {
+  start: string;
+  end: string;
+}
+
 interface StaffSettings {
   email: string;
   name: string;
   offdays: string[];
-  leavestart: string;
-  leaveend: string;
+  leaveperiods: LeavePeriod[];
   updatedat: string;
 }
 
@@ -632,26 +636,50 @@ export default function App() {
     
     // Check recurring off-days
     const dayName = format(date, "EEEE");
-    if (staff.offdays && staff.offdays.includes(dayName)) return true;
+    if (staff.offdays && Array.isArray(staff.offdays) && staff.offdays.includes(dayName)) return true;
     
-    // Check specific leave dates
-    if (staff.leavestart && staff.leaveend) {
+    // Check specific leave periods
+    if (staff.leaveperiods && Array.isArray(staff.leaveperiods)) {
       try {
-        const start = new Date(staff.leavestart);
-        const end = new Date(staff.leaveend);
-        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-          const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        return staff.leaveperiods.some(period => {
+          if (!period.start || !period.end) return false;
+          const start = new Date(period.start);
+          const end = new Date(period.end);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+          
           const sDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
           const eDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
           return checkDate >= sDate && checkDate <= eDate;
-        }
-      } catch (e) {}
+        });
+      } catch (e) {
+        console.error("Error checking leave periods:", e);
+      }
     }
     return false;
   };
 
   const getCalendarEvents = (tasks: Task[], notes: Note[], history: HistoryEntry[]) => {
     const events: any[] = [];
+    
+    // Add leave events for all staff
+    staffSettings.forEach(staff => {
+      if (staff.leaveperiods) {
+        staff.leaveperiods.forEach(p => {
+          if (!p.start || !p.end) return;
+          events.push({
+            id: `leave-${staff.email}-${p.start}`,
+            title: `OFF: ${staff.name.split(' ')[0]}`,
+            category: "Leave",
+            calendarType: 'history', // Use history type to show in list but maybe distinguish later
+            dateCompleted: p.start, // Simplified for single day dots if needed, but let's see
+            isLeave: true,
+            staffName: staff.name
+          });
+        });
+      }
+    });
+
     if (tasks && Array.isArray(tasks)) {
       tasks.forEach(t => events.push({ ...t, calendarType: 'task' }));
     }
@@ -888,13 +916,13 @@ export default function App() {
     }
   };
 
-  const saveStaffSettings = async (email: string, name: string, offDays: string[], leaveStart: string, leaveEnd: string) => {
+  const saveStaffSettings = async (email: string, name: string, offDays: string[], leavePeriods: LeavePeriod[]) => {
     setIsSyncing(true);
     try {
       const res = await fetch("/api/staff-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, offDays, leaveStart, leaveEnd }),
+        body: JSON.stringify({ email, name, offDays, leavePeriods }),
       });
       if (res.ok) {
         showNotification("Profile settings saved");
@@ -1469,7 +1497,15 @@ export default function App() {
                     <div className="flex justify-between items-center px-2">
                       <div className="flex flex-col">
                         <h4 className="text-[18px] font-bold tracking-tight">Today's Focus</h4>
-                        <span className="text-[12px] font-medium text-text-secondary">{remainingTodayItems.length} items remaining</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-text-secondary">{remainingTodayItems.length} items remaining</span>
+                          {user && isStaffMemberOnLeave(user.email, currentTime) && (
+                            <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              You are on Leave Today
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 relative">
                         {isQuickPickOpen && (
@@ -1891,6 +1927,7 @@ export default function App() {
                   onUpdateRemark={updateHistoryRemark} 
                   onUndo={undoTaskCompletion}
                   today={currentTime}
+                  staffSettings={staffSettings}
                 />
               </div>
             )}
@@ -2809,7 +2846,7 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
   onChangePassword: (passwords: any) => Promise<any>,
   onLogout: () => void,
   staffSettings: StaffSettings[],
-  onSaveStaffSettings: (email: string, name: string, offDays: string[], leaveStart: string, leaveEnd: string) => Promise<void>
+  onSaveStaffSettings: (email: string, name: string, offDays: string[], leavePeriods: LeavePeriod[]) => Promise<void>
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullName, setFullName] = useState(user?.fullName || "");
@@ -2822,9 +2859,10 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
     if (!user?.email) return null;
     return staffSettings.find(s => s.email?.toLowerCase() === user.email.toLowerCase());
   }, [staffSettings, user]);
+  
   const [offDays, setOffDays] = useState<string[]>([]);
-  const [leaveStart, setLeaveStart] = useState("");
-  const [leaveEnd, setLeaveEnd] = useState("");
+  const [leavePeriods, setLeavePeriods] = useState<LeavePeriod[]>([]);
+  const [newLeave, setNewLeave] = useState<LeavePeriod>({ start: "", end: "" });
   const [isSavingLeave, setIsSavingLeave] = useState(false);
 
   useEffect(() => {
@@ -2837,8 +2875,7 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
   useEffect(() => {
     if (currentSettings) {
       setOffDays(currentSettings.offdays || []);
-      setLeaveStart(currentSettings.leavestart || "");
-      setLeaveEnd(currentSettings.leaveend || "");
+      setLeavePeriods(currentSettings.leaveperiods || []);
     }
   }, [currentSettings]);
 
@@ -2846,11 +2883,21 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
     setOffDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
   };
 
+  const addLeavePeriod = () => {
+    if (!newLeave.start || !newLeave.end) return;
+    setLeavePeriods(prev => [...prev, newLeave].sort((a, b) => a.start.localeCompare(b.start)));
+    setNewLeave({ start: "", end: "" });
+  };
+
+  const removeLeavePeriod = (index: number) => {
+    setLeavePeriods(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSaveLeaveSettings = async () => {
     if (!user) return;
     setIsSavingLeave(true);
     try {
-      await onSaveStaffSettings(user.email, user.fullName, offDays, leaveStart, leaveEnd);
+      await onSaveStaffSettings(user.email, user.fullName, offDays, leavePeriods);
     } finally {
       setIsSavingLeave(false);
     }
@@ -3009,44 +3056,97 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               <div>
-                <h4 className="text-[20px] font-bold tracking-tight mb-2">Specific Leave</h4>
-                <p className="text-[13px] text-text-secondary font-medium mb-6">Plan your upcoming absence dates</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Start Date</label>
-                    <input 
-                      type="date"
-                      value={leaveStart}
-                      onChange={(e) => setLeaveStart(e.target.value)}
-                      className="w-full bg-white border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
-                    />
+                <h4 className="text-[20px] font-bold tracking-tight mb-2">Planned Leave</h4>
+                <p className="text-[13px] text-text-secondary font-medium mb-6">Add your upcoming absence dates</p>
+                
+                <div className="space-y-4 mb-6">
+                  {leavePeriods.map((period, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-white border border-border-apple p-4 rounded-2xl group transition-all hover:border-accent-blue/30">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+                          <Calendar className="w-5 h-5 text-orange-500" />
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-bold text-text-primary">
+                            {format(new Date(period.start), "dd MMM")} — {format(new Date(period.end), "dd MMM yyyy")}
+                          </p>
+                          <p className="text-[11px] font-medium text-text-secondary">Confirmed</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => removeLeavePeriod(idx)}
+                        className="p-2 text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:text-red-500 hover:bg-red-50 rounded-lg"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {leavePeriods.length === 0 && (
+                    <div className="text-center py-6 border-2 border-dashed border-border-apple rounded-2xl">
+                      <p className="text-[12px] font-medium text-text-secondary">No leave periods added yet</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-border-apple/60 shadow-sm">
+                  <p className="text-[11px] font-bold text-text-secondary uppercase tracking-widest mb-4">Add New Leave</p>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Start Date</label>
+                      <input 
+                        type="date"
+                        value={newLeave.start}
+                        onChange={(e) => setNewLeave({ ...newLeave, start: e.target.value })}
+                        className="w-full bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">End Date</label>
+                      <input 
+                        type="date"
+                        value={newLeave.end}
+                        onChange={(e) => setNewLeave({ ...newLeave, end: e.target.value })}
+                        className="w-full bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
+                      />
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">End Date</label>
-                    <input 
-                      type="date"
-                      value={leaveEnd}
-                      onChange={(e) => setLeaveEnd(e.target.value)}
-                      className="w-full bg-white border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition-all font-medium"
-                    />
-                  </div>
+                  <button 
+                    onClick={addLeavePeriod}
+                    disabled={!newLeave.start || !newLeave.end}
+                    className="w-full bg-accent-blue/10 text-accent-blue px-6 py-3 rounded-xl font-bold text-[13px] hover:bg-accent-blue hover:text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add This Period
+                  </button>
                 </div>
               </div>
-              <div className="flex items-end justify-end">
+              
+              <div className="flex flex-col items-end justify-end">
+                <div className="bg-white p-6 rounded-2xl border border-border-apple/60 shadow-apple mb-6 w-full">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-[18px] bg-accent-blue/5 flex items-center justify-center shrink-0">
+                      <Cloud className="w-6 h-6 text-accent-blue" />
+                    </div>
+                    <div>
+                      <h5 className="text-[15px] font-bold text-text-primary mb-1">Sync to Sheet</h5>
+                      <p className="text-[12px] font-medium text-text-secondary leading-relaxed">Your off-days and leave schedule will be synced with the main office database for team visibility.</p>
+                    </div>
+                  </div>
+                </div>
                 <button 
                   onClick={handleSaveLeaveSettings}
                   disabled={isSavingLeave}
                   className={cn(
-                    "bg-accent-blue text-white px-10 py-4 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2",
+                    "bg-accent-blue text-white px-10 py-5 rounded-[22px] font-bold text-sm hover:bg-[#0077ED] transition-all shadow-xl shadow-accent-blue/30 flex items-center gap-3 w-full justify-center",
                     isSavingLeave && "opacity-70 cursor-not-allowed"
                   )}
                 >
                   {isSavingLeave ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
-                    <Cloud className="w-5 h-5" />
+                    <CheckSquare className="w-5 h-5" />
                   )}
-                  {isSavingLeave ? "Saving Settings..." : "Save Leave Profile"}
+                  {isSavingLeave ? "Syncing Logic..." : "Save My Leave Profile"}
                 </button>
               </div>
             </div>
@@ -3173,11 +3273,12 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
   );
 }
 
-function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: { 
+function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings = [] }: { 
   history: HistoryEntry[], 
   onUpdateRemark: (taskId: string, date: string, remark: string) => void,
   onUndo: (taskId: string, date: string) => void,
-  today: Date
+  today: Date,
+  staffSettings?: StaffSettings[]
 }) {
   const [currentMonth, setCurrentMonth] = useState(today);
   const [selectedDate, setSelectedDate] = useState<Date | null>(today);
@@ -3185,6 +3286,34 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: {
   const start = startOfWeek(startOfMonth(currentMonth));
   const end = endOfWeek(endOfMonth(currentMonth));
   const days = eachDayOfInterval({ start, end });
+  
+  const isStaffOff = (email: string, date: Date) => {
+    const staff = staffSettings.find(s => s.email?.toLowerCase() === email?.toLowerCase());
+    if (!staff) return false;
+    const dayName = format(date, "EEEE");
+    if (staff.offdays && Array.isArray(staff.offdays) && staff.offdays.includes(dayName)) return true;
+    
+    if (staff.leaveperiods && Array.isArray(staff.leaveperiods)) {
+      try {
+        const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        return staff.leaveperiods.some(period => {
+          if (!period.start || !period.end) return false;
+          const start = new Date(period.start);
+          const end = new Date(period.end);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+          
+          const sDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+          const eDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          return checkDate >= sDate && checkDate <= eDate;
+        });
+      } catch (e) {}
+    }
+    return false;
+  };
+
+  const staffOnLeaveOnSelectedDate = selectedDate 
+    ? staffSettings.filter(s => isStaffOff(s.email, selectedDate))
+    : [];
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
@@ -3235,18 +3364,24 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: {
                   isSelected 
                     ? "bg-accent-blue text-white border-accent-blue shadow-lg shadow-accent-blue/20" 
                     : "bg-white hover:bg-gray-50 border-border-apple/40 hover:border-border-apple",
-                  !isSameMonth(day, currentMonth) && "opacity-20"
+                  !isSameMonth(day, currentMonth) && "opacity-20",
+                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-orange-50/40"
                 )}
               >
                 <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
                   {format(day, "d")}
                 </span>
-                {hasCompletions && (
-                  <div className={cn(
-                    "w-1.5 h-1.5 rounded-full mt-1",
-                    isSelected ? "bg-white" : "bg-accent-green"
-                  )} />
-                )}
+                <div className="flex gap-1 mt-1">
+                  {staffSettings.some(s => isStaffOff(s.email, day)) && (
+                    <div className={cn("w-1 h-1 rounded-full", isSelected ? "bg-white" : "bg-orange-400")} />
+                  )}
+                  {hasCompletions && (
+                    <div className={cn(
+                      "w-1 h-1 rounded-full",
+                      isSelected ? "bg-white" : "bg-accent-green"
+                    )} />
+                  )}
+                </div>
               </button>
             );
           })}
@@ -3263,7 +3398,28 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today }: {
           </div>
         </div>
 
-                <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+        <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+          {staffOnLeaveOnSelectedDate.length > 0 && (
+            <div className="bg-orange-50 p-5 rounded-[20px] border border-orange-100 mb-2 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <Calendar className="w-4 h-4 text-orange-600" />
+                </div>
+                <h6 className="text-[15px] font-bold text-orange-800">Staff on Leave</h6>
+              </div>
+              <div className="space-y-2">
+                {staffOnLeaveOnSelectedDate.map(staff => (
+                  <div key={staff.email} className="flex items-center justify-between bg-white/60 p-3 rounded-xl border border-orange-200/50">
+                    <span className="text-[13px] font-bold text-orange-700">{staff.name}</span>
+                    <div className="flex items-center gap-1.5 bg-orange-100/50 px-2 py-0.5 rounded-lg">
+                      <Clock className="w-3 h-3 text-orange-500" />
+                      <span className="text-[9px] font-bold text-orange-500 uppercase tracking-widest">Out of Office</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {completionsForDate.length > 0 ? (
             completionsForDate.map((entry, i) => {
               let isTodayEntry = false;
@@ -3433,17 +3589,21 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
     const staff = staffSettings.find(s => s.email?.toLowerCase() === email?.toLowerCase());
     if (!staff) return false;
     const dayName = format(date, "EEEE");
-    if (staff.offdays && staff.offdays.includes(dayName)) return true;
-    if (staff.leavestart && staff.leaveend) {
+    if (staff.offdays && Array.isArray(staff.offdays) && staff.offdays.includes(dayName)) return true;
+    
+    if (staff.leaveperiods && Array.isArray(staff.leaveperiods)) {
       try {
-        const start = new Date(staff.leavestart);
-        const end = new Date(staff.leaveend);
-        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-          const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        return staff.leaveperiods.some(period => {
+          if (!period.start || !period.end) return false;
+          const start = new Date(period.start);
+          const end = new Date(period.end);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+          
           const sDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
           const eDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
           return checkDate >= sDate && checkDate <= eDate;
-        }
+        });
       } catch (e) {}
     }
     return false;
@@ -3518,11 +3678,17 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
                 {staffOnLeave.length > 0 && (
                   <div className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : "bg-orange-400 rotate-45")} />
                 )}
-                {dayTasks.slice(0, 2).map((t, idx) => (
+                {staffOnLeave.length === 0 && dayTasks.slice(0, 3).map((t, idx) => (
                   <div 
                     key={`t-${idx}`} 
                     className={cn("w-1 h-1 rounded-full", isTodayDay ? "bg-white" : getTaskColor(t.category))} 
                   />
+                ))}
+                {staffOnLeave.length > 0 && dayTasks.slice(0, 1).map((t, idx) => (
+                   <div 
+                     key={`t-${idx}`} 
+                     className={cn("w-1 h-1 rounded-full opacity-40", isTodayDay ? "bg-white" : getTaskColor(t.category))} 
+                   />
                 ))}
               </div>
 
