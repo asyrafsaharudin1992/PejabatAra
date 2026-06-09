@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { 
   LayoutDashboard, 
   CheckSquare, 
@@ -158,7 +158,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskCategory, setNewTaskCategory] = useState<string>("Quality of Service");
-  const [newTaskFrequency, setNewTaskFrequency] = useState<string>("Daily");
+  const [newTaskFrequency, setNewTaskFrequency] = useState<string>("When Needed");
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteDueDate, setNewNoteDueDate] = useState("");
@@ -184,6 +184,8 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isQuickPickOpen, setIsQuickPickOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  const lastDateRef = useRef<string>(format(new Date(), "yyyy-MM-dd"));
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -191,6 +193,14 @@ export default function App() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const todayStr = format(currentTime, "yyyy-MM-dd");
+    if (todayStr !== lastDateRef.current) {
+      lastDateRef.current = todayStr;
+      setSelectedForTodayIds([]);
+    }
+  }, [currentTime]);
 
   const getHijriDate = () => {
     try {
@@ -1489,17 +1499,17 @@ export default function App() {
                   {staffOnLeaveToday.length > 0 && (
                     <div className="mt-8 pt-6 border-t border-border-apple/30">
                       <div className="flex items-center gap-2 mb-4">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
                         <h5 className="text-[13px] font-bold text-text-primary uppercase tracking-wider">Staff on Leave Today</h5>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {staffOnLeaveToday.map(staff => (
-                          <div key={staff.email} className="flex items-center gap-2 bg-orange-50 border border-orange-100 px-3 py-1.5 rounded-xl">
-                            <div className="w-6 h-6 rounded-lg bg-orange-100 flex items-center justify-center">
-                              <User className="w-3.5 h-3.5 text-orange-600" />
+                          <div key={staff.email} className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
+                              <User className="w-3.5 h-3.5 text-slate-500" />
                             </div>
-                            <span className="text-[12px] font-bold text-orange-700">{staff.name}</span>
-                            <span className="text-[10px] font-medium text-orange-500 italic">On Leave</span>
+                            <span className="text-[12px] font-bold text-slate-600">{staff.name}</span>
+                            <span className="text-[10px] font-medium text-slate-400 italic">On Leave</span>
                           </div>
                         ))}
                       </div>
@@ -1516,7 +1526,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <span className="text-[12px] font-medium text-text-secondary">{remainingTodayItems.length} items remaining</span>
                           {user && isStaffMemberOnLeave(user.email, currentTime) && (
-                            <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse flex items-center gap-1">
+                            <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider animate-pulse flex items-center gap-1">
                               <Calendar className="w-3 h-3" />
                               You are on Leave Today
                             </span>
@@ -3079,8 +3089,8 @@ function Profile({ user, onUpdateProfile, onChangePassword, onLogout, staffSetti
                   {leavePeriods.map((period, idx) => (
                     <div key={idx} className="flex items-center justify-between bg-white border border-border-apple p-4 rounded-2xl group transition-all hover:border-accent-blue/30">
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
-                          <Calendar className="w-5 h-5 text-orange-500" />
+                        <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center">
+                          <Calendar className="w-5 h-5 text-slate-500" />
                         </div>
                         <div>
                           <p className="text-[13px] font-bold text-text-primary">
@@ -3390,7 +3400,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                     ? "bg-accent-blue text-white border-accent-blue shadow-lg shadow-accent-blue/20" 
                     : "bg-white hover:bg-gray-50 border-border-apple/40 hover:border-border-apple",
                   !isSameMonth(day, currentMonth) && "opacity-20",
-                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-orange-50/50"
+                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-slate-50/50"
                 )}
               >
                 <div className="flex flex-col items-center">
@@ -3400,7 +3410,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                   {staffSettings.some(s => isStaffOff(s.email, day)) && (
                     <span className={cn(
                       "text-[8px] font-bold uppercase tracking-widest mt-0.5",
-                      isSelected ? "text-white/80" : "text-orange-500"
+                      isSelected ? "text-white/80" : "text-slate-500"
                     )}>
                       Off
                     </span>
@@ -3432,20 +3442,20 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
 
         <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
           {staffOnLeaveOnSelectedDate.length > 0 && (
-            <div className="bg-orange-50 p-5 rounded-[20px] border border-orange-100 mb-2 shadow-sm">
+            <div className="bg-slate-50 p-5 rounded-[20px] border border-slate-200 mb-2 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <Calendar className="w-4 h-4 text-orange-600" />
+                <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
+                  <Calendar className="w-4 h-4 text-slate-500" />
                 </div>
-                <h6 className="text-[15px] font-bold text-orange-800">Staff on Leave</h6>
+                <h6 className="text-[15px] font-bold text-slate-700">Staff on Leave</h6>
               </div>
               <div className="space-y-2">
                 {staffOnLeaveOnSelectedDate.map(staff => (
-                  <div key={staff.email} className="flex items-center justify-between bg-white/60 p-3 rounded-xl border border-orange-200/50">
-                    <span className="text-[13px] font-bold text-orange-700">{staff.name}</span>
-                    <div className="flex items-center gap-1.5 bg-orange-100/50 px-2 py-0.5 rounded-lg">
-                      <Clock className="w-3 h-3 text-orange-500" />
-                      <span className="text-[9px] font-bold text-orange-500 uppercase tracking-widest">Out of Office</span>
+                  <div key={staff.email} className="flex items-center justify-between bg-white border border-slate-200 p-3 rounded-xl">
+                    <span className="text-[13px] font-bold text-slate-600">{staff.name}</span>
+                    <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-lg">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Out of Office</span>
                     </div>
                   </div>
                 ))}
@@ -3466,23 +3476,23 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
               return (
                 <div key={i} className={cn(
                   "p-5 rounded-[20px] border shadow-sm",
-                  entry.isLeave ? "bg-orange-50/50 border-orange-100" : "bg-white border-border-apple/50"
+                  entry.isLeave ? "bg-slate-50 border-slate-200" : "bg-white border-border-apple/50"
                 )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className={cn(
                         "w-8 h-8 rounded-lg flex items-center justify-center",
-                        entry.isLeave ? "bg-orange-100" : "bg-accent-green/10"
+                        entry.isLeave ? "bg-slate-100" : "bg-accent-green/10"
                       )}>
                         {entry.isLeave ? (
-                          <Calendar className="w-4 h-4 text-orange-600" />
+                          <Calendar className="w-4 h-4 text-slate-500" />
                         ) : (
                           <CheckCircle2 className="w-4 h-4 text-accent-green" />
                         )}
                       </div>
                       <h6 className={cn(
                         "text-[15px] font-bold",
-                        entry.isLeave ? "text-orange-900" : "text-text-primary"
+                        entry.isLeave ? "text-slate-700" : "text-text-primary"
                       )}>{entry.title}</h6>
                     </div>
                     {isTodayEntry && !entry.isLeave && (
@@ -3496,11 +3506,11 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                   </div>
                   <div className={cn(
                     "border rounded-xl p-3",
-                    entry.isLeave ? "bg-white/60 border-orange-200/50" : "bg-[#F8F9FA] border-border-apple/60"
+                    entry.isLeave ? "bg-white border-slate-200" : "bg-[#F8F9FA] border-border-apple/60"
                   )}>
                     <p className={cn(
                       "text-[10px] font-bold uppercase tracking-widest mb-1",
-                      entry.isLeave ? "text-orange-500" : "text-text-secondary"
+                      entry.isLeave ? "text-slate-500" : "text-text-secondary"
                     )}>Remarks</p>
                     {isTodayEntry && !entry.isLeave ? (
                       <textarea 
@@ -3512,7 +3522,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                     ) : (
                       <p className={cn(
                         "text-[13px] leading-relaxed italic",
-                        entry.isLeave ? "text-orange-700/80" : "text-text-primary/80"
+                        entry.isLeave ? "text-slate-600" : "text-text-primary/80"
                       )}>
                         {entry.remarks || "No remarks recorded."}
                       </p>
@@ -3725,7 +3735,7 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
               className={cn(
                 "aspect-square flex flex-col items-center justify-center rounded-lg relative transition-all group",
                 isTodayDay ? "bg-accent-blue text-white" : "hover:bg-gray-50",
-                staffOnLeave.length > 0 && !isTodayDay && "bg-orange-50/50"
+                staffOnLeave.length > 0 && !isTodayDay && "bg-slate-50/50"
               )}
             >
               <div className="flex flex-col items-center z-10">
@@ -3733,7 +3743,7 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
                 {staffOnLeave.length > 0 && (
                   <span className={cn(
                     "text-[7px] font-black uppercase tracking-tighter",
-                    isTodayDay ? "text-white/90" : "text-orange-500"
+                    isTodayDay ? "text-white/90" : "text-slate-500"
                   )}>
                     Off
                   </span>
@@ -3760,11 +3770,11 @@ function CalendarView({ mini, events = [], categories = [], staffSettings = [], 
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white rounded-xl shadow-2xl border border-border-apple p-3 opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50">
                   {staffOnLeave.length > 0 && (
                     <div className="mb-3">
-                      <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-1">On Leave</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">On Leave</p>
                       {staffOnLeave.map(s => (
                         <div key={s.email} className="flex items-center gap-1.5 mb-1 last:mb-0">
-                          <div className="w-1 h-1 rounded-full bg-orange-500" />
-                          <span className="text-[11px] font-bold text-orange-700">OFF - {s.name.split(' ')[0]}</span>
+                          <div className="w-1 h-1 rounded-full bg-slate-400" />
+                          <span className="text-[11px] font-bold text-slate-600">OFF - {s.name.split(' ')[0]}</span>
                         </div>
                       ))}
                     </div>
