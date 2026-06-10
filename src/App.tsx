@@ -184,6 +184,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isQuickPickOpen, setIsQuickPickOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [todayRemarks, setTodayRemarks] = useState<Record<string, string>>({});
   
   const lastDateRef = useRef<string>(format(new Date(), "yyyy-MM-dd"));
 
@@ -909,15 +910,22 @@ export default function App() {
 
   const completeTaskForToday = async (task: Task) => {
     const now = new Date();
+    const taskRemark = todayRemarks[task.id] || "";
+    
     const optimisticEntry = {
       taskId: task.id,
       title: task.title,
       dateCompleted: now.toISOString(),
-      remarks: task.description || ""
+      remarks: taskRemark
     };
 
     // Optimistic update
     setHistory([optimisticEntry, ...history]);
+    setTodayRemarks(prev => {
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
 
     setIsSyncing(true);
     try {
@@ -927,7 +935,7 @@ export default function App() {
         body: JSON.stringify({
           taskId: task.id,
           title: task.title,
-          remarks: task.description || ""
+          remarks: taskRemark
         }),
       });
       const newEntry = await res.json();
@@ -1669,8 +1677,8 @@ export default function App() {
                             <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-xl p-3 mb-1 ml-10">
                               <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-1">Remarks</p>
                               <textarea 
-                                value={(item as Task).description || ""}
-                                onChange={(e) => updateTaskRemark(item.id, e.target.value)}
+                                value={todayRemarks[item.id] || ""}
+                                onChange={(e) => setTodayRemarks(prev => ({ ...prev, [item.id]: e.target.value }))}
                                 placeholder="Add specific remarks for today..."
                                 className="w-full bg-transparent text-[13px] text-text-primary/80 leading-relaxed italic border-none focus:ring-0 p-0 resize-none min-h-[40px] cursor-text"
                               />
