@@ -19,11 +19,11 @@ export default async function handler(req: any, res: any) {
     const tokenResponse = await client.getAccessToken();
     const token = tokenResponse.token;
 
-    // A=id, B=category, C=title, D=description, E=frequency, F=status, G=subtasks, H=createdAt
+    // A=id, B=category, C=title, D=description, E=frequency, F=status, G=subtasks, H=createdAt, I=frequencyDetail
     const SHEET_NAME = 'Tasks';
 
     if (req.method === 'GET') {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:H`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:I`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       const rows = data.values || [];
@@ -36,7 +36,8 @@ export default async function handler(req: any, res: any) {
         frequency: row[4] || "DAILY",
         completed: row[5] === "Completed",
         subtasks: row[6] ? JSON.parse(row[6]) : [],
-        createdAt: row[7] || new Date().toISOString()
+        createdAt: row[7] || new Date().toISOString(),
+        frequencyDetail: row[8] || ""
       }));
 
       return res.status(200).json(tasks);
@@ -54,10 +55,11 @@ export default async function handler(req: any, res: any) {
         body.frequency || "DAILY",
         body.completed ? "Completed" : "Pending",
         JSON.stringify(body.subtasks || []),
-        new Date().toISOString() // createdAt
+        new Date().toISOString(), // createdAt
+        body.frequencyDetail || "" // frequencyDetail
       ];
 
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:H:append?valueInputOption=RAW`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:I:append?valueInputOption=RAW`;
       await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -72,7 +74,8 @@ export default async function handler(req: any, res: any) {
         frequency: newTaskRow[4],
         completed: body.completed,
         subtasks: body.subtasks || [],
-        createdAt: newTaskRow[7]
+        createdAt: newTaskRow[7],
+        frequencyDetail: newTaskRow[8]
       });
     }
 
@@ -92,35 +95,26 @@ export default async function handler(req: any, res: any) {
 
       if (rowIndex === -1) return res.status(404).json({ error: "Task not found" });
 
-      // Step 2: Update (Cols B to G)
-      // We skip A (id) and H (createdAt)
-      const updateRow = [
-        body.category,
-        body.title,
-        body.description || "",
-        body.frequency || "DAILY",
-        body.completed === undefined ? undefined : (body.completed ? "Completed" : "Pending"),
-        body.subtasks ? JSON.stringify(body.subtasks) : undefined
-      ];
-
-      // Update specific cells based on what's provided
-      // Alternatively, update the whole range B:G for that row
-      const currentRowRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A${rowIndex + 1}:G${rowIndex + 1}`, {
+      // Step 2: Update (Cols B to I)
+      // We skip A (id) and retrieve columns up to I (9 columns)
+      const currentRowRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A${rowIndex + 1}:I${rowIndex + 1}`, {
          headers: { Authorization: `Bearer ${token}` }
       });
       const currentRowData = await currentRowRes.json();
-      const currentRow = currentRowData.values[0];
+      const currentRow = currentRowData.values[0] || [];
 
       const finalRow = [
         body.category || currentRow[1],
         body.title || currentRow[2],
-        body.description !== undefined ? body.description : currentRow[3],
+        body.description !== undefined ? body.description : (currentRow[3] || ""),
         body.frequency || currentRow[4],
         body.completed !== undefined ? (body.completed ? "Completed" : "Pending") : currentRow[5],
-        body.subtasks ? JSON.stringify(body.subtasks) : currentRow[6]
+        body.subtasks ? JSON.stringify(body.subtasks) : (currentRow[6] || "[]"),
+        currentRow[7] || new Date().toISOString(),
+        body.frequencyDetail !== undefined ? body.frequencyDetail : (currentRow[8] || "")
       ];
 
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!B${rowIndex + 1}:G${rowIndex + 1}?valueInputOption=RAW`, {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!B${rowIndex + 1}:I${rowIndex + 1}?valueInputOption=RAW`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: [finalRow] })

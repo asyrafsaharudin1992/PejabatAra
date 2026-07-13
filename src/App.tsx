@@ -40,6 +40,7 @@ type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA"
 interface Subtask {
   text: string;
   completed: boolean;
+  completedAt?: string;
 }
 
 interface Task {
@@ -159,6 +160,7 @@ export default function App() {
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskCategory, setNewTaskCategory] = useState<string>("Quality of Service");
   const [newTaskFrequency, setNewTaskFrequency] = useState<string>("When Needed");
+  const [newTaskFrequencyDetail, setNewTaskFrequencyDetail] = useState<string>("Monday");
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteDueDate, setNewNoteDueDate] = useState("");
@@ -583,6 +585,7 @@ export default function App() {
       title: newTaskTitle,
       category: newTaskCategory,
       frequency: newTaskFrequency,
+      frequencyDetail: ["Weekly", "Monthly", "2-Monthly", "3-Monthly"].includes(newTaskFrequency) ? newTaskFrequencyDetail : undefined,
       completed: false,
     };
 
@@ -620,9 +623,12 @@ export default function App() {
     const updatedSubtasks = task.subtasks.map((st, idx) => {
       if (idx !== subtaskIndex) return st;
       const isObject = typeof st !== 'string';
+      const text = isObject ? st.text : st;
+      const completed = isObject ? !st.completed : true;
       return {
-        text: isObject ? st.text : st,
-        completed: isObject ? !st.completed : true
+        text,
+        completed,
+        completedAt: completed ? new Date().toISOString() : undefined
       };
     });
 
@@ -1645,7 +1651,18 @@ export default function App() {
                               {(item as Task).subtasks.map((st, idx) => {
                                 const isObj = typeof st !== 'string';
                                 const text = isObj ? st.text : st;
-                                const completed = isObj ? st.completed : false;
+                                let completed = false;
+                                if (isObj && st.completed) {
+                                  if (st.completedAt) {
+                                    try {
+                                      completed = isSameDay(new Date(st.completedAt), currentTime);
+                                    } catch (e) {
+                                      completed = false;
+                                    }
+                                  } else {
+                                    completed = true;
+                                  }
+                                }
                                 
                                 return (
                                   <button 
@@ -1764,7 +1781,17 @@ export default function App() {
                       <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Frequency</label>
                       <select 
                         value={newTaskFrequency}
-                        onChange={(e) => setNewTaskFrequency(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewTaskFrequency(val);
+                          if (val === "Weekly") {
+                            setNewTaskFrequencyDetail("Monday");
+                          } else if (["Monthly", "2-Monthly", "3-Monthly"].includes(val)) {
+                            setNewTaskFrequencyDetail("1");
+                          } else {
+                            setNewTaskFrequencyDetail("");
+                          }
+                        }}
                         className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
                       >
                         <option value="Daily">Daily</option>
@@ -1783,6 +1810,37 @@ export default function App() {
                       </button>
                     </div>
                   </form>
+
+                  {/* Conditional frequency sub-options for creating */}
+                  {newTaskFrequency === "Weekly" && (
+                    <div className="flex flex-col gap-1.5 mt-4 max-w-xs">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Day</label>
+                      <select 
+                        value={newTaskFrequencyDetail || "Monday"}
+                        onChange={(e) => setNewTaskFrequencyDetail(e.target.value)}
+                        className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
+                      >
+                        {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(day => (
+                          <option key={day} value={day}>{day}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {["Monthly", "2-Monthly", "3-Monthly"].includes(newTaskFrequency) && (
+                    <div className="flex flex-col gap-1.5 mt-4 max-w-xs">
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Date</label>
+                      <select 
+                        value={newTaskFrequencyDetail || "1"}
+                        onChange={(e) => setNewTaskFrequencyDetail(e.target.value)}
+                        className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all appearance-none"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map(date => (
+                          <option key={date} value={date.toString()}>Date {date}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Department Filters */}
@@ -1898,7 +1956,18 @@ export default function App() {
                             {task.subtasks.map((st, idx) => {
                               const isObj = typeof st !== 'string';
                               const text = isObj ? st.text : st;
-                              const completed = isObj ? st.completed : false;
+                              let completed = false;
+                              if (isObj && st.completed) {
+                                if (st.completedAt) {
+                                  try {
+                                    completed = isSameDay(new Date(st.completedAt), currentTime);
+                                  } catch (e) {
+                                    completed = false;
+                                  }
+                                } else {
+                                  completed = true;
+                                }
+                              }
                               
                               return (
                                 <div key={idx} className="flex items-center gap-3">
@@ -3578,13 +3647,12 @@ function isTaskOnDay(task: Task, day: Date) {
     return false;
   }
 
-  if (freq === "weekly") {
-    if (!task.frequencyDetail) return false;
-    return task.frequencyDetail.trim().toLowerCase() === dayName.toLowerCase();
-  }
-
-  if (freq.startsWith("weekly ")) {
-    const target = freq.replace("weekly ", "").trim().toLowerCase();
+  if (freq.startsWith("weekly")) {
+    if (freq === "weekly") {
+      if (!task.frequencyDetail) return false;
+      return task.frequencyDetail.trim().toLowerCase() === dayName.toLowerCase();
+    }
+    const target = freq.replace("weekly", "").replace(/[-_]/g, "").trim().toLowerCase();
     return dayName.toLowerCase() === target;
   }
 
@@ -3594,18 +3662,26 @@ function isTaskOnDay(task: Task, day: Date) {
     return dayName === "Tuesday" || dayName === "Thursday";
   }
 
-  if (freq === "monthly") {
-    const target = task.frequencyDetail || "1";
+  if (freq.startsWith("monthly")) {
+    if (freq === "monthly") {
+      const target = task.frequencyDetail || "1";
+      return dayOfMonth.toString() === target;
+    }
+    const target = freq.replace("monthly", "").replace(/[-_]/g, "").trim();
     return dayOfMonth.toString() === target;
   }
 
-  if (freq === "2-monthly" || freq === "2 monthly" || freq === "2_monthly") {
-    const target = task.frequencyDetail || "1";
+  if (freq.startsWith("2-monthly") || freq.startsWith("2 monthly") || freq.startsWith("2_monthly")) {
+    let target = task.frequencyDetail || "1";
+    const suffix = freq.replace(/2[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
+    if (suffix) target = suffix;
     return dayOfMonth.toString() === target && month % 2 === 1;
   }
 
-  if (freq === "3-monthly" || freq === "3 monthly" || freq === "3_monthly") {
-    const target = task.frequencyDetail || "1";
+  if (freq.startsWith("3-monthly") || freq.startsWith("3 monthly") || freq.startsWith("3_monthly")) {
+    let target = task.frequencyDetail || "1";
+    const suffix = freq.replace(/3[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
+    if (suffix) target = suffix;
     return dayOfMonth.toString() === target && (month + 1) % 3 === 0;
   }
 
