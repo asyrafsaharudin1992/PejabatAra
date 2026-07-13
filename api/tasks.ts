@@ -32,7 +32,7 @@ export default async function handler(req: any, res: any) {
         id: row[0],
         category: row[1],
         title: row[2],
-        description: row[3] || "",
+        description: "",
         frequency: row[4] || "DAILY",
         completed: row[5] === "Completed",
         subtasks: row[6] ? JSON.parse(row[6]) : [],

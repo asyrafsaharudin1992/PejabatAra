@@ -1923,7 +1923,7 @@ export default function App() {
                         <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-2xl p-4 flex-grow">
                           <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">Remarks / Description</p>
                           <p className="text-[14px] text-text-primary/80 leading-relaxed italic">
-                            {task.description || "No specific remarks for this task yet. Click edit to add details."}
+                            {task.description || ""}
                           </p>
                         </div>
                       </motion.div>
