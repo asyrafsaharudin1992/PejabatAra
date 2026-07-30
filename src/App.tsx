@@ -2553,8 +2553,17 @@ export default function App() {
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Subtasks (one per line)</label>
                     <textarea 
-                      value={(editingTask.subtasks || []).join("\n")}
-                      onChange={(e) => setEditingTask({ ...editingTask, subtasks: e.target.value.split("\n").filter(s => s.trim()) })}
+                      value={(editingTask.subtasks || []).map(st => typeof st === 'string' ? st : st.text).join("\n")}
+                      onChange={(e) => {
+                        const prev = editingTask.subtasks || [];
+                        const newSubtasks = e.target.value.split("\n").filter(s => s.trim()).map(line => {
+                          const text = line.trim();
+                          // Preserve existing subtask object (completed / completedAt) by matching text
+                          const existing = prev.find(st => (typeof st === 'string' ? st : st.text) === text);
+                          return existing !== undefined ? existing : text;
+                        });
+                        setEditingTask({ ...editingTask, subtasks: newSubtasks });
+                      }}
                       placeholder="Enter subtasks..."
                       className="w-full h-24 bg-[#F8F9FA] border border-border-apple rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue resize-none transition-all"
                     />
