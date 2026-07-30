@@ -151,7 +151,7 @@ export default async function handler(req: any, res: any) {
     };
 
     if (req.method === 'GET') {
-      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:D`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:E`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) {
         const errText = await response.text();
         return res.status(response.status).json({ error: "Failed to fetch history from Google Sheets", details: errText });
@@ -159,7 +159,8 @@ export default async function handler(req: any, res: any) {
       const data = await response.json();
       const rows = data.values || [];
       return res.status(200).json(rows.slice(1).map((r: any) => ({
-        taskId: r[0], title: r[1], dateCompleted: r[2], remarks: r[3] || ""
+        taskId: r[0], title: r[1], dateCompleted: r[2], remarks: r[3] || "",
+        subtasks: r[4] ? r[4].split(" | ").map((s: string) => s.trim()).filter(Boolean) : []
       })));
     }
 
@@ -237,7 +238,7 @@ export default async function handler(req: any, res: any) {
         console.error("Tracker update failed:", e);
       }
 
-      return res.status(200).json({ taskId: entry[0], title: entry[1], dateCompleted: entry[2], remarks: entry[3] });
+      return res.status(200).json({ taskId: entry[0], title: entry[1], dateCompleted: entry[2], remarks: entry[3], subtasks: tickedSubtasks });
     }
 
     if (req.method === 'PATCH') {
