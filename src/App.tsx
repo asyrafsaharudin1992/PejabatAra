@@ -918,7 +918,19 @@ export default function App() {
   const completeTaskForToday = async (task: Task) => {
     const now = new Date();
     const taskRemark = todayRemarks[task.id] || "";
-    
+
+    // Collect the subtasks that are ticked (completed today) so they can be
+    // recorded in the History / Tracker sheet alongside DONE + remarks.
+    const tickedSubtasks = (task.subtasks || [])
+      .filter(st => {
+        if (typeof st === 'string') return false;
+        if (!st.completed) return false;
+        if (!st.completedAt) return true;
+        try { return isSameDay(new Date(st.completedAt), currentTime); }
+        catch (e) { return true; }
+      })
+      .map(st => (typeof st === 'string' ? st : st.text));
+
     const optimisticEntry = {
       taskId: task.id,
       title: task.title,
@@ -942,7 +954,8 @@ export default function App() {
         body: JSON.stringify({
           taskId: task.id,
           title: task.title,
-          remarks: taskRemark
+          remarks: taskRemark,
+          subtasks: tickedSubtasks
         }),
       });
       const newEntry = await res.json();
