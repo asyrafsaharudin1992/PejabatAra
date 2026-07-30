@@ -170,9 +170,12 @@ export default async function handler(req: any, res: any) {
       const todayIso = new Date().toISOString();
       const todayDate = todayIso.split('T')[0];
 
-      // 1. Update History Sheet (List)
-      const entry = [taskId, title, todayIso, body.remarks || ""];
-      const hRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:D:append?valueInputOption=RAW`, {
+      // 1. Update History Sheet (List) — column E stores the ticked subtasks
+      const tickedSubtasks: string[] = Array.isArray(body.subtasks)
+        ? body.subtasks.filter((s: any) => typeof s === 'string' && s.trim()).map((s: string) => s.trim())
+        : [];
+      const entry = [taskId, title, todayIso, body.remarks || "", tickedSubtasks.join(" | ")];
+      const hRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:E:append?valueInputOption=RAW`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: [entry] })
@@ -213,8 +216,11 @@ export default async function handler(req: any, res: any) {
             });
           }
 
-          // Set "DONE" or "Done: remarks"
-          const cellValue = body.remarks ? `Done: ${body.remarks}` : 'DONE';
+          // Single line in the cell: "DONE, <subtask>, <subtask>, <remarks>"
+          const cellParts = ['DONE'];
+          if (tickedSubtasks.length > 0) cellParts.push(...tickedSubtasks);
+          if (body.remarks) cellParts.push(body.remarks);
+          const cellValue = cellParts.join(', ');
           const updateRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${rowIndex + 1}?valueInputOption=RAW`, {
             method: 'PUT',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -239,13 +245,18 @@ export default async function handler(req: any, res: any) {
       if (typeof body === 'string') body = JSON.parse(body);
       const { taskId, dateCompleted, remarks } = body;
 
-      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:C`;
+      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:E`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
       const getData = await getRes.json();
       const rows = getData.values || [];
       const rowIndex = rows.findIndex((row: string[]) => row[0]?.toString() === taskId?.toString() && row[2] === dateCompleted);
 
       if (rowIndex !== -1) {
+        // Subtasks recorded for this completion (History column E), stored as "a | b | c"
+        const storedSubtasks: string[] = (rows[rowIndex] && rows[rowIndex][4])
+          ? rows[rowIndex][4].split(" | ").map((s: string) => s.trim()).filter(Boolean)
+          : [];
+
         await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!D${rowIndex + 1}?valueInputOption=RAW`, {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -270,7 +281,11 @@ export default async function handler(req: any, res: any) {
             const tRowIndex = rows.findIndex((r: any) => r[0] === dateStr);
 
             if (colIndex !== undefined && colIndex !== -1 && tRowIndex !== -1) {
-              const cellValue = remarks ? `Done: ${remarks}` : 'DONE';
+              // Rebuild single line: "DONE, <subtask>, <subtask>, <remarks>"
+              const cellParts = ['DONE'];
+              if (storedSubtasks.length > 0) cellParts.push(...storedSubtasks);
+              if (remarks) cellParts.push(remarks);
+              const cellValue = cellParts.join(', ');
               await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${TRACKER_SHEET}!${getColLetter(colIndex)}${tRowIndex + 1}?valueInputOption=RAW`, {
                 method: 'PUT',
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
