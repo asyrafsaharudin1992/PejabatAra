@@ -79,6 +79,7 @@ interface HistoryEntry {
   title: string;
   dateCompleted: string;
   remarks: string;
+  subtasks?: string[];
 }
 
 interface CategoryData {
@@ -935,7 +936,8 @@ export default function App() {
       taskId: task.id,
       title: task.title,
       dateCompleted: now.toISOString(),
-      remarks: taskRemark
+      remarks: taskRemark,
+      subtasks: tickedSubtasks
     };
 
     // Optimistic update
@@ -1983,33 +1985,11 @@ export default function App() {
                         {task.subtasks && task.subtasks.length > 0 && (
                           <div className="mb-4 space-y-2.5">
                             {task.subtasks.map((st, idx) => {
-                              const isObj = typeof st !== 'string';
-                              const text = isObj ? st.text : st;
-                              let completed = false;
-                              if (isObj && st.completed) {
-                                if (st.completedAt) {
-                                  try {
-                                    completed = isSameDay(new Date(st.completedAt), currentTime);
-                                  } catch (e) {
-                                    completed = false;
-                                  }
-                                } else {
-                                  completed = true;
-                                }
-                              }
-                              
+                              const text = typeof st === 'string' ? st : st.text;
                               return (
                                 <div key={idx} className="flex items-center gap-3">
-                                  <div className={cn(
-                                    "w-4 h-4 rounded-full border transition-all flex items-center justify-center",
-                                    completed ? "bg-accent-blue border-accent-blue" : "border-border-apple/60"
-                                  )}>
-                                    {completed && <div className="w-1 h-1 bg-white rounded-full" />}
-                                  </div>
-                                  <span className={cn(
-                                    "text-[13px] font-medium leading-tight",
-                                    completed ? "text-text-secondary/50 line-through" : "text-text-secondary"
-                                  )}>
+                                  <div className="w-4 h-4 rounded-full border border-border-apple/60 flex items-center justify-center" />
+                                  <span className="text-[13px] font-medium leading-tight text-text-secondary">
                                     {text}
                                   </span>
                                 </div>
@@ -3610,6 +3590,18 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                       </button>
                     )}
                   </div>
+                  {!entry.isLeave && entry.subtasks && entry.subtasks.length > 0 && (
+                    <div className="mb-3 flex flex-col gap-1.5">
+                      {entry.subtasks.map((stText: string, si: number) => (
+                        <div key={si} className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full bg-accent-green/15 flex items-center justify-center">
+                            <CheckCircle2 className="w-3 h-3 text-accent-green" />
+                          </div>
+                          <span className="text-[12px] font-medium text-text-secondary">{stText}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className={cn(
                     "border rounded-xl p-3",
                     entry.isLeave ? "bg-white border-slate-200" : "bg-[#F8F9FA] border-border-apple/60"
