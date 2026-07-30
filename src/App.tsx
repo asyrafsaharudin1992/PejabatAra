@@ -180,6 +180,7 @@ export default function App() {
   const [editingPortalLink, setEditingPortalLink] = useState<PortalLink | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editSubtasksText, setEditSubtasksText] = useState("");
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("bg-blue-100 text-blue-600");
@@ -1000,13 +1001,27 @@ export default function App() {
     e.preventDefault();
     if (!editingTask) return;
 
+    // Parse the free-text subtasks box into subtasks, preserving the
+    // completed / completedAt state of any subtask whose text is unchanged.
+    const prevSubtasks = editingTask.subtasks || [];
+    const parsedSubtasks = editSubtasksText
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(text => {
+        const existing = prevSubtasks.find(st => (typeof st === 'string' ? st : st.text) === text);
+        return existing !== undefined ? existing : text;
+      });
+
+    const taskToSave = { ...editingTask, subtasks: parsedSubtasks };
+
     try {
       await fetch(`/api/tasks?id=${editingTask.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editingTask),
+        body: JSON.stringify(taskToSave),
       });
-      setTasks(tasks.map(t => t.id === editingTask.id ? editingTask : t));
+      setTasks(tasks.map(t => t.id === editingTask.id ? taskToSave : t));
       setIsEditModalOpen(false);
       setEditingTask(null);
     } catch (error) {
@@ -1016,6 +1031,7 @@ export default function App() {
 
   const openEditModal = (task: Task) => {
     setEditingTask({ ...task });
+    setEditSubtasksText((task.subtasks || []).map(st => typeof st === 'string' ? st : st.text).join("\n"));
     setIsEditModalOpen(true);
   };
 
@@ -2553,17 +2569,8 @@ export default function App() {
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Subtasks (one per line)</label>
                     <textarea 
-                      value={(editingTask.subtasks || []).map(st => typeof st === 'string' ? st : st.text).join("\n")}
-                      onChange={(e) => {
-                        const prev = editingTask.subtasks || [];
-                        const newSubtasks = e.target.value.split("\n").filter(s => s.trim()).map(line => {
-                          const text = line.trim();
-                          // Preserve existing subtask object (completed / completedAt) by matching text
-                          const existing = prev.find(st => (typeof st === 'string' ? st : st.text) === text);
-                          return existing !== undefined ? existing : text;
-                        });
-                        setEditingTask({ ...editingTask, subtasks: newSubtasks });
-                      }}
+                      value={editSubtasksText}
+                      onChange={(e) => setEditSubtasksText(e.target.value)}
                       placeholder="Enter subtasks..."
                       className="w-full h-24 bg-[#F8F9FA] border border-border-apple rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue resize-none transition-all"
                     />
