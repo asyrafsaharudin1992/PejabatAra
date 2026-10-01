@@ -34,6 +34,8 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
+import { isSupabaseConfigured } from "./lib/supabase";
+import { loadQualityWorkspace } from "./lib/qualityData";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
 
@@ -266,16 +268,12 @@ export default function App() {
   ];
 
   useEffect(() => {
-    // Clean potentially corrupted data
-    localStorage.removeItem("notes");
-    localStorage.removeItem("araoffice_notes");
-
     const savedUser = localStorage.getItem("araoffice_user");
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
         if (parsed && typeof parsed === "object") {
-          setUser(parsed);
+          setUser(localStorage.getItem("ara_view_mode") === "staff" ? { ...parsed, role: "Staff" } : parsed);
         }
       } catch (e) {
         console.error("Error parsing saved user:", e);
@@ -286,8 +284,6 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // Poll every 30s
-    return () => clearInterval(interval);
   }, [user]);
 
   useEffect(() => {
@@ -341,6 +337,27 @@ export default function App() {
   const fetchData = async (silent = false) => {
     if (!user) return;
     if (user.role === "Superadmin" && !silent) setIsUsersLoading(true);
+
+    if (isSupabaseConfigured) {
+      try {
+        const workspace = await loadQualityWorkspace(user.role === "Superadmin");
+        setConnectionStatus({ connected: true, error: null });
+        setTasks(workspace.tasks as Task[]);
+        setNotes(workspace.notes as Note[]);
+        setHistory(workspace.history as HistoryEntry[]);
+        setTaskCategories(workspace.categories.filter((category) => category.name !== "General"));
+        setPortalLinks(workspace.links as PortalLink[]);
+        setStaffSettings(workspace.settings as StaffSettings[]);
+        if (user.role === "Superadmin") setAllUsers(workspace.users as UserData[]);
+      } catch (error) {
+        console.error("Supabase workspace load failed:", error);
+        setConnectionStatus({ connected: false, error: "Unable to load workspace data." });
+      } finally {
+        if (user.role === "Superadmin" && !silent) setIsUsersLoading(false);
+        if (!silent) setIsLoading(false);
+      }
+      return;
+    }
     
     const fetchJson = async (url: string) => {
       try {
