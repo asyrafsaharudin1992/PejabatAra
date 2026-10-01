@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -38,10 +38,11 @@ import {
 } from "./portalData";
 import { cn } from "./lib/utils";
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase } from "./lib/supabase";
-import ShiftHandoverView from "./ShiftHandover";
-import { usePanelSync } from "./lib/usePanelSync";
+import ShiftHandoverView, { shiftGuides, ShiftGuides } from "./ShiftHandover";
+import { PanelNoticeState, usePanelSync } from "./lib/usePanelSync";
+import { useCaPortalState } from "./lib/useCaPortalState";
 
-type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "announcements" | "links" | "admin";
+type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "announcements" | "links" | "admin";
 
 const categoryLabelMap: Record<string, string> = {
   "Semua": "All",
@@ -89,6 +90,7 @@ const viewTitles: Record<View, string> = {
   knowledge: "Reference Hub",
   training: "My Training",
   panelTraining: "Panel Training",
+  services: "Our Services",
   announcements: "Announcements",
   links: "Important Links",
   admin: "Portal Management",
@@ -102,6 +104,28 @@ function readLocal<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
+
+type Service = [string, string];
+type CaWorkspaceContent = {
+  resources: KnowledgeResource[];
+  trainingModules: TrainingModule[];
+  announcements: Announcement[];
+  links: typeof quickLinks;
+  services: Service[];
+  panelRows: PanelTrainingRow[];
+  shiftGuides: ShiftGuides;
+};
+type CaPersonalContent = { completedLessons: string[]; readResources: string[]; panelNotices: PanelNoticeState };
+
+const caWorkspaceDefaults = (): CaWorkspaceContent => ({
+  resources: readLocal<KnowledgeResource[]>("ara_portal_resources", knowledgeResources),
+  trainingModules,
+  announcements: announcementsSeed,
+  links: quickLinks,
+  services: serviceSeed,
+  panelRows: defaultPanelTrainingRows,
+  shiftGuides,
+});
 
 function normalizeUser(user: PortalUser): PortalUser {
   const demo = demoStaff.find((member) => member.email === user.email);
@@ -128,18 +152,15 @@ export default function PortalApp() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [selectedResource, setSelectedResource] = useState<KnowledgeResource | null>(null);
   const [selectedModule, setSelectedModule] = useState<TrainingModule | null>(null);
-  const [completedLessons, setCompletedLessons] = useState<string[]>([]);
-  const [readResources, setReadResources] = useState<string[]>([]);
+  const workspace = useCaPortalState<CaWorkspaceContent>(caWorkspaceDefaults(), user?.email, user?.role === "Superadmin");
+  const personal = useCaPortalState<CaPersonalContent>({ completedLessons: [], readResources: [], panelNotices: { seen: [], alerts: [] } }, user?.email, true, "personal");
+  const content = workspace.data;
+  const completedLessons = personal.data.completedLessons;
+  const readResources = personal.data.readResources;
   const [staff, setStaff] = useState<PortalUser[]>(() => readLocal<PortalUser[]>("ara_portal_staff", demoStaff).map(normalizeUser));
-  const [resources, setResources] = useState<KnowledgeResource[]>(() => readLocal<KnowledgeResource[]>("ara_portal_resources", knowledgeResources));
   const [toast, setToast] = useState("");
-  const panelSync = usePanelSync(user?.email, view === 'panelTraining');
-
-  useEffect(() => {
-    if (!user) return;
-    setCompletedLessons(readLocal(`ara_training_${user.email}`, []));
-    setReadResources(readLocal(`ara_read_${user.email}`, []));
-  }, [user]);
+  const persistPanelNotices = useCallback((panelNotices: PanelNoticeState) => { void personal.save({ ...personal.data, panelNotices }); }, [personal.data, personal.save]);
+  const panelSync = usePanelSync(user?.email, personal.ready && view === 'panelTraining', personal.data.panelNotices, persistPanelNotices);
 
   useEffect(() => {
     if (!toast) return;
@@ -179,15 +200,13 @@ export default function PortalApp() {
     const next = completedLessons.includes(lessonId)
       ? completedLessons.filter((id) => id !== lessonId)
       : [...completedLessons, lessonId];
-    setCompletedLessons(next);
-    localStorage.setItem(`ara_training_${user.email}`, JSON.stringify(next));
+    void personal.save({ ...personal.data, completedLessons: next });
   };
 
   const markResourceRead = (resourceId: string) => {
     if (!user || readResources.includes(resourceId)) return;
     const next = [...readResources, resourceId];
-    setReadResources(next);
-    localStorage.setItem(`ara_read_${user.email}`, JSON.stringify(next));
+    void personal.save({ ...personal.data, readResources: next });
     setToast("Marked as read");
   };
 
@@ -199,10 +218,8 @@ export default function PortalApp() {
   };
 
   const updateResource = (updated: KnowledgeResource) => {
-    const next = resources.map((resource) => resource.id === updated.id ? updated : resource);
-    setResources(next);
-    localStorage.setItem("ara_portal_resources", JSON.stringify(next));
-    setToast("Memo details updated");
+    const resources = content.resources.map((resource) => resource.id === updated.id ? updated : resource);
+    void workspace.save({ ...content, resources }).then((saved) => setToast(saved ? "Memo details saved" : "Unable to save memo details"));
   };
 
   if (!user) return <LoginScreen onLogin={login} />;
@@ -257,10 +274,10 @@ export default function PortalApp() {
               <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
             </button>
             <button onClick={() => navigate("home")} className="flex items-center gap-3 rounded-2xl p-1.5 pr-3 hover:bg-slate-50">
-              <Avatar name={user.fullName} />
+              <Avatar name="Clinic Assistants" />
               <div className="hidden text-left sm:block">
-                <p className="text-sm font-bold leading-tight">{user.fullName}</p>
-                <p className="text-xs text-slate-500">{user.role === "Superadmin" ? "Administrator" : user.department}</p>
+                <p className="text-sm font-bold leading-tight">Clinic Assistants</p>
+                <p className="text-xs text-slate-500">AraSpace portal</p>
               </div>
             </button>
           </div>
@@ -269,33 +286,33 @@ export default function PortalApp() {
         <main className="p-4 sm:p-6 lg:p-[38px]">
           {view === "home" && (
             <HomeView
-              user={user}
-              completedLessons={completedLessons}
               readResources={readResources}
               onNavigate={navigate}
               onOpenResource={setSelectedResource}
-              onOpenModule={setSelectedModule}
               search={globalSearch}
               setSearch={setGlobalSearch}
+              announcements={content.announcements}
+              resources={content.resources}
             />
           )}
-          {view === "handover" && <ShiftHandoverView user={user} />}
+          {view === "handover" && <ShiftHandoverView guides={content.shiftGuides} />}
           {view === "knowledge" && (
             <KnowledgeView
               initialSearch={globalSearch}
               readResources={readResources}
               onOpen={setSelectedResource}
-              resources={resources}
+              resources={content.resources}
               canEdit={user.role === "Superadmin"}
               onUpdateResource={updateResource}
             />
           )}
           {view === "training" && (
-            <TrainingView completedLessons={completedLessons} onOpen={setSelectedModule} />
+            <TrainingView modules={content.trainingModules} completedLessons={completedLessons} onOpen={setSelectedModule} />
           )}
-          {view === "panelTraining" && <PanelTrainingView canEdit={user.role === "Superadmin"} sync={panelSync} />}
-          {view === "announcements" && <AnnouncementsView />}
-          {view === "links" && <LinksView />}
+          {view === "panelTraining" && <PanelTrainingView rows={content.panelRows} onRowsChange={(panelRows) => void workspace.save({ ...content, panelRows })} canEdit={user.role === "Superadmin"} sync={panelSync} />}
+          {view === "services" && <OurServicesView services={content.services} />}
+          {view === "announcements" && <AnnouncementsView announcements={content.announcements} />}
+          {view === "links" && <LinksView links={content.links} />}
           {view === "admin" && user.role === "Superadmin" && (
             <AdminView staff={staff} onAddStaff={addStaff} />
           )}
@@ -424,8 +441,8 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
     { id: "home", label: "Home", icon: Home },
     { id: "handover", label: "Shift Passover", icon: ClipboardCheck },
     { id: "knowledge", label: "Reference Hub", icon: Library },
-    { id: "training", label: "My Training", icon: GraduationCap },
     { id: "panelTraining", label: "Panel Training", icon: BookOpen },
+    { id: "services", label: "Our Services", icon: Sparkles },
     { id: "announcements", label: "Announcements", icon: Bell },
     { id: "links", label: "Important Links", icon: Link2 },
   ];
@@ -435,7 +452,7 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
       {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
       <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/10 bg-[#083a55] p-6 text-white transition-transform duration-300 lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex items-center justify-between px-2 py-3">
-          <div className="flex items-center gap-3"><LogoMark /><div><p className="font-semibold tracking-tight">ARASPACE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Operations & Training</p></div></div>
+          <div className="flex items-center gap-3"><LogoMark /><div><p className="font-semibold tracking-tight">ARASPACE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinic Assistants</p></div></div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
         </div>
         <div className="mx-1 mt-8 h-px bg-white/10" />
@@ -450,8 +467,7 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
           ))}
         </nav>
         <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-          <div className="flex items-center gap-3"><Avatar name={user.fullName} dark /><div className="min-w-0"><p className="truncate text-sm font-semibold">{user.fullName}</p><p className="truncate text-xs text-[#9bb5c7]">{user.department}</p></div></div>
-          <p className="mt-3 rounded-lg bg-white/8 px-3 py-2 text-xs font-semibold text-[#b5cad8]">{user.branch}</p>
+          <div className="flex items-center gap-3"><Avatar name="Clinic Assistants" dark /><div className="min-w-0"><p className="truncate text-sm font-semibold">Clinic Assistants</p><p className="truncate text-xs text-[#9bb5c7]">AraSpace portal</p></div></div>
           <button onClick={onLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
         </div>
       </aside>
@@ -459,14 +475,12 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
   );
 }
 
-function HomeView({ user, completedLessons, readResources, onNavigate, onOpenResource, onOpenModule, search, setSearch }: { user: PortalUser; completedLessons: string[]; readResources: string[]; onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void; onOpenModule: (module: TrainingModule) => void; search: string; setSearch: (value: string) => void }) {
-  const totalLessons = trainingModules.reduce((total, module) => total + module.lessons.length, 0);
-  const trainingProgress = Math.round((completedLessons.length / totalLessons) * 100);
+function HomeView({ readResources, onNavigate, onOpenResource, search, setSearch, announcements, resources }: { readResources: string[]; onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void; search: string; setSearch: (value: string) => void; announcements: Announcement[]; resources: KnowledgeResource[] }) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
   const quickActions: { label: string; note: string; icon: typeof Home; view: View; tone: string }[] = [
-    { label: "Shift Passover", note: "6 outstanding", icon: ClipboardCheck, view: "handover", tone: "text-[#7258ff]" },
+    { label: "Shift Passover", note: "AM & PM guide", icon: ClipboardCheck, view: "handover", tone: "text-[#7258ff]" },
     { label: "Reference Hub", note: "SOPs & guides", icon: Library, view: "knowledge", tone: "text-[#20c7f4]" },
-    { label: "My Training", note: `${trainingProgress}% complete`, icon: GraduationCap, view: "training", tone: "text-[#ffb000]" },
+    { label: "Our Services", note: "Clinic services", icon: Sparkles, view: "services", tone: "text-[#ffb000]" },
     { label: "Announcements", note: "1 new item", icon: Bell, view: "announcements", tone: "text-[#ff3b62]" },
     { label: "Important Links", note: "Work systems", icon: Link2, view: "links", tone: "text-[#20c7f4]" },
   ];
@@ -476,26 +490,14 @@ function HomeView({ user, completedLessons, readResources, onNavigate, onOpenRes
       <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
         <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · {user.branch}</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, {user.fullName}</h2>
-            <p className="mt-3 text-base text-[#bed2df]">All staff tasks, references and training in one workspace.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Clinic Assistants</h2>
+            <p className="mt-3 text-base text-[#bed2df]">References and everyday work guides in one workspace.</p>
           </div>
           <div className="text-left md:text-right">
             <span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span>
             <p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p>
           </div>
-        </div>
-      </section>
-
-      <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Next action</p>
-            <h3 className="mt-3 text-2xl font-semibold">PM passover is still open</h3>
-            <p className="mt-2 text-[#bed2df]">6 outstanding tasks need to be reviewed before handover.</p>
-            <button onClick={() => onNavigate("handover")} className="mt-6 inline-flex items-center gap-3 rounded-[14px] bg-white px-5 py-3 text-sm font-bold text-[#0b3d59]">Open passover <ArrowRight className="h-4 w-4" /></button>
-          </div>
-          <span className="inline-flex w-fit rounded-full bg-[#ffc62b] px-5 py-2 text-sm font-bold text-[#263247]">Action needed</span>
         </div>
       </section>
 
@@ -516,17 +518,11 @@ function HomeView({ user, completedLessons, readResources, onNavigate, onOpenRes
         <div className="flex w-full max-w-xl gap-2 rounded-[16px] bg-white p-2 shadow-sm"><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onNavigate("knowledge")} placeholder="Try: shift change, Plato, complaints..." className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" /><button onClick={() => onNavigate("knowledge")} className="rounded-xl bg-[#0b3d59] px-5 py-2.5 text-sm font-bold text-white">Search</button></div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="overflow-hidden rounded-[28px] border border-[#dce4ed] bg-white">
-          <div className="bg-[#0b3d59] p-7 text-white"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#ffc62b]">Staff development</p><h3 className="mt-2 text-2xl font-semibold">My training</h3></div><div className="text-right"><p className="text-4xl font-semibold">{trainingProgress}%</p><p className="mt-1 text-xs text-[#a9c1d0]">{completedLessons.length}/{totalLessons} lessons</p></div></div><div className="mt-6 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-[#ffc62b]" style={{ width: `${trainingProgress}%` }} /></div></div>
-          <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{trainingModules[0].title}</p><p className="mt-1 text-sm text-slate-500">Required module · {trainingModules[0].duration} min</p></div><button onClick={() => onOpenModule(trainingModules[0])} className="rounded-xl bg-[#0b3d59] px-5 py-3 text-sm font-bold text-white">Continue training</button></div>
-        </div>
-        <div className="rounded-[28px] border border-[#dce4ed] bg-white p-7">
-          <div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div>
-          <h3 className="mt-5 text-xl font-semibold">{announcementsSeed[0].title}</h3><p className="mt-3 text-sm leading-6 text-slate-600">{announcementsSeed[0].body}</p>
-          <button onClick={() => onNavigate("announcements")} className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button>
-          <div className="mt-7 border-t border-slate-100 pt-5"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Latest references</p>{knowledgeResources.slice(0, 2).map((resource) => <button key={resource.id} onClick={() => onOpenResource(resource)} className="mt-4 flex w-full items-center gap-3 text-left"><FileText className="h-5 w-5 shrink-0 text-[#20aee0]" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{resource.title}</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>)}</div>
-        </div>
+      <section className="rounded-[28px] border border-[#dce4ed] bg-white p-7">
+        <div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div>
+        <h3 className="mt-5 text-xl font-semibold">{announcements[0]?.title || "No announcements yet"}</h3><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{announcements[0]?.body || "New announcements will appear here."}</p>
+        <button onClick={() => onNavigate("announcements")} className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button>
+        <div className="mt-7 grid gap-4 border-t border-slate-100 pt-5 md:grid-cols-2"><p className="text-xs font-bold uppercase tracking-wider text-slate-400 md:col-span-2">Latest references</p>{resources.slice(0, 2).map((resource) => <button key={resource.id} onClick={() => onOpenResource(resource)} className="flex items-center gap-3 rounded-xl bg-[#f7f9fc] p-4 text-left"><FileText className="h-5 w-5 shrink-0 text-[#20aee0]" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{resource.title}</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>)}</div>
       </section>
     </div>
   );
@@ -537,6 +533,19 @@ const announcementsSeed: Announcement[] = [
   { id: "onboarding", title: "New staff onboarding training", body: "Supervisors should ensure new staff complete the onboarding modules during their first week.", date: "28 Sep 2026", audience: "Supervisors & new staff", priority: "Biasa" },
   { id: "complaint", title: "Patient complaint SOP updated", body: "Review the new escalation flow in the Reference Hub and report any unclear steps.", date: "25 Sep 2026", audience: "Front desk & operations", priority: "Biasa" },
 ];
+
+const serviceSeed: Service[] = [
+    ["General consultation", "Consultation, acute treatment and follow-up care."],
+    ["Medical screening", "Individual, corporate and pre-employment screening packages."],
+    ["Vaccination", "Routine, travel and workplace vaccination services."],
+    ["Laboratory services", "Blood tests, screening samples and result follow-up."],
+    ["Women & child health", "Family-focused consultation and selected screening services."],
+    ["Panel & corporate care", "Panel registration support, claims guidance and employer services."],
+];
+
+function OurServicesView({ services }: { services: Service[] }) {
+  return <div className="mx-auto max-w-[1500px] space-y-7"><section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Clinic Assistants · Reference</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Our services</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">A quick overview of clinic services for staff orientation and patient enquiries. Confirm current pricing, eligibility and clinical suitability through the official process.</p></section><section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{services.map(([title, detail], index) => <article key={title} className="rounded-[24px] border border-[#dce4ed] bg-white p-6 shadow-[0_10px_28px_rgba(16,54,78,0.04)]"><span className="text-xs font-bold tracking-[0.18em] text-[#0b9aca]">0{index + 1}</span><h3 className="mt-4 text-lg font-semibold tracking-tight">{title}</h3><p className="mt-2 text-sm leading-6 text-[#60758c]">{detail}</p></article>)}</section><div className="rounded-[22px] border border-[#aee7fb] bg-[#edf9fe] p-5 text-sm leading-6 text-[#0b587b]"><strong>Staff reminder:</strong> Do not promise a price, panel coverage or clinical outcome before checking the applicable official guide or consulting the responsible clinician.</div></div>;
+}
 
 function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource }: { initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void }) {
   const [search, setSearch] = useState(initialSearch);
@@ -565,7 +574,7 @@ function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowl
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#e8f7fd] text-[#0b587b]"><FileText className="h-6 w-6" /></div>
             <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Official memos</p><h3 className="mt-1 text-lg font-semibold tracking-tight text-[#14233b]">AraSihat operational documents</h3><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">Original memos, policies and SOPs are stored in Drive. Use this hub to search references and open the full version when needed.</p></div>
           </div>
-          <div className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#e8f7fd] px-4 py-3 text-sm font-bold text-[#0b587b]"><CheckCircle2 className="h-4 w-4" />{knowledgeResources.length} memos connected</div>
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#e8f7fd] px-4 py-3 text-sm font-bold text-[#0b587b]"><CheckCircle2 className="h-4 w-4" />{resources.length} memos connected</div>
         </div>
         <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-[#fbfdff] px-5 py-4 sm:px-6"><span className="rounded-full bg-[#eef8fc] px-3 py-1.5 text-xs font-semibold text-[#0b587b]">Memos & policies</span><span className="rounded-full bg-[#eef8fc] px-3 py-1.5 text-xs font-semibold text-[#0b587b]">Clinical operations SOPs</span><span className="rounded-full bg-[#eef8fc] px-3 py-1.5 text-xs font-semibold text-[#0b587b]">Staff training</span><span className="rounded-full bg-[#fff7d8] px-3 py-1.5 text-xs font-semibold text-[#876700]">Official Drive version</span></div>
       </div>
@@ -602,8 +611,8 @@ function ResourceTableRow({ resource, canEdit, onOpen, onUpdate }: { key?: strin
   </div>;
 }
 
-function TrainingView({ completedLessons, onOpen }: { completedLessons: string[]; onOpen: (module: TrainingModule) => void }) {
-  const totalLessons = trainingModules.reduce((count, module) => count + module.lessons.length, 0);
+function TrainingView({ modules, completedLessons, onOpen }: { modules: TrainingModule[]; completedLessons: string[]; onOpen: (module: TrainingModule) => void }) {
+  const totalLessons = modules.reduce((count, module) => count + module.lessons.length, 0);
   const totalPercent = Math.round((completedLessons.length / totalLessons) * 100);
   return (
     <div className="mx-auto max-w-[1500px] space-y-7">
@@ -611,7 +620,7 @@ function TrainingView({ completedLessons, onOpen }: { completedLessons: string[]
         <div><p className="text-sm font-semibold text-[#67cff4]">Your learning plan</p><h2 className="mt-2 text-3xl font-semibold tracking-[-0.035em]">Learn a little, use it at work.</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Complete modules in priority order. Progress is saved on this device for the prototype.</p></div>
         <div className="rounded-2xl border border-white/15 bg-white/10 p-5"><div className="flex justify-between text-sm font-semibold"><span>Overall</span><span>{totalPercent}%</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-[#ffc62b]" style={{ width: `${totalPercent}%` }} /></div><p className="mt-3 text-sm text-[#b9cfdd]">{completedLessons.length} of {totalLessons} lessons completed</p></div>
       </section>
-      <div className="grid gap-5 lg:grid-cols-2">{trainingModules.map((module) => <div key={module.id}><TrainingCard module={module} completedLessons={completedLessons} onOpen={() => onOpen(module)} large /></div>)}</div>
+      <div className="grid gap-5 lg:grid-cols-2">{modules.map((module) => <div key={module.id}><TrainingCard module={module} completedLessons={completedLessons} onOpen={() => onOpen(module)} large /></div>)}</div>
     </div>
   );
 }
@@ -619,7 +628,6 @@ function TrainingView({ completedLessons, onOpen }: { completedLessons: string[]
 type PanelAvailability = "" | "Kajang" | "Seri Kembangan";
 type PanelTrainingRow = { id: string; panel: string; availability: PanelAvailability; guideUrl: string; portalUrl: string };
 
-const panelTrainingDriveUrl = "https://drive.google.com/drive/folders/1nvJW1koDXL0dqfeCkKy1K-K0BFmEaVhr?usp=share_link";
 const defaultPanelTrainingRows: PanelTrainingRow[] = [
   { id: "healthconnect", panel: "HealthConnect", availability: "", guideUrl: "https://drive.google.com/file/d/1xI8S_EOJxrGT3X74So9t7dbDTimSny45/preview", portalUrl: "" },
   { id: "hukm", panel: "HUKM", availability: "", guideUrl: "https://drive.google.com/file/d/145h4ltrl8bw4dyQ9bMxrqbp3tw1zuRD_/preview", portalUrl: "" },
@@ -634,40 +642,23 @@ function panelEmbedUrl(url: string) {
   return url.includes("/folders/") ? "" : url;
 }
 
-function PanelTrainingView({ canEdit, sync }: { canEdit: boolean; sync: ReturnType<typeof usePanelSync> }) {
-  const [rows, setRows] = useState<PanelTrainingRow[]>(() => {
-    const saved = readLocal<PanelTrainingRow[]>("ara_panel_training", []);
-    const legacy = [
-      ["aia", "AIA", "Kajang"], ["healthmetrics", "HealthMetrics", "Seri Kembangan"],
-      ["pmcare", "PMCare", "Kajang"], ["micare", "MiCare", "Seri Kembangan"],
-    ];
-    // Replace untouched demo rows, retaining any records the admin has edited.
-    const retained = saved.filter((row) => !legacy.some(([id, panel, branch]) =>
-      row.id === id && row.panel === panel && row.availability === branch &&
-      row.guideUrl === panelTrainingDriveUrl && !row.portalUrl));
-    return [...retained, ...defaultPanelTrainingRows.filter((row) => !retained.some((item) => item.id === row.id))];
-  });
+function PanelTrainingView({ rows, onRowsChange, canEdit, sync }: { rows: PanelTrainingRow[]; onRowsChange: (rows: PanelTrainingRow[]) => void; canEdit: boolean; sync: ReturnType<typeof usePanelSync> }) {
   const [selectedPanel, setSelectedPanel] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
   useEffect(() => {
     if (!sync.files.length) return;
-    setRows((current) => {
-      const added = sync.files.filter((file) => !current.some((row) => row.id === `drive-${file.id}` || row.guideUrl.includes(`/d/${file.id}/`)));
-      if (!added.length) return current;
-      const next: PanelTrainingRow[] = [...current, ...added.map((file) => ({ id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: '' as PanelAvailability, guideUrl: file.url, portalUrl: '' }))];
-      localStorage.setItem('ara_panel_training', JSON.stringify(next));
-      return next;
-    });
-  }, [sync.files]);
+    const added = sync.files.filter((file) => !rows.some((row) => row.id === `drive-${file.id}` || row.guideUrl.includes(`/d/${file.id}/`)));
+    if (!added.length) return;
+    onRowsChange([...rows, ...added.map((file) => ({ id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: '' as PanelAvailability, guideUrl: file.url, portalUrl: '' }))]);
+  }, [sync.files, rows, onRowsChange]);
   const updateRow = (id: string, patch: Partial<PanelTrainingRow>) => {
     const next = rows.map((row) => row.id === id ? { ...row, ...patch } : row);
-    setRows(next);
-    localStorage.setItem("ara_panel_training", JSON.stringify(next));
+    onRowsChange(next);
   };
 
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
-      <span role="status">{sync.error || (sync.realtimeEnabled ? (sync.connected ? 'Live guide updates connected' : 'Connecting to live updates…') : sync.checking ? 'Checking for new guides…' : sync.checkedAt ? `Last checked ${new Date(sync.checkedAt).toLocaleTimeString()} · Checked when you open Panel Training` : 'Select Check now to check for new guides.')}</span>
-      <button onClick={sync.refresh} disabled={sync.checking} className="shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-[#0b587b] disabled:opacity-50">Check now</button>
+      <span role="status">{sync.error || (sync.connected ? 'Live guide updates connected' : 'Connecting to live updates…')}</span>
+      <button onClick={sync.refresh} disabled={sync.checking} className="shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-[#0b587b] disabled:opacity-50">Refresh</button>
     </div>
     {sync.alerts.length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
       <h3 className="text-sm font-semibold text-[#0b3d59]">New panel guides added ({sync.alerts.length})</h3>
@@ -695,12 +686,12 @@ function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kin
   return <ModalShell onClose={onClose} wide><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability} · Official AraSpace reference</p></div><button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} className="h-[62vh] min-h-[480px] w-full" /></div><div className="mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">This reference opens inside AraSpace. Use the official source for the latest version.</p><a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
-function AnnouncementsView() {
-  return <div className="mx-auto max-w-[1500px] space-y-6"><section className="rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Team updates</p><h2 className="mt-2 text-3xl font-semibold">Announcements</h2><p className="mt-2 text-[#b9cfdd]">Operational changes and information staff need to know.</p></section>{announcementsSeed.map((item) => <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", item.priority === "Penting" ? "border-rose-200" : "border-[#dce4ed]")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", item.priority === "Penting" ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-600")}><Bell className="h-5 w-5" /></div><div><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 leading-7 text-slate-600">{item.body}</p></div></div><div className="shrink-0 text-sm text-slate-400 sm:text-right"><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div></div></article>)}</div>;
+function AnnouncementsView({ announcements }: { announcements: Announcement[] }) {
+  return <div className="mx-auto max-w-[1500px] space-y-6"><section className="rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Team updates</p><h2 className="mt-2 text-3xl font-semibold">Announcements</h2><p className="mt-2 text-[#b9cfdd]">Operational changes and information staff need to know.</p></section>{announcements.map((item) => <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", item.priority === "Penting" ? "border-rose-200" : "border-[#dce4ed]")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", item.priority === "Penting" ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-600")}><Bell className="h-5 w-5" /></div><div><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 leading-7 text-slate-600">{item.body}</p></div></div><div className="shrink-0 text-sm text-slate-400 sm:text-right"><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div></div></article>)}</div>;
 }
 
-function LinksView() {
-  return <div className="mx-auto max-w-[1500px]"><section className="mb-6 rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quick access</p><h2 className="mt-2 text-3xl font-semibold">Important links</h2><p className="mt-2 text-[#b9cfdd]">Systems and forms used in daily operations.</p></section><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{quickLinks.map((link) => <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className="h-5 w-5 text-[#8eb2c6] group-hover:text-white" /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3><p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p><p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>)}</div><p className="mt-6 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">These are starter links. An admin can replace them with the organisation's live links before publishing.</p></div>;
+function LinksView({ links }: { links: typeof quickLinks }) {
+  return <div className="mx-auto max-w-[1500px]"><section className="mb-6 rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quick access</p><h2 className="mt-2 text-3xl font-semibold">Important links</h2><p className="mt-2 text-[#b9cfdd]">Systems and forms used in daily operations.</p></section><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className="h-5 w-5 text-[#8eb2c6] group-hover:text-white" /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3><p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p><p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>)}</div><p className="mt-6 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">These are starter links. An admin can replace them with the organisation's live links before publishing.</p></div>;
 }
 
 function AdminView({ staff, onAddStaff }: { staff: PortalUser[]; onAddStaff: (staff: PortalUser) => void }) {

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleAuth } from 'google-auth-library';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 
 export const folderId = '1nvJW1koDXL0dqfeCkKy1K-K0BFmEaVhr';
 export function required(name: string) {
@@ -17,9 +18,24 @@ export function matches(value: string, digest: string) {
   const expected = Buffer.from(digest);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
+function googleCredentials() {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  if (email && privateKey) return { client_email: email, private_key: privateKey.replace(/\\n/g, '\n') };
+  const source = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!source) throw new Error('Missing server configuration: GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_PRIVATE_KEY');
+  const raw = existsSync(source) ? readFileSync(source, 'utf8') : source;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.client_email !== 'string' || typeof parsed.private_key !== 'string') throw new Error('invalid key fields');
+    return { client_email: parsed.client_email, private_key: parsed.private_key.replace(/\\n/g, '\n') };
+  } catch {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON must be a valid service-account JSON value or file path.');
+  }
+}
 export async function driveRequest(path: string, body?: unknown) {
   const auth = new GoogleAuth({
-    credentials: { client_email: required('GOOGLE_SERVICE_ACCOUNT_EMAIL'), private_key: required('GOOGLE_PRIVATE_KEY').replace(/\\n/g, '\n') },
+    credentials: googleCredentials(),
     scopes: ['https://www.googleapis.com/auth/drive.metadata.readonly'],
   });
   const token = await auth.getAccessToken();
