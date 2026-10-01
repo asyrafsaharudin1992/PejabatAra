@@ -160,6 +160,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<{ connected: boolean; error: string | null }>({ connected: false, error: null });
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionResolved, setSessionResolved] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskCategory, setNewTaskCategory] = useState<string>("Quality of Service");
   const [newTaskFrequency, setNewTaskFrequency] = useState<string>("When Needed");
@@ -276,15 +277,16 @@ export default function App() {
         localStorage.removeItem("araoffice_user");
       }
     }
+    setSessionResolved(true);
   }, []);
 
   // Quality & Corporate is entered through the AraOffice lobby. Keep one
   // shared session so staff never see a second, legacy sign-in screen here.
   useEffect(() => {
-    if (!user && window.location.hash.startsWith("#office/quality")) {
+    if (sessionResolved && !user && window.location.hash.startsWith("#office/quality")) {
       window.location.hash = "";
     }
-  }, [user]);
+  }, [sessionResolved, user]);
 
   useEffect(() => {
     fetchData();
@@ -1255,7 +1257,7 @@ export default function App() {
 
   // The lobby owns authentication for every office. If a user navigates
   // directly to this office without a session, return to that single sign-in.
-  if (!user) return null;
+  if (!sessionResolved || !user) return null;
 
   return (
     <div className="quality-office-shell flex h-screen bg-[#f7fafc] text-text-primary font-sans overflow-hidden">
