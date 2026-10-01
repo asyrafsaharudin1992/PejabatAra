@@ -324,9 +324,17 @@ export default function App() {
     if (!user) return;
     if (user.role === "Superadmin" && !silent) setIsUsersLoading(true);
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured || user.email === "system-admin@arasihat.local") {
       try {
-        const workspace = await loadQualityWorkspace(user.role === "Superadmin");
+        // The passcode-only System Admin preview has no Supabase Auth JWT.
+        // Read through the server-side service-role bridge instead of exposing
+        // the service-role key or weakening RLS policies for anonymous users.
+        const workspace = user.email === "system-admin@arasihat.local"
+          ? await fetch("/api/status?workspace=1").then(async (response) => {
+              if (!response.ok) throw new Error("Unable to load the admin workspace.");
+              return response.json();
+            })
+          : await loadQualityWorkspace(user.role === "Superadmin");
         setConnectionStatus({ connected: true, error: null });
         setTasks(workspace.tasks as Task[]);
         setNotes(workspace.notes as Note[]);
