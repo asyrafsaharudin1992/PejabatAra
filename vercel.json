@@ -1,8 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [{ "path": "/api/panel-watch", "schedule": "0 0 * * *" }],
   "functions": {
-    "api/panel-watch.ts": { "maxDuration": 60 },
     "api/panel-webhook.ts": { "maxDuration": 60 }
   }
 }
