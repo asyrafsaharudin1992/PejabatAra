@@ -35,6 +35,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
 import { isSupabaseConfigured, signOutSupabase } from "./lib/supabase";
+import { officeFetch as fetch } from "./lib/officeApi";
 import { loadQualityWorkspace } from "./lib/qualityData";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
@@ -196,13 +197,6 @@ export default function App() {
   const lastDateRef = useRef<string>(format(new Date(), "yyyy-MM-dd"));
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     const todayStr = format(currentTime, "yyyy-MM-dd");
     if (todayStr !== lastDateRef.current) {
       lastDateRef.current = todayStr;
@@ -324,17 +318,9 @@ export default function App() {
     if (!user) return;
     if (user.role === "Superadmin" && !silent) setIsUsersLoading(true);
 
-    if (isSupabaseConfigured || user.email === "system-admin@arasihat.local") {
+    if (isSupabaseConfigured) {
       try {
-        // The passcode-only System Admin preview has no Supabase Auth JWT.
-        // Read through the server-side service-role bridge instead of exposing
-        // the service-role key or weakening RLS policies for anonymous users.
-        const workspace = user.email === "system-admin@arasihat.local"
-          ? await fetch("/api/status?workspace=1").then(async (response) => {
-              if (!response.ok) throw new Error("Unable to load the admin workspace.");
-              return response.json();
-            })
-          : await loadQualityWorkspace(user.role === "Superadmin");
+        const workspace = await loadQualityWorkspace(false);
         setConnectionStatus({ connected: true, error: null });
         setTasks(workspace.tasks as Task[]);
         setNotes(workspace.notes as Note[]);
@@ -353,65 +339,8 @@ export default function App() {
       return;
     }
     
-    const fetchJson = async (url: string) => {
-      try {
-        console.log(`[fetchData] Fetching ${url}...`);
-        const res = await fetch(url);
-        if (!res.ok) {
-          const text = await res.text();
-          console.error(`[fetchData] HTTP error! status: ${res.status} for ${url}. Response:`, text.substring(0, 100));
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          const text = await res.text();
-          console.error(`[fetchData] Expected JSON from ${url} but got ${contentType}. Response:`, text.substring(0, 100));
-          throw new Error(`Expected JSON from ${url} but got ${contentType}`);
-        }
-        const data = await res.json();
-        console.log(`[fetchData] Successfully fetched ${url}. Data length:`, Array.isArray(data) ? data.length : 'Object');
-        return data;
-      } catch (e) {
-        console.error(`[fetchData] Error in fetchJson for ${url}:`, e);
-        throw e;
-      }
-    };
-
-    try {
-      const [status, tasksData, notesData, historyData, taskCategoriesData, portalData, staffSettingsData] = await Promise.all([
-        fetchJson("/api/status"),
-        fetchJson("/api/tasks"),
-        fetchJson("/api/notes"),
-        fetchJson("/api/history"),
-        fetchJson("/api/categories"),
-        fetchJson("/api/portal"),
-        fetchJson("/api/staff-settings")
-      ]);
-      
-      setConnectionStatus(status);
-      if (Array.isArray(tasksData)) setTasks(tasksData);
-      if (Array.isArray(notesData)) setNotes(notesData);
-      if (Array.isArray(historyData)) setHistory(historyData);
-      if (Array.isArray(taskCategoriesData)) setTaskCategories(taskCategoriesData.filter(c => c && c.name && c.name !== "General"));
-      if (Array.isArray(portalData)) setPortalLinks(portalData);
-      if (Array.isArray(staffSettingsData)) setStaffSettings(staffSettingsData);
-
-      if (user.role === "Superadmin") {
-        try {
-          const usersData = await fetchJson("/api/users");
-          if (Array.isArray(usersData)) setAllUsers(usersData);
-        } catch (e) {
-          console.error("Error fetching users:", e);
-        } finally {
-          if (!silent) setIsUsersLoading(false);
-        }
-      }
-    } catch (error) {
-      console.error("Fetch data error:", error);
-      setConnectionStatus({ connected: false, error: "Connection lost. Retrying..." });
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
+    setConnectionStatus({ connected: false, error: "Supabase is not configured." });
+    setIsLoading(false);
   };
 
   const showNotification = (text: string, type: "success" | "error" = "success") => {
@@ -776,7 +705,7 @@ export default function App() {
           body: JSON.stringify(newNoteData),
         });
         
-        if (!res.ok) throw new Error("Failed to save note to Google Sheets");
+        if (!res.ok) throw new Error("Failed to save note");
         
         const savedNote = await res.json();
         setNotes(prev => [savedNote, ...prev]);
@@ -932,7 +861,7 @@ export default function App() {
     const taskRemark = todayRemarks[task.id] || "";
 
     // Collect the subtasks that are ticked (completed today) so they can be
-    // recorded in the History / Tracker sheet alongside DONE + remarks.
+    // recorded in the history alongside DONE + remarks.
     const tickedSubtasks = (task.subtasks || [])
       .filter(st => {
         if (typeof st === 'string') return false;
@@ -1286,13 +1215,10 @@ export default function App() {
         <nav className="flex-1 space-y-1 px-2">
           {[
             { id: "Overview", icon: LayoutDashboard, roles: ["Superadmin", "Staff"] },
-            { id: "All Tasks", icon: CheckSquare, roles: ["Superadmin"] },
-            { id: "Calendar", icon: Calendar, roles: ["Superadmin", "Staff"] },
+            { id: "All Tasks", icon: CheckSquare, roles: ["Superadmin", "Staff"] },
             { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
             { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
             { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
-            { id: "Users", icon: User, roles: ["Superadmin"] },
-            { id: "Profile", icon: User, roles: ["Superadmin", "Staff"] },
           ].filter(item => item.roles.includes(user?.role || "Staff")).map((item) => (
             <button
               key={item.id}
@@ -1327,6 +1253,12 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
+        {connectionStatus.error && (
+          <div role="alert" className="rounded-xl bg-red-50 px-5 py-4 text-sm text-red-800 flex items-center justify-between gap-4">
+            <span>Workspace data could not be loaded. Your saved records have not been deleted.</span>
+            <button type="button" onClick={() => fetchData()} className="font-semibold">Try again</button>
+          </div>
+        )}
         <header className="flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">{activeTab}</h2>
@@ -1455,7 +1387,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-[1fr_340px] gap-6 flex-grow">
+                <div className="grid grid-cols-1 gap-6 flex-grow">
                   {/* Today's Focus Card */}
                   <div className="flex flex-col gap-4">
                     <div className="flex justify-between items-center px-2">
@@ -1639,43 +1571,26 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-6">
-                    {/* Calendar Card */}
-                    <div className="bg-white p-6 rounded-[20px] shadow-apple border border-border-apple/50">
-                      <CalendarView 
-                        mini 
-                        events={getCalendarEvents(tasks, notes, history)} 
-                        categories={taskCategories} 
-                        staffSettings={staffSettings}
-                        allUsers={allUsers}
-                      />
-                    </div>
-                  </div>
                 </div>
               </>
             )}
 
-            {activeTab === "Users" && user?.role === "Superadmin" && (
-              <UserManagement 
-                allUsers={allUsers} 
-                onAddUser={addUser} 
-                onDeleteUser={deleteUser} 
-                onResetPassword={resetPassword}
-                isLoading={isUsersLoading}
-              />
-            )}
 
-            {activeTab === "Profile" && (
-              <Profile 
-                user={user} 
-                onUpdateProfile={updateProfile} 
-                onChangePassword={changePassword} 
-                onLogout={handleLogout}
-                staffSettings={staffSettings}
-                onSaveStaffSettings={saveStaffSettings}
-              />
+            {activeTab === "All Tasks" && user?.role !== "Superadmin" && (
+              <section className="rounded-2xl bg-white p-8">
+                <h2 className="text-2xl font-semibold">All Tasks</h2>
+                <p className="mt-2 text-sm text-slate-500">{tasks.length} tasks · Quality &amp; Corporate</p>
+                <div className="mt-6 divide-y divide-slate-100">
+                  {tasks.filter(task => `${task.title} ${task.category}`.toLowerCase().includes(searchQuery.toLowerCase())).map(task => (
+                    <article key={task.id} className="py-5">
+                      <h3 className="font-semibold">{task.title}</h3>
+                      <p className="mt-1 text-sm text-slate-500">{task.category} · {task.frequency} {task.frequencyDetail}</p>
+                      {task.description && <p className="mt-2 text-sm">{task.description}</p>}
+                    </article>
+                  ))}
+                </div>
+              </section>
             )}
-
             {activeTab === "All Tasks" && user?.role === "Superadmin" && (
               <div className="flex flex-col gap-6">
                 <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
@@ -2121,23 +2036,6 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === "Calendar" && (
-              <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
-                {isLoading ? (
-                  <div className="flex flex-col items-center justify-center py-20">
-                    <Loader2 className="w-10 h-10 text-accent-blue animate-spin mb-4" />
-                    <p className="text-text-secondary font-bold uppercase tracking-widest text-[11px]">Loading Calendar...</p>
-                  </div>
-                ) : (
-                  <CalendarView 
-                    events={getCalendarEvents(tasks, notes, history)} 
-                    categories={taskCategories} 
-                    staffSettings={staffSettings}
-                    allUsers={allUsers}
-                  />
-                )}
-              </div>
-            )}
 
             {activeTab === "Notes" && (
               <div className="flex flex-col gap-6">
@@ -2657,7 +2555,7 @@ export default function App() {
   );
 }
 
-function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, isLoading }: { 
+export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, isLoading }: {
   allUsers: UserData[], 
   onAddUser: (user: any) => void, 
   onDeleteUser: (email: string) => void,
@@ -2671,7 +2569,7 @@ function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, is
     return (
       <div className="bg-white p-12 rounded-[24px] shadow-apple border border-border-apple/50 flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-4 border-accent-blue/20 border-t-accent-blue rounded-full animate-spin mb-4" />
-        <p className="text-text-secondary font-medium">Loading user data from Google Sheets...</p>
+        <p className="text-text-secondary font-medium">Loading accounts...</p>
       </div>
     );
   }
@@ -2787,10 +2685,10 @@ function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, is
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Initial Password</label>
                   <input 
-                    type="text" 
+                    type="password"
                     value={newUser.password}
                     onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                    placeholder="staff123"
+                    placeholder="At least 12 characters"
                     className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all"
                   />
                 </div>

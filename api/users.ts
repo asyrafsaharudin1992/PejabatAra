@@ -1,75 +1,39 @@
-import { GoogleAuth } from 'google-auth-library';
+import { officeAccess } from './_office-db';
 
 export default async function handler(req: any, res: any) {
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID || "1z41IbJtvILMYHz9EqvpflzZD3kTFLF0R9q-0OnzzQFE";
+  res.setHeader('Cache-Control', 'no-store');
   try {
-    const auth = new GoogleAuth({
-      credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: (process.env.GOOGLE_PRIVATE_KEY || "")
-          .replace(/^"/, '') 
-          .replace(/"$/, '') 
-          .replace(/\\n/g, '\n'),
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    const client = await auth.getClient();
-    const tokenResponse = await client.getAccessToken();
-    const token = tokenResponse.token;
-
-    const SHEET_NAME = 'Users';
-
+    const { db, user } = await officeAccess(req, true);
     if (req.method === 'GET') {
-      const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:G`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await response.json();
-      const rows = data.values || [];
-      return res.status(200).json(rows.slice(1).map((r: any) => ({
-        email: r[0], fullName: r[1], role: r[2], lastLogin: r[4], status: r[5] || "Active"
-      })));
+      const { data, error } = await db.from('profiles').select('id,email,full_name,role,status,department').order('full_name');
+      if (error) throw error;
+      return res.json((data || []).map(p => ({ ...p, fullName:p.full_name, role:p.role === 'super_admin' ? 'Superadmin' : 'Staff' })));
     }
-
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    if (req.method === 'POST') {
+      if (!body.fullName?.trim() || !body.email?.includes('@') || typeof body.password !== 'string' || body.password.length < 12 || !['Staff','Superadmin'].includes(body.role)) return res.status(400).json({error:'Enter a name, email, valid role and password of at least 12 characters.'});
+      const { data, error } = await db.auth.admin.createUser({email:body.email.trim(), password:body.password, email_confirm:true, user_metadata:{full_name:body.fullName.trim()}});
+      if (error) throw error;
+      const { error: profileError } = await db.from('profiles').upsert({id:data.user.id,email:body.email.trim(),full_name:body.fullName.trim(),role:body.role === 'Superadmin' ? 'super_admin' : 'staff',status:'active',department:body.department || null});
+      if (profileError) throw new Error('Account created, but profile setup failed. Check this account before retrying.');
+      return res.json({success:true});
+    }
+    const email = req.query.email || body.email;
+    if (!email) return res.status(400).json({error:'Select an account.'});
+    const { data: target, error } = await db.from('profiles').select('id,role').eq('email',email).single();
+    if (error) throw error;
+    if (req.method === 'PATCH') {
+      if (typeof body.password !== 'string' || body.password.length < 12) return res.status(400).json({error:'Use at least 12 characters.'});
+      const {error} = await db.auth.admin.updateUserById(target.id,{password:body.password});
+      if(error) throw error;
+      return res.json({success:true});
+    }
     if (req.method === 'DELETE') {
-      const { email } = req.query;
-      if (!email) return res.status(400).json({ error: "Email is required" });
-
-      // Step A: Get sheetId
-      const sheetInfoRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const sheetInfo = await sheetInfoRes.json();
-      const sheet = sheetInfo.sheets.find((s: any) => s.properties.title === SHEET_NAME);
-      const sheetId = sheet.properties.sheetId;
-
-      // Step B: Find Row
-      const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_NAME}!A:A`;
-      const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${token}` } });
-      const getData = await getRes.json();
-      const emails = getData.values || [];
-      const rowIndex = emails.findIndex((row: string[]) => row[0]?.toLowerCase() === (email as string).toLowerCase());
-
-      if (rowIndex !== -1) {
-        // Step C: batchUpdate deleteDimension
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requests: [{
-              deleteDimension: {
-                range: {
-                  sheetId: sheetId,
-                  dimension: 'ROWS',
-                  startIndex: rowIndex,
-                  endIndex: rowIndex + 1
-                }
-              }
-            }]
-          })
-        });
-        return res.status(200).json({ success: true });
-      }
-      return res.status(404).json({ error: "User not found" });
+      if (target.id === user.id || target.role === 'super_admin') return res.status(400).json({error:'System Admin accounts cannot be deleted here.'});
+      const {error} = await db.auth.admin.deleteUser(target.id);
+      if(error) throw error;
+      return res.json({success:true});
     }
-
-    return res.status(405).json({ error: 'Method not allowed' });
-  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+    return res.status(405).json({error:'Method not allowed.'});
+  } catch(error:any) { return res.status(error.status || 400).json({error:error.message}); }
 }
