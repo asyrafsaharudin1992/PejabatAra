@@ -429,7 +429,6 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
     { id: "announcements", label: "Announcements", icon: Bell },
     { id: "links", label: "Important Links", icon: Link2 },
   ];
-  if (user.role === "Superadmin") items.push({ id: "admin", label: "Management", icon: ShieldCheck });
 
   return (
     <>
