@@ -111,6 +111,7 @@ interface UserData {
   status?: string;
   location?: string;
   profilePic?: string;
+  officeAccess?: string[];
 }
 
 const INITIAL_CATEGORIES: CategoryData[] = [
@@ -2555,15 +2556,24 @@ export default function App() {
   );
 }
 
-export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, isLoading }: {
+const OFFICE_ACCESS_OPTIONS = [
+  { id: 'ceo', label: 'CEO' }, { id: 'coo', label: 'COO' }, { id: 'procurement', label: 'Procurement' },
+  { id: 'finance', label: 'Finance' }, { id: 'hr', label: 'Human Resources' }, { id: 'quality', label: 'Quality & Corporate' },
+  { id: 'clinical', label: 'Clinical Administration' }, { id: 'ca', label: 'Clinical Assistants' },
+];
+
+export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, onUpdateOfficeAccess, isLoading }: {
   allUsers: UserData[], 
   onAddUser: (user: any) => void, 
   onDeleteUser: (email: string) => void,
   onResetPassword: (email: string) => void,
+  onUpdateOfficeAccess: (email: string, officeAccess: string[]) => void,
   isLoading: boolean
 }) {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [newUser, setNewUser] = useState({ email: "", fullName: "", role: "Staff", password: "", location: "Main Office" });
+  const [editingAccess, setEditingAccess] = useState<UserData | null>(null);
+  const [newUser, setNewUser] = useState({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] as string[] });
+  const toggleOffice = (officeId: string, current: string[], update: (next: string[]) => void) => update(current.includes(officeId) ? current.filter(id => id !== officeId) : [...current, officeId]);
 
   if (isLoading) {
     return (
@@ -2597,6 +2607,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Full Name</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Email</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Role</th>
+              <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Office access</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Status</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest text-right">Actions</th>
             </tr>
@@ -2613,6 +2624,9 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
                   )}>
                     {u.role}
                   </span>
+                </td>
+                <td className="py-4 px-4">
+                  {u.role === 'Superadmin' ? <span className="text-xs font-semibold text-[#0b587b]">All offices</span> : <button onClick={() => setEditingAccess(u)} className="text-left text-xs font-semibold text-[#0b587b] hover:underline">{(u.officeAccess || []).map(id => OFFICE_ACCESS_OPTIONS.find(option => option.id === id)?.label).filter(Boolean).join(', ') || 'Set access'}</button>}
                 </td>
                 <td className="py-4 px-4 text-[12px] text-text-secondary">
                   <span className="flex items-center gap-1.5">
@@ -2703,18 +2717,11 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
                     <option value="Superadmin">Superadmin</option>
                   </select>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Location</label>
-                  <select 
-                    value={newUser.location}
-                    onChange={(e) => setNewUser({ ...newUser, location: e.target.value })}
-                    className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all"
-                  >
-                    <option value="Main Office">Main Office</option>
-                    <option value="Kajang">Kajang</option>
-                    <option value="Semenyih">Semenyih</option>
-                    <option value="Seri Kembangan">Seri Kembangan</option>
-                  </select>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Office access</label>
+                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F8F9FA] p-3">
+                    {OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 text-xs font-medium text-slate-700"><input type="checkbox" checked={newUser.officeAccess.includes(office.id)} onChange={() => toggleOffice(office.id, newUser.officeAccess, officeAccess => setNewUser({ ...newUser, officeAccess }))} />{office.label}</label>)}
+                  </div>
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button 
@@ -2727,7 +2734,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
                     onClick={() => {
                       onAddUser(newUser);
                       setIsAddUserModalOpen(false);
-                      setNewUser({ email: "", fullName: "", role: "Staff", password: "", location: "Main Office" });
+                      setNewUser({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] });
                     }}
                     className="flex-1 bg-accent-blue text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20"
                   >
@@ -2738,6 +2745,9 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {editingAccess && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditingAccess(null)} className="absolute inset-0 bg-black/20 backdrop-blur-sm" /><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="relative w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl"><h3 className="text-xl font-bold tracking-tight">Office access</h3><p className="mt-1 text-sm text-text-secondary">Choose the doors {editingAccess.fullName} can open.</p><div className="mt-6 grid grid-cols-2 gap-3">{OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 rounded-xl bg-[#f8f9fa] p-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={(editingAccess.officeAccess || []).includes(office.id)} onChange={() => setEditingAccess({ ...editingAccess, officeAccess: (editingAccess.officeAccess || []).includes(office.id) ? (editingAccess.officeAccess || []).filter(id => id !== office.id) : [...(editingAccess.officeAccess || []), office.id] })} />{office.label}</label>)}</div><div className="mt-6 flex gap-3"><button onClick={() => setEditingAccess(null)} className="flex-1 rounded-xl border border-border-apple px-4 py-3 text-sm font-bold">Cancel</button><button onClick={() => { onUpdateOfficeAccess(editingAccess.email, editingAccess.officeAccess || []); setEditingAccess(null); }} className="flex-1 rounded-xl bg-accent-blue px-4 py-3 text-sm font-bold text-white">Save access</button></div></motion.div></div>}
       </AnimatePresence>
     </div>
   );

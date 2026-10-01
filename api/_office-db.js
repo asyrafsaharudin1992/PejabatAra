@@ -11,7 +11,8 @@ export async function officeAccess(req, adminOnly = false) {
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
   const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();
-  if (profileError || profile?.status !== 'active' || (profile.role !== 'super_admin' && (adminOnly || profile.department !== 'Quality & Corporate'))) {
+  const officeAccess = data.user.app_metadata?.office_access;
+  if (profileError || profile?.status !== 'active' || (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !officeAccess.includes('quality')))) {
     throw Object.assign(new Error('Access restricted.'), { status: 403 });
   }
   return { db, user: data.user, profile };

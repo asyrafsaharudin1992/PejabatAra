@@ -9,6 +9,7 @@ export interface PortalUser {
   branch: string;
   status?: "active" | "invited" | "inactive";
   lastActive?: string;
+  officeAccess?: string[];
 }
 
 export interface KnowledgeResource {

@@ -51,6 +51,7 @@ export async function signInWithSupabase(email: string, password: string): Promi
     branch: branchRecord?.name || "Cawangan belum ditetapkan",
     status: profile?.status || "active",
     lastActive: "Sekarang",
+    officeAccess: Array.isArray(authData.user.app_metadata?.office_access) ? authData.user.app_metadata.office_access : [],
   };
 }
 
