@@ -156,7 +156,10 @@ export default function PortalApp() {
   const logout = async () => {
     await signOutSupabase();
     localStorage.removeItem("ara_portal_session");
+    localStorage.removeItem("araoffice_user");
+    localStorage.removeItem("ara_view_mode");
     setUser(null);
+    window.location.hash = "";
   };
 
   const navigate = (nextView: View) => {

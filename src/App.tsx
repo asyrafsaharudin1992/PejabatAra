@@ -34,7 +34,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
-import { isSupabaseConfigured } from "./lib/supabase";
+import { isSupabaseConfigured, signOutSupabase } from "./lib/supabase";
 import { loadQualityWorkspace } from "./lib/qualityData";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
@@ -239,10 +239,6 @@ export default function App() {
 
   const [selectedForTodayIds, setSelectedForTodayIds] = useState<string[]>([]);
   const [user, setUser] = useState<UserData | null>(null);
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [isLoginLoading, setIsLoginLoading] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<UserData[]>([]);
@@ -282,6 +278,14 @@ export default function App() {
     }
   }, []);
 
+  // Quality & Corporate is entered through the AraOffice lobby. Keep one
+  // shared session so staff never see a second, legacy sign-in screen here.
+  useEffect(() => {
+    if (!user && window.location.hash.startsWith("#office/quality")) {
+      window.location.hash = "";
+    }
+  }, [user]);
+
   useEffect(() => {
     fetchData();
   }, [user]);
@@ -292,34 +296,14 @@ export default function App() {
     }
   }, [activeTab]);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError("");
-    setIsLoginLoading(true);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setUser(data);
-        localStorage.setItem("araoffice_user", JSON.stringify(data));
-      } else {
-        setLoginError(data.error || "Login failed");
-      }
-    } catch (error) {
-      setLoginError("Connection error. Please try again.");
-    } finally {
-      setIsLoginLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setUser(null);
     localStorage.removeItem("araoffice_user");
+    localStorage.removeItem("ara_portal_session");
+    localStorage.removeItem("ara_view_mode");
+    await signOutSupabase();
     setActiveTab("Overview");
+    window.location.hash = "";
   };
 
   const safeFormat = (dateStr: string | undefined | null, formatStr: string, fallback = "N/A") => {
@@ -1269,87 +1253,22 @@ export default function App() {
 
   const upcomingDeadlines = remainingTodayItems.length;
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-bg-apple flex items-center justify-center p-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-[400px] bg-white p-10 rounded-[32px] shadow-apple border border-border-apple/50"
-        >
-          <div className="flex flex-col items-center mb-10">
-            <div className="w-16 h-16 bg-accent-blue rounded-[20px] flex items-center justify-center shadow-xl shadow-accent-blue/20 mb-6">
-              <LayoutDashboard className="w-8 h-8 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">AraOffice</h1>
-            <p className="text-text-secondary text-sm font-medium mt-1">Sign in to your workstation</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold text-text-secondary uppercase tracking-widest ml-1">Email Address</label>
-              <input 
-                type="email" 
-                required
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="name@hsohealthcare.com"
-                className="w-full bg-[#F8F9FA] border border-border-apple rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold text-text-secondary uppercase tracking-widest ml-1">Password</label>
-              <input 
-                type="password" 
-                required
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-[#F8F9FA] border border-border-apple rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all"
-              />
-            </div>
-
-            {loginError && (
-              <motion.p 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-red-500 text-xs font-medium text-center bg-red-50 py-2 rounded-lg"
-              >
-                {loginError}
-              </motion.p>
-            )}
-
-            <button 
-              type="submit"
-              disabled={isLoginLoading}
-              className="w-full bg-accent-blue text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent-blue/25 hover:shadow-xl hover:shadow-accent-blue/30 hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
-            >
-              {isLoginLoading ? "Signing in..." : "Sign In"}
-            </button>
-          </form>
-
-          <div className="mt-10 pt-10 border-t border-border-apple/50 text-center">
-            <p className="text-[11px] text-text-secondary font-medium uppercase tracking-widest">
-              Clinic Management System v2.0
-            </p>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
+  // The lobby owns authentication for every office. If a user navigates
+  // directly to this office without a session, return to that single sign-in.
+  if (!user) return null;
 
   return (
-    <div className="flex h-screen bg-bg-apple text-text-primary font-sans overflow-hidden">
+    <div className="quality-office-shell flex h-screen bg-[#f7fafc] text-text-primary font-sans overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-[260px] bg-white border-r border-border-apple flex flex-col px-4 py-8">
+      <aside className="w-[260px] bg-[#083a55] text-white border-0 flex flex-col px-4 py-8">
         <div className="px-4 mb-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-accent-blue rounded-xl flex items-center justify-center shadow-lg shadow-accent-blue/20">
+            <div className="w-10 h-10 bg-[#0b587b] rounded-xl flex items-center justify-center shadow-lg shadow-black/20">
               <LayoutDashboard className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="text-[16px] font-bold tracking-tight leading-tight">AraOffice</h1>
-              <p className="text-[11px] text-text-secondary font-medium uppercase tracking-wider">Workstation</p>
+              <p className="text-[11px] text-[#70d8fa] font-bold uppercase tracking-[0.18em]">Quality & Corporate</p>
             </div>
           </div>
         </div>
@@ -1371,13 +1290,13 @@ export default function App() {
               className={cn(
                 "w-full flex items-center px-4 py-3 text-[14px] font-bold rounded-apple-sm transition-all duration-200 group",
                 activeTab === item.id 
-                  ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/20" 
-                  : "text-text-secondary hover:bg-gray-50 hover:text-text-primary"
+                  ? "bg-white text-[#162a43] shadow-lg shadow-black/10" 
+                  : "text-[#b8cddd] hover:bg-white/10 hover:text-white"
               )}
             >
               <item.icon className={cn(
                 "w-5 h-5 mr-3 transition-colors",
-                activeTab === item.id ? "text-white" : "text-text-secondary group-hover:text-text-primary"
+                activeTab === item.id ? "text-[#7357ff]" : "text-[#b8cddd] group-hover:text-white"
               )} />
               {item.id}
             </button>
@@ -1387,7 +1306,7 @@ export default function App() {
         <div className="mt-auto px-2 space-y-4">
           <button 
             onClick={handleLogout}
-            className="w-full flex items-center px-4 py-3 text-[14px] font-bold rounded-apple-sm text-red-500 hover:bg-red-50 transition-all"
+            className="w-full flex items-center px-4 py-3 text-[14px] font-bold rounded-apple-sm text-[#ff9eae] hover:bg-white/10 transition-all"
           >
             <CloudOff className="w-5 h-5 mr-3" />
             Sign Out
