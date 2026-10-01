@@ -1314,59 +1314,6 @@ export default function App() {
             Sign Out
           </button>
 
-          <div className={cn(
-            "p-4 rounded-2xl flex flex-col gap-2 transition-all border",
-            connectionStatus.connected 
-              ? "bg-green-50 border-green-100" 
-              : "bg-red-50 border-red-100"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "text-[11px] font-bold uppercase tracking-widest",
-                connectionStatus.connected ? "text-green-600" : "text-red-600"
-              )}>
-                {connectionStatus.connected ? (isSyncing ? "Syncing..." : "Cloud Sync") : "Offline"}
-              </span>
-              <div className={cn(
-                "w-2 h-2 rounded-full",
-                isSyncing ? "animate-spin border-t-2 border-green-500 bg-transparent" : "animate-pulse",
-                connectionStatus.connected ? "bg-green-500" : "bg-red-500"
-              )} />
-            </div>
-            <p className={cn(
-              "text-[10px] font-medium leading-tight",
-              connectionStatus.connected ? "text-green-700/70" : "text-red-700/70"
-            )}>
-              {connectionStatus.connected 
-                ? "Database is active and syncing in real-time." 
-                : connectionStatus.error || "Connection lost. Please check your sheet permissions."}
-            </p>
-            {!connectionStatus.connected && (
-              <button 
-                onClick={async () => {
-                  setIsSyncing(true);
-                  try {
-                    const res = await fetch("/api/reconnect", { method: "POST" });
-                    const status = await res.json();
-                    setConnectionStatus(status);
-                    if (status.connected) {
-                      fetchData();
-                      showNotification("Reconnected successfully");
-                    } else {
-                      showNotification(status.error || "Failed to reconnect", "error");
-                    }
-                  } catch (e) {
-                    showNotification("Network error while reconnecting", "error");
-                  } finally {
-                    setIsSyncing(false);
-                  }
-                }}
-                className="mt-2 w-full py-2 bg-white border border-red-200 text-red-600 text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-red-50 transition-all"
-              >
-                Retry Connection
-              </button>
-            )}
-          </div>
         </div>
       </aside>
 
