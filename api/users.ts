@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db';
+import { officeAccess } from './_office-db.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
