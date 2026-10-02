@@ -42,7 +42,49 @@ async function save(table: string, records: any[], onConflict: string) {
   if (error) throw new Error(`${table}: ${error.message}`);
 }
 
+async function migrateTrackers() {
+  const trackerRows = await rows('Tracker', 'A:Y');
+  const trackerColumns = [
+    'tracker_date',
+    'clinical_audit_individual_feedback',
+    'clinical_audit_reporting',
+    'follow_up_referred_cases',
+    'in_house_guidelines',
+    'documenting_in_plato',
+    'graphic_design',
+    'email_correspondence',
+    'new_membership_data_update',
+    'cme_for_doctors',
+    'google_review_response',
+    'locum_qr_scan_review',
+    'damage_control',
+    'social_media',
+    'in_house_app_system_maintenance',
+    'corporate_collaborations',
+    'locumhub_performance_key_in',
+    'locum_interview_feedback',
+    'birthday_wishes',
+    'others',
+    'desktop_ops_drive_clearance',
+    'locum_directory_update',
+    'finding_replacement',
+    'meeting',
+    'doctors_schedule_locum_slots',
+  ];
+  const trackers = trackerRows.slice(1).filter((row) => row[0]).map((row) =>
+    Object.fromEntries(trackerColumns.map((column, index) => [column, String(row[index] || '').trim()]))
+  );
+  await save('office_trackers', trackers, 'tracker_date');
+  return trackers.length;
+}
+
 async function main() {
+  if (process.argv.includes('--tracker-only')) {
+    const trackerCount = await migrateTrackers();
+    console.log(`Tracker import completed: ${trackerCount} dates processed. No other Google Sheet tabs were read.`);
+    return;
+  }
+
   const categoryRows = await rows('Categories', 'A:B');
   const categories = categoryRows.slice(1).filter((r) => r[0]).map((r) => ({ name: r[0], color: r[1] || 'bg-slate-100 text-slate-600' }));
   await save('office_categories', categories, 'name');
@@ -62,7 +104,9 @@ async function main() {
   const links = linkRows.slice(1).filter((r) => r[0] && r[3]).map((r) => ({ id: r[0], folder: r[1] || 'General', title: r[2] || 'Link', url: r[3], created_at: r[4] || new Date().toISOString() }));
   await save('office_portal_links', links, 'id');
 
-  console.log(`Import completed without overwriting existing records: ${categories.length} categories, ${tasks.length} tasks, ${notes.length} notes and ${links.length} portal links processed. User and History sheets are intentionally excluded.`);
+  const trackerCount = await migrateTrackers();
+
+  console.log(`Import completed without overwriting existing records: ${categories.length} categories, ${tasks.length} tasks, ${notes.length} notes, ${links.length} portal links and ${trackerCount} tracker dates processed. User and History sheets are intentionally excluded.`);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

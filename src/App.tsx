@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { 
   LayoutDashboard, 
+  Check,
   CheckSquare, 
   StickyNote, 
   User, 
@@ -83,6 +84,9 @@ interface HistoryEntry {
   dateCompleted: string;
   remarks: string;
   subtasks?: string[];
+  category?: string;
+  source?: "manual" | "tracker";
+  readOnly?: boolean;
 }
 
 interface CategoryData {
@@ -235,6 +239,8 @@ export default function App() {
 
   const [selectedForTodayIds, setSelectedForTodayIds] = useState<string[]>([]);
   const [user, setUser] = useState<UserData | null>(null);
+  const [systemAdminAccount, setSystemAdminAccount] = useState<UserData | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<"admin" | "staff">(() => localStorage.getItem("ara_view_mode") === "staff" ? "staff" : "admin");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<UserData[]>([]);
@@ -265,6 +271,7 @@ export default function App() {
       try {
         const parsed = JSON.parse(savedUser);
         if (parsed && typeof parsed === "object") {
+          setSystemAdminAccount(parsed.role === "Superadmin" ? parsed : null);
           setUser(localStorage.getItem("ara_view_mode") === "staff" ? { ...parsed, role: "Staff" } : parsed);
         }
       } catch (e) {
@@ -301,6 +308,14 @@ export default function App() {
     await signOutSupabase();
     setActiveTab("Overview");
     window.location.hash = "";
+  };
+
+  const switchWorkspaceMode = (mode: "admin" | "staff") => {
+    if (!systemAdminAccount) return;
+    localStorage.setItem("ara_view_mode", mode);
+    setWorkspaceMode(mode);
+    setUser(mode === "staff" ? { ...systemAdminAccount, role: "Staff" } : systemAdminAccount);
+    setActiveTab("Overview");
   };
 
   const safeFormat = (dateStr: string | undefined | null, formatStr: string, fallback = "N/A") => {
@@ -1113,7 +1128,7 @@ export default function App() {
 
   const remainingTodayItems = combinedTodayItems.filter(item => {
     if (item.type === 'task') {
-      return !history.some(h => h.taskId === item.id && isSameDay(new Date(h.dateCompleted), currentTime));
+      return !isTaskCompletedForCycle(item as Task, history, currentTime);
     }
     return !item.completed;
   });
@@ -1192,6 +1207,18 @@ export default function App() {
     : 0;
 
   const upcomingDeadlines = remainingTodayItems.length;
+  const trackerHistory = history.filter(entry => entry.source === "tracker");
+  const recordedWorkdays = new Set(trackerHistory.map(entry => String(entry.dateCompleted).slice(0, 10))).size;
+  const latestRecordedDate = history[0]?.dateCompleted ? new Date(history[0].dateCompleted) : null;
+  const latestRecordedKey = history[0]?.dateCompleted ? String(history[0].dateCompleted).slice(0, 10) : "";
+  const latestDayActivity = latestRecordedKey
+    ? history.filter(entry => String(entry.dateCompleted).slice(0, 10) === latestRecordedKey)
+    : [];
+  const thisMonthActivity = history.filter(entry => {
+    const date = new Date(entry.dateCompleted);
+    return !isNaN(date.getTime()) && isSameMonth(date, currentTime);
+  }).length;
+  const latestWorkstreams = Array.from(new Set(latestDayActivity.map(entry => entry.category).filter(Boolean)));
 
   // The lobby owns authentication for every office. If a user navigates
   // directly to this office without a session, return to that single sign-in.
@@ -1254,6 +1281,23 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
+        {systemAdminAccount && (
+          <section className="flex flex-col gap-3 rounded-[20px] border border-[#dce4ed] bg-white px-5 py-4 shadow-[0_10px_30px_rgba(21,53,72,0.05)] sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#0b9aca]">System Admin preview</p>
+              <p className="mt-1 text-[13px] font-semibold text-[#29465a]">
+                {workspaceMode === "admin" ? "Administrator controls are enabled" : "Viewing Quality & Corporate as staff"}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">
+                <button type="button" onClick={() => switchWorkspaceMode("admin")} className={cn("rounded-lg px-4 py-2 text-xs font-bold transition", workspaceMode === "admin" ? "bg-[#0b587b] text-white shadow-sm" : "text-slate-500 hover:text-[#0b587b]")}>Admin View</button>
+                <button type="button" onClick={() => switchWorkspaceMode("staff")} className={cn("rounded-lg px-4 py-2 text-xs font-bold transition", workspaceMode === "staff" ? "bg-[#0b587b] text-white shadow-sm" : "text-slate-500 hover:text-[#0b587b]")}>Staff View</button>
+              </div>
+              <button type="button" onClick={() => { localStorage.removeItem("ara_view_mode"); window.location.hash = "#office/admin"; }} className="rounded-xl border border-[#dce4ed] bg-white px-4 py-2.5 text-xs font-bold text-[#0b587b] transition hover:border-[#0b587b]/30 hover:bg-[#f7fafb]">Control Centre</button>
+            </div>
+          </section>
+        )}
         {connectionStatus.error && (
           <div role="alert" className="rounded-xl bg-red-50 px-5 py-4 text-sm text-red-800 flex items-center justify-between gap-4">
             <span>Workspace data could not be loaded. Your saved records have not been deleted.</span>
@@ -1313,80 +1357,87 @@ export default function App() {
           >
             {activeTab === "Overview" && (
               <>
-                {/* Welcome Message */}
-                <div className="flex flex-col gap-1 mb-2">
-                  <h2 className="text-[28px] font-bold tracking-tight text-text-primary">
-                    Welcome {user?.fullName?.split(' ')[0]}! 👋
-                  </h2>
-                  <p className="text-[14px] text-text-secondary font-medium">
-                    This is your Operation Command Center. Have a productive day managing your clinic's excellence.
-                  </p>
-                </div>
-
-                {/* Stats Row */}
-                <div className="grid grid-cols-3 gap-6">
-                  {[
-                    { label: "Daily Completion", value: `${completionRate}%`, color: "text-accent-blue" },
-                    { label: "Upcoming Deadlines", value: upcomingDeadlines.toString().padStart(2, '0'), color: "text-orange-500" },
-                    { label: "Total Tasks Managed", value: tasks.length, color: "text-accent-green" },
-                  ].map((stat, i) => (
-                    <div key={i} className="bg-white p-6 rounded-[20px] shadow-apple border border-border-apple/50 hover:shadow-apple-hover transition-all duration-300 group">
-                      <p className="text-[11px] font-bold text-text-secondary uppercase tracking-widest mb-2">{stat.label}</p>
-                      <h3 className={cn("text-[32px] font-bold tracking-tight", stat.color)}>{stat.value}</h3>
+                <section className="relative overflow-hidden rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_22px_60px_rgba(11,64,92,0.18)]">
+                  <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-[#1a6a8d]/50 blur-3xl" />
+                  <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="max-w-2xl">
+                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#79d6f7]">Quality &amp; Corporate Office</p>
+                      <h2 className="text-[38px] font-semibold leading-tight tracking-[-0.035em]">
+                        Welcome back, {user?.fullName?.split(' ')[0]}.
+                      </h2>
+                      <p className="mt-3 max-w-xl text-[15px] leading-6 text-white/70">
+                        A clear view of today’s priorities and the work already recorded by your team.
+                      </p>
                     </div>
-                  ))}
-                </div>
-
-                {/* Department Load Chart */}
-                <div className="bg-white p-6 rounded-[20px] shadow-apple border border-border-apple/50">
-                  <div className="flex items-center justify-between mb-6">
-                    <h4 className="text-[18px] font-bold tracking-tight">Department Load</h4>
-                    <span className="text-[11px] font-bold text-text-secondary uppercase tracking-widest">Today's Distribution</span>
+                    <div className="min-w-[230px] rounded-[20px] border border-white/15 bg-white/10 px-5 py-4 backdrop-blur-sm">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/55">Latest record</p>
+                      <p className="mt-2 text-[18px] font-semibold tracking-tight">
+                        {latestRecordedDate && !isNaN(latestRecordedDate.getTime()) ? format(latestRecordedDate, "d MMMM yyyy") : "No activity yet"}
+                      </p>
+                      <p className="mt-1 text-[12px] text-white/60">{latestDayActivity.length} completed activities</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-6">
-                    {departmentLoad.filter(d => d.total > 0).map((dept, idx) => (
-                      <div key={idx} className="flex flex-col gap-2">
-                        <div className="flex justify-between items-end">
-                          <span className="text-[13px] font-bold text-text-primary">{dept.name}</span>
-                          <span className="text-[11px] font-bold text-text-secondary">{dept.completed}/{dept.total} Tasks</span>
-                        </div>
-                        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${dept.percentage}%` }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                            className={cn("h-full rounded-full", dept.barColor)}
-                          />
-                        </div>
+                </section>
+
+                <section className="overflow-hidden rounded-[24px] border border-[#e3e9ed] bg-white shadow-[0_14px_40px_rgba(21,53,72,0.055)]">
+                  <div className="grid grid-cols-2 lg:grid-cols-4">
+                    {[
+                      { label: "Recorded workdays", value: recordedWorkdays, detail: "From daily tracker" },
+                      { label: "Activity this month", value: thisMonthActivity, detail: "Completed items" },
+                      { label: "Task library", value: tasks.length, detail: "Active references" },
+                      { label: "Today’s queue", value: upcomingDeadlines, detail: `${completionRate}% complete` },
+                    ].map((stat, index) => (
+                      <div key={stat.label} className={cn("px-7 py-6", index > 0 && "border-l border-[#edf1f3]", index > 1 && "border-t lg:border-t-0")}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8192a0]">{stat.label}</p>
+                        <p className="mt-3 text-[31px] font-semibold tracking-[-0.04em] text-[#102b3d]">{stat.value}</p>
+                        <p className="mt-1 text-[12px] text-[#7b8d9a]">{stat.detail}</p>
                       </div>
                     ))}
-                    {departmentLoad.filter(d => d.total > 0).length === 0 && (
-                      <div className="col-span-full py-4 text-center">
-                        <p className="text-[13px] text-text-secondary italic">No tasks scheduled for today.</p>
-                      </div>
-                    )}
                   </div>
+                </section>
 
-                  {staffOnLeaveToday.length > 0 && (
-                    <div className="mt-8 pt-6 border-t border-border-apple/30">
-                      <div className="flex items-center gap-2 mb-4">
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
-                        <h5 className="text-[13px] font-bold text-text-primary uppercase tracking-wider">Staff on Leave Today</h5>
+                <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+                  <div className="rounded-[24px] border border-[#e3e9ed] bg-white p-7 shadow-[0_14px_40px_rgba(21,53,72,0.045)]">
+                    <div className="mb-6 flex items-end justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1b8bb6]">Latest activity</p>
+                        <h3 className="mt-1 text-[21px] font-semibold tracking-tight text-[#102b3d]">
+                          {latestRecordedDate && !isNaN(latestRecordedDate.getTime()) ? format(latestRecordedDate, "EEEE, d MMMM") : "No record available"}
+                        </h3>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {staffOnLeaveToday.map(staff => (
-                          <div key={staff.email} className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
-                            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
-                              <User className="w-3.5 h-3.5 text-slate-500" />
-                            </div>
-                            <span className="text-[12px] font-bold text-slate-600">{staff.name}</span>
-                            <span className="text-[10px] font-medium text-slate-400 italic">On Leave</span>
-                          </div>
-                        ))}
-                      </div>
+                      <button onClick={() => setActiveTab("History")} className="text-[12px] font-semibold text-[#0b587b] hover:text-[#063a51]">View history</button>
                     </div>
-                  )}
-                </div>
+                    <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
+                      {latestDayActivity.slice(0, 8).map((entry, index) => (
+                        <div key={`${entry.taskId}-${index}`} className="flex min-h-[54px] items-center gap-3 border-t border-[#edf1f3] py-3.5">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e9f7f1]">
+                            <CheckCircle2 className="h-4 w-4 text-[#159468]" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-[13px] font-semibold text-[#183348]">{entry.title}</p>
+                            <p className="truncate text-[11px] text-[#8595a1]">{entry.remarks || entry.category || "Completed"}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {latestDayActivity.length === 0 && <p className="py-8 text-sm text-[#80919d]">No completed activities have been recorded.</p>}
+                    </div>
+                  </div>
+                  <div className="rounded-[24px] border border-[#e3e9ed] bg-[#f3f8fa] p-7">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#728895]">Workstreams recorded</p>
+                    <div className="mt-5 space-y-3">
+                      {latestWorkstreams.map(workstream => {
+                        const count = latestDayActivity.filter(entry => entry.category === workstream).length;
+                        return (
+                          <div key={workstream} className="flex items-center justify-between rounded-[14px] bg-white px-4 py-3 shadow-[0_5px_16px_rgba(18,51,70,0.04)]">
+                            <span className="text-[13px] font-semibold text-[#183348]">{workstream}</span>
+                            <span className="text-[12px] font-semibold tabular-nums text-[#0b587b]">{count}</span>
+                          </div>
+                        );
+                      })}
+                      {latestWorkstreams.length === 0 && <p className="text-sm text-[#80919d]">No workstreams recorded yet.</p>}
+                    </div>
+                  </div>
+                </section>
 
                 <div className="grid grid-cols-1 gap-6 flex-grow">
                   {/* Today's Focus Card */}
@@ -1450,61 +1501,59 @@ export default function App() {
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-1 gap-4">
+                    <div className="overflow-hidden rounded-[20px] border border-[#e2e9ed] bg-white shadow-[0_12px_34px_rgba(21,53,72,0.045)] divide-y divide-[#edf1f3]">
                       {remainingTodayItems.map((item) => (
-                        <div key={`${item.type}-${item.id}`} className="bg-white p-5 rounded-[20px] shadow-apple border border-border-apple/50 hover:shadow-apple-hover transition-all duration-300 group">
-                          <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-4 flex-1">
-                              <button 
-                                onClick={() => {
-                                  if (item.type === 'task') {
-                                    completeTaskForToday(item as Task);
-                                  } else {
-                                    const note = item as Note;
-                                    updateNoteStatus(note.id, true);
-                                  }
-                                }}
-                                className="w-6 h-6 rounded-lg border-2 border-border-apple hover:border-accent-blue hover:bg-accent-blue/5 flex items-center justify-center transition-all group/tick"
-                              >
-                                <CheckCircle2 className="w-4 h-4 text-transparent group-hover/tick:text-accent-blue/30" />
-                              </button>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={cn("px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider", 
-                                    item.type === 'note' ? 'bg-orange-100 text-orange-600' : getCategoryColor(item.category))}>
-                                    {item.category || ''}
-                                  </span>
-                                  {item.type === 'task' && (item as Task).frequency && (
-                                    <span className="bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                                      <Clock className="w-3 h-3" />
-                                      {(item as Task).frequency.replace(/_/g, ' ')}
-                                    </span>
-                                  )}
-                                  {item.type === 'note' && (
-                                    <span className="bg-orange-50 text-orange-500 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                                      <StickyNote className="w-3 h-3" />
-                                      Note
-                                    </span>
-                                  )}
-                                </div>
-                                <h5 className="text-[16px] font-bold text-text-primary leading-tight">{item.title}</h5>
+                        <div key={`${item.type}-${item.id}`} className="group px-4 py-3.5 transition-colors hover:bg-[#fbfcfd]">
+                          <div className="grid items-center gap-3 sm:grid-cols-[28px_minmax(220px,1fr)] xl:grid-cols-[28px_minmax(260px,1fr)_minmax(220px,0.75fr)_32px]">
+                            <button
+                              onClick={() => {
+                                if (item.type === 'task') {
+                                  completeTaskForToday(item as Task);
+                                } else {
+                                  const note = item as Note;
+                                  updateNoteStatus(note.id, true);
+                                }
+                              }}
+                              aria-label={`Complete ${item.title}`}
+                              className="flex h-6 w-6 items-center justify-center rounded-full border border-[#cfdbe1] bg-white transition-all hover:border-[#0b82ad] hover:bg-[#edf8fc] group/tick"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 text-transparent group-hover/tick:text-[#0b82ad]/40" />
+                            </button>
+
+                            <div className="min-w-0">
+                              <h5 className="truncate text-[14px] font-semibold tracking-tight text-[#183348]">{item.title}</h5>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-semibold uppercase tracking-[0.1em]">
+                                <span className={item.type === 'note' ? 'text-orange-600' : 'text-[#1b82a9]'}>{item.category || (item.type === 'note' ? 'Note' : '')}</span>
+                                <span className="h-1 w-1 rounded-full bg-[#c7d3d9]" />
+                                <span className="text-[#82939e]">{item.type === 'task' ? formatTaskSchedule(item as Task) : 'Note'}</span>
                               </div>
                             </div>
-                            {item.type === 'task' && (
+
+                            {item.type === 'task' ? (
+                              <div className="col-span-2 sm:col-start-2 xl:col-span-1 xl:col-start-auto">
+                                <input
+                                  value={todayRemarks[item.id] || ""}
+                                  onChange={(e) => setTodayRemarks(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                  placeholder="Add remarks…"
+                                  aria-label={`Remarks for ${item.title}`}
+                                  className="h-9 w-full rounded-[10px] border border-[#e0e7eb] bg-[#f7f9fa] px-3 text-[12px] text-[#365064] outline-none transition focus:border-[#91cde2] focus:bg-white focus:ring-2 focus:ring-[#0b82ad]/8"
+                                />
+                              </div>
+                            ) : <div className="hidden xl:block" />}
+
+                            {item.type === 'task' && user?.role === "Superadmin" ? (
                               <button 
-                                onClick={() => user?.role === "Superadmin" && openEditModal(item as Task)}
-                                className={cn(
-                                  "p-2 hover:bg-gray-50 rounded-xl transition-all text-text-secondary hover:text-text-primary hover:scale-110 active:scale-95",
-                                  user?.role !== "Superadmin" && "opacity-0 pointer-events-none"
-                                )}
+                                onClick={() => openEditModal(item as Task)}
+                                aria-label={`Edit ${item.title}`}
+                                className="hidden h-8 w-8 items-center justify-center rounded-lg text-[#81929e] transition hover:bg-[#edf3f5] hover:text-[#183348] xl:flex"
                               >
-                                <Edit2 className="w-4 h-4" />
+                                <Edit2 className="h-3.5 w-3.5" />
                               </button>
-                            )}
+                            ) : <div className="hidden xl:block" />}
                           </div>
                           
                           {item.type === 'task' && (item as Task).subtasks && (item as Task).subtasks.length > 0 && (
-                            <div className="ml-10 mb-5 space-y-3">
+                            <div className="mt-2.5 flex flex-wrap gap-1.5 pl-0 sm:pl-10">
                               {(item as Task).subtasks.map((st, idx) => {
                                 const isObj = typeof st !== 'string';
                                 const text = isObj ? st.text : st;
@@ -1525,48 +1574,33 @@ export default function App() {
                                   <button 
                                     key={idx} 
                                     onClick={() => toggleSubtask(item.id, idx)}
-                                    className="flex items-center gap-3 group/st w-full text-left"
+                                    className={cn(
+                                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-left text-[10px] font-medium transition",
+                                      completed ? "border-[#b9dfd0] bg-[#eff9f5] text-[#4d7f6b] line-through" : "border-[#dce5e9] bg-white text-[#607684] hover:border-[#9fcddd]"
+                                    )}
                                   >
                                     <div className={cn(
-                                      "w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center",
+                                      "flex h-3.5 w-3.5 items-center justify-center rounded-full border transition-all",
                                       completed 
-                                        ? "bg-accent-blue border-accent-blue" 
-                                        : "border-border-apple/60 group-hover/st:border-accent-blue/40"
+                                        ? "border-[#159468] bg-[#159468]"
+                                        : "border-[#aebdc5]"
                                     )}>
-                                      {completed && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                      {completed && <Check className="h-2.5 w-2.5 text-white" />}
                                     </div>
-                                    <span className={cn(
-                                      "text-[13px] font-medium leading-tight transition-all",
-                                      completed ? "text-text-secondary/50 line-through" : "text-text-secondary"
-                                    )}>
-                                      {text}
-                                    </span>
+                                    <span>{text}</span>
                                   </button>
                                 );
                               })}
                             </div>
                           )}
-                          
-                          {item.type === 'task' && (
-                            <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-xl p-3 mb-1 ml-10">
-                              <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-1">Remarks</p>
-                              <textarea 
-                                value={todayRemarks[item.id] || ""}
-                                onChange={(e) => setTodayRemarks(prev => ({ ...prev, [item.id]: e.target.value }))}
-                                placeholder="Add specific remarks for today..."
-                                className="w-full bg-transparent text-[13px] text-text-primary/80 leading-relaxed italic border-none focus:ring-0 p-0 resize-none min-h-[40px] cursor-text"
-                              />
-                            </div>
-                          )}
                         </div>
                       ))}
                       {remainingTodayItems.length === 0 && (
-                        <div className="bg-[#F8F9FA] border border-dashed border-border-apple p-12 rounded-[24px] flex flex-col items-center justify-center text-center">
-                          <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-apple mb-4">
-                            <Zap className="w-8 h-8 text-accent-blue opacity-20" />
+                        <div className="flex items-center justify-center gap-3 bg-[#f8fafb] px-5 py-8 text-center">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm">
+                            <Zap className="h-4 w-4 text-[#7f9ba9]" />
                           </div>
-                          <p className="text-[15px] font-bold text-text-primary mb-1">Queue Clear!</p>
-                          <p className="text-[13px] font-medium text-text-secondary">You're all caught up for today.</p>
+                          <div className="text-left"><p className="text-[13px] font-semibold text-[#183348]">Queue clear</p><p className="text-[11px] text-[#82939e]">You're all caught up for today.</p></div>
                         </div>
                       )}
                     </div>
@@ -1578,15 +1612,41 @@ export default function App() {
 
 
             {activeTab === "All Tasks" && user?.role !== "Superadmin" && (
-              <section className="rounded-2xl bg-white p-8">
-                <h2 className="text-2xl font-semibold">All Tasks</h2>
-                <p className="mt-2 text-sm text-slate-500">{tasks.length} tasks · Quality &amp; Corporate</p>
-                <div className="mt-6 divide-y divide-slate-100">
-                  {tasks.filter(task => `${task.title} ${task.category}`.toLowerCase().includes(searchQuery.toLowerCase())).map(task => (
-                    <article key={task.id} className="py-5">
-                      <h3 className="font-semibold">{task.title}</h3>
-                      <p className="mt-1 text-sm text-slate-500">{task.category} · {task.frequency} {task.frequencyDetail}</p>
-                      {task.description && <p className="mt-2 text-sm">{task.description}</p>}
+              <section className="flex flex-col gap-6">
+                <div className="rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_20px_55px_rgba(11,64,92,0.16)]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#79d6f7]">Task library</p>
+                  <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+                    <div>
+                      <h2 className="text-[34px] font-semibold tracking-[-0.035em]">Work, clearly organised.</h2>
+                      <p className="mt-2 text-[14px] text-white/65">{tasks.length} recurring responsibilities across {dynamicCategories.length} workstreams.</p>
+                    </div>
+                    <div className="rounded-[16px] border border-white/15 bg-white/10 px-5 py-3 text-right">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-white/50">Current view</p>
+                      <p className="mt-1 text-[14px] font-semibold">{selectedCategory === "All" ? "All workstreams" : selectedCategory}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {["All", ...dynamicCategories.map(category => category.name)].map(category => (
+                    <button key={category} onClick={() => setSelectedCategory(category)} className={cn(
+                      "rounded-full px-4 py-2 text-[12px] font-semibold transition-colors",
+                      selectedCategory === category ? "bg-[#123f58] text-white" : "bg-white text-[#617684] hover:bg-[#edf4f7]"
+                    )}>{category}</button>
+                  ))}
+                </div>
+                <div className="overflow-hidden rounded-[24px] border border-[#e3e9ed] bg-white shadow-[0_14px_40px_rgba(21,53,72,0.045)]">
+                  {tasks
+                    .filter(task => selectedCategory === "All" || task.category === selectedCategory)
+                    .filter(task => `${task.title} ${task.category}`.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .map((task, index) => (
+                    <article key={task.id} className={cn("grid gap-4 px-7 py-5 md:grid-cols-[1fr_190px] md:items-center", index > 0 && "border-t border-[#edf1f3]")}>
+                      <div>
+                        <p className="text-[15px] font-semibold tracking-tight text-[#183348]">{task.title}</p>
+                      </div>
+                      <div className="md:text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[#1b82a9]">{task.category}</p>
+                        <p className="mt-1 text-[12px] text-[#8495a0]">{formatTaskSchedule(task)}</p>
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -1594,8 +1654,24 @@ export default function App() {
             )}
             {activeTab === "All Tasks" && user?.role === "Superadmin" && (
               <div className="flex flex-col gap-6">
-                <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
-                  <h4 className="text-[20px] font-bold tracking-tight mb-6">Create New Task</h4>
+                <div className="rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_20px_55px_rgba(11,64,92,0.16)]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#79d6f7]">Task library</p>
+                  <div className="mt-2 flex items-end justify-between gap-6">
+                    <div>
+                      <h2 className="text-[34px] font-semibold tracking-[-0.035em]">A quieter way to manage work.</h2>
+                      <p className="mt-2 text-[14px] text-white/65">Review responsibilities, cadence and guidance in one place.</p>
+                    </div>
+                    <div className="hidden rounded-[16px] border border-white/15 bg-white/10 px-5 py-3 text-right md:block">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-white/50">Task library</p>
+                      <p className="mt-1 text-[22px] font-semibold">{tasks.length}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white p-8 rounded-[24px] shadow-[0_14px_40px_rgba(21,53,72,0.045)] border border-[#e3e9ed]">
+                  <div className="mb-6">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#1b82a9]">Create</p>
+                    <h4 className="mt-1 text-[20px] font-semibold tracking-tight">Add a new responsibility</h4>
+                  </div>
                   <form onSubmit={addTask} className="grid grid-cols-1 md:grid-cols-[1fr_200px_200px_160px] gap-4">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Task Title</label>
@@ -1669,7 +1745,7 @@ export default function App() {
 
                   {["Monthly", "2-Monthly", "3-Monthly"].includes(newTaskFrequency) && (
                     <div className="flex flex-col gap-1.5 mt-4 max-w-xs">
-                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Date</label>
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Due Day Each Cycle</label>
                       <select 
                         value={newTaskFrequencyDetail || "1"}
                         onChange={(e) => setNewTaskFrequencyDetail(e.target.value)}
@@ -1679,6 +1755,7 @@ export default function App() {
                           <option key={date} value={date.toString()}>Date {date}</option>
                         ))}
                       </select>
+                      <p className="ml-1 text-[11px] leading-4 text-[#82939e]">Appears on this day, moves to the next working day when it falls on a weekend, and remains visible until completed. An earlier completion in the same cycle is recognised.</p>
                     </div>
                   )}
                 </div>
@@ -1734,27 +1811,22 @@ export default function App() {
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2 }}
-                        className="bg-white p-6 rounded-[24px] shadow-apple border border-border-apple/50 hover:shadow-apple-hover transition-all duration-300 flex flex-col"
+                        className="bg-white p-6 rounded-[20px] shadow-[0_10px_32px_rgba(21,53,72,0.045)] border border-[#e3e9ed] hover:border-[#c9d8df] hover:shadow-[0_16px_38px_rgba(21,53,72,0.075)] transition-all duration-300 flex flex-col"
                       >
                         <div className="flex justify-between items-start mb-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className={cn("px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider", getCategoryColor(task.category))}>
+                              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#167ca2]">
                                 {task.category}
                               </span>
                               {task.frequency && (
-                                <span className="bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  {task.frequency} {task.frequencyDetail && (
-                                    <span className="opacity-70">
-                                      ({task.frequency === "Weekly" ? task.frequencyDetail : `Date ${task.frequencyDetail}`})
-                                    </span>
-                                  )}
+                                <span className="border-l border-[#dce5e9] pl-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#82939e] flex items-center gap-1">
+                                  {formatTaskSchedule(task)}
                                 </span>
                               )}
                             </div>
-                            <h5 className="text-[17px] font-bold text-text-primary leading-tight">{task.title}</h5>
-                            <p className="text-[11px] text-text-secondary mt-1 font-medium">Created on {format(new Date(task.createdAt), "MMM d, yyyy")}</p>
+                            <h5 className="text-[17px] font-semibold tracking-tight text-[#183348] leading-tight">{task.title}</h5>
+                            <p className="text-[11px] text-[#8a9aa5] mt-1 font-medium">Added {format(new Date(task.createdAt), "d MMM yyyy")}</p>
                           </div>
                           <div className="flex gap-1 relative">
                             {user?.role === "Superadmin" && (
@@ -1807,10 +1879,10 @@ export default function App() {
                           </div>
                         )}
                         
-                        <div className="bg-[#F8F9FA] border border-border-apple/60 rounded-2xl p-4 flex-grow">
-                          <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">Remarks / Description</p>
-                          <p className="text-[14px] text-text-primary/80 leading-relaxed italic">
-                            {task.description || ""}
+                        <div className="bg-[#f5f8f9] rounded-[14px] p-4 flex-grow">
+                          <p className="text-[10px] font-semibold text-[#8495a0] uppercase tracking-[0.14em] mb-2">Guidance</p>
+                          <p className="text-[13px] text-[#536b7a] leading-relaxed">
+                            {task.description || "No additional guidance recorded."}
                           </p>
                         </div>
                       </motion.div>
@@ -2338,7 +2410,7 @@ export default function App() {
 
                   {["Monthly", "2-Monthly", "3-Monthly"].includes(editingTask.frequency || "") && (
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Select Date</label>
+                      <label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Due Day Each Cycle</label>
                       <select 
                         value={editingTask.frequencyDetail || "1"}
                         onChange={(e) => setEditingTask({ ...editingTask, frequencyDetail: e.target.value })}
@@ -2348,6 +2420,7 @@ export default function App() {
                           <option key={date} value={date.toString()}>Date {date}</option>
                         ))}
                       </select>
+                      <p className="ml-1 text-[11px] leading-4 text-[#82939e]">Appears on this day, moves to the next working day when it falls on a weekend, and remains visible until completed. An earlier completion in the same cycle is recognised.</p>
                     </div>
                   )}
 
@@ -3195,6 +3268,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
 }) {
   const [currentMonth, setCurrentMonth] = useState(today);
   const [selectedDate, setSelectedDate] = useState<Date | null>(today);
+  const [jumpDate, setJumpDate] = useState(format(today, "yyyy-MM-dd"));
   
   const start = startOfWeek(startOfMonth(currentMonth));
   const end = endOfWeek(endOfMonth(currentMonth));
@@ -3228,8 +3302,17 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
     ? staffSettings.filter(s => isStaffOff(s.email, selectedDate))
     : [];
 
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+  const nextMonth = () => setCurrentMonth(month => addMonths(month, 1));
+  const prevMonth = () => setCurrentMonth(month => subMonths(month, 1));
+  const jumpToDate = (value: string) => {
+    if (!value) return;
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(year, month - 1, day, 12);
+    if (isNaN(date.getTime())) return;
+    setCurrentMonth(date);
+    setSelectedDate(date);
+    setJumpDate(value);
+  };
 
   const completionsForDate = selectedDate 
     ? [
@@ -3255,8 +3338,26 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10">
       <div className="bg-[#F8F9FA] p-8 rounded-[24px] border border-border-apple/60">
-        <div className="flex justify-between items-center mb-8">
-          <h5 className="text-[18px] font-bold tracking-tight">{format(currentMonth, "MMMM yyyy")}</h5>
+        <div className="flex justify-between items-center mb-8 gap-4">
+          <div>
+            <h5 className="text-[18px] font-bold tracking-tight">{format(currentMonth, "MMMM yyyy")}</h5>
+            <label className="mt-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#81929e]">
+              Jump to date
+              <input
+                type="date"
+                value={jumpDate}
+                onChange={(event) => setJumpDate(event.target.value)}
+                className="rounded-lg border border-[#dce5e9] bg-white px-2 py-1 text-[11px] font-medium tracking-normal text-[#29465a] outline-none focus:border-[#0b587b]"
+              />
+              <button
+                type="button"
+                onClick={() => jumpToDate(jumpDate)}
+                className="rounded-lg bg-[#0b587b] px-2.5 py-1.5 text-[10px] font-bold normal-case tracking-normal text-white transition-colors hover:bg-[#084866]"
+              >
+                Go
+              </button>
+            </label>
+          </div>
           <div className="flex gap-2">
             <button onClick={prevMonth} className="p-2 hover:bg-white rounded-xl border border-transparent hover:border-border-apple transition-all"><ChevronLeft className="w-5 h-5" /></button>
             <button onClick={nextMonth} className="p-2 hover:bg-white rounded-xl border border-transparent hover:border-border-apple transition-all"><ChevronRight className="w-5 h-5" /></button>
@@ -3280,7 +3381,10 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
             return (
               <button
                 key={i}
-                onClick={() => setSelectedDate(day)}
+                onClick={() => {
+                  setSelectedDate(day);
+                  setJumpDate(format(day, "yyyy-MM-dd"));
+                }}
                 className={cn(
                   "aspect-square rounded-2xl flex flex-col items-center justify-center relative transition-all border group",
                   isSelected 
@@ -3382,7 +3486,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                         entry.isLeave ? "text-slate-700" : "text-text-primary"
                       )}>{entry.title}</h6>
                     </div>
-                    {isTodayEntry && !entry.isLeave && (
+                    {isTodayEntry && !entry.isLeave && !entry.readOnly && (
                       <button 
                         onClick={() => onUndo(entry.taskId, entry.dateCompleted)}
                         className="text-[10px] font-bold text-accent-blue uppercase tracking-widest hover:underline"
@@ -3391,6 +3495,12 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                       </button>
                     )}
                   </div>
+                  {!entry.isLeave && (entry.category || entry.source === "tracker") && (
+                    <div className="mb-3 flex items-center gap-2">
+                      {entry.category && <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[#197da4]">{entry.category}</span>}
+                      {entry.source === "tracker" && <span className="rounded-full bg-[#eef4f6] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#728792]">Daily tracker</span>}
+                    </div>
+                  )}
                   {!entry.isLeave && entry.subtasks && entry.subtasks.length > 0 && (
                     <div className="mb-3 flex flex-col gap-1.5">
                       {entry.subtasks.map((stText: string, si: number) => (
@@ -3410,8 +3520,8 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                     <p className={cn(
                       "text-[10px] font-bold uppercase tracking-widest mb-1",
                       entry.isLeave ? "text-slate-500" : "text-text-secondary"
-                    )}>Remarks</p>
-                    {isTodayEntry && !entry.isLeave ? (
+                    )}>Details</p>
+                    {isTodayEntry && !entry.isLeave && !entry.readOnly ? (
                       <textarea 
                         value={entry.remarks || ""}
                         onChange={(e) => onUpdateRemark(entry.taskId, entry.dateCompleted, e.target.value)}
@@ -3427,10 +3537,10 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                       </p>
                     )}
                   </div>
-                  {!isTodayEntry && !entry.isLeave && (
+                  {(!isTodayEntry || entry.readOnly) && !entry.isLeave && (
                     <div className="mt-3 flex items-center gap-1.5 text-text-secondary">
                       <Clock className="w-3 h-3" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Locked</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest">{entry.source === "tracker" ? "Recorded in daily tracker" : "Locked"}</span>
                     </div>
                   )}
                 </div>
@@ -3448,6 +3558,66 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
   );
 }
 
+function normalizedTaskFrequency(task: Task) {
+  return (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+}
+
+function formatTaskSchedule(task: Task) {
+  const frequency = normalizedTaskFrequency(task);
+  const detail = task.frequencyDetail?.trim();
+  if (frequency === "monthly" || frequency === "2-monthly" || frequency === "2 monthly" || frequency === "3-monthly" || frequency === "3 monthly") {
+    const label = frequency.startsWith("2") ? "Every 2 months" : frequency.startsWith("3") ? "Every 3 months" : "Monthly";
+    return `${label} · Day ${detail || "1"}`;
+  }
+  if (frequency === "weekly" && detail) return `Weekly · ${detail}`;
+  return (task.frequency || "Daily").replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function taskCycleKey(task: Task, day: Date) {
+  const frequency = normalizedTaskFrequency(task);
+  const year = day.getFullYear();
+  const month = day.getMonth();
+
+  if (frequency.startsWith("2-monthly") || frequency.startsWith("2 monthly")) {
+    return `two-month:${year}:${Math.floor(month / 2)}`;
+  }
+  if (frequency.startsWith("3-monthly") || frequency.startsWith("3 monthly")) {
+    return `three-month:${year}:${Math.floor(month / 3)}`;
+  }
+  if (frequency === "monthly 3rd 4th fri") return `day:${format(day, "yyyy-MM-dd")}`;
+  if (frequency.startsWith("monthly")) return `month:${format(day, "yyyy-MM")}`;
+  if (frequency.startsWith("weekly")) return `week:${format(startOfWeek(day), "yyyy-MM-dd")}`;
+  return `day:${format(day, "yyyy-MM-dd")}`;
+}
+
+function isTaskCompletedForCycle(task: Task, history: HistoryEntry[], day: Date) {
+  const cycle = taskCycleKey(task, day);
+  const endOfDay = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999);
+  return history.some(entry => {
+    if (entry.taskId !== task.id) return false;
+    const completedDate = new Date(entry.dateCompleted);
+    if (isNaN(completedDate.getTime()) || completedDate > endOfDay) return false;
+    return taskCycleKey(task, completedDate) === cycle;
+  });
+}
+
+function scheduledDayOfMonth(day: Date, requestedDay: string | undefined) {
+  const parsedDay = Number.parseInt(requestedDay || "1", 10);
+  const lastDay = new Date(day.getFullYear(), day.getMonth() + 1, 0).getDate();
+  const safeDay = Math.min(Math.max(Number.isFinite(parsedDay) ? parsedDay : 1, 1), lastDay);
+  const scheduled = new Date(day.getFullYear(), day.getMonth(), safeDay, 12);
+
+  // Recurring office work should not first become due on a weekend.
+  if (scheduled.getDay() === 6) scheduled.setDate(scheduled.getDate() + 2);
+  if (scheduled.getDay() === 0) scheduled.setDate(scheduled.getDate() + 1);
+  return scheduled;
+}
+
+function isOnOrAfterScheduledDay(day: Date, scheduled: Date) {
+  const check = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12);
+  return check >= scheduled;
+}
+
 function isTaskOnDay(task: Task, day: Date) {
   if (task.deadline) {
     try {
@@ -3458,9 +3628,8 @@ function isTaskOnDay(task: Task, day: Date) {
     }
   }
   
-  const freq = (task.frequency || "").toLowerCase().replace(/_/g, ' ').trim();
+  const freq = normalizedTaskFrequency(task);
   const dayName = format(day, "EEEE"); // e.g. "Friday"
-  const dayOfMonth = day.getDate();
   const month = day.getMonth(); // 0-11
   
   if (freq === "daily" || freq === "") return true;
@@ -3484,30 +3653,7 @@ function isTaskOnDay(task: Task, day: Date) {
     return dayName === "Tuesday" || dayName === "Thursday";
   }
 
-  if (freq.startsWith("monthly")) {
-    if (freq === "monthly") {
-      const target = task.frequencyDetail || "1";
-      return dayOfMonth.toString() === target;
-    }
-    const target = freq.replace("monthly", "").replace(/[-_]/g, "").trim();
-    return dayOfMonth.toString() === target;
-  }
-
-  if (freq.startsWith("2-monthly") || freq.startsWith("2 monthly") || freq.startsWith("2_monthly")) {
-    let target = task.frequencyDetail || "1";
-    const suffix = freq.replace(/2[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
-    if (suffix) target = suffix;
-    return dayOfMonth.toString() === target && month % 2 === 1;
-  }
-
-  if (freq.startsWith("3-monthly") || freq.startsWith("3 monthly") || freq.startsWith("3_monthly")) {
-    let target = task.frequencyDetail || "1";
-    const suffix = freq.replace(/3[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
-    if (suffix) target = suffix;
-    return dayOfMonth.toString() === target && (month + 1) % 3 === 0;
-  }
-
-  if (freq === "monthly_2nd_fri") {
+  if (freq === "monthly 2nd fri") {
      if (dayName !== "Friday") return false;
      const firstDay = startOfMonth(day);
      let count = 0;
@@ -3522,7 +3668,7 @@ function isTaskOnDay(task: Task, day: Date) {
      return false;
   }
 
-  if (freq === "monthly_3rd_4th_fri") {
+  if (freq === "monthly 3rd 4th fri") {
      if (dayName !== "Friday") return false;
      const firstDay = startOfMonth(day);
      let count = 0;
@@ -3535,6 +3681,28 @@ function isTaskOnDay(task: Task, day: Date) {
        }
      }
      return false;
+  }
+
+  if (freq.startsWith("monthly")) {
+    if (freq === "monthly") {
+      return isOnOrAfterScheduledDay(day, scheduledDayOfMonth(day, task.frequencyDetail));
+    }
+    const target = freq.replace("monthly", "").replace(/[-_]/g, "").trim();
+    return isOnOrAfterScheduledDay(day, scheduledDayOfMonth(day, target));
+  }
+
+  if (freq.startsWith("2-monthly") || freq.startsWith("2 monthly") || freq.startsWith("2_monthly")) {
+    let target = task.frequencyDetail || "1";
+    const suffix = freq.replace(/2[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
+    if (suffix) target = suffix;
+    return month % 2 === 1 && isOnOrAfterScheduledDay(day, scheduledDayOfMonth(day, target));
+  }
+
+  if (freq.startsWith("3-monthly") || freq.startsWith("3 monthly") || freq.startsWith("3_monthly")) {
+    let target = task.frequencyDetail || "1";
+    const suffix = freq.replace(/3[-_ ]monthly/g, "").replace(/[-_]/g, "").trim();
+    if (suffix) target = suffix;
+    return (month + 1) % 3 === 0 && isOnOrAfterScheduledDay(day, scheduledDayOfMonth(day, target));
   }
 
   return false;

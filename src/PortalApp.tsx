@@ -236,16 +236,26 @@ export default function PortalApp() {
         onLogout={logout}
       />
 
-      {adminAccount?.role === "Superadmin" && (
-        <div className="fixed right-5 top-5 z-[60] flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-xl">
-          <span className="hidden px-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 sm:inline">View as</span>
-          <button onClick={() => switchWorkspaceMode("admin")} className={`rounded-xl px-3 py-2 text-xs font-bold transition ${workspaceMode === "admin" ? "bg-[#0b587b] text-white" : "text-slate-500 hover:bg-slate-100"}`}>Admin</button>
-          <button onClick={() => switchWorkspaceMode("staff")} className={`rounded-xl px-3 py-2 text-xs font-bold transition ${workspaceMode === "staff" ? "bg-[#0b587b] text-white" : "text-slate-500 hover:bg-slate-100"}`}>Staff</button>
-          <button onClick={() => { localStorage.removeItem("ara_view_mode"); window.location.hash = "#office/admin"; }} className="ml-1 border-l border-slate-200 px-3 py-2 text-xs font-bold text-[#0b587b] hover:text-[#083a55]">System Admin</button>
-        </div>
-      )}
-
       <div className="min-h-screen lg:pl-[300px]">
+        {adminAccount?.role === "Superadmin" && (
+          <div className="border-b border-[#dce4ed] bg-white/95 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-[38px]">
+            <div className="mx-auto flex max-w-[1500px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#0b9aca]">System Admin preview</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#29465a]">
+                  {workspaceMode === "admin" ? "Administrator controls are enabled" : "Viewing the portal as Clinic Assistants"}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">
+                  <button onClick={() => switchWorkspaceMode("admin")} className={`rounded-lg px-4 py-2 text-xs font-bold transition ${workspaceMode === "admin" ? "bg-[#0b587b] text-white shadow-sm" : "text-slate-500 hover:text-[#0b587b]"}`}>Admin View</button>
+                  <button onClick={() => switchWorkspaceMode("staff")} className={`rounded-lg px-4 py-2 text-xs font-bold transition ${workspaceMode === "staff" ? "bg-[#0b587b] text-white shadow-sm" : "text-slate-500 hover:text-[#0b587b]"}`}>Staff View</button>
+                </div>
+                <button onClick={() => { localStorage.removeItem("ara_view_mode"); window.location.hash = "#office/admin"; }} className="rounded-xl border border-[#dce4ed] bg-white px-4 py-2.5 text-xs font-bold text-[#0b587b] transition hover:border-[#0b587b]/30 hover:bg-[#f7fafb]">Control Centre</button>
+              </div>
+            </div>
+          </div>
+        )}
         <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
           <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6 lg:px-10">
             <button
