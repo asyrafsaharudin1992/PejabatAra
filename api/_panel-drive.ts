@@ -34,8 +34,9 @@ function googleCredentials() {
   }
 }
 export async function driveRequest(path: string, body?: unknown) {
+  const credentials = googleCredentials();
   const auth = new GoogleAuth({
-    credentials: googleCredentials(),
+    credentials,
     scopes: ['https://www.googleapis.com/auth/drive.metadata.readonly'],
   });
   const token = await auth.getAccessToken();
@@ -45,7 +46,13 @@ export async function driveRequest(path: string, body?: unknown) {
     ...(body ? { body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok) throw new Error(`Drive API returned ${response.status}`);
+  if (!response.ok) {
+    // Google's reason (e.g. API disabled vs. no folder access) and the account
+    // used are needed to fix sharing or project settings.
+    const detail = await response.json().catch(() => ({}));
+    const reason = detail.error?.errors?.[0]?.reason || detail.error?.status || '';
+    throw new Error(`Drive API returned ${response.status}${reason ? ` (${reason})` : ''} for ${credentials.client_email}`);
+  }
   return response.status === 204 ? {} : response.json();
 }
 
