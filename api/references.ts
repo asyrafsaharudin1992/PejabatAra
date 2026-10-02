@@ -9,6 +9,12 @@ const CA_BRANCH = 'AraSpace Clinical Assistants';
 const READER_OFFICES = ['ca', 'quality'];
 const DRIVE_SYNC_INTERVAL = 10 * 60 * 1000;
 
+// Accepts either the bare folder ID or a pasted Drive folder link.
+function memoFolderId() {
+  const value = (process.env.MEMO_DRIVE_FOLDER_ID || '').trim();
+  return value.match(/folders\/([\w-]+)/)?.[1] || value.match(/[?&]id=([\w-]+)/)?.[1] || value.split(/[?#/]/)[0];
+}
+
 type Resource = { id: string; sourceUrl?: string; [key: string]: unknown };
 type Payload = { resources: Resource[]; driveSyncedAt?: string };
 
@@ -25,7 +31,7 @@ async function legacyResources(db: any) {
 // Adds memos that are new in the Drive folder. Existing entries, including any
 // metadata an admin has edited, are never changed or removed.
 async function withDriveMemos(payload: Payload, force: boolean) {
-  const folderId = process.env.MEMO_DRIVE_FOLDER_ID;
+  const folderId = memoFolderId();
   if (!folderId) return { payload, added: 0, synced: false };
   const last = Date.parse(payload.driveSyncedAt || '') || 0;
   if (!force && Date.now() - last < DRIVE_SYNC_INTERVAL) return { payload, added: 0, synced: false };
@@ -53,7 +59,7 @@ export default async function handler(req: any, res: any) {
     const forceSync = req.method === 'POST' && req.query.action === 'sync';
     if (req.method === 'GET' || forceSync) {
       if (forceSync && profile.role !== 'super_admin') return res.status(403).json({ error: 'Only an administrator can sync with Drive.' });
-      if (forceSync && !process.env.MEMO_DRIVE_FOLDER_ID) return res.status(400).json({ error: 'The memo Drive folder has not been set up yet (MEMO_DRIVE_FOLDER_ID).' });
+      if (forceSync && !memoFolderId()) return res.status(400).json({ error: 'The memo Drive folder has not been set up yet (MEMO_DRIVE_FOLDER_ID).' });
       let current: Payload | null = existing?.payload || null;
       if (!current) {
         const resources = await legacyResources(db);
@@ -67,7 +73,7 @@ export default async function handler(req: any, res: any) {
       } catch (error: any) {
         // Drive being unavailable must not hide the memos already saved.
         drive.error = error.message || 'Drive sync failed.';
-        if (forceSync) return res.status(502).json({ error: `Drive sync failed: ${drive.error}` });
+        if (forceSync) return res.status(502).json({ error: `Drive sync failed: ${drive.error} (folder ${memoFolderId()})` });
       }
       if (!existing || current !== existing.payload) {
         const data = await save(current);
