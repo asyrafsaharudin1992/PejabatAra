@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
+/** @param {string | string[]} [requiredOffice] */
 export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality') {
   const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
   if (!token) throw Object.assign(new Error('Sign in required.'), { status: 401 });
@@ -12,10 +13,23 @@ export async function officeAccess(req, adminOnly = false, requiredOffice = 'qua
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
   const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();
   const officeAccess = data.user.app_metadata?.office_access;
-  if (profileError || profile?.status !== 'active' || (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !officeAccess.includes(requiredOffice)))) {
+  // requiredOffice may list several offices; access to any one of them is enough.
+  const offices = [].concat(requiredOffice);
+  if (profileError || profile?.status !== 'active' || (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !offices.some((office) => officeAccess.includes(office))))) {
     throw Object.assign(new Error('Access restricted.'), { status: 403 });
   }
   return { db, user: data.user, profile };
+}
+
+// Finds a branch by name, optionally creating it. Branches double as the
+// owner of shared portal_state records.
+export async function branchId(db, name, create) {
+  const { data: existing, error: lookupError } = await db.from('branches').select('id').eq('name', name).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing || !create) return existing?.id || null;
+  const { data, error } = await db.from('branches').insert({ name, active: true }).select('id').single();
+  if (error) throw error;
+  return data.id;
 }
 
 const schemas = {

@@ -30,6 +30,7 @@ import {
   ExternalLink,
   PlusCircle,
   Globe,
+  Library,
   Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -38,6 +39,9 @@ import { cn } from "./lib/utils";
 import { isSupabaseConfigured, signOutSupabase } from "./lib/supabase";
 import { officeFetch as fetch } from "./lib/officeApi";
 import { loadQualityWorkspace } from "./lib/qualityData";
+import { useSharedReferences } from "./lib/useSharedReferences";
+import { KnowledgeView, ResourceModal } from "./ReferenceHub";
+import { KnowledgeResource, knowledgeResources } from "./portalData";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
 
@@ -240,6 +244,8 @@ export default function App() {
   const [selectedForTodayIds, setSelectedForTodayIds] = useState<string[]>([]);
   const [user, setUser] = useState<UserData | null>(null);
   const [systemAdminAccount, setSystemAdminAccount] = useState<UserData | null>(null);
+  const references = useSharedReferences(knowledgeResources, user?.email, user?.role === "Superadmin", (saved, message) => showNotification(message, saved ? "success" : "error"));
+  const [selectedResource, setSelectedResource] = useState<KnowledgeResource | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<"admin" | "staff">(() => localStorage.getItem("ara_view_mode") === "staff" ? "staff" : "admin");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
@@ -1247,6 +1253,7 @@ export default function App() {
             { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
             { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
             { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
+            { id: "Reference", icon: Library, roles: ["Superadmin", "Staff"] },
           ].filter(item => item.roles.includes(user?.role || "Staff")).map((item) => (
             <button
               key={item.id}
@@ -2110,6 +2117,20 @@ export default function App() {
             )}
 
 
+            {activeTab === "Reference" && (
+              <KnowledgeView
+                initialSearch=""
+                readResources={[]}
+                onOpen={setSelectedResource}
+                resources={references.resources}
+                canEdit={user?.role === "Superadmin"}
+                onUpdateResource={references.update}
+                onCommit={references.saveNow}
+                onSyncDrive={references.syncDrive}
+                syncing={references.syncing}
+              />
+            )}
+
             {activeTab === "Notes" && (
               <div className="flex flex-col gap-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[24px] shadow-apple border border-border-apple/50">
@@ -2329,6 +2350,10 @@ export default function App() {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {selectedResource && (
+        <ResourceModal resource={selectedResource} isRead={false} onClose={() => setSelectedResource(null)} onMarkRead={() => {}} />
+      )}
 
       {/* Edit Modal */}
       <AnimatePresence>

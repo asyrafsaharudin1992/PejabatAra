@@ -49,6 +49,22 @@ export async function driveRequest(path: string, body?: unknown) {
   return response.status === 204 ? {} : response.json();
 }
 
+// Lists the files directly inside a Drive folder (sub-folders excluded).
+export async function listDriveFiles(folder: string, mimeType?: string) {
+  const files: { id: string; name: string }[] = [];
+  const filter = mimeType ? `mimeType = '${mimeType}'` : `mimeType != 'application/vnd.google-apps.folder'`;
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({ q: `'${folder}' in parents and trashed = false and ${filter}`, fields: 'nextPageToken,incompleteSearch,files(id,name)', pageSize: '1000', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const result = await driveRequest(`files?${params}`);
+    if (result.incompleteSearch) throw new Error('Incomplete Drive listing');
+    files.push(...(result.files || []));
+    pageToken = result.nextPageToken || '';
+  } while (pageToken);
+  return files;
+}
+
 export async function syncPanelFiles() {
   const files: { id: string; name: string; url: string }[] = [];
   let pageToken = '';

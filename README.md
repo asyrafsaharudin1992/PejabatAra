@@ -69,6 +69,7 @@ Rujuk `.env.example` untuk senarai penuh.
 | `VITE_PANEL_REALTIME_ENABLED` | Hidupkan sync realtime Panel Training |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Akses Supabase di pelayan sahaja |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Service account Google (Drive/Sheets) |
+| `MEMO_DRIVE_FOLDER_ID` | Folder Drive memo rasmi untuk sync Reference Hub |
 | `GOOGLE_SHEET_ID` | Google Sheet lama (untuk migrasi) |
 | `PANEL_WEBHOOK_URL`, `PANEL_WATCH_SECRET`, `CRON_SECRET` | Webhook dan cron Drive watch |
 
