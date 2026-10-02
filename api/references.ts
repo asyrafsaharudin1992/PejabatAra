@@ -1,5 +1,5 @@
 import { branchId, officeAccess } from './_office-db.js';
-import { listDriveFiles } from './_panel-drive';
+import { listDriveFiles } from './_panel-drive.js';
 
 // Official memos are shared by every office that shows the Reference Hub, so
 // they live in one record instead of inside a single office's workspace state.

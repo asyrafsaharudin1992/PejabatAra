@@ -1,5 +1,5 @@
 import { branchId, officeAccess } from './_office-db.js';
-import { folderId, listDriveFiles } from './_panel-drive';
+import { folderId, listDriveFiles } from './_panel-drive.js';
 
 // Panel guide PDFs from the Panel Training Drive folder. The list is cached in
 // portal_state and refreshed from Drive at most every few minutes, so staff

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { database, driveRequest, hash, required, syncPanelFiles } from './_panel-drive';
+import { database, driveRequest, hash, required, syncPanelFiles } from './_panel-drive.js';
 
 function authorised(req: any) {
   const supplied = String(req.headers.authorization || '').replace(/^Bearer /, '');
