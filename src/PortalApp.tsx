@@ -596,11 +596,12 @@ function driveGuideMatchesPanel(file: { name: string }, panel: string) {
 }
 
 function PanelAvailabilityEditor({ value, onChange }: { value: PanelAvailability; onChange: (value: PanelAvailability) => void }) {
-  return <details className="relative">
+  const [open, setOpen] = useState(false);
+  return <details open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)} className="relative">
     <summary className="cursor-pointer list-none rounded-xl bg-slate-50/70 px-3 py-2 text-sm font-semibold text-[#0b587b] hover:bg-slate-100">{value.length ? value.join(", ") : "Select locations"}</summary>
     <div className="absolute left-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
       {PANEL_LOCATIONS.map((location) => <label key={location} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-[#f3f9fc]"><input type="checkbox" checked={value.includes(location)} onChange={() => onChange(value.includes(location) ? value.filter((item) => item !== location) : [...value, location])} className="h-4 w-4 accent-[#0b587b]" />{location}</label>)}
-      <p className="px-2 pt-1 text-[10px] text-slate-400">Select more than one location.</p>
+      <div className="mt-1 flex items-center justify-between border-t border-slate-100 px-2 pt-2"><p className="text-[10px] text-slate-400">Select more than one location.</p><button type="button" onClick={() => setOpen(false)} className="rounded-md bg-[#0b587b] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#084563]">Done</button></div>
     </div>
   </details>;
 }
