@@ -537,15 +537,46 @@ function TrainingView({ modules, completedLessons, onOpen }: { modules: Training
   );
 }
 
-type PanelAvailability = "" | "Kajang" | "Seri Kembangan";
+type PanelAvailability = string[];
 type PanelTrainingRow = { id: string; panel: string; availability: PanelAvailability; guideUrl: string; portalUrl: string };
+const PANEL_LOCATIONS = ["Kajang", "Seri Kembangan", "Semenyih"];
 
+function normalisePanelRow(row: PanelTrainingRow & { availability?: unknown }): PanelTrainingRow {
+  const value: unknown = row.availability;
+  const availability = Array.isArray(value)
+    ? value.filter((location): location is string => typeof location === "string")
+    : typeof value === "string" ? value.split(/\s*\/\s*|\s*,\s*/).map((location) => location.trim()).filter(Boolean) : [];
+  return { ...row, availability };
+}
+
+const panelEntry = (id: string, panel: string, availability: PanelAvailability, guideUrl = ""): PanelTrainingRow => ({ id, panel, availability, guideUrl, portalUrl: "" });
 const defaultPanelTrainingRows: PanelTrainingRow[] = [
-  { id: "healthconnect", panel: "HealthConnect", availability: "", guideUrl: "https://drive.google.com/file/d/1xI8S_EOJxrGT3X74So9t7dbDTimSny45/preview", portalUrl: "" },
-  { id: "hukm", panel: "HUKM", availability: "", guideUrl: "https://drive.google.com/file/d/145h4ltrl8bw4dyQ9bMxrqbp3tw1zuRD_/preview", portalUrl: "" },
-  { id: "ia", panel: "IA", availability: "", guideUrl: "https://drive.google.com/file/d/1FwlkKs6sRwqwOBwqfY8KBcfxX-PU0uWH/preview", portalUrl: "" },
-  { id: "mesas2u", panel: "MESAS2U", availability: "", guideUrl: "https://drive.google.com/file/d/10sUNL6G45RRhdNpQ6Z_7tDjCzNQPmT_f/preview", portalUrl: "" },
-  { id: "great-eastern", panel: "Great Eastern", availability: "", guideUrl: "https://drive.google.com/file/d/1x2Q7HlLAtm92MXzEcUaNeq9LNg9p1l9g/preview", portalUrl: "" },
+  panelEntry("imas", "iMAS", ["Kajang", "Seri Kembangan"]),
+  panelEntry("pmcare", "PMCare", ["Kajang", "Seri Kembangan", "Semenyih"], "https://drive.google.com/file/d/145h4ltrl8bw4dyQ9bMxrqbp3tw1zuRD_/preview"),
+  panelEntry("aia", "AIA", ["Kajang", "Seri Kembangan"]),
+  panelEntry("iltizam-selangor-sihat", "Iltizam Selangor Sihat", ["Kajang", "Seri Kembangan"]),
+  panelEntry("great-eastern", "Great Eastern", ["Kajang", "Seri Kembangan", "Semenyih"], "https://drive.google.com/file/d/1x2Q7HlLAtm92MXzEcUaNeq9LNg9p1l9g/preview"),
+  panelEntry("mediexpress", "MediExpress", ["Kajang", "Seri Kembangan"]),
+  panelEntry("healthconnect", "HealthConnect", ["Kajang", "Seri Kembangan"], "https://drive.google.com/file/d/1xI8S_EOJxrGT3X74So9t7dbDTimSny45/preview"),
+  panelEntry("mytpa", "MyTPA", ["Kajang", "Seri Kembangan"]),
+  panelEntry("medkad", "Medkad", ["Kajang", "Seri Kembangan"]),
+  panelEntry("perkeso", "PERKESO", ["Kajang", "Seri Kembangan", "Semenyih"]),
+  panelEntry("sehati", "SEHATI", ["Kajang", "Seri Kembangan", "Semenyih"]),
+  panelEntry("compumed", "Compumed", ["Kajang", "Seri Kembangan"]),
+  panelEntry("redalert-online", "RedAlert Online", ["Kajang", "Seri Kembangan"]),
+  panelEntry("eben-assist", "eBen Assist", ["Kajang", "Seri Kembangan"]),
+  panelEntry("mednefits", "Mednefits", ["Kajang", "Seri Kembangan"]),
+  panelEntry("perubatan-madani", "Perubatan Madani", ["Kajang", "Seri Kembangan", "Semenyih"]),
+  panelEntry("peka-b40", "Peka B40", ["Kajang", "Seri Kembangan", "Semenyih"]),
+  panelEntry("selcare", "SelCare", ["Kajang", "Seri Kembangan"]),
+  panelEntry("tenaga-nasional", "Tenaga Nasional", ["Kajang", "Seri Kembangan", "Semenyih"]),
+  panelEntry("miya", "MIYA", ["Kajang", "Seri Kembangan"]),
+  panelEntry("ukm", "UKM", ["Kajang", "Seri Kembangan"]),
+  panelEntry("hctm", "HCTM", ["Kajang", "Seri Kembangan"]),
+  panelEntry("wecare", "WeCare", ["Kajang", "Seri Kembangan"]),
+  panelEntry("yadim", "YADIM", ["Kajang"]),
+  panelEntry("asp-medical-group", "ASP Medical Group", ["Kajang"]),
+  panelEntry("international-assistance", "International Assistance", ["Seri Kembangan"]),
 ];
 
 function panelEmbedUrl(url: string) {
@@ -554,15 +585,66 @@ function panelEmbedUrl(url: string) {
   return url.includes("/folders/") ? "" : url;
 }
 
+function normalisePanelSearch(value: string) {
+  return value.toLowerCase().replace(/\.[a-z0-9]{2,5}$/i, "").replace(/[^a-z0-9]/g, "");
+}
+
+function driveGuideMatchesPanel(file: { name: string }, panel: string) {
+  const fileName = normalisePanelSearch(file.name);
+  const panelName = normalisePanelSearch(panel);
+  return Boolean(panelName) && fileName.includes(panelName);
+}
+
+function PanelAvailabilityEditor({ value, onChange }: { value: PanelAvailability; onChange: (value: PanelAvailability) => void }) {
+  return <details className="relative">
+    <summary className="cursor-pointer list-none rounded-xl bg-slate-50/70 px-3 py-2 text-sm font-semibold text-[#0b587b] hover:bg-slate-100">{value.length ? value.join(", ") : "Select locations"}</summary>
+    <div className="absolute left-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+      {PANEL_LOCATIONS.map((location) => <label key={location} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-[#f3f9fc]"><input type="checkbox" checked={value.includes(location)} onChange={() => onChange(value.includes(location) ? value.filter((item) => item !== location) : [...value, location])} className="h-4 w-4 accent-[#0b587b]" />{location}</label>)}
+      <p className="px-2 pt-1 text-[10px] text-slate-400">Select more than one location.</p>
+    </div>
+  </details>;
+}
+
 function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { rows: PanelTrainingRow[]; onRowsChange: (rows: PanelTrainingRow[]) => void; canEdit: boolean; sync: ReturnType<typeof usePanelSync> }) {
-  const [selectedPanel, setSelectedPanel] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
+  const [selectedPanel, setSelectedPanelState] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
+  const setSelectedPanel = (next: { row: PanelTrainingRow; kind: "guide" | "portal" } | null) => {
+    if (next?.kind === "portal") {
+      window.open(next.row.portalUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setSelectedPanelState(next);
+  };
+  const normalisedSavedRows = savedRows.map(normalisePanelRow);
+  const migratedSavedRows = normalisedSavedRows.flatMap((row) => row.id === "ukm-hctm"
+    ? [{ ...row, id: "ukm", panel: "UKM" }, { ...row, id: "hctm", panel: "HCTM" }]
+    : [row]);
+  const savedDriveRows = migratedSavedRows.filter((row) => row.id.startsWith("drive-"));
+  const canonicalRows = defaultPanelTrainingRows.map((defaultRow) => {
+    const saved = migratedSavedRows.find((row) => row.id === defaultRow.id);
+    // Use an admin-renamed panel label as the matching target. For example,
+    // the original iMAS row may have been renamed to eMAS.
+    const panelName = saved?.panel || defaultRow.panel;
+    const importedGuide = savedDriveRows.find((row) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panelName)));
+    return saved ? { ...defaultRow, ...saved, availability: saved.availability.length ? saved.availability : defaultRow.availability, guideUrl: saved.guideUrl || defaultRow.guideUrl || importedGuide?.guideUrl || "" } : importedGuide ? { ...defaultRow, guideUrl: importedGuide.guideUrl } : defaultRow;
+  });
+  const extraRows = migratedSavedRows.filter((row) => !defaultPanelTrainingRows.some((defaultRow) => defaultRow.id === row.id) && !(row.id.startsWith("drive-") && canonicalRows.some((panel) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panel.panel)))));
+  // A Drive guide belongs to an existing panel when its filename contains the
+  // panel name (e.g. "e-MAS New Guideline..." -> "eMAS"). Attach it to that
+  // row instead of creating a duplicate panel entry.
+  const linkedRows = [...canonicalRows, ...extraRows].map((row) => {
+    if (row.guideUrl) return row;
+    const file = sync.files.find((candidate) => driveGuideMatchesPanel(candidate, row.panel));
+    return file ? { ...row, guideUrl: file.url } : row;
+  });
   // Guides found in Drive but not yet saved are shown to everyone straight away;
   // only an admin's session saves them into the workspace.
-  const driveRows = sync.files.filter((file) => !savedRows.some((row) => row.id === `drive-${file.id}` || row.guideUrl.includes(`/d/${file.id}/`))).map((file) => ({ id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: '' as PanelAvailability, guideUrl: file.url, portalUrl: '' }));
-  const rows = driveRows.length ? [...savedRows, ...driveRows] : savedRows;
+  const driveRows = sync.files.filter((file) => !linkedRows.some((row) => row.id === `drive-${file.id}` || row.guideUrl.includes(`/d/${file.id}/`) || driveGuideMatchesPanel(file, row.panel))).map((file) => ({ id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: [] as PanelAvailability, guideUrl: file.url, portalUrl: '' }));
+  const rows = [...linkedRows, ...driveRows];
+  const rowsSignature = JSON.stringify(rows);
+  const savedSignature = JSON.stringify(migratedSavedRows);
   useEffect(() => {
-    if (canEdit && driveRows.length) onRowsChange(rows);
-  }, [canEdit, sync.files, savedRows]);
+    if (canEdit && rowsSignature !== savedSignature) onRowsChange(rows);
+  }, [canEdit, rowsSignature, savedSignature]);
   const updateRow = (id: string, patch: Partial<PanelTrainingRow>) => {
     const next = rows.map((row) => row.id === id ? { ...row, ...patch } : row);
     onRowsChange(next);
@@ -576,7 +658,7 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
     {sync.alerts.length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
       <h3 className="text-sm font-semibold text-[#0b3d59]">New panel guides added ({sync.alerts.length})</h3>
       <div className="mt-3 space-y-3">{sync.alerts.map((file) => <div key={file.id} className="flex items-center justify-between gap-4">
-        <button className="text-left text-sm text-[#0b587b] hover:underline" onClick={() => setSelectedPanel({ row: rows.find((row) => row.guideUrl.includes(`/d/${file.id}/`)) || { id: `drive-${file.id}`, panel: file.name, availability: '', guideUrl: file.url, portalUrl: '' }, kind: 'guide' })}>{file.name}</button>
+        <button className="text-left text-sm text-[#0b587b] hover:underline" onClick={() => setSelectedPanel({ row: rows.find((row) => row.guideUrl.includes(`/d/${file.id}/`)) || { id: `drive-${file.id}`, panel: file.name, availability: [], guideUrl: file.url, portalUrl: '' }, kind: 'guide' })}>{file.name}</button>
         <button aria-label={`Dismiss alert for ${file.name}`} onClick={() => sync.dismiss(file.id)} className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-500 hover:bg-white">Dismiss</button>
       </div>)}</div>
     </section>}
@@ -586,9 +668,9 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
         <span className="inline-flex shrink-0 items-center gap-2 rounded-[14px] bg-white/10 px-4 py-3 text-sm font-semibold text-[#d8edf6]"><BookOpen className="h-4 w-4" />Direct document links</span>
       </div>
     </section>
-    <div className="flex items-center justify-between"><div><p className="text-sm font-bold text-slate-500">{rows.length} panels listed</p><p className="mt-1 text-xs text-slate-400">Open a panel guide to read its document here.</p></div><span className="rounded-full bg-[#e8f7fd] px-3 py-1.5 text-xs font-bold text-[#0b587b]">Staff reference</span></div>
+    <div className="flex items-center justify-between"><div><p className="text-sm font-bold text-slate-500">{rows.length} panels listed</p><p className="mt-1 text-xs text-slate-400">Open a panel guide to read its document here.</p></div><span className="rounded-full bg-[#e8f7fd] px-3 py-1.5 text-xs font-bold text-[#0b587b]">{canEdit ? "Admin editing enabled" : "Staff reference · read-only"}</span></div>
     <section className="overflow-hidden rounded-[24px] border border-[#dce4ed] bg-white shadow-[0_12px_30px_rgba(16,54,78,0.06)]">
-      <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead className="bg-[#f7fafc]"><tr className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400"><th className="w-[25%] px-6 py-4">Panel name</th><th className="w-[20%] px-6 py-4">Availability</th><th className="w-[27.5%] px-6 py-4">Panel guide</th><th className="w-[27.5%] px-6 py-4">Panel portal</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="transition hover:bg-[#f8fcfe]"><td className="px-6 py-5 align-middle">{canEdit ? <input value={row.panel} onChange={(event) => updateRow(row.id, { panel: event.target.value })} className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-[15px] font-semibold text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /> : <span className="text-[15px] font-semibold text-[#14233b]">{row.panel}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <select value={row.availability} onChange={(event) => updateRow(row.id, { availability: event.target.value as PanelAvailability })} className="rounded-xl bg-slate-50/70 px-3 py-2 text-sm font-semibold text-[#0b587b] outline-none transition hover:bg-slate-100 focus:bg-white"><option value="">Select location</option><option>Kajang</option><option>Seri Kembangan</option></select> : <span className="inline-flex rounded-full bg-[#eef8fc] px-3 py-1.5 text-xs font-bold text-[#0b587b]">{row.availability || "Not assigned"}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><details><summary className="cursor-pointer text-xs text-slate-400">Edit guide link</summary><input value={row.guideUrl} onChange={(event) => updateRow(row.id, { guideUrl: event.target.value })} placeholder="Paste direct Drive file URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /></details>{row.guideUrl && !row.guideUrl.includes("/folders/") && <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.guideUrl && !row.guideUrl.includes("/folders/") ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] transition hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Direct guide link to be added</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><input value={row.portalUrl} onChange={(event) => updateRow(row.id, { portalUrl: event.target.value })} placeholder="Paste portal URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" />{row.portalUrl && <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.portalUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Portal link to be added</span>}</td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead className="bg-[#f7fafc]"><tr className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400"><th className="w-[25%] px-6 py-4">Panel name</th><th className="w-[20%] px-6 py-4">Availability</th><th className="w-[27.5%] px-6 py-4">Panel guide</th><th className="w-[27.5%] px-6 py-4">Panel portal</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="transition hover:bg-[#f8fcfe]"><td className="px-6 py-5 align-middle">{canEdit ? <input aria-label={`Panel name for ${row.panel}`} value={row.panel} onChange={(event) => updateRow(row.id, { panel: event.target.value })} className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-[15px] font-semibold text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /> : <span className="text-[15px] font-semibold text-[#14233b]">{row.panel}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <PanelAvailabilityEditor value={row.availability} onChange={(availability) => updateRow(row.id, { availability })} /> : <div className="flex flex-wrap gap-1.5">{row.availability.length ? row.availability.map((location) => <span key={location} className="inline-flex rounded-full bg-[#eef8fc] px-2.5 py-1 text-xs font-bold text-[#0b587b]">{location}</span>) : <span className="text-xs font-semibold text-slate-400">Not assigned</span>}</div>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><details><summary className="cursor-pointer text-xs text-slate-400">Edit guide link</summary><input value={row.guideUrl} onChange={(event) => updateRow(row.id, { guideUrl: event.target.value })} placeholder="Paste direct Drive file URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /></details>{row.guideUrl && !row.guideUrl.includes("/folders/") && <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.guideUrl && !row.guideUrl.includes("/folders/") ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] transition hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Direct guide link to be added</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><input value={row.portalUrl} onChange={(event) => updateRow(row.id, { portalUrl: event.target.value })} placeholder="Paste portal URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" />{row.portalUrl && <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.portalUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Portal link to be added</span>}</td></tr>)}</tbody></table></div>
     </section>
     {selectedPanel && <PanelTrainingModal row={selectedPanel.row} kind={selectedPanel.kind} onClose={() => setSelectedPanel(null)} />}
   </div>;
@@ -596,7 +678,7 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
 
 function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kind: "guide" | "portal"; onClose: () => void }) {
   const url = kind === "guide" ? row.guideUrl : row.portalUrl;
-  return <ModalShell onClose={onClose} wide><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability} · Official AraSpace reference</p></div><button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} className="h-[62vh] min-h-[480px] w-full" /></div><div className="mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">This reference opens inside AraSpace. Use the official source for the latest version.</p><a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
+  return <ModalShell onClose={onClose} wide><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} className="h-[62vh] min-h-[480px] w-full" /></div><div className="mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">This reference opens inside AraSpace. Use the official source for the latest version.</p><a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
 function AnnouncementsView({ announcements }: { announcements: Announcement[] }) {

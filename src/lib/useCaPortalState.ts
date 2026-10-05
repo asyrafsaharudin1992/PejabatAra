@@ -12,6 +12,8 @@ export function useCaPortalState<T extends Record<string, unknown>>(initialValue
   const [data, setData] = useState<T>(initial.current);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveVersion = useRef(0);
 
   const request = useCallback(async (method: 'GET' | 'PUT', payload?: T) => {
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -53,15 +55,21 @@ export function useCaPortalState<T extends Record<string, unknown>>(initialValue
 
   const save = useCallback(async (next: T) => {
     setData(next);
-    try {
-      const result = await request('PUT', next);
-      if (result.payload) setData(result.payload);
-      setError('');
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to save portal content.');
-      return false;
-    }
+    const version = ++saveVersion.current;
+    let saved = false;
+    const operation = saveQueue.current.catch(() => undefined).then(async () => {
+      try {
+        const result = await request('PUT', next);
+        if (version === saveVersion.current && result.payload) setData(result.payload);
+        if (version === saveVersion.current) setError('');
+        saved = true;
+      } catch (cause) {
+        if (version === saveVersion.current) setError(cause instanceof Error ? cause.message : 'Unable to save portal content.');
+      }
+    });
+    saveQueue.current = operation.then(() => undefined, () => undefined);
+    await operation;
+    return saved;
   }, [request]);
 
   return { data, ready, error, save, setData };
