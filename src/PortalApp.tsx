@@ -30,7 +30,9 @@ import {
   Announcement,
   demoStaff,
   KnowledgeResource,
+  KnowledgeBaseUpdate,
   knowledgeResources,
+  knowledgeUpdates,
   PortalUser,
   quickLinks,
   trainingModules,
@@ -71,6 +73,7 @@ function readLocal<T>(key: string, fallback: T): T {
 type Service = [string, string];
 type CaWorkspaceContent = {
   resources: KnowledgeResource[];
+  knowledgeUpdates: KnowledgeBaseUpdate[];
   trainingModules: TrainingModule[];
   announcements: Announcement[];
   links: typeof quickLinks;
@@ -82,6 +85,7 @@ type CaPersonalContent = { completedLessons: string[]; readResources: string[]; 
 
 const caWorkspaceDefaults = (): CaWorkspaceContent => ({
   resources: readLocal<KnowledgeResource[]>("ara_portal_resources", knowledgeResources),
+  knowledgeUpdates,
   trainingModules,
   announcements: announcementsSeed,
   links: quickLinks,
@@ -258,13 +262,13 @@ export default function PortalApp() {
         <main className="p-4 sm:p-6 lg:p-[38px]">
           {view === "home" && (
             <HomeView
-              readResources={readResources}
               onNavigate={navigate}
               onOpenResource={setSelectedResource}
               search={globalSearch}
               setSearch={setGlobalSearch}
               announcements={content.announcements}
               resources={content.resources}
+              knowledgeUpdates={content.knowledgeUpdates || []}
             />
           )}
           {view === "handover" && <ShiftHandoverView guides={content.shiftGuides} />}
@@ -279,6 +283,8 @@ export default function PortalApp() {
               onCommit={references.saveNow}
               onSyncDrive={references.syncDrive}
               syncing={references.syncing}
+              pendingMemos={references.pendingMemos}
+              onApprovePendingMemo={references.approvePendingMemo}
             />
           )}
           {view === "training" && (
@@ -450,57 +456,59 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
   );
 }
 
-function HomeView({ readResources, onNavigate, onOpenResource, search, setSearch, announcements, resources }: { readResources: string[]; onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void; search: string; setSearch: (value: string) => void; announcements: Announcement[]; resources: KnowledgeResource[] }) {
+type HomeProps = { onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void; search: string; setSearch: (value: string) => void; announcements: Announcement[]; resources: KnowledgeResource[]; knowledgeUpdates: KnowledgeBaseUpdate[] };
+type HomeDestination = { label: string; note: string; icon: typeof Home; view?: View; resource?: KnowledgeResource; tone: string };
+
+function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, knowledgeUpdates }: HomeProps) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
-  const quickActions: { label: string; note: string; icon: typeof Home; view: View; tone: string }[] = [
-    { label: "Shift Passover", note: "AM & PM guide", icon: ClipboardCheck, view: "handover", tone: "text-[#7258ff]" },
-    { label: "Reference Hub", note: "SOPs & guides", icon: Library, view: "knowledge", tone: "text-[#20c7f4]" },
+  const quickAccess: HomeDestination[] = [
+    { label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, view: "handover", tone: "text-[#7258ff]" },
+    { label: "Reference Hub", note: "SOPs & work guides", icon: Library, view: "knowledge", tone: "text-[#20c7f4]" },
+    { label: "Panel Training", note: "Panel workflows & guides", icon: BookOpen, view: "panelTraining", tone: "text-emerald-400" },
     { label: "Our Services", note: "Clinic services", icon: Sparkles, view: "services", tone: "text-[#ffb000]" },
-    { label: "Announcements", note: "1 new item", icon: Bell, view: "announcements", tone: "text-[#ff3b62]" },
     { label: "Important Links", note: "Work systems", icon: Link2, view: "links", tone: "text-[#20c7f4]" },
   ];
+  const findResource = (terms: string[]) => resources.find((resource) => terms.some((term) => `${resource.title} ${resource.category} ${resource.keywords.join(" ")}`.toLowerCase().includes(term)));
+  const commonlyNeeded = [
+    { label: "Shift passover template", note: "AM & PM daily guides", icon: ClipboardCheck, view: "handover" as View },
+    { label: "Panel patient workflow", note: "Registration & panel reference", icon: BookOpen, resource: findResource(["panel", "arapanel"]) },
+    { label: "Complaint escalation", note: "Patient complaint process", icon: AlertCircle, resource: findResource(["complaint", "aduan"]) },
+    { label: "Plato guide", note: "Daily system reference", icon: FileText, resource: findResource(["plato"]) },
+    { label: "Clinic services reference", note: "Service overview", icon: Sparkles, view: "services" as View },
+    { label: "Important work systems", note: "Systems & useful links", icon: Link2, view: "links" as View },
+  ].filter((item) => item.view || item.resource);
+  const importantAnnouncement = announcements.find((announcement) => announcement.priority === "Penting");
+  const openDestination = (item: HomeDestination) => item.resource ? onOpenResource(item.resource) : item.view && onNavigate(item.view);
 
-  return (
-    <div className="mx-auto max-w-[1500px] space-y-7">
-      <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
-        <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Clinic Assistants</h2>
-            <p className="mt-3 text-base text-[#bed2df]">References and everyday work guides in one workspace.</p>
-          </div>
-          <div className="text-left md:text-right">
-            <span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span>
-            <p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p>
-          </div>
-        </div>
-      </section>
+  return <div className="mx-auto max-w-[1500px] space-y-8">
+    <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
+      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Clinic Assistants</h2><p className="mt-3 text-base text-[#bed2df]">References and everyday work guides in one workspace.</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p></div></div>
+    </section>
 
-      <section>
-        <div className="mb-4 flex items-end justify-between"><h3 className="text-2xl font-semibold tracking-tight">Quick actions</h3><span className="text-xs font-bold uppercase tracking-[0.22em] text-[#9aacc0]">Shortcuts</span></div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {quickActions.map((action) => (
-            <button key={action.view} onClick={() => onNavigate(action.view)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]">
-              <div className="flex items-center gap-2"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", action.tone)}><action.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div>
-              <p className="mt-5 font-semibold">{action.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{action.note}</p>
-            </button>
-          ))}
-        </div>
-      </section>
+    <SearchAraSpace search={search} setSearch={setSearch} onSearch={() => onNavigate("knowledge")} />
 
-      <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4"><div className="grid h-12 w-12 place-items-center rounded-full bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search SOPs, work guides or FAQs without leaving the portal.</p></div></div>
-        <div className="flex w-full max-w-xl gap-2 rounded-[16px] bg-white p-2 shadow-sm"><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onNavigate("knowledge")} placeholder="Try: shift change, Plato, complaints..." className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none" /><button onClick={() => onNavigate("knowledge")} className="rounded-xl bg-[#0b3d59] px-5 py-2.5 text-sm font-bold text-white">Search</button></div>
-      </section>
+    <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">{quickAccess.map((item) => <button key={item.label} onClick={() => openDestination(item)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}</div></section>
 
-      <section className="rounded-[28px] border border-[#dce4ed] bg-white p-7">
-        <div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div>
-        <h3 className="mt-5 text-xl font-semibold">{announcements[0]?.title || "No announcements yet"}</h3><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{announcements[0]?.body || "New announcements will appear here."}</p>
-        <button onClick={() => onNavigate("announcements")} className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button>
-        <div className="mt-7 grid gap-4 border-t border-slate-100 pt-5 md:grid-cols-2"><p className="text-xs font-bold uppercase tracking-wider text-slate-400 md:col-span-2">Latest references</p>{resources.slice(0, 2).map((resource) => <button key={resource.id} onClick={() => onOpenResource(resource)} className="flex items-center gap-3 rounded-xl bg-[#f7f9fc] p-4 text-left"><FileText className="h-5 w-5 shrink-0 text-[#20aee0]" /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{resource.title}</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>)}</div>
-      </section>
-    </div>
-  );
+    <section><SectionHeading title="Commonly needed" eyebrow="Everyday resources" /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{commonlyNeeded.map((item) => <button key={item.label} onClick={() => item.resource ? onOpenResource(item.resource) : item.view && onNavigate(item.view)} className="group flex min-h-[76px] items-center gap-3 rounded-2xl border border-[#dce4ed] bg-white p-4 text-left transition hover:border-[#8cdbf7] hover:bg-[#f9fcfe]"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#edf9fe] text-[#0b587b]"><item.icon className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-[#14233b]">{item.label}</span><span className="mt-0.5 block truncate text-xs text-[#60758c]">{item.note}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:text-[#0b587b]" /></button>)}</div></section>
+
+    <LatestUpdates updates={knowledgeUpdates} resources={resources} onNavigate={onNavigate} onOpenResource={onOpenResource} />
+
+    {importantAnnouncement && <section className="rounded-[28px] border border-rose-100 bg-white p-6 sm:p-7"><div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div><h3 className="mt-4 text-xl font-semibold">{importantAnnouncement.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{importantAnnouncement.body}</p><button onClick={() => onNavigate("announcements")} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button></section>}
+  </div>;
+}
+
+function SectionHeading({ title, eyebrow }: { title: string; eyebrow: string }) {
+  return <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">{title}</h3><span className="text-right text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">{eyebrow}</span></div>;
+}
+
+function SearchAraSpace({ search, setSearch, onSearch }: { search: string; setSearch: (value: string) => void; onSearch: () => void }) {
+  return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search SOPs, work guides, training and FAQs without leaving the portal.</p></div></div><div className="flex w-full max-w-xl gap-2 rounded-[16px] bg-white p-2 shadow-sm"><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onSearch()} placeholder="Try: panel registration, Plato, complaints, shift change..." className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-slate-400" /><button onClick={onSearch} className="rounded-xl bg-[#0b3d59] px-5 py-2.5 text-sm font-bold text-white">Search</button></div></section>;
+}
+
+function LatestUpdates({ updates, resources, onNavigate, onOpenResource }: { updates: KnowledgeBaseUpdate[]; resources: KnowledgeResource[]; onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void }) {
+  const resourceById = new Map(resources.map((resource) => [resource.id, resource]));
+  const badgeTone = { NEW: "bg-emerald-50 text-emerald-700", UPDATED: "bg-sky-50 text-sky-700", NOTICE: "bg-amber-50 text-amber-700" };
+  return <section className="rounded-[28px] border border-[#dce4ed] bg-white p-6 sm:p-7"><SectionHeading title="Latest updates" eyebrow="Knowledge base" />{updates.length === 0 ? <p className="rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-[#60758c]">No verified knowledge-base updates have been published yet.</p> : <div className="divide-y divide-[#e7edf2]">{updates.map((update) => { const resource = update.resourceId ? resourceById.get(update.resourceId) : undefined; return <button key={update.id} onClick={() => resource ? onOpenResource(resource) : update.view && onNavigate(update.view as View)} className="flex w-full items-center gap-4 py-4 text-left first:pt-0 last:pb-0"><span className={cn("rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider", badgeTone[update.type])}>{update.type}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{update.title}</span><span className="mt-0.5 block text-xs text-slate-500">{update.date}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /></button>; })}</div>}</section>;
 }
 
 const announcementsSeed: Announcement[] = [
@@ -608,6 +616,8 @@ function PanelAvailabilityEditor({ value, onChange }: { value: PanelAvailability
 
 function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { rows: PanelTrainingRow[]; onRowsChange: (rows: PanelTrainingRow[]) => void; canEdit: boolean; sync: ReturnType<typeof usePanelSync> }) {
   const [selectedPanel, setSelectedPanelState] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
+  const [importingFile, setImportingFile] = useState<{ id: string; name: string; url: string } | null>(null);
+  const [dismissedImports, setDismissedImports] = useState<string[]>([]);
   const setSelectedPanel = (next: { row: PanelTrainingRow; kind: "guide" | "portal" } | null) => {
     if (next?.kind === "portal") {
       window.open(next.row.portalUrl, "_blank", "noopener,noreferrer");
@@ -622,25 +632,15 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
   const savedDriveRows = migratedSavedRows.filter((row) => row.id.startsWith("drive-"));
   const canonicalRows = defaultPanelTrainingRows.map((defaultRow) => {
     const saved = migratedSavedRows.find((row) => row.id === defaultRow.id);
-    // Use an admin-renamed panel label as the matching target. For example,
-    // the original iMAS row may have been renamed to eMAS.
-    const panelName = saved?.panel || defaultRow.panel;
-    const importedGuide = savedDriveRows.find((row) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panelName)));
-    return saved ? { ...defaultRow, ...saved, availability: saved.availability.length ? saved.availability : defaultRow.availability, guideUrl: saved.guideUrl || defaultRow.guideUrl || importedGuide?.guideUrl || "" } : importedGuide ? { ...defaultRow, guideUrl: importedGuide.guideUrl } : defaultRow;
+    // Preserve any guide that an administrator has already linked. New files
+    // are intentionally not matched by filename here: an admin decides where
+    // each new PDF belongs in the import prompt below.
+    const importedGuide = savedDriveRows.find((row) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(saved?.panel || defaultRow.panel)));
+    return saved ? { ...defaultRow, ...saved, availability: saved.availability.length ? saved.availability : defaultRow.availability, guideUrl: saved.guideUrl || importedGuide?.guideUrl || defaultRow.guideUrl || "" } : importedGuide ? { ...defaultRow, guideUrl: importedGuide.guideUrl } : defaultRow;
   });
   const extraRows = migratedSavedRows.filter((row) => !defaultPanelTrainingRows.some((defaultRow) => defaultRow.id === row.id) && !(row.id.startsWith("drive-") && canonicalRows.some((panel) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panel.panel)))));
-  // A Drive guide belongs to an existing panel when its filename contains the
-  // panel name (e.g. "e-MAS New Guideline..." -> "eMAS"). Attach it to that
-  // row instead of creating a duplicate panel entry.
-  const linkedRows = [...canonicalRows, ...extraRows].map((row) => {
-    if (row.guideUrl) return row;
-    const file = sync.files.find((candidate) => driveGuideMatchesPanel(candidate, row.panel));
-    return file ? { ...row, guideUrl: file.url } : row;
-  });
-  // Guides found in Drive but not yet saved are shown to everyone straight away;
-  // only an admin's session saves them into the workspace.
-  const driveRows = sync.files.filter((file) => !linkedRows.some((row) => row.id === `drive-${file.id}` || row.guideUrl.includes(`/d/${file.id}/`) || driveGuideMatchesPanel(file, row.panel))).map((file) => ({ id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: [] as PanelAvailability, guideUrl: file.url, portalUrl: '' }));
-  const rows = [...linkedRows, ...driveRows];
+  const rows = [...canonicalRows, ...extraRows];
+  const pendingFiles = sync.files.filter((file) => !rows.some((row) => row.guideUrl.includes(`/d/${file.id}/`)));
   const rowsSignature = JSON.stringify(rows);
   const savedSignature = JSON.stringify(migratedSavedRows);
   useEffect(() => {
@@ -650,15 +650,28 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
     const next = rows.map((row) => row.id === id ? { ...row, ...patch } : row);
     onRowsChange(next);
   };
+  useEffect(() => {
+    if (!canEdit || importingFile) return;
+    const next = pendingFiles.find((file) => !dismissedImports.includes(file.id));
+    if (next) setImportingFile(next);
+  }, [canEdit, dismissedImports, importingFile, pendingFiles]);
+  const createPanelFromImport = (file: { id: string; name: string; url: string }) => {
+    onRowsChange([...rows, { id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: [], guideUrl: file.url, portalUrl: '' }]);
+    setImportingFile(null);
+  };
+  const syncGuideWithPanel = (file: { id: string; name: string; url: string }, panelId: string) => {
+    onRowsChange(rows.map((row) => row.id === panelId ? { ...row, guideUrl: file.url } : row));
+    setImportingFile(null);
+  };
 
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
       <span role="status">{sync.error || (sync.connected ? 'Panel guides sync automatically from Drive' : 'Checking Drive for panel guides…')}</span>
       <button onClick={sync.refresh} disabled={sync.checking} className="shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-[#0b587b] disabled:opacity-50">Refresh</button>
     </div>
-    {sync.alerts.length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
-      <h3 className="text-sm font-semibold text-[#0b3d59]">New panel guides added ({sync.alerts.length})</h3>
-      <div className="mt-3 space-y-3">{sync.alerts.map((file) => <div key={file.id} className="flex items-center justify-between gap-4">
+    {sync.alerts.filter((file) => pendingFiles.some((pending) => pending.id === file.id)).length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
+      <h3 className="text-sm font-semibold text-[#0b3d59]">New panel guides need review</h3>
+      <div className="mt-3 space-y-3">{sync.alerts.filter((file) => pendingFiles.some((pending) => pending.id === file.id)).map((file) => <div key={file.id} className="flex items-center justify-between gap-4">
         <button className="text-left text-sm text-[#0b587b] hover:underline" onClick={() => setSelectedPanel({ row: rows.find((row) => row.guideUrl.includes(`/d/${file.id}/`)) || { id: `drive-${file.id}`, panel: file.name, availability: [], guideUrl: file.url, portalUrl: '' }, kind: 'guide' })}>{file.name}</button>
         <button aria-label={`Dismiss alert for ${file.name}`} onClick={() => sync.dismiss(file.id)} className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-500 hover:bg-white">Dismiss</button>
       </div>)}</div>
@@ -674,7 +687,19 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
       <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead className="bg-[#f7fafc]"><tr className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400"><th className="w-[25%] px-6 py-4">Panel name</th><th className="w-[20%] px-6 py-4">Availability</th><th className="w-[27.5%] px-6 py-4">Panel guide</th><th className="w-[27.5%] px-6 py-4">Panel portal</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="transition hover:bg-[#f8fcfe]"><td className="px-6 py-5 align-middle">{canEdit ? <input aria-label={`Panel name for ${row.panel}`} value={row.panel} onChange={(event) => updateRow(row.id, { panel: event.target.value })} className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-[15px] font-semibold text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /> : <span className="text-[15px] font-semibold text-[#14233b]">{row.panel}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <PanelAvailabilityEditor value={row.availability} onChange={(availability) => updateRow(row.id, { availability })} /> : <div className="flex flex-wrap gap-1.5">{row.availability.length ? row.availability.map((location) => <span key={location} className="inline-flex rounded-full bg-[#eef8fc] px-2.5 py-1 text-xs font-bold text-[#0b587b]">{location}</span>) : <span className="text-xs font-semibold text-slate-400">Not assigned</span>}</div>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><details><summary className="cursor-pointer text-xs text-slate-400">Edit guide link</summary><input value={row.guideUrl} onChange={(event) => updateRow(row.id, { guideUrl: event.target.value })} placeholder="Paste direct Drive file URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /></details>{row.guideUrl && !row.guideUrl.includes("/folders/") && <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.guideUrl && !row.guideUrl.includes("/folders/") ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] transition hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Direct guide link to be added</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><input value={row.portalUrl} onChange={(event) => updateRow(row.id, { portalUrl: event.target.value })} placeholder="Paste portal URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" />{row.portalUrl && <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.portalUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Portal link to be added</span>}</td></tr>)}</tbody></table></div>
     </section>
     {selectedPanel && <PanelTrainingModal row={selectedPanel.row} kind={selectedPanel.kind} onClose={() => setSelectedPanel(null)} />}
+    {canEdit && importingFile && <PanelGuideImportPrompt file={importingFile} panels={rows} onCreatePanel={() => createPanelFromImport(importingFile)} onLinkPanel={(panelId) => syncGuideWithPanel(importingFile, panelId)} onDismiss={() => { setDismissedImports((ids) => [...ids, importingFile.id]); setImportingFile(null); }} />}
   </div>;
+}
+
+function PanelGuideImportPrompt({ file, panels, onCreatePanel, onLinkPanel, onDismiss }: { file: { id: string; name: string; url: string }; panels: PanelTrainingRow[]; onCreatePanel: () => void; onLinkPanel: (panelId: string) => void; onDismiss: () => void }) {
+  const [panelId, setPanelId] = useState(panels[0]?.id || "");
+  return <ModalShell onClose={onDismiss}>
+    <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">New panel guide detected</p>
+    <h2 className="mt-2 text-2xl font-semibold tracking-tight">Where should this PDF go?</h2>
+    <p className="mt-3 rounded-xl bg-[#f7f9fc] p-4 text-sm font-semibold text-[#29465a]">{file.name}</p>
+    <div className="mt-6 grid gap-3 sm:grid-cols-2"><button type="button" onClick={onCreatePanel} className="rounded-2xl border border-[#8cdbf7] bg-[#edf9fe] p-4 text-left transition hover:bg-[#dff4fc]"><Plus className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Create new panel</p><p className="mt-1 text-xs leading-5 text-[#60758c]">Add this PDF as a new panel entry. You can complete its availability and portal link afterwards.</p></button><div className="rounded-2xl border border-[#dce4ed] p-4"><BookOpen className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Sync with an existing panel</p><select aria-label="Panel to sync this guide with" value={panelId} onChange={(event) => setPanelId(event.target.value)} className="mt-3 h-10 w-full rounded-xl bg-slate-50 px-3 text-sm font-medium outline-none"><option value="" disabled>Select a panel</option>{panels.map((panel) => <option key={panel.id} value={panel.id}>{panel.panel}</option>)}</select><button type="button" disabled={!panelId} onClick={() => onLinkPanel(panelId)} className="mt-2 w-full rounded-xl bg-[#0b587b] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-50">Sync guide</button></div></div>
+    <button type="button" onClick={onDismiss} className="mt-5 text-sm font-semibold text-slate-500 hover:text-[#0b587b]">Decide later</button>
+  </ModalShell>;
 }
 
 function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kind: "guide" | "portal"; onClose: () => void }) {

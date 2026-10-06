@@ -53,6 +53,18 @@ export interface Announcement {
   priority: "Penting" | "Biasa";
 }
 
+// Populate this from the CMS or shared-reference sync when change metadata is available.
+// Keeping it separate from resources prevents Home from implying that every resource was
+// recently changed simply because it exists in the knowledge base.
+export interface KnowledgeBaseUpdate {
+  id: string;
+  type: "NEW" | "UPDATED" | "NOTICE";
+  title: string;
+  date: string;
+  resourceId?: string;
+  view?: "handover" | "knowledge" | "panelTraining" | "services" | "announcements" | "links";
+}
+
 export interface QuickLink {
   id: string;
   title: string;
@@ -337,6 +349,9 @@ export const announcements: Announcement[] = [
     priority: "Biasa",
   },
 ];
+
+// No verified knowledge-base change records have been supplied yet.
+export const knowledgeUpdates: KnowledgeBaseUpdate[] = [];
 
 export const quickLinks: QuickLink[] = [
   { id: "plato", title: "Plato CMS", description: "Clinic management", group: "Systems", url: "https://app.platohealth.ai" },

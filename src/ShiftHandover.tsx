@@ -75,7 +75,7 @@ export default function ShiftHandoverView({ guides = shiftGuides }: { guides?: S
         })}
       </div>
 
-      <section className="rounded-[26px] border border-[#dce4ed] bg-white p-6 sm:p-8"><div className="flex items-center gap-3"><ClipboardCheck className="h-5 w-5 text-[#0b587b]" /><div><h3 className="font-semibold">How to use this guide</h3><p className="mt-1 text-sm text-[#60758c]">Read the relevant AM or PM list, complete your normal work, then share only outstanding matters through the official WhatsApp passover.</p></div></div><div className="mt-6 grid gap-3 md:grid-cols-3">{["Use the correct shift template.", "Do not key in patient data here.", "Send real handover through WhatsApp."].map((item) => <div key={item} className="flex items-center gap-3 rounded-2xl bg-[#f7f9fc] p-4 text-sm font-medium text-[#526a80]"><CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />{item}</div>)}</div></section>
+      <section className="rounded-[26px] border border-[#dce4ed] bg-white p-6 sm:p-8"><div className="flex items-center gap-3"><ClipboardCheck className="h-5 w-5 text-[#0b587b]" /><div><h3 className="font-semibold">How to use this guide</h3><p className="mt-1 text-sm text-[#60758c]">Read the relevant AM or PM list, complete your normal work, then share only outstanding matters through the official WhatsApp passover.</p></div></div><div className="mt-6 grid gap-3 md:grid-cols-3">{["Use the correct shift template.", "Do not leave out any important passovers.", "Send real handover through WhatsApp."].map((item) => <div key={item} className="flex items-center gap-3 rounded-2xl bg-[#f7f9fc] p-4 text-sm font-medium text-[#526a80]"><CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />{item}</div>)}</div></section>
 
     </div>
   );

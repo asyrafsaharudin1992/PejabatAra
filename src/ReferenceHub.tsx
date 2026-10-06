@@ -44,11 +44,13 @@ function resourceTypeLabel(type: KnowledgeResource["type"]) {
   return "Guideline";
 }
 
-export function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource, onCommit, onSyncDrive, syncing = false }: { initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void; onCommit?: () => void; onSyncDrive?: () => void; syncing?: boolean }) {
+export function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource, onCommit, onSyncDrive, syncing = false, pendingMemos = [], onApprovePendingMemo }: { initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void; onCommit?: () => void; onSyncDrive?: () => void; syncing?: boolean; pendingMemos?: KnowledgeResource[]; onApprovePendingMemo?: (resource: KnowledgeResource) => void }) {
   const [search, setSearch] = useState(initialSearch);
   const [category, setCategory] = useState("Semua");
   const [typeFilter, setTypeFilter] = useState("Semua");
   const [statusFilter, setStatusFilter] = useState("Semua");
+  const [dismissedPending, setDismissedPending] = useState<string[]>([]);
+  const pendingMemo = canEdit ? pendingMemos.find((memo) => !dismissedPending.includes(memo.id)) : undefined;
   // Keep the hub filter aligned with the four official departments. Legacy
   // labels are normalised into these departments in the table and filter.
   const categories = ["Semua", ...departmentValues];
@@ -88,8 +90,20 @@ export function KnowledgeView({ initialSearch, readResources, onOpen, resources 
         </div>
       </div>
       {filtered.length === 0 && <EmptyState icon={<Search />} title="No results found" text="Try another keyword or category." />}
+      {pendingMemo && onApprovePendingMemo && <MemoImportPrompt memo={pendingMemo} onSave={onApprovePendingMemo} onDismiss={() => setDismissedPending((ids) => [...ids, pendingMemo.id])} />}
     </div>
   );
+}
+
+function MemoImportPrompt({ memo, onSave, onDismiss }: { memo: KnowledgeResource; onSave: (memo: KnowledgeResource) => void; onDismiss: () => void }) {
+  const [date, setDate] = useState(memo.updatedAt === "Belum diekstrak" ? "" : memo.updatedAt);
+  return <ModalShell onClose={onDismiss}>
+    <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">New memo detected</p>
+    <h2 className="mt-2 text-2xl font-semibold tracking-tight">Review before saving</h2>
+    <p className="mt-3 rounded-xl bg-[#f7f9fc] p-4 text-sm font-semibold text-[#29465a]">{memo.title}</p>
+    <label className="mt-5 block"><span className="mb-2 block text-sm font-semibold text-slate-700">Memo date</span><input aria-label="Memo date" value={date} onChange={(event) => setDate(event.target.value)} placeholder="dd/mm/yyyy" className="h-11 w-full rounded-xl bg-slate-50 px-3 text-sm outline-none ring-1 ring-slate-200 transition focus:bg-white focus:ring-[#0b587b]" /><span className="mt-2 block text-xs leading-5 text-slate-500">Leave blank if the date is not available yet. You can edit it later from the Reference Hub.</span></label>
+    <div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => onSave({ ...memo, updatedAt: date.trim() || "Belum diekstrak" })} className="rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-bold text-white">Save memo</button><button type="button" onClick={onDismiss} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100">Decide later</button></div>
+  </ModalShell>;
 }
 
 function FilterChipGroup({ label, value, onChange, options, optionLabels }: { label: string; value: string; onChange: (value: string) => void; options: string[]; optionLabels?: Record<string, string> }) {

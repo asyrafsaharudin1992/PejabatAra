@@ -16,7 +16,7 @@ function memoFolderId() {
 }
 
 type Resource = { id: string; sourceUrl?: string; [key: string]: unknown };
-type Payload = { resources: Resource[]; driveSyncedAt?: string };
+type Payload = { resources: Resource[]; pendingMemos?: Resource[]; driveSyncedAt?: string };
 
 // Before this record existed, memo edits were saved in the CA workspace.
 // Copy them across (read-only) so no earlier edit is lost.
@@ -28,19 +28,20 @@ async function legacyResources(db: any) {
   return Array.isArray(data?.payload?.resources) ? data.payload.resources as Resource[] : null;
 }
 
-// Adds memos that are new in the Drive folder. Existing entries, including any
-// metadata an admin has edited, are never changed or removed.
+// New Drive PDFs stay pending until an administrator confirms their metadata.
+// This prevents an unreviewed filename or missing date from being published to
+// every office immediately.
 async function withDriveMemos(payload: Payload, force: boolean) {
   const folderId = memoFolderId();
   if (!folderId) return { payload, added: 0, synced: false };
   const last = Date.parse(payload.driveSyncedAt || '') || 0;
   if (!force && Date.now() - last < DRIVE_SYNC_INTERVAL) return { payload, added: 0, synced: false };
-  const known = (fileId: string) => payload.resources.some((item) => item.id === `drive-${fileId}` || String(item.sourceUrl || '').includes(`/d/${fileId}/`));
+  const known = (fileId: string) => [...payload.resources, ...(payload.pendingMemos || [])].some((item) => item.id === `drive-${fileId}` || String(item.sourceUrl || '').includes(`/d/${fileId}/`));
   const added = (await listDriveFiles(folderId)).filter((file) => !known(file.id)).map((file) => {
     const title = file.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' ').trim();
     return { id: `drive-${file.id}`, title, summary: '', category: 'Operasi', type: 'Memo', readTime: 5, updatedAt: 'Belum diekstrak', owner: 'AraSihat', status: 'AKTIF', keywords: [title.toLowerCase(), 'memo', 'rujukan'], content: ['Dokumen rasmi ini dipaparkan terus daripada sumber Drive AraSihat.'], sourceUrl: `https://drive.google.com/file/d/${file.id}/preview` };
   });
-  return { payload: { resources: [...added, ...payload.resources], driveSyncedAt: new Date().toISOString() }, added: added.length, synced: true };
+  return { payload: { ...payload, pendingMemos: [...(payload.pendingMemos || []), ...added], driveSyncedAt: new Date().toISOString() }, added: added.length, synced: true };
 }
 
 export default async function handler(req: any, res: any) {
@@ -77,9 +78,9 @@ export default async function handler(req: any, res: any) {
       }
       if (!existing || current !== existing.payload) {
         const data = await save(current);
-        return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at, drive });
+        return res.status(200).json({ payload: data.payload, pendingMemos: data.payload.pendingMemos || [], updatedAt: data.updated_at, drive });
       }
-      return res.status(200).json({ payload: existing.payload, updatedAt: existing.updated_at, drive });
+      return res.status(200).json({ payload: existing.payload, pendingMemos: existing.payload.pendingMemos || [], updatedAt: existing.updated_at, drive });
     }
 
     if (!['PATCH', 'PUT'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed.' });
@@ -92,8 +93,9 @@ export default async function handler(req: any, res: any) {
     const submitted: Resource[] = body.payload.resources;
     const ids = new Set(submitted.map((item) => item.id));
     const kept = (existing?.payload?.resources || []).filter((item: Resource) => !ids.has(item.id));
-    const data = await save({ resources: [...kept, ...submitted], driveSyncedAt: existing?.payload?.driveSyncedAt });
-    return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at });
+    const pendingMemos = (existing?.payload?.pendingMemos || []).filter((item: Resource) => !ids.has(item.id));
+    const data = await save({ resources: [...kept, ...submitted], pendingMemos, driveSyncedAt: existing?.payload?.driveSyncedAt });
+    return res.status(200).json({ payload: data.payload, pendingMemos: data.payload.pendingMemos || [], updatedAt: data.updated_at });
   } catch (error: any) {
     return res.status(error.status || 400).json({ error: error.message || 'Unable to load shared references.' });
   }

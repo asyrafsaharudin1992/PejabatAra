@@ -18,6 +18,7 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
   const token = useRef('');
   const lastDrive = useRef<{ added: number; error: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [pendingMemos, setPendingMemos] = useState<KnowledgeResource[]>([]);
   const onResult = useRef(onSaveResult);
   onResult.current = onSaveResult;
 
@@ -34,16 +35,21 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to reach shared references.');
     lastDrive.current = result.drive || null;
-    return (result.payload?.resources ?? null) as KnowledgeResource[] | null;
+    return result as { payload?: { resources?: KnowledgeResource[] }; pendingMemos?: KnowledgeResource[]; drive?: { added?: number; error?: string } };
   }, []);
 
   const load = useCallback(async () => {
     if (!account || !supabase || pending.current) return;
     try {
-      const saved = await request('GET');
+      const result = await request('GET');
+      const saved = result.payload?.resources ?? null;
       if (pending.current) return;
       if (saved) setResources(saved);
-      else if (isAdmin) setResources((await request('PUT', initial.current)) || initial.current);
+      else if (isAdmin) {
+        const created = await request('PUT', initial.current);
+        setResources(created.payload?.resources || initial.current);
+      }
+      setPendingMemos(result.pendingMemos || []);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load shared references.');
@@ -68,7 +74,8 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     const next = pending.current;
     if (!next) return true;
     try {
-      await request('PUT', next);
+      const result = await request('PUT', next);
+      setPendingMemos(result.pendingMemos || []);
       setError('');
       onResult.current?.(true, 'Memo details saved');
       return true;
@@ -130,10 +137,11 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     saveNow();
     setSyncing(true);
     try {
-      const saved = await request('POST', undefined, '?action=sync');
-      if (saved) setResources(saved);
+      const result = await request('POST', undefined, '?action=sync');
+      if (result.payload?.resources) setResources(result.payload.resources);
+      setPendingMemos(result.pendingMemos || []);
       const added = lastDrive.current?.added || 0;
-      onResult.current?.(true, added ? `${added} new memo${added === 1 ? '' : 's'} added from Drive` : 'Already up to date with Drive');
+      onResult.current?.(true, added ? `${added} new memo${added === 1 ? '' : 's'} ready for review` : 'Already up to date with Drive');
     } catch (cause) {
       onResult.current?.(false, cause instanceof Error ? cause.message : 'Drive sync failed.');
     } finally {
@@ -141,5 +149,16 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     }
   }, [isAdmin, request, saveNow]);
 
-  return { resources, ready, error, update, saveNow, syncDrive, syncing };
+  const approvePendingMemo = useCallback((resource: KnowledgeResource) => {
+    if (!isAdmin) return;
+    setResources((current) => {
+      const next = [resource, ...current.filter((item) => item.id !== resource.id)];
+      pending.current = next;
+      return next;
+    });
+    if (timer.current) window.clearTimeout(timer.current);
+    void flush();
+  }, [flush, isAdmin]);
+
+  return { resources, ready, error, update, saveNow, syncDrive, syncing, pendingMemos, approvePendingMemo };
 }
