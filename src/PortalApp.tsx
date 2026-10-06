@@ -618,6 +618,7 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
   const [selectedPanel, setSelectedPanelState] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
   const [importingFile, setImportingFile] = useState<{ id: string; name: string; url: string } | null>(null);
   const [dismissedImports, setDismissedImports] = useState<string[]>([]);
+  const [handledImports, setHandledImports] = useState<string[]>([]);
   const setSelectedPanel = (next: { row: PanelTrainingRow; kind: "guide" | "portal" } | null) => {
     if (next?.kind === "portal") {
       window.open(next.row.portalUrl, "_blank", "noopener,noreferrer");
@@ -640,7 +641,7 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
   });
   const extraRows = migratedSavedRows.filter((row) => !defaultPanelTrainingRows.some((defaultRow) => defaultRow.id === row.id) && !(row.id.startsWith("drive-") && canonicalRows.some((panel) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panel.panel)))));
   const rows = [...canonicalRows, ...extraRows];
-  const pendingFiles = sync.files.filter((file) => !rows.some((row) => row.guideUrl.includes(`/d/${file.id}/`)));
+  const pendingFiles = sync.files.filter((file) => !handledImports.includes(file.id) && !rows.some((row) => row.guideUrl.includes(`/d/${file.id}/`)));
   const rowsSignature = JSON.stringify(rows);
   const savedSignature = JSON.stringify(migratedSavedRows);
   useEffect(() => {
@@ -656,10 +657,12 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
     if (next) setImportingFile(next);
   }, [canEdit, dismissedImports, importingFile, pendingFiles]);
   const createPanelFromImport = (file: { id: string; name: string; url: string }) => {
+    setHandledImports((ids) => [...ids, file.id]);
     onRowsChange([...rows, { id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: [], guideUrl: file.url, portalUrl: '' }]);
     setImportingFile(null);
   };
   const syncGuideWithPanel = (file: { id: string; name: string; url: string }, panelId: string) => {
+    setHandledImports((ids) => [...ids, file.id]);
     onRowsChange(rows.map((row) => row.id === panelId ? { ...row, guideUrl: file.url } : row));
     setImportingFile(null);
   };
@@ -704,7 +707,7 @@ function PanelGuideImportPrompt({ file, panels, onCreatePanel, onLinkPanel, onDi
 
 function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kind: "guide" | "portal"; onClose: () => void }) {
   const url = kind === "guide" ? row.guideUrl : row.portalUrl;
-  return <ModalShell onClose={onClose} wide><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} className="h-[62vh] min-h-[480px] w-full" /></div><div className="mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">This reference opens inside AraSpace. Use the official source for the latest version.</p><a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
+  return <ModalShell onClose={onClose} wide><div className="sticky top-0 z-10 -mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
 function AnnouncementsView({ announcements }: { announcements: Announcement[] }) {

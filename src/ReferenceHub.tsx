@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { ChevronDown, ExternalLink, FileText, RefreshCw, Search, X } from "lucide-react";
 import { KnowledgeResource, knowledgeResources } from "./portalData";
 import { cn } from "./lib/utils";
@@ -136,4 +136,11 @@ export function ResourceModal({ resource, isRead, onClose, onMarkRead }: { resou
 }
 
 function EmptyState({ icon, title, text }: { icon: ReactNode; title: string; text: string }) { return <div className="mt-6 flex flex-col items-center rounded-[22px] border border-dashed border-slate-300 bg-white py-20 text-center"><div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-400 [&>svg]:h-6 [&>svg]:w-6">{icon}</div><h3 className="mt-4 text-lg font-semibold">{title}</h3><p className="mt-1 text-sm text-slate-500">{text}</p></div>; }
-export function ModalShell({ children, onClose, wide = false }: { children: ReactNode; onClose: () => void; wide?: boolean }) { return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onMouseDown={onClose}><div role="dialog" aria-modal="true" className={cn("max-h-[90vh] w-full overflow-y-auto rounded-[22px] bg-white p-6 shadow-2xl sm:p-8", wide ? "max-w-3xl" : "max-w-lg")} onMouseDown={(event) => event.stopPropagation()}>{children}</div></div>; }
+export function ModalShell({ children, onClose, wide = false }: { children: ReactNode; onClose: () => void; wide?: boolean }) {
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, []);
+  return <div className="fixed inset-0 z-[70] flex items-center justify-center overscroll-contain bg-slate-950/55 p-4 backdrop-blur-sm" onMouseDown={onClose}><div role="dialog" aria-modal="true" className={cn("max-h-[90vh] w-full overscroll-contain overflow-y-auto rounded-[22px] bg-white p-6 shadow-2xl sm:p-8", wide ? "max-w-3xl" : "max-w-lg")} onMouseDown={(event) => event.stopPropagation()}>{children}</div></div>;
+}
