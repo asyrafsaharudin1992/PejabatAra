@@ -14,7 +14,7 @@ export function usePanelTraining(active: boolean, canEdit: boolean) {
     if (!supabase) throw new Error('Supabase is not configured.');
     const { data: session } = await supabase.auth.getSession();
     if (!session.session) throw new Error('Sign in with your staff account to load Panel Training.');
-    const response = await fetch('/api/panel-training', {
+    const response = await fetch('/api/panel-files', {
       method,
       headers: { Authorization: `Bearer ${session.session.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,

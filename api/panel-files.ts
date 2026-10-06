@@ -1,42 +1,66 @@
-import { branchId, officeAccess } from './_office-db.js';
+import { officeAccess } from './_office-db.js';
 import { folderId, listDriveFiles } from './_panel-drive.js';
 
-// Panel guide PDFs from the Panel Training Drive folder. The list is cached in
-// portal_state and refreshed from Drive at most every few minutes, so staff
-// opening the page do not each call Drive. Admins can force a refresh.
-const SHARED_BRANCH = 'AraOffice Shared';
-const STATE_KEY = 'panel_drive_files';
-const SYNC_INTERVAL = 10 * 60 * 1000;
+type Panel = { id: string; name: string; availability: string[]; portal_url: string; active?: boolean };
+type Guide = { id: string; drive_file_id: string; file_name: string; drive_url: string; panel_id: string | null; status: 'pending' | 'linked' | 'archived' };
 
-type Cached = { files: { id: string; name: string; url: string }[]; syncedAt: string };
+async function payload(db: any, includePending: boolean) {
+  const { data: panels, error: panelsError } = await db.from('panels').select('id,name,availability,portal_url,active').eq('active', true).order('name');
+  if (panelsError) throw panelsError;
+  let guideQuery = db.from('panel_guides').select('id,drive_file_id,file_name,drive_url,panel_id,status').order('detected_at');
+  if (!includePending) guideQuery = guideQuery.eq('status', 'linked');
+  const { data: guides, error: guidesError } = await guideQuery;
+  if (guidesError) throw guidesError;
+  return { panels: (panels || []) as Panel[], guides: (guides || []) as Guide[] };
+}
+
+async function syncGuides(db: any) {
+  const files = await listDriveFiles(folderId, 'application/pdf');
+  if (!files.length) return 0;
+  const { data: known, error: knownError } = await db.from('panel_guides').select('drive_file_id');
+  if (knownError) throw knownError;
+  const ids = new Set((known || []).map((guide: { drive_file_id: string }) => guide.drive_file_id));
+  const added = files.filter((file) => !ids.has(file.id)).map((file) => ({ drive_file_id: file.id, file_name: file.name, drive_url: `https://drive.google.com/file/d/${file.id}/preview`, status: 'pending' }));
+  if (!added.length) return 0;
+  const { error } = await db.from('panel_guides').insert(added);
+  if (error) throw error;
+  return added.length;
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed.' });
   try {
     const { db, user, profile } = await officeAccess(req, false, 'ca');
-    const force = req.method === 'POST' && req.query.action === 'sync';
-    if (force && profile.role !== 'super_admin') return res.status(403).json({ error: 'Only an administrator can sync with Drive.' });
-    const sharedBranch = await branchId(db, SHARED_BRANCH, true);
-    const { data: existing, error: readError } = await db.from('portal_state').select('payload').eq('branch_id', sharedBranch).eq('state_key', STATE_KEY).maybeSingle();
-    if (readError) throw readError;
-    const cached: Cached | null = existing?.payload || null;
+    const isAdmin = profile.role === 'super_admin';
+    if (req.method === 'GET') {
+      if (isAdmin) await syncGuides(db);
+      return res.status(200).json(await payload(db, isAdmin));
+    }
+    if (!['POST', 'PUT'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed.' });
+    if (!isAdmin) return res.status(403).json({ error: 'Only System Admin can manage Panel Training.' });
 
-    if (!force && cached && Date.now() - (Date.parse(cached.syncedAt) || 0) < SYNC_INTERVAL) {
-      return res.status(200).json(cached);
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    if (req.method === 'POST') {
+      const added = await syncGuides(db);
+      return res.status(200).json({ ...(await payload(db, true)), added });
     }
-    try {
-      const files = (await listDriveFiles(folderId, 'application/pdf')).map((file) => ({ id: file.id, name: file.name, url: `https://drive.google.com/file/d/${file.id}/preview` }));
-      const payload: Cached = { files, syncedAt: new Date().toISOString() };
-      const { error } = await db.from('portal_state').upsert({ branch_id: sharedBranch, state_key: STATE_KEY, payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+    if (body.action === 'link_guide') {
+      const { error } = await db.from('panel_guides').update({ panel_id: body.panelId, status: 'linked', decided_at: new Date().toISOString(), decided_by: user.id, updated_at: new Date().toISOString() }).eq('id', body.guideId);
       if (error) throw error;
-      return res.status(200).json(payload);
-    } catch (error: any) {
-      // Fall back to the last good list so a Drive outage does not hide guides.
-      if (cached && !force) return res.status(200).json({ ...cached, error: 'Drive is unavailable; showing the last synced list.' });
-      return res.status(502).json({ error: `Drive sync failed: ${error.message || 'unknown error'}` });
-    }
+    } else if (body.action === 'create_panel') {
+      const panel: Panel = body.panel;
+      if (!panel?.id || !panel?.name || !body.guideId) return res.status(400).json({ error: 'Panel details and guide are required.' });
+      const { error: panelError } = await db.from('panels').insert({ id: panel.id, name: panel.name, availability: panel.availability || [], portal_url: panel.portal_url || '' });
+      if (panelError) throw panelError;
+      const { error: guideError } = await db.from('panel_guides').update({ panel_id: panel.id, status: 'linked', decided_at: new Date().toISOString(), decided_by: user.id, updated_at: new Date().toISOString() }).eq('id', body.guideId);
+      if (guideError) throw guideError;
+    } else if (body.action === 'update_panel') {
+      const panel: Panel = body.panel;
+      const { error } = await db.from('panels').update({ name: panel.name, availability: panel.availability || [], portal_url: panel.portal_url || '', updated_at: new Date().toISOString() }).eq('id', panel.id);
+      if (error) throw error;
+    } else return res.status(400).json({ error: 'Unknown panel action.' });
+    return res.status(200).json(await payload(db, true));
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to load panel guides.' });
+    return res.status(error.status || 400).json({ error: error.message || 'Unable to manage Panel Training.' });
   }
 }
