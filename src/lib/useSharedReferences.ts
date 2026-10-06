@@ -42,12 +42,12 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     if (!account || !supabase || pending.current) return;
     try {
       const result = await request('GET');
-      const saved = result.payload?.resources ?? null;
+      const saved = Array.isArray(result.payload?.resources) ? result.payload.resources : null;
       if (pending.current) return;
       if (saved) setResources(saved);
       else if (isAdmin) {
         const created = await request('PUT', initial.current);
-        setResources(created.payload?.resources || initial.current);
+        setResources(Array.isArray(created.payload?.resources) ? created.payload.resources : initial.current);
       }
       setPendingMemos(result.pendingMemos || []);
       setError('');
@@ -138,7 +138,7 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     setSyncing(true);
     try {
       const result = await request('POST', undefined, '?action=sync');
-      if (result.payload?.resources) setResources(result.payload.resources);
+      if (Array.isArray(result.payload?.resources)) setResources(result.payload.resources);
       setPendingMemos(result.pendingMemos || []);
       const added = lastDrive.current?.added || 0;
       onResult.current?.(true, added ? `${added} new memo${added === 1 ? '' : 's'} ready for review` : 'Already up to date with Drive');

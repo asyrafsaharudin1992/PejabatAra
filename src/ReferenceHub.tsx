@@ -45,16 +45,18 @@ function resourceTypeLabel(type: KnowledgeResource["type"]) {
 }
 
 export function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource, onCommit, onSyncDrive, syncing = false, pendingMemos = [], onApprovePendingMemo }: { initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void; onCommit?: () => void; onSyncDrive?: () => void; syncing?: boolean; pendingMemos?: KnowledgeResource[]; onApprovePendingMemo?: (resource: KnowledgeResource) => void }) {
+  const safeResources = Array.isArray(resources) ? resources : knowledgeResources;
+  const safePendingMemos = Array.isArray(pendingMemos) ? pendingMemos : [];
   const [search, setSearch] = useState(initialSearch);
   const [category, setCategory] = useState("Semua");
   const [typeFilter, setTypeFilter] = useState("Semua");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [dismissedPending, setDismissedPending] = useState<string[]>([]);
-  const pendingMemo = canEdit ? pendingMemos.find((memo) => !dismissedPending.includes(memo.id)) : undefined;
+  const pendingMemo = canEdit ? safePendingMemos.find((memo) => !dismissedPending.includes(memo.id)) : undefined;
   // Keep the hub filter aligned with the four official departments. Legacy
   // labels are normalised into these departments in the table and filter.
   const categories = ["Semua", ...departmentValues];
-  const filtered = resources.filter((item) => {
+  const filtered = safeResources.filter((item) => {
     const haystack = `${item.title} ${item.summary} ${item.category} ${item.keywords.join(" ")}`.toLowerCase();
     const itemDepartments = item.category.split(" / ").map((part) => normalizeDepartmentValue(part.trim()));
     const itemStatus = item.status === "TERBATAL" ? "TERBATAL" : "AKTIF";
@@ -78,7 +80,7 @@ export function KnowledgeView({ initialSearch, readResources, onOpen, resources 
         <button type="button" onClick={() => { setCategory("Semua"); setTypeFilter("Semua"); setStatusFilter("Semua"); setSearch(""); }} className="rounded-lg border border-white/15 px-3 py-1.5 text-left text-xs font-bold text-[#a9c5d2] transition hover:border-white/30 hover:bg-white/10 sm:self-end">Clear filters</button>
       </div>
       <div className="mt-4 flex flex-col gap-3 border-t border-white/15 pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-[#8de2fa]"><FileText className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#8fb8c9]">Official memos</p><p className="truncate text-sm font-semibold text-white">AraSihat operational documents <span className="ml-1 text-xs font-normal text-[#a9c5d2]">· {resources.length} connected</span></p></div></div>
+        <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-[#8de2fa]"><FileText className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#8fb8c9]">Official memos</p><p className="truncate text-sm font-semibold text-white">AraSihat operational documents <span className="ml-1 text-xs font-normal text-[#a9c5d2]">· {safeResources.length} connected</span></p></div></div>
         <div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">Memos & policies</span><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">Clinical SOPs</span><span className="rounded-full bg-[#fff7d8] px-2.5 py-1 text-[10px] font-semibold text-[#876700]">Official Drive</span>{canEdit && onSyncDrive && <button type="button" onClick={onSyncDrive} disabled={syncing} className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1 text-[10px] font-bold text-[#d9eef5] transition hover:bg-white/10 disabled:opacity-60"><RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} />{syncing ? "Syncing…" : "Sync Drive"}</button>}</div>
       </div>
       </div>
