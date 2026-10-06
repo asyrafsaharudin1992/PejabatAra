@@ -144,5 +144,5 @@ export function ModalShell({ children, onClose, wide = false }: { children: Reac
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previous; };
   }, []);
-  return <div className="fixed inset-0 z-[70] flex items-center justify-center overscroll-contain bg-slate-950/55 p-4 backdrop-blur-sm" onMouseDown={onClose}><div role="dialog" aria-modal="true" className={cn("max-h-[90vh] w-full overscroll-contain overflow-y-auto rounded-[22px] bg-white p-6 shadow-2xl sm:p-8", wide ? "max-w-3xl" : "max-w-lg")} onMouseDown={(event) => event.stopPropagation()}>{children}</div></div>;
+  return <div className="fixed inset-0 z-[70] flex items-center justify-center overscroll-contain bg-slate-950/55 p-4 backdrop-blur-sm" onClick={onClose}><div role="dialog" aria-modal="true" className={cn("relative z-10 max-h-[90vh] w-full overscroll-contain overflow-y-auto rounded-[22px] bg-white p-6 shadow-2xl sm:p-8", wide ? "max-w-3xl" : "max-w-lg")} onClick={(event) => event.stopPropagation()}>{children}</div></div>;
 }
