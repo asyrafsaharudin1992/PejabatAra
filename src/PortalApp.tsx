@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -41,7 +41,7 @@ import {
 import { cn } from "./lib/utils";
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase } from "./lib/supabase";
 import ShiftHandoverView, { shiftGuides, ShiftGuides } from "./ShiftHandover";
-import { PanelNoticeState, usePanelSync } from "./lib/usePanelSync";
+import { usePanelTraining } from "./lib/usePanelTraining";
 import { useCaPortalState } from "./lib/useCaPortalState";
 import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
@@ -81,7 +81,7 @@ type CaWorkspaceContent = {
   panelRows: PanelTrainingRow[];
   shiftGuides: ShiftGuides;
 };
-type CaPersonalContent = { completedLessons: string[]; readResources: string[]; panelNotices: PanelNoticeState };
+type CaPersonalContent = { completedLessons: string[]; readResources: string[] };
 
 const caWorkspaceDefaults = (): CaWorkspaceContent => ({
   resources: readLocal<KnowledgeResource[]>("ara_portal_resources", knowledgeResources),
@@ -120,7 +120,7 @@ export default function PortalApp() {
   const [selectedResource, setSelectedResource] = useState<KnowledgeResource | null>(null);
   const [selectedModule, setSelectedModule] = useState<TrainingModule | null>(null);
   const workspace = useCaPortalState<CaWorkspaceContent>(caWorkspaceDefaults(), user?.email, user?.role === "Superadmin");
-  const personal = useCaPortalState<CaPersonalContent>({ completedLessons: [], readResources: [], panelNotices: { seen: [], alerts: [] } }, user?.email, true, "personal");
+  const personal = useCaPortalState<CaPersonalContent>({ completedLessons: [], readResources: [] }, user?.email, true, "personal");
   const references = useSharedReferences(workspace.data.resources, user?.email, user?.role === "Superadmin", (saved, message) => { setToastError(!saved); setToast(message); });
   const content = { ...workspace.data, resources: references.resources };
   const completedLessons = personal.data.completedLessons;
@@ -128,8 +128,7 @@ export default function PortalApp() {
   const [staff, setStaff] = useState<PortalUser[]>(() => readLocal<PortalUser[]>("ara_portal_staff", demoStaff).map(normalizeUser));
   const [toast, setToast] = useState("");
   const [toastError, setToastError] = useState(false);
-  const persistPanelNotices = useCallback((panelNotices: PanelNoticeState) => { void personal.save({ ...personal.data, panelNotices }); }, [personal.data, personal.save]);
-  const panelSync = usePanelSync(user?.email, personal.ready && view === 'panelTraining', personal.data.panelNotices, persistPanelNotices, user?.role === "Superadmin");
+  const panelTraining = usePanelTraining(personal.ready && view === 'panelTraining', user?.role === "Superadmin");
 
   useEffect(() => {
     if (!toast) return;
@@ -193,7 +192,7 @@ export default function PortalApp() {
   return (
     <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
       <Sidebar
-        panelAlertCount={panelSync.alerts.length}
+        panelAlertCount={panelTraining.guides.filter((guide) => guide.status === 'pending').length}
         user={user}
         view={view}
         open={mobileNavOpen}
@@ -290,7 +289,7 @@ export default function PortalApp() {
           {view === "training" && (
             <TrainingView modules={content.trainingModules} completedLessons={completedLessons} onOpen={setSelectedModule} />
           )}
-          {view === "panelTraining" && <PanelTrainingView rows={content.panelRows} onRowsChange={(panelRows) => void workspace.save({ ...content, panelRows })} canEdit={user.role === "Superadmin"} sync={panelSync} />}
+          {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <OurServicesView services={content.services} />}
           {view === "announcements" && <AnnouncementsView announcements={content.announcements} />}
           {view === "links" && <LinksView links={content.links} />}
@@ -614,11 +613,10 @@ function PanelAvailabilityEditor({ value, onChange }: { value: PanelAvailability
   </details>;
 }
 
-function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { rows: PanelTrainingRow[]; onRowsChange: (rows: PanelTrainingRow[]) => void; canEdit: boolean; sync: ReturnType<typeof usePanelSync> }) {
+function PanelTrainingView({ training, canEdit }: { training: ReturnType<typeof usePanelTraining>; canEdit: boolean }) {
   const [selectedPanel, setSelectedPanelState] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
-  const [importingFile, setImportingFile] = useState<{ id: string; name: string; url: string } | null>(null);
-  const [dismissedImports, setDismissedImports] = useState<string[]>([]);
-  const [handledImports, setHandledImports] = useState<string[]>([]);
+  const [importingGuide, setImportingGuide] = useState<typeof training.guides[number] | null>(null);
+  const [saving, setSaving] = useState(false);
   const setSelectedPanel = (next: { row: PanelTrainingRow; kind: "guide" | "portal" } | null) => {
     if (next?.kind === "portal") {
       window.open(next.row.portalUrl, "_blank", "noopener,noreferrer");
@@ -626,58 +624,42 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
     }
     setSelectedPanelState(next);
   };
-  const normalisedSavedRows = savedRows.map(normalisePanelRow);
-  const migratedSavedRows = normalisedSavedRows.flatMap((row) => row.id === "ukm-hctm"
-    ? [{ ...row, id: "ukm", panel: "UKM" }, { ...row, id: "hctm", panel: "HCTM" }]
-    : [row]);
-  const savedDriveRows = migratedSavedRows.filter((row) => row.id.startsWith("drive-"));
-  const canonicalRows = defaultPanelTrainingRows.map((defaultRow) => {
-    const saved = migratedSavedRows.find((row) => row.id === defaultRow.id);
-    // Preserve any guide that an administrator has already linked. New files
-    // are intentionally not matched by filename here: an admin decides where
-    // each new PDF belongs in the import prompt below.
-    const importedGuide = savedDriveRows.find((row) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(saved?.panel || defaultRow.panel)));
-    return saved ? { ...defaultRow, ...saved, availability: saved.availability.length ? saved.availability : defaultRow.availability, guideUrl: saved.guideUrl || importedGuide?.guideUrl || defaultRow.guideUrl || "" } : importedGuide ? { ...defaultRow, guideUrl: importedGuide.guideUrl } : defaultRow;
-  });
-  const extraRows = migratedSavedRows.filter((row) => !defaultPanelTrainingRows.some((defaultRow) => defaultRow.id === row.id) && !(row.id.startsWith("drive-") && canonicalRows.some((panel) => normalisePanelSearch(row.panel).includes(normalisePanelSearch(panel.panel)))));
-  const rows = [...canonicalRows, ...extraRows];
-  const pendingFiles = sync.files.filter((file) => !handledImports.includes(file.id) && !rows.some((row) => row.guideUrl.includes(`/d/${file.id}/`)));
-  const rowsSignature = JSON.stringify(rows);
-  const savedSignature = JSON.stringify(migratedSavedRows);
+  const rows = training.panels.map((panel) => ({
+    id: panel.id, panel: panel.name, availability: panel.availability || [], portalUrl: panel.portal_url || '',
+    guideUrl: training.guides.find((guide) => guide.status === 'linked' && guide.panel_id === panel.id)?.drive_url || '',
+  }));
+  const pendingGuides = training.guides.filter((guide) => guide.status === 'pending');
   useEffect(() => {
-    if (canEdit && rowsSignature !== savedSignature) onRowsChange(rows);
-  }, [canEdit, rowsSignature, savedSignature]);
-  const updateRow = (id: string, patch: Partial<PanelTrainingRow>) => {
-    const next = rows.map((row) => row.id === id ? { ...row, ...patch } : row);
-    onRowsChange(next);
+    if (canEdit && !importingGuide && pendingGuides[0]) setImportingGuide(pendingGuides[0]);
+  }, [canEdit, importingGuide, pendingGuides]);
+  const updatePanel = async (id: string, patch: Partial<PanelTrainingRow>) => {
+    const current = rows.find((row) => row.id === id);
+    if (!current) return;
+    await training.mutate({ action: 'update_panel', panel: { id, name: patch.panel ?? current.panel, availability: patch.availability ?? current.availability, portal_url: patch.portalUrl ?? current.portalUrl } });
   };
-  useEffect(() => {
-    if (!canEdit || importingFile) return;
-    const next = pendingFiles.find((file) => !dismissedImports.includes(file.id));
-    if (next) setImportingFile(next);
-  }, [canEdit, dismissedImports, importingFile, pendingFiles]);
-  const createPanelFromImport = (file: { id: string; name: string; url: string }) => {
-    setHandledImports((ids) => [...ids, file.id]);
-    onRowsChange([...rows, { id: `drive-${file.id}`, panel: file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '), availability: [], guideUrl: file.url, portalUrl: '' }]);
-    setImportingFile(null);
+  const linkGuide = async (panelId: string) => {
+    if (!importingGuide) return;
+    setSaving(true);
+    if (await training.mutate({ action: 'link_guide', guideId: importingGuide.id, panelId })) setImportingGuide(null);
+    setSaving(false);
   };
-  const syncGuideWithPanel = (file: { id: string; name: string; url: string }, panelId: string) => {
-    setHandledImports((ids) => [...ids, file.id]);
-    onRowsChange(rows.map((row) => row.id === panelId ? { ...row, guideUrl: file.url } : row));
-    setImportingFile(null);
+  const createPanel = async () => {
+    if (!importingGuide) return;
+    const name = importingGuide.file_name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim();
+    const id = `panel-${importingGuide.drive_file_id.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)}`;
+    setSaving(true);
+    if (await training.mutate({ action: 'create_panel', guideId: importingGuide.id, panel: { id, name, availability: [], portal_url: '' } })) setImportingGuide(null);
+    setSaving(false);
   };
 
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
-      <span role="status">{sync.error || (sync.connected ? 'Panel guides sync automatically from Drive' : 'Checking Drive for panel guides…')}</span>
-      <button onClick={sync.refresh} disabled={sync.checking} className="shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-[#0b587b] disabled:opacity-50">Refresh</button>
+      <span role="status">{training.error || (training.loading ? 'Checking Drive for panel guides…' : 'Panel guides sync automatically from Drive')}</span>
+      <button onClick={() => void training.refresh(canEdit)} disabled={training.loading} className="shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-[#0b587b] disabled:opacity-50">Refresh</button>
     </div>
-    {sync.alerts.filter((file) => pendingFiles.some((pending) => pending.id === file.id)).length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
+    {canEdit && pendingGuides.length > 0 && <section aria-label="New panel guides" className="rounded-2xl bg-sky-50 p-5">
       <h3 className="text-sm font-semibold text-[#0b3d59]">New panel guides need review</h3>
-      <div className="mt-3 space-y-3">{sync.alerts.filter((file) => pendingFiles.some((pending) => pending.id === file.id)).map((file) => <div key={file.id} className="flex items-center justify-between gap-4">
-        <button className="text-left text-sm text-[#0b587b] hover:underline" onClick={() => setSelectedPanel({ row: rows.find((row) => row.guideUrl.includes(`/d/${file.id}/`)) || { id: `drive-${file.id}`, panel: file.name, availability: [], guideUrl: file.url, portalUrl: '' }, kind: 'guide' })}>{file.name}</button>
-        <button aria-label={`Dismiss alert for ${file.name}`} onClick={() => sync.dismiss(file.id)} className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-500 hover:bg-white">Dismiss</button>
-      </div>)}</div>
+      <div className="mt-3 space-y-3">{pendingGuides.map((guide) => <button key={guide.id} className="block text-left text-sm font-semibold text-[#0b587b] hover:underline" onClick={() => setImportingGuide(guide)}>{guide.file_name}</button>)}</div>
     </section>}
     <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -687,21 +669,21 @@ function PanelTrainingView({ rows: savedRows, onRowsChange, canEdit, sync }: { r
     </section>
     <div className="flex items-center justify-between"><div><p className="text-sm font-bold text-slate-500">{rows.length} panels listed</p><p className="mt-1 text-xs text-slate-400">Open a panel guide to read its document here.</p></div><span className="rounded-full bg-[#e8f7fd] px-3 py-1.5 text-xs font-bold text-[#0b587b]">{canEdit ? "Admin editing enabled" : "Staff reference · read-only"}</span></div>
     <section className="overflow-hidden rounded-[24px] border border-[#dce4ed] bg-white shadow-[0_12px_30px_rgba(16,54,78,0.06)]">
-      <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead className="bg-[#f7fafc]"><tr className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400"><th className="w-[25%] px-6 py-4">Panel name</th><th className="w-[20%] px-6 py-4">Availability</th><th className="w-[27.5%] px-6 py-4">Panel guide</th><th className="w-[27.5%] px-6 py-4">Panel portal</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="transition hover:bg-[#f8fcfe]"><td className="px-6 py-5 align-middle">{canEdit ? <input aria-label={`Panel name for ${row.panel}`} value={row.panel} onChange={(event) => updateRow(row.id, { panel: event.target.value })} className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-[15px] font-semibold text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /> : <span className="text-[15px] font-semibold text-[#14233b]">{row.panel}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <PanelAvailabilityEditor value={row.availability} onChange={(availability) => updateRow(row.id, { availability })} /> : <div className="flex flex-wrap gap-1.5">{row.availability.length ? row.availability.map((location) => <span key={location} className="inline-flex rounded-full bg-[#eef8fc] px-2.5 py-1 text-xs font-bold text-[#0b587b]">{location}</span>) : <span className="text-xs font-semibold text-slate-400">Not assigned</span>}</div>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><details><summary className="cursor-pointer text-xs text-slate-400">Edit guide link</summary><input value={row.guideUrl} onChange={(event) => updateRow(row.id, { guideUrl: event.target.value })} placeholder="Paste direct Drive file URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /></details>{row.guideUrl && !row.guideUrl.includes("/folders/") && <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.guideUrl && !row.guideUrl.includes("/folders/") ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] transition hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Direct guide link to be added</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><input value={row.portalUrl} onChange={(event) => updateRow(row.id, { portalUrl: event.target.value })} placeholder="Paste portal URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" />{row.portalUrl && <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.portalUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Portal link to be added</span>}</td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead className="bg-[#f7fafc]"><tr className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400"><th className="w-[25%] px-6 py-4">Panel name</th><th className="w-[20%] px-6 py-4">Availability</th><th className="w-[27.5%] px-6 py-4">Panel guide</th><th className="w-[27.5%] px-6 py-4">Panel portal</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="transition hover:bg-[#f8fcfe]"><td className="px-6 py-5 align-middle">{canEdit ? <input aria-label={`Panel name for ${row.panel}`} defaultValue={row.panel} onBlur={(event) => void updatePanel(row.id, { panel: event.target.value })} className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-[15px] font-semibold text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" /> : <span className="text-[15px] font-semibold text-[#14233b]">{row.panel}</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <PanelAvailabilityEditor value={row.availability} onChange={(availability) => void updatePanel(row.id, { availability })} /> : <div className="flex flex-wrap gap-1.5">{row.availability.length ? row.availability.map((location) => <span key={location} className="inline-flex rounded-full bg-[#eef8fc] px-2.5 py-1 text-xs font-bold text-[#0b587b]">{location}</span>) : <span className="text-xs font-semibold text-slate-400">Not assigned</span>}</div>}</td><td className="px-6 py-5 align-middle">{row.guideUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "guide" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] transition hover:text-[#0071e3]"><BookOpen className="h-4 w-4 text-[#20aee0]" />Open panel guide<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Direct guide link to be added</span>}</td><td className="px-6 py-5 align-middle">{canEdit ? <div className="space-y-2"><input defaultValue={row.portalUrl} onBlur={(event) => void updatePanel(row.id, { portalUrl: event.target.value })} placeholder="Paste portal URL" className="w-full rounded-xl bg-slate-50/70 px-3 py-2 text-xs text-[#14233b] outline-none transition hover:bg-slate-100 focus:bg-white" />{row.portalUrl && <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button>}</div> : row.portalUrl ? <button type="button" onClick={() => setSelectedPanel({ row, kind: "portal" })} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open panel portal<ExternalLink className="h-3.5 w-3.5" /></button> : <span className="text-sm text-slate-400">Portal link to be added</span>}</td></tr>)}</tbody></table></div>
     </section>
     {selectedPanel && <PanelTrainingModal row={selectedPanel.row} kind={selectedPanel.kind} onClose={() => setSelectedPanel(null)} />}
-    {canEdit && importingFile && <PanelGuideImportPrompt file={importingFile} panels={rows} onCreatePanel={() => createPanelFromImport(importingFile)} onLinkPanel={(panelId) => syncGuideWithPanel(importingFile, panelId)} onDismiss={() => { setDismissedImports((ids) => [...ids, importingFile.id]); setImportingFile(null); }} />}
+    {canEdit && importingGuide && <PanelGuideImportPrompt file={{ id: importingGuide.id, name: importingGuide.file_name, url: importingGuide.drive_url }} panels={rows} saving={saving} onCreatePanel={createPanel} onLinkPanel={linkGuide} onDismiss={() => setImportingGuide(null)} />}
   </div>;
 }
 
-function PanelGuideImportPrompt({ file, panels, onCreatePanel, onLinkPanel, onDismiss }: { file: { id: string; name: string; url: string }; panels: PanelTrainingRow[]; onCreatePanel: () => void; onLinkPanel: (panelId: string) => void; onDismiss: () => void }) {
+function PanelGuideImportPrompt({ file, panels, saving, onCreatePanel, onLinkPanel, onDismiss }: { file: { id: string; name: string; url: string }; panels: PanelTrainingRow[]; saving: boolean; onCreatePanel: () => void; onLinkPanel: (panelId: string) => void; onDismiss: () => void }) {
   const [panelId, setPanelId] = useState(panels[0]?.id || "");
   return <ModalShell onClose={onDismiss}>
     <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">New panel guide detected</p>
     <h2 className="mt-2 text-2xl font-semibold tracking-tight">Where should this PDF go?</h2>
     <p className="mt-3 rounded-xl bg-[#f7f9fc] p-4 text-sm font-semibold text-[#29465a]">{file.name}</p>
-    <div className="mt-6 grid gap-3 sm:grid-cols-2"><button type="button" onClick={onCreatePanel} className="rounded-2xl border border-[#8cdbf7] bg-[#edf9fe] p-4 text-left transition hover:bg-[#dff4fc]"><Plus className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Create new panel</p><p className="mt-1 text-xs leading-5 text-[#60758c]">Add this PDF as a new panel entry. You can complete its availability and portal link afterwards.</p></button><div className="rounded-2xl border border-[#dce4ed] p-4"><BookOpen className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Sync with an existing panel</p><select aria-label="Panel to sync this guide with" value={panelId} onChange={(event) => setPanelId(event.target.value)} className="mt-3 h-10 w-full rounded-xl bg-slate-50 px-3 text-sm font-medium outline-none"><option value="" disabled>Select a panel</option>{panels.map((panel) => <option key={panel.id} value={panel.id}>{panel.panel}</option>)}</select><button type="button" disabled={!panelId} onClick={() => onLinkPanel(panelId)} className="mt-2 w-full rounded-xl bg-[#0b587b] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-50">Sync guide</button></div></div>
-    <button type="button" onClick={onDismiss} className="mt-5 text-sm font-semibold text-slate-500 hover:text-[#0b587b]">Decide later</button>
+    <div className="mt-6 grid gap-3 sm:grid-cols-2"><button type="button" disabled={saving} onClick={onCreatePanel} className="rounded-2xl border border-[#8cdbf7] bg-[#edf9fe] p-4 text-left transition hover:bg-[#dff4fc] disabled:opacity-50"><Plus className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Create new panel</p><p className="mt-1 text-xs leading-5 text-[#60758c]">Add this PDF as a new panel entry. You can complete its availability and portal link afterwards.</p></button><div className="rounded-2xl border border-[#dce4ed] p-4"><BookOpen className="h-5 w-5 text-[#0b587b]" /><p className="mt-3 font-semibold">Sync with an existing panel</p><select aria-label="Panel to sync this guide with" value={panelId} onChange={(event) => setPanelId(event.target.value)} className="mt-3 h-10 w-full rounded-xl bg-slate-50 px-3 text-sm font-medium outline-none"><option value="" disabled>Select a panel</option>{panels.map((panel) => <option key={panel.id} value={panel.id}>{panel.panel}</option>)}</select><button type="button" disabled={!panelId || saving} onClick={() => onLinkPanel(panelId)} className="mt-2 w-full rounded-xl bg-[#0b587b] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Sync guide'}</button></div></div>
+    <button type="button" disabled={saving} onClick={onDismiss} className="mt-5 text-sm font-semibold text-slate-500 hover:text-[#0b587b] disabled:opacity-50">Decide later</button>
   </ModalShell>;
 }
 
