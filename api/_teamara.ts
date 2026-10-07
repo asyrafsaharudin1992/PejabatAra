@@ -69,8 +69,9 @@ export async function teamaraHandler(req: any, res: any) {
     const numericQuery = /^\d+$/.test(q.replace(/\s+/g, ''));
     const members = cache.members.filter((member) => isAdmin || q.length >= 2).filter((member) => {
       if (!q) return true;
-      const haystack = numericQuery ? `${member.ic} ${member.memberId}` : member.name;
-      return haystack.toLowerCase().includes(q);
+      if (numericQuery) return `${member.ic} ${member.memberId}`.toLowerCase().includes(q);
+      const name = member.name.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+      return name === q || name.split(' ').includes(q) || name.includes(` ${q} `);
     });
     return res.status(200).json({ members, family: isAdmin ? cache.family : [], vendors: isAdmin ? cache.vendors : [], isAdmin, cachedAt: cache.at });
   } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra data.' }); }
