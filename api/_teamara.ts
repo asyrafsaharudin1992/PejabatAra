@@ -41,7 +41,7 @@ export async function teamaraHandler(req: any, res: any) {
     if (!cache || Date.now() - cache.at > 60_000) {
       const metadata = await sheets.spreadsheets.get({ spreadsheetId: spreadsheetId(), fields: 'sheets.properties.title' });
       const titles = (metadata.data.sheets || []).map((sheet: any) => sheet.properties?.title).filter(Boolean);
-      const memberSheet = titles.find((title: string) => title.toLowerCase() === 'user') || titles[0] || 'User';
+      const memberSheet = titles.find((title: string) => title.toLowerCase() === 'teamara semua aktif') || titles.find((title: string) => title.toLowerCase() === 'user') || titles[0] || 'User';
       const raw = await sheetRows(sheets, memberSheet);
       const header = raw[1] || [];
       const branchIndex = header.findIndex((value) => /^(cawangan|branch)$/i.test(text(value).replace(/\s+/g, ' '))) >= 0
