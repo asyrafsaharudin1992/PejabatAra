@@ -33,7 +33,6 @@ export default async function handler(req: any, res: any) {
     const { db, user, profile } = await officeAccess(req, false, 'ca');
     const isAdmin = profile.role === 'super_admin';
     if (req.method === 'GET') {
-      if (isAdmin) await syncGuides(db);
       return res.status(200).json(await payload(db, isAdmin));
     }
     if (!['POST', 'PUT'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed.' });
@@ -58,6 +57,15 @@ export default async function handler(req: any, res: any) {
       const panel: Panel = body.panel;
       const { error } = await db.from('panels').update({ name: panel.name, availability: panel.availability || [], portal_url: panel.portal_url || '', updated_at: new Date().toISOString() }).eq('id', panel.id);
       if (error) throw error;
+    } else if (body.action === 'delete_panel') {
+      if (!body.panelId) return res.status(400).json({ error: 'Panel is required.' });
+      // Retain the source PDF in Drive and its database record for auditability,
+      // while removing both from the active staff-facing panel list.
+      const now = new Date().toISOString();
+      const { error: guideError } = await db.from('panel_guides').update({ panel_id: null, status: 'archived', updated_at: now }).eq('panel_id', body.panelId);
+      if (guideError) throw guideError;
+      const { error: panelError } = await db.from('panels').update({ active: false, updated_at: now }).eq('id', body.panelId);
+      if (panelError) throw panelError;
     } else return res.status(400).json({ error: 'Unknown panel action.' });
     return res.status(200).json(await payload(db, true));
   } catch (error: any) {

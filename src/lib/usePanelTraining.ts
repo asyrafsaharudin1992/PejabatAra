@@ -33,7 +33,9 @@ export function usePanelTraining(active: boolean, canEdit: boolean) {
     finally { setLoading(false); }
   }, [active, canEdit, request]);
 
-  useEffect(() => { void refresh(canEdit); }, [refresh, canEdit]);
+  // Load the saved panel list first. A Drive scan is comparatively slow and is
+  // only needed when an admin explicitly presses Refresh.
+  useEffect(() => { void refresh(false); }, [refresh]);
   useEffect(() => {
     if (!active) return;
     const onFocus = () => { if (document.visibilityState === 'visible') void refresh(canEdit); };
