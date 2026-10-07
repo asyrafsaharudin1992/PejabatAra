@@ -48,8 +48,9 @@ import { useCaPortalState } from "./lib/useCaPortalState";
 import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
 import { ManagedServices } from './ManagedServices';
+import TeamAra from './TeamAra';
 
-type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "announcements" | "links" | "admin";
+type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "teamara" | "announcements" | "links" | "admin";
 
 
 const viewTitles: Record<View, string> = {
@@ -59,6 +60,7 @@ const viewTitles: Record<View, string> = {
   training: "My Training",
   panelTraining: "Panel Training",
   services: "Our Services",
+  teamara: "TeamAra",
   announcements: "Announcements",
   links: "Important Links",
   admin: "Portal Management",
@@ -298,6 +300,7 @@ export default function PortalApp() {
           )}
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
+          {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
           {view === "announcements" && <AnnouncementsView announcements={content.announcements} />}
           {view === "links" && <LinksView links={content.links} />}
           {view === "admin" && user.role === "Superadmin" && (
@@ -430,6 +433,7 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
     { id: "knowledge", label: "Reference Hub", icon: Library },
     { id: "panelTraining", label: "Panel Training", icon: BookOpen },
     { id: "services", label: "Our Services", icon: Sparkles },
+    { id: "teamara", label: "TeamAra", icon: Users },
     { id: "announcements", label: "Announcements", icon: Bell },
     { id: "links", label: "Important Links", icon: Link2 },
   ];
