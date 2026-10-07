@@ -3,7 +3,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { existsSync, readFileSync } from 'node:fs';
 import { officeAccess } from './_office-db.js';
 
-const spreadsheetId = () => process.env.GOOGLE_SHEET_ID || '1z41IbJtvILMyHz9EqvpflzZD3kTFLF0R9q-0OnzzQFE';
+const spreadsheetId = () => process.env.GOOGLE_SHEET_ID || '1ZgsXMJ5us4aMJQsGGr40tE18Dw2r2Cx0qaW_euy_kOE';
 let cache: { at: number; members: TeamAraMember[]; family: Record<string, string>[]; vendors: Record<string, string>[] } | null = null;
 type TeamAraMember = { name: string; ic: string; phone: string; memberId: string; term: string; expiry: string; branch: string; active: boolean };
 
@@ -45,8 +45,8 @@ export async function teamaraHandler(req: any, res: any) {
       const rows = raw.length > 1 ? raw.slice(1) : raw;
       const dataRows = rows.slice(1);
       const members = dataRows.filter((row) => text(row[0])).map((row) => { const expiry = text(row[5]); const date = dateValue(expiry); return { name: text(row[0]), ic: text(row[1]), phone: text(row[2]), memberId: text(row[3]), term: text(row[4]), expiry, branch: text(row[8]), active: !date || date >= new Date(new Date().setHours(0, 0, 0, 0)) }; });
-      const familyRows = await sheetRows(sheets, 'keluarga teamara');
-      const vendorRows = await sheetRows(sheets, 'vendor teamara');
+      const familyRows = await sheetRows(sheets, 'KELUARGA TEAMARA');
+      const vendorRows = await sheetRows(sheets, 'VENDOR TEAMARA');
       cache = { at: Date.now(), members, family: objectRows(familyRows), vendors: objectRows(vendorRows) };
     }
     const members = cache.members.filter((member) => isAdmin || q.length >= 2).filter((member) => !q || `${member.name} ${member.ic} ${member.memberId} ${member.branch}`.toLowerCase().includes(q));
