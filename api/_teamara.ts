@@ -66,7 +66,12 @@ export async function teamaraHandler(req: any, res: any) {
       const vendorRows = await sheetRows(sheets, 'VENDOR TEAMARA');
       cache = { at: Date.now(), members, family: objectRows(familyRows), vendors: objectRows(vendorRows) };
     }
-    const members = cache.members.filter((member) => isAdmin || q.length >= 2).filter((member) => !q || `${member.name} ${member.ic} ${member.memberId} ${member.branch}`.toLowerCase().includes(q));
+    const numericQuery = /^\d+$/.test(q.replace(/\s+/g, ''));
+    const members = cache.members.filter((member) => isAdmin || q.length >= 2).filter((member) => {
+      if (!q) return true;
+      const haystack = numericQuery ? `${member.ic} ${member.memberId}` : member.name;
+      return haystack.toLowerCase().includes(q);
+    });
     return res.status(200).json({ members, family: isAdmin ? cache.family : [], vendors: isAdmin ? cache.vendors : [], isAdmin, cachedAt: cache.at });
   } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra data.' }); }
 }
