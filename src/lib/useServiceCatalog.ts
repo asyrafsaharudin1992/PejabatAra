@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 
 export type ServiceFolder = { id: string; name: string; description: string };
 export type ServiceCatalogItem = { id: string; folder_id: string | null; storage_path: string; title: string; summary: string };
-export type ServiceFaq = { id: string; folder_id: string | null; question: string; answer: string };
+export type ServiceFaq = { id: string; folder_id: string | null; service_id: string | null; question: string; answer: string };
 type Catalog = { folders: ServiceFolder[]; services: ServiceCatalogItem[]; faqs: ServiceFaq[] };
 
 export function useServiceCatalog(active: boolean) {
@@ -12,7 +12,7 @@ export function useServiceCatalog(active: boolean) {
   const request = useCallback(async (body?: unknown) => {
     if (!supabase) throw new Error('Supabase is not configured.');
     const { data: session } = await supabase.auth.getSession(); if (!session.session) throw new Error('Sign in with your staff account to load services.');
-    const response = await fetch('/api/service-catalog', { method: body ? 'PUT' : 'GET', headers: { Authorization: `Bearer ${session.session.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const response = await fetch('/api/panel-files?resource=services', { method: body ? 'PUT' : 'GET', headers: { Authorization: `Bearer ${session.session.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Unable to load services.');
     setData({ folders: result.folders || [], services: result.services || [], faqs: result.faqs || [] }); return result;
   }, []);

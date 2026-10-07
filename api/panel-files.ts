@@ -1,5 +1,6 @@
 import { officeAccess } from './_office-db.js';
 import { folderId, listDriveFiles } from './_panel-drive.js';
+import { serviceCatalogHandler } from './_service-catalog.js';
 
 type Panel = { id: string; name: string; availability: string[]; portal_url: string; active?: boolean };
 type Guide = { id: string; drive_file_id: string; file_name: string; drive_url: string; panel_id: string | null; status: 'pending' | 'linked' | 'archived' };
@@ -30,6 +31,7 @@ async function syncGuides(db: any) {
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
+    if (req.query?.resource === 'services') return await serviceCatalogHandler(req, res);
     const { db, user, profile } = await officeAccess(req, false, 'ca');
     const isAdmin = profile.role === 'super_admin';
     if (req.method === 'GET') {

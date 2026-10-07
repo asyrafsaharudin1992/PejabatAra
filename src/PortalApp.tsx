@@ -47,6 +47,7 @@ import { useServiceCatalog } from "./lib/useServiceCatalog";
 import { useCaPortalState } from "./lib/useCaPortalState";
 import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
+import { ManagedServices } from './ManagedServices';
 
 type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "announcements" | "links" | "admin";
 
@@ -131,7 +132,10 @@ export default function PortalApp() {
   const [toast, setToast] = useState("");
   const [toastError, setToastError] = useState(false);
   const panelTraining = usePanelTraining(personal.ready && view === 'panelTraining', user?.role === "Superadmin");
-  const serviceCatalog = useServiceCatalog(personal.ready && view === 'services');
+  // Start loading as soon as the Services view is opened.  The service hook
+  // still uses the signed-in session for protected mutations, while the UI
+  // keeps its local poster fallback visible during the initial request.
+  const serviceCatalog = useServiceCatalog(view === 'services');
 
   useEffect(() => {
     if (!toast) return;
@@ -293,7 +297,7 @@ export default function PortalApp() {
             <TrainingView modules={content.trainingModules} completedLessons={completedLessons} onOpen={setSelectedModule} />
           )}
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
-          {view === "services" && <OurServicesView catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
+          {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
           {view === "announcements" && <AnnouncementsView announcements={content.announcements} />}
           {view === "links" && <LinksView links={content.links} />}
           {view === "admin" && user.role === "Superadmin" && (
