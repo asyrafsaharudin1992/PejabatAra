@@ -14,6 +14,13 @@ export async function serviceCatalogHandler(req: any, res: any) {
   if (req.method !== 'PUT' || !isAdmin) return res.status(403).json({ error: 'Only System Admin can manage services.' });
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {}; const now = new Date().toISOString();
   if (body.action === 'create_folder') { const { error } = await db.from('service_folders').insert({ name: body.name, description: body.description || '' }); if (error) throw error; }
+  else if (body.action === 'delete_folder') {
+    if (!body.id) return res.status(400).json({ error: 'A folder id is required.' });
+    const { error: servicesError } = await db.from('service_catalog_items').update({ folder_id: null, updated_at: now }).eq('folder_id', body.id);
+    if (servicesError) throw servicesError;
+    const { error } = await db.from('service_folders').update({ active: false }).eq('id', body.id);
+    if (error) throw error;
+  }
   else if (body.action === 'create_service') {
     const file = body.file; if (!body.title || !file?.base64 || !file?.name) return res.status(400).json({ error: 'A service title and poster are required.' });
     const ext = file.name.toLowerCase().match(/\.(png|jpe?g|webp)$/)?.[1]; if (!ext) return res.status(400).json({ error: 'Use a PNG, JPG or WebP poster.' });
