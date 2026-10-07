@@ -60,12 +60,14 @@ export function ManagedServices({ catalog, canEdit }: { catalog: ReturnType<type
     if (!shareFile) return;
     try {
       await navigator.clipboard.write([new ClipboardItem({ [shareFile.type]: shareFile })]);
-      window.location.assign('whatsapp://');
+      window.location.assign('whatsapp://send');
     } catch {
       // The browser will keep the button available after the user grants clipboard permission.
     }
   };
-  const canShareFile = Boolean(shareFile && navigator.share && navigator.canShare?.({ files: [shareFile] }));
+  // WhatsApp Desktop for macOS has no share extension.  Open the native app
+  // directly there; mobile devices can still use their system share sheet.
+  const canShareFile = !/Macintosh/.test(navigator.userAgent) && Boolean(shareFile && navigator.share && navigator.canShare?.({ files: [shareFile] }));
 
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Clinic Assistants · Reference</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Our services</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Open a service to view official posters, notes and a FAQ specific to that service.</p></section>
