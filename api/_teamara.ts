@@ -24,6 +24,7 @@ async function sheetRows(sheets: any, title: string, range = 'A:Z') {
 }
 
 const text = (value: unknown) => String(value ?? '').trim();
+const key = (value: unknown) => text(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
 const objectRows = (rows: string[][]) => {
   const [headers, ...values] = rows;
   return values.filter((row) => row.some((cell) => text(cell))).map((row) => Object.fromEntries(headers.map((header, index) => [text(header) || `Column ${index + 1}`, text(row[index])]))) as Record<string, string>[];
@@ -42,9 +43,25 @@ export async function teamaraHandler(req: any, res: any) {
       const titles = (metadata.data.sheets || []).map((sheet: any) => sheet.properties?.title).filter(Boolean);
       const memberSheet = titles.find((title: string) => title.toLowerCase() === 'user') || titles[0] || 'User';
       const raw = await sheetRows(sheets, memberSheet);
-      const rows = raw.length > 1 ? raw.slice(1) : raw;
-      const dataRows = rows.slice(1).reverse();
-      const members = dataRows.filter((row) => text(row[0])).map((row) => { const expiry = text(row[5]); const date = dateValue(expiry); return { name: text(row[0]), ic: text(row[1]), phone: text(row[2]), memberId: text(row[3]), term: text(row[4]), expiry, branch: text(row[8]), active: !date || date >= new Date(new Date().setHours(0, 0, 0, 0)) }; });
+      const header = raw[1] || [];
+      const branchIndex = header.findIndex((value) => /^(cawangan|branch)$/i.test(text(value).replace(/\s+/g, ' '))) >= 0
+        ? header.findIndex((value) => /^(cawangan|branch)$/i.test(text(value).replace(/\s+/g, ' ')))
+        : -1;
+      // The active tab currently exposes A:H, while the legacy branch column is
+      // still present in Sheet16. Build a small lookup so the first tab remains
+      // the source of truth and branch filters continue to work.
+      const branchMap = new Map<string, string>();
+      if (branchIndex < 0) {
+        const branchRows = await sheetRows(sheets, 'Sheet16');
+        for (const row of branchRows) {
+          const branches = [text(row[8]), text(row[18])].filter((value) => /^(KJ|SK|SY)(\s*&\s*(KJ|SK|SY))?$/i.test(value));
+          const branch = branches[0] || '';
+          if (!branch) continue;
+          [row[0], row[1], row[2], row[3], row[10], row[11], row[14], row[15]].map(key).filter(Boolean).forEach((value) => branchMap.set(value, branch.toUpperCase()));
+        }
+      }
+      const dataRows = raw.slice(2).reverse();
+      const members = dataRows.filter((row) => text(row[0])).map((row) => { const expiry = text(row[5]); const date = dateValue(expiry); const name = text(row[0]); const ic = text(row[1]); const phone = text(row[2]); const memberId = text(row[3]); const branch = branchIndex >= 0 ? text(row[branchIndex]) : (branchMap.get(key(name)) || branchMap.get(key(ic)) || branchMap.get(key(phone)) || branchMap.get(key(memberId)) || ''); return { name, ic, phone, memberId, term: text(row[4]), expiry, branch, active: !date || date >= new Date(new Date().setHours(0, 0, 0, 0)) }; });
       const familyRows = await sheetRows(sheets, 'KELUARGA TEAMARA');
       const vendorRows = await sheetRows(sheets, 'VENDOR TEAMARA');
       cache = { at: Date.now(), members, family: objectRows(familyRows), vendors: objectRows(vendorRows) };
