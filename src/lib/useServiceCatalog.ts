@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
 export type ServiceFolder = { id: string; name: string; description: string };
-export type ServiceCatalogItem = { id: string; folder_id: string | null; storage_path: string; title: string; summary: string };
+export type ServiceCatalogItem = { id: string; folder_id: string | null; storage_path: string; title: string; summary: string; tags: string };
 export type ServiceFaq = { id: string; folder_id: string | null; service_id: string | null; question: string; answer: string };
 type Catalog = { folders: ServiceFolder[]; services: ServiceCatalogItem[]; faqs: ServiceFaq[] };
 
