@@ -62,7 +62,7 @@ function OldCardGenerator({ members }: { members: Member[] }) {
 }
 
 function CardGenerator({ members }: { members: Member[] }) {
-  const [branch, setBranch] = useState('All'); const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [selected, setSelected] = useState(''); const [templateSrc, setTemplateSrc] = useState('/teamara/template.png');
+  const [branch, setBranch] = useState('All'); const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [selected, setSelected] = useState(''); const [selectAll, setSelectAll] = useState(false); const [templateSrc, setTemplateSrc] = useState('/teamara/template.png');
   const branches = ['KJ', 'SK', 'SY', 'KJ & SK'];
   const parse = (value: string) => { const match = value.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/); return match ? new Date(Number(match[3].length === 2 ? `20${match[3]}` : match[3]), Number(match[2]) - 1, Number(match[1])) : null; };
   const filtered = members.filter((member) => { const date = parse(member.expiry); if (branch !== 'All' && !member.branch.toUpperCase().includes(branch)) return false; if (from && (!date || date < new Date(`${from}T00:00:00`))) return false; if (to && (!date || date > new Date(`${to}T23:59:59`))) return false; return true; });
