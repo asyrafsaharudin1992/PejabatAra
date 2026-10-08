@@ -13,12 +13,13 @@ export default function AdminUsers() {
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+  // Returns an error message, or an empty string when the change was saved.
   const act = async (method: string, body: any) => {
     setMessage('');
     try {
       await officeFetch('/api/users', { method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-      await load(); setMessage('Account updated successfully.');
-    } catch(error:any) { setMessage(error.message); }
+      await load(); setMessage('Account updated successfully.'); return '';
+    } catch(error:any) { setMessage(error.message); return error.message || 'Unable to update this account.'; }
   };
   return <main className="min-h-screen bg-[#f5f7f9] p-8 text-[#14233b]">
     <div className="mx-auto max-w-6xl">
@@ -26,8 +27,7 @@ export default function AdminUsers() {
       {message && <p role="status" className="mb-5 rounded-xl bg-white p-4">{message}</p>}
       <UserManagement allUsers={users} isLoading={loading} onAddUser={data => void act('POST',data)}
         onDeleteUser={email => { if(window.confirm(`Delete ${email}? This removes their sign-in account.`)) void act('DELETE',{email}); }}
-        onResetPassword={email => { const password=window.prompt(`Enter a new password for ${email} (at least 12 characters):`); if(password) void act('PATCH',{email,password}); }}
-        onUpdateOfficeAccess={(email, officeAccess) => void act('PATCH',{email,officeAccess})} />
+        onUpdateUser={(email, changes) => act('PATCH',{email,...changes})} />
     </div>
   </main>;
 }

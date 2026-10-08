@@ -2660,16 +2660,42 @@ const OFFICE_ACCESS_OPTIONS = [
   { id: 'clinical', label: 'Clinical Administration' }, { id: 'ca', label: 'Clinical Assistants' },
 ];
 
-export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassword, onUpdateOfficeAccess, isLoading }: {
+type UserUpdate = { fullName?: string; newEmail?: string; password?: string; officeAccess?: string[] };
+
+export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser, isLoading }: {
   allUsers: UserData[], 
   onAddUser: (user: any) => void, 
   onDeleteUser: (email: string) => void,
-  onResetPassword: (email: string) => void,
-  onUpdateOfficeAccess: (email: string, officeAccess: string[]) => void,
+  onUpdateUser: (email: string, changes: UserUpdate) => Promise<string>,
   isLoading: boolean
 }) {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [editingAccess, setEditingAccess] = useState<UserData | null>(null);
+  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [editDraft, setEditDraft] = useState({ fullName: "", email: "", password: "", officeAccess: [] as string[] });
+  const [editError, setEditError] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const openEdit = (u: UserData) => {
+    setEditingUser(u);
+    setEditDraft({ fullName: u.fullName || "", email: u.email, password: "", officeAccess: u.officeAccess || [] });
+    setEditError("");
+  };
+  const saveEdit = async () => {
+    if (!editingUser) return;
+    const changes: UserUpdate = {};
+    if (editDraft.fullName.trim() !== (editingUser.fullName || "")) changes.fullName = editDraft.fullName;
+    if (editDraft.email.trim().toLowerCase() !== editingUser.email.toLowerCase()) changes.newEmail = editDraft.email;
+    if (editDraft.password) {
+      if (editDraft.password.length < 12) { setEditError("New password must be at least 12 characters."); return; }
+      changes.password = editDraft.password;
+    }
+    const currentAccess = [...(editingUser.officeAccess || [])].sort().join(",");
+    if (editingUser.role !== "Superadmin" && [...editDraft.officeAccess].sort().join(",") !== currentAccess) changes.officeAccess = editDraft.officeAccess;
+    if (!Object.keys(changes).length) { setEditingUser(null); return; }
+    setSavingEdit(true); setEditError("");
+    const error = await onUpdateUser(editingUser.email, changes);
+    setSavingEdit(false);
+    if (error) setEditError(error); else setEditingUser(null);
+  };
   const [newUser, setNewUser] = useState({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] as string[] });
   const toggleOffice = (officeId: string, current: string[], update: (next: string[]) => void) => update(current.includes(officeId) ? current.filter(id => id !== officeId) : [...current, officeId]);
 
@@ -2724,7 +2750,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
                   </span>
                 </td>
                 <td className="py-4 px-4">
-                  {u.role === 'Superadmin' ? <span className="text-xs font-semibold text-[#0b587b]">All offices</span> : <button onClick={() => setEditingAccess(u)} className="text-left text-xs font-semibold text-[#0b587b] hover:underline">{(u.officeAccess || []).map(id => OFFICE_ACCESS_OPTIONS.find(option => option.id === id)?.label).filter(Boolean).join(', ') || 'Set access'}</button>}
+                  {u.role === 'Superadmin' ? <span className="text-xs font-semibold text-[#0b587b]">All offices</span> : <button onClick={() => openEdit(u)} className="text-left text-xs font-semibold text-[#0b587b] hover:underline">{(u.officeAccess || []).map(id => OFFICE_ACCESS_OPTIONS.find(option => option.id === id)?.label).filter(Boolean).join(', ') || 'Set access'}</button>}
                 </td>
                 <td className="py-4 px-4 text-[12px] text-text-secondary">
                   <span className="flex items-center gap-1.5">
@@ -2735,11 +2761,12 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
                 <td className="py-4 px-4 text-right">
                   <div className="flex justify-end gap-2">
                     <button 
-                      onClick={() => onResetPassword(u.email)}
-                      title="Reset Password"
-                      className="p-2 hover:bg-orange-50 rounded-lg text-text-secondary hover:text-orange-500 transition-all"
+                      onClick={() => openEdit(u)}
+                      title="Edit user"
+                      aria-label={`Edit ${u.fullName}`}
+                      className="p-2 hover:bg-blue-50 rounded-lg text-text-secondary hover:text-accent-blue transition-all"
                     >
-                      <Clock className="w-4 h-4" />
+                      <Edit2 className="w-4 h-4" />
                     </button>
                     <button 
                       onClick={() => onDeleteUser(u.email)}
@@ -2845,7 +2872,18 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onResetPassw
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {editingAccess && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditingAccess(null)} className="absolute inset-0 bg-black/20 backdrop-blur-sm" /><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="relative w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl"><h3 className="text-xl font-bold tracking-tight">Office access</h3><p className="mt-1 text-sm text-text-secondary">Choose the doors {editingAccess.fullName} can open.</p><div className="mt-6 grid grid-cols-2 gap-3">{OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 rounded-xl bg-[#f8f9fa] p-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={(editingAccess.officeAccess || []).includes(office.id)} onChange={() => setEditingAccess({ ...editingAccess, officeAccess: (editingAccess.officeAccess || []).includes(office.id) ? (editingAccess.officeAccess || []).filter(id => id !== office.id) : [...(editingAccess.officeAccess || []), office.id] })} />{office.label}</label>)}</div><div className="mt-6 flex gap-3"><button onClick={() => setEditingAccess(null)} className="flex-1 rounded-xl border border-border-apple px-4 py-3 text-sm font-bold">Cancel</button><button onClick={() => { onUpdateOfficeAccess(editingAccess.email, editingAccess.officeAccess || []); setEditingAccess(null); }} className="flex-1 rounded-xl bg-accent-blue px-4 py-3 text-sm font-bold text-white">Save access</button></div></motion.div></div>}
+        {editingUser && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !savingEdit && setEditingUser(null)} className="absolute inset-0 bg-black/20 backdrop-blur-sm" /><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-[28px] bg-white p-7 shadow-2xl">
+          <h3 className="text-xl font-bold tracking-tight">Edit user</h3>
+          <p className="mt-1 text-sm text-text-secondary">Update {editingUser.fullName}'s sign-in details and office access.</p>
+          <div className="mt-6 space-y-4">
+            <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Full Name</label><input type="text" value={editDraft.fullName} onChange={(e) => setEditDraft({ ...editDraft, fullName: e.target.value })} className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all" /></div>
+            <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Email Address</label><input type="email" value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all" />{editDraft.email.trim().toLowerCase() !== editingUser.email.toLowerCase() && <p className="ml-1 text-xs text-amber-700">They will sign in with the new email from now on.</p>}</div>
+            <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">New Password</label><input type="password" autoComplete="new-password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Leave blank to keep the current password" className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all" /></div>
+            <div className="flex flex-col gap-2"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Office access</label>{editingUser.role === "Superadmin" ? <p className="rounded-xl bg-[#F8F9FA] p-3 text-xs font-semibold text-[#0b587b]">System Admin has access to all offices.</p> : <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F8F9FA] p-3">{OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 text-xs font-medium text-slate-700"><input type="checkbox" checked={editDraft.officeAccess.includes(office.id)} onChange={() => toggleOffice(office.id, editDraft.officeAccess, officeAccess => setEditDraft({ ...editDraft, officeAccess }))} />{office.label}</label>)}</div>}</div>
+            {editError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-600">{editError}</p>}
+          </div>
+          <div className="mt-6 flex gap-3"><button onClick={() => setEditingUser(null)} disabled={savingEdit} className="flex-1 rounded-xl border border-border-apple px-4 py-3 text-sm font-bold disabled:opacity-50">Cancel</button><button onClick={() => void saveEdit()} disabled={savingEdit || !editDraft.fullName.trim() || !editDraft.email.trim()} className="flex-1 rounded-xl bg-accent-blue px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{savingEdit ? "Saving…" : "Save changes"}</button></div>
+        </motion.div></div>}
       </AnimatePresence>
     </div>
   );

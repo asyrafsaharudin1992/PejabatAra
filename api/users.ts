@@ -27,18 +27,39 @@ export default async function handler(req: any, res: any) {
     const { data: target, error } = await db.from('profiles').select('id,role').eq('email',email).single();
     if (error) throw error;
     if (req.method === 'PATCH') {
+      const authUpdate: Record<string, unknown> = {};
+      const profileUpdate: Record<string, unknown> = {};
       if (body.officeAccess !== undefined) {
         if (!Array.isArray(body.officeAccess) || body.officeAccess.some((office: unknown) => typeof office !== 'string')) return res.status(400).json({error:'Choose valid office access.'});
         if (target.role === 'super_admin') return res.status(400).json({error:'System Admin access is managed automatically.'});
-        const { error: accessError } = await db.auth.admin.updateUserById(target.id,{app_metadata:{office_access:body.officeAccess}});
-        if (accessError) throw accessError;
+        authUpdate.app_metadata = {office_access:body.officeAccess};
       }
       if (body.password !== undefined) {
         if (typeof body.password !== 'string' || body.password.length < 12) return res.status(400).json({error:'Use at least 12 characters.'});
-        const {error} = await db.auth.admin.updateUserById(target.id,{password:body.password});
-        if(error) throw error;
+        authUpdate.password = body.password;
       }
-      if (body.officeAccess === undefined && body.password === undefined) return res.status(400).json({error:'Choose an account update.'});
+      if (body.newEmail !== undefined) {
+        const nextEmail = typeof body.newEmail === 'string' ? body.newEmail.trim() : '';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) return res.status(400).json({error:'Enter a valid email address.'});
+        if (nextEmail.toLowerCase() !== String(email).toLowerCase()) {
+          // Admin-set emails are confirmed immediately so the person can sign in with the new address straight away.
+          authUpdate.email = nextEmail; authUpdate.email_confirm = true; profileUpdate.email = nextEmail;
+        }
+      }
+      if (body.fullName !== undefined) {
+        const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+        if (!fullName) return res.status(400).json({error:'Enter a full name.'});
+        authUpdate.user_metadata = {full_name:fullName}; profileUpdate.full_name = fullName;
+      }
+      if (!Object.keys(authUpdate).length && !Object.keys(profileUpdate).length) return res.status(400).json({error:'Choose an account update.'});
+      if (Object.keys(authUpdate).length) {
+        const { error: authError } = await db.auth.admin.updateUserById(target.id, authUpdate);
+        if (authError) throw authError;
+      }
+      if (Object.keys(profileUpdate).length) {
+        const { error: profileError } = await db.from('profiles').update(profileUpdate).eq('id', target.id);
+        if (profileError) throw new Error('Sign-in details were updated, but the profile could not be saved. Refresh and check this account.');
+      }
       return res.json({success:true});
     }
     if (req.method === 'DELETE') {
