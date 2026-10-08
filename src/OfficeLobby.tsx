@@ -75,7 +75,7 @@ function AdminHub() {
   const [mode, setMode] = useState<'admin' | 'staff'>(() => localStorage.getItem('ara_view_mode') === 'staff' ? 'staff' : 'admin');
   const rooms = offices.filter((room) => room.id !== 'admin');
   const openRoom = (roomId: string) => { localStorage.setItem('ara_view_mode', mode); window.location.hash = `office/${roomId}`; };
-  return <div className="min-h-screen bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16">
+  return <div className="h-screen overflow-y-auto bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16">
     <div className="mx-auto max-w-6xl">
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
         <div><p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE CONTROL CENTRE</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">System Admin</h1><p className="mt-2 text-sm text-slate-500">Manage and open every office from one account.</p></div>

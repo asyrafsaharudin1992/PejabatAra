@@ -1231,7 +1231,7 @@ export default function App() {
   if (!sessionResolved || !user) return null;
 
   return (
-    <div className="quality-office-shell flex h-screen bg-[#f7fafc] text-text-primary font-sans overflow-hidden">
+    <div className="quality-office-shell flex min-h-screen bg-[#f7fafc] text-text-primary font-sans overflow-x-hidden">
       {/* Sidebar */}
       <aside className="w-[260px] bg-[#083a55] text-white border-0 flex flex-col px-4 py-8">
         <div className="px-4 mb-10">
