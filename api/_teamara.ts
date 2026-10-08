@@ -43,10 +43,10 @@ export async function teamaraHandler(req: any, res: any) {
       const titles = (metadata.data.sheets || []).map((sheet: any) => sheet.properties?.title).filter(Boolean);
       const memberSheet = titles.find((title: string) => title.toLowerCase() === 'teamara semua aktif') || titles.find((title: string) => title.toLowerCase() === 'user') || titles[0] || 'User';
       const raw = await sheetRows(sheets, memberSheet);
-      const header = raw[1] || [];
-      const branchIndex = header.findIndex((value) => /^(cawangan|branch)$/i.test(text(value).replace(/\s+/g, ' '))) >= 0
-        ? header.findIndex((value) => /^(cawangan|branch)$/i.test(text(value).replace(/\s+/g, ' ')))
-        : -1;
+      // TeamAra's current source keeps its branch value in column I (zero-based
+      // index 8). Do not infer this from a header: the sheet contains other
+      // header-like labels that can make the dashboard read the wrong column.
+      const branchIndex = 8;
       // The active tab currently exposes A:H, while the legacy branch column is
       // still present in Sheet16. Build a small lookup so the first tab remains
       // the source of truth and branch filters continue to work.
@@ -67,12 +67,36 @@ export async function teamaraHandler(req: any, res: any) {
       cache = { at: Date.now(), members, family: objectRows(familyRows), vendors: objectRows(vendorRows) };
     }
     const numericQuery = /^\d+$/.test(q.replace(/\s+/g, ''));
-    const members = cache.members.filter((member) => isAdmin || q.length >= 2).filter((member) => {
+    const members = cache.members.filter((member) => {
       if (!q) return true;
       if (numericQuery) return `${member.ic} ${member.memberId}`.toLowerCase().includes(q);
       const name = member.name.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
       return name === q || name.split(' ').includes(q) || name.includes(` ${q} `);
     });
-    return res.status(200).json({ members, family: isAdmin ? cache.family : [], vendors: isAdmin ? cache.vendors : [], isAdmin, cachedAt: cache.at });
+    return res.status(200).json({ members, family: cache.family, vendors: cache.vendors, isAdmin, cachedAt: cache.at });
   } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra data.' }); }
+}
+
+// Card and birthday WhatsApp templates, plus the card template and birthday poster image paths. Everyone with TeamAra access reads them;
+// only System Admin can change them. Missing rows mean "use the built-in default".
+export async function teamaraMessagesHandler(req: any, res: any) {
+  try {
+    const { db, user, profile } = await officeAccess(req, false, 'ca');
+    const isAdmin = profile.role === 'super_admin';
+    if (req.method === 'PUT') {
+      if (!isAdmin) return res.status(403).json({ error: 'Only System Admin can edit TeamAra messages.' });
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+      if (!['card', 'birthday', 'card_template', 'birthday_poster'].includes(body.key) || typeof body.body !== 'string' || !body.body.trim()) return res.status(400).json({ error: 'A message type and text are required.' });
+      const imageFolder = ({ card_template: 'card', birthday_poster: 'birthday' } as Record<string, string>)[body.key];
+      if (imageFolder && !new RegExp(`^${imageFolder}/[\\w-]+\\.(png|jpe?g)$`).test(body.body)) return res.status(400).json({ error: 'Invalid image path.' });
+      const { data: previous } = await db.from('teamara_messages').select('body').eq('key', body.key).maybeSingle();
+      const { error } = await db.from('teamara_messages').upsert({ key: body.key, body: body.body, updated_at: new Date().toISOString(), updated_by: user.id });
+      if (error) throw error;
+      // Replaced template images are no longer referenced; the browser can't delete them, so do it here.
+      if (imageFolder && previous?.body && previous.body !== body.body) await db.storage.from('teamara-templates').remove([previous.body]);
+    } else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed.' });
+    const { data, error } = await db.from('teamara_messages').select('key,body');
+    if (error) throw error;
+    return res.status(200).json({ messages: Object.fromEntries((data || []).map((row: any) => [row.key, row.body])) });
+  } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra messages.' }); }
 }
