@@ -35,6 +35,7 @@ import {
   knowledgeResources,
   knowledgeUpdates,
   PortalUser,
+  QuickLink,
   quickLinks,
   trainingModules,
   TrainingModule,
@@ -42,7 +43,7 @@ import {
 import { cn } from "./lib/utils";
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase } from "./lib/supabase";
 import ShiftHandoverView, { shiftGuides, ShiftGuides } from "./ShiftHandover";
-import { usePanelTraining } from "./lib/usePanelTraining";
+import { PanelRecord, usePanelTraining } from "./lib/usePanelTraining";
 import { useServiceCatalog } from "./lib/useServiceCatalog";
 import { useCaPortalState } from "./lib/useCaPortalState";
 import { useSharedReferences } from "./lib/useSharedReferences";
@@ -92,7 +93,7 @@ const caWorkspaceDefaults = (): CaWorkspaceContent => ({
   resources: readLocal<KnowledgeResource[]>("ara_portal_resources", knowledgeResources),
   knowledgeUpdates,
   trainingModules,
-  announcements: announcementsSeed,
+  announcements: [],
   links: quickLinks,
   services: serviceSeed,
   panelRows: defaultPanelTrainingRows,
@@ -133,11 +134,13 @@ export default function PortalApp() {
   const [staff, setStaff] = useState<PortalUser[]>(() => readLocal<PortalUser[]>("ara_portal_staff", demoStaff).map(normalizeUser));
   const [toast, setToast] = useState("");
   const [toastError, setToastError] = useState(false);
-  const panelTraining = usePanelTraining(personal.ready && view === 'panelTraining', user?.role === "Superadmin");
+  // Home search covers every tab, so load Services and Panel Training once staff start typing there.
+  const homeSearching = view === "home" && globalSearch.trim().length > 0;
+  const panelTraining = usePanelTraining(personal.ready && (view === 'panelTraining' || homeSearching), user?.role === "Superadmin");
   // Start loading as soon as the Services view is opened.  The service hook
   // still uses the signed-in session for protected mutations, while the UI
   // keeps its local poster fallback visible during the initial request.
-  const serviceCatalog = useServiceCatalog(view === 'services');
+  const serviceCatalog = useServiceCatalog(view === 'services' || homeSearching);
 
   useEffect(() => {
     if (!toast) return;
@@ -196,12 +199,27 @@ export default function PortalApp() {
 
   const updateResource = references.update;
 
+  const saveAnnouncements = async (next: Announcement[], message: string) => {
+    const saved = await workspace.save({ ...workspace.data, announcements: next });
+    setToastError(!saved);
+    setToast(saved ? message : "Unable to save announcements. Please try again.");
+    return saved;
+  };
+
+  const saveLinks = async (next: QuickLink[], message: string) => {
+    const saved = await workspace.save({ ...workspace.data, links: next });
+    setToastError(!saved);
+    setToast(saved ? message : "Unable to save links. Please try again.");
+    return saved;
+  };
+
   if (!user) return <LoginScreen onLogin={login} />;
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
       <Sidebar
         panelAlertCount={panelTraining.guides.filter((guide) => guide.status === 'pending').length}
+        announcementCount={content.announcements.length}
         user={user}
         view={view}
         open={mobileNavOpen}
@@ -276,7 +294,10 @@ export default function PortalApp() {
               setSearch={setGlobalSearch}
               announcements={content.announcements}
               resources={content.resources}
-              knowledgeUpdates={content.knowledgeUpdates || []}
+              links={content.links}
+              serviceCatalog={serviceCatalog}
+              panels={panelTraining.panels}
+              panelsLoading={panelTraining.loading}
             />
           )}
           {view === "handover" && <ShiftHandoverView guides={content.shiftGuides} />}
@@ -301,8 +322,8 @@ export default function PortalApp() {
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
           {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
-          {view === "announcements" && <AnnouncementsView announcements={content.announcements} />}
-          {view === "links" && <LinksView links={content.links} />}
+          {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} />}
+          {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
           {view === "admin" && user.role === "Superadmin" && (
             <AdminView staff={staff} onAddStaff={addStaff} />
           )}
@@ -426,17 +447,8 @@ function LoginScreen({ onLogin }: { onLogin: (user: PortalUser) => void }) {
   );
 }
 
-function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCount = 0 }: { user: PortalUser; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void; panelAlertCount?: number }) {
-  const items: { id: View; label: string; icon: typeof Home }[] = [
-    { id: "home", label: "Home", icon: Home },
-    { id: "handover", label: "Shift Passover", icon: ClipboardCheck },
-    { id: "knowledge", label: "Reference Hub", icon: Library },
-    { id: "panelTraining", label: "Panel Training", icon: BookOpen },
-    { id: "services", label: "Our Services", icon: Sparkles },
-    { id: "teamara", label: "TeamAra", icon: Users },
-    { id: "announcements", label: "Announcements", icon: Bell },
-    { id: "links", label: "Important Links", icon: Link2 },
-  ];
+function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCount = 0, announcementCount = 0 }: { user: PortalUser; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void; panelAlertCount?: number; announcementCount?: number }) {
+  const items: { id: View; label: string; icon: typeof Home }[] = [{ id: "home", label: "Home", icon: Home }, ...portalTabs];
 
   return (
     <>
@@ -452,8 +464,8 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
             <button key={item.id} onClick={() => onNavigate(item.id)} className={cn("flex w-full items-center gap-3 rounded-[14px] px-4 py-3.5 text-sm font-semibold transition", view === item.id ? "bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.14)] [&>svg]:text-[#7357ff]" : "text-[#b8cddd] hover:bg-white/8 hover:text-white")}>
               <item.icon className="h-5 w-5" />{item.label}
               {item.id === "panelTraining" && panelAlertCount > 0 && <span className="ml-auto rounded-full bg-rose-500 px-2 py-0.5 text-xs text-white">{panelAlertCount}</span>}
-              {item.id === "announcements" && <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">1</span>}
-              {item.id !== "announcements" && <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
+              {item.id === "announcements" && announcementCount > 0 && <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{announcementCount}</span>}
+              {!(item.id === "announcements" && announcementCount > 0) && <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
             </button>
           ))}
         </nav>
@@ -466,42 +478,44 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
   );
 }
 
-type HomeProps = { onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void; search: string; setSearch: (value: string) => void; announcements: Announcement[]; resources: KnowledgeResource[]; knowledgeUpdates: KnowledgeBaseUpdate[] };
-type HomeDestination = { label: string; note: string; icon: typeof Home; view?: View; resource?: KnowledgeResource; tone: string };
+// Every tab in the sidebar (besides Home). Quick access on Home is built from this list,
+// so a new tab only needs to be added here to appear in both places.
+const portalTabs: { id: View; label: string; note: string; icon: typeof Home; tone: string }[] = [
+  { id: "knowledge", label: "Reference Hub", note: "SOPs, memos & work guides", icon: Library, tone: "text-[#20c7f4]" },
+  { id: "panelTraining", label: "Panel Training", note: "Panel workflows & guides", icon: BookOpen, tone: "text-emerald-400" },
+  { id: "services", label: "Our Services", note: "Clinic services & FAQs", icon: Sparkles, tone: "text-[#ffb000]" },
+  { id: "teamara", label: "TeamAra", note: "Members & cards", icon: Users, tone: "text-[#ff7ab6]" },
+  { id: "handover", label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, tone: "text-[#7258ff]" },
+  { id: "announcements", label: "Announcements", note: "Team updates", icon: Bell, tone: "text-[#ff6b81]" },
+  { id: "links", label: "Important Links", note: "Work systems", icon: Link2, tone: "text-[#20c7f4]" },
+];
 
-function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, knowledgeUpdates }: HomeProps) {
+type HomeProps = {
+  onNavigate: (view: View) => void;
+  onOpenResource: (resource: KnowledgeResource) => void;
+  search: string;
+  setSearch: (value: string) => void;
+  announcements: Announcement[];
+  resources: KnowledgeResource[];
+  links: QuickLink[];
+  serviceCatalog: ReturnType<typeof useServiceCatalog>;
+  panels: PanelRecord[];
+  panelsLoading: boolean;
+};
+
+function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, panels, panelsLoading }: HomeProps) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
-  const quickAccess: HomeDestination[] = [
-    { label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, view: "handover", tone: "text-[#7258ff]" },
-    { label: "Reference Hub", note: "SOPs & work guides", icon: Library, view: "knowledge", tone: "text-[#20c7f4]" },
-    { label: "Panel Training", note: "Panel workflows & guides", icon: BookOpen, view: "panelTraining", tone: "text-emerald-400" },
-    { label: "Our Services", note: "Clinic services", icon: Sparkles, view: "services", tone: "text-[#ffb000]" },
-    { label: "Important Links", note: "Work systems", icon: Link2, view: "links", tone: "text-[#20c7f4]" },
-  ];
-  const findResource = (terms: string[]) => resources.find((resource) => terms.some((term) => `${resource.title} ${resource.category} ${resource.keywords.join(" ")}`.toLowerCase().includes(term)));
-  const commonlyNeeded = [
-    { label: "Shift passover template", note: "AM & PM daily guides", icon: ClipboardCheck, view: "handover" as View },
-    { label: "Panel patient workflow", note: "Registration & panel reference", icon: BookOpen, resource: findResource(["panel", "arapanel"]) },
-    { label: "Complaint escalation", note: "Patient complaint process", icon: AlertCircle, resource: findResource(["complaint", "aduan"]) },
-    { label: "Plato guide", note: "Daily system reference", icon: FileText, resource: findResource(["plato"]) },
-    { label: "Clinic services reference", note: "Service overview", icon: Sparkles, view: "services" as View },
-    { label: "Important work systems", note: "Systems & useful links", icon: Link2, view: "links" as View },
-  ].filter((item) => item.view || item.resource);
   const importantAnnouncement = announcements.find((announcement) => announcement.priority === "Penting");
-  const openDestination = (item: HomeDestination) => item.resource ? onOpenResource(item.resource) : item.view && onNavigate(item.view);
 
   return <div className="mx-auto max-w-[1500px] space-y-8">
     <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
       <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Clinic Assistants</h2><p className="mt-3 text-base text-[#bed2df]">References and everyday work guides in one workspace.</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p></div></div>
     </section>
 
-    <SearchAraSpace search={search} setSearch={setSearch} onSearch={() => onNavigate("knowledge")} />
+    <SearchAraSpace search={search} setSearch={setSearch} />
+    {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} panels={panels} panelsLoading={panelsLoading} />}
 
-    <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">{quickAccess.map((item) => <button key={item.label} onClick={() => openDestination(item)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}</div></section>
-
-    <section><SectionHeading title="Commonly needed" eyebrow="Everyday resources" /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{commonlyNeeded.map((item) => <button key={item.label} onClick={() => item.resource ? onOpenResource(item.resource) : item.view && onNavigate(item.view)} className="group flex min-h-[76px] items-center gap-3 rounded-2xl border border-[#dce4ed] bg-white p-4 text-left transition hover:border-[#8cdbf7] hover:bg-[#f9fcfe]"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#edf9fe] text-[#0b587b]"><item.icon className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-[#14233b]">{item.label}</span><span className="mt-0.5 block truncate text-xs text-[#60758c]">{item.note}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:text-[#0b587b]" /></button>)}</div></section>
-
-    <LatestUpdates updates={knowledgeUpdates} resources={resources} onNavigate={onNavigate} onOpenResource={onOpenResource} />
+    <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{portalTabs.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}</div></section>
 
     {importantAnnouncement && <section className="rounded-[28px] border border-rose-100 bg-white p-6 sm:p-7"><div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div><h3 className="mt-4 text-xl font-semibold">{importantAnnouncement.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{importantAnnouncement.body}</p><button onClick={() => onNavigate("announcements")} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button></section>}
   </div>;
@@ -511,21 +525,53 @@ function SectionHeading({ title, eyebrow }: { title: string; eyebrow: string }) 
   return <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">{title}</h3><span className="text-right text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">{eyebrow}</span></div>;
 }
 
-function SearchAraSpace({ search, setSearch, onSearch }: { search: string; setSearch: (value: string) => void; onSearch: () => void }) {
-  return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search SOPs, work guides, training and FAQs without leaving the portal.</p></div></div><div className="flex w-full max-w-xl gap-2 rounded-[16px] bg-white p-2 shadow-sm"><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onSearch()} placeholder="Try: panel registration, Plato, complaints, shift change..." className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-slate-400" /><button onClick={onSearch} className="rounded-xl bg-[#0b3d59] px-5 py-2.5 text-sm font-bold text-white">Search</button></div></section>;
+function SearchAraSpace({ search, setSearch }: { search: string; setSearch: (value: string) => void }) {
+  return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search references, memos, services, panels, announcements and links.</p></div></div><div className="flex w-full max-w-xl items-center gap-2 rounded-[16px] bg-white p-2 shadow-sm"><Search className="ml-2 h-4 w-4 shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setSearch("")} placeholder="Try: AraSihat, panel registration, Plato, complaints..." className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-sm outline-none placeholder:text-slate-400" />{search && <button onClick={() => setSearch("")} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}</div></section>;
 }
 
-function LatestUpdates({ updates, resources, onNavigate, onOpenResource }: { updates: KnowledgeBaseUpdate[]; resources: KnowledgeResource[]; onNavigate: (view: View) => void; onOpenResource: (resource: KnowledgeResource) => void }) {
-  const resourceById = new Map(resources.map((resource) => [resource.id, resource]));
-  const badgeTone = { NEW: "bg-emerald-50 text-emerald-700", UPDATED: "bg-sky-50 text-sky-700", NOTICE: "bg-amber-50 text-amber-700" };
-  return <section className="rounded-[28px] border border-[#dce4ed] bg-white p-6 sm:p-7"><SectionHeading title="Latest updates" eyebrow="Knowledge base" />{updates.length === 0 ? <p className="rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-[#60758c]">No verified knowledge-base updates have been published yet.</p> : <div className="divide-y divide-[#e7edf2]">{updates.map((update) => { const resource = update.resourceId ? resourceById.get(update.resourceId) : undefined; return <button key={update.id} onClick={() => resource ? onOpenResource(resource) : update.view && onNavigate(update.view as View)} className="flex w-full items-center gap-4 py-4 text-left first:pt-0 last:pb-0"><span className={cn("rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider", badgeTone[update.type])}>{update.type}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{update.title}</span><span className="mt-0.5 block text-xs text-slate-500">{update.date}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /></button>; })}</div>}</section>;
-}
+// Shift Passover is a daily checklist, not reference material, so it stays out of search.
+const searchableTabs = portalTabs.filter((tab) => tab.id !== "handover");
 
-const announcementsSeed: Announcement[] = [
-  { id: "review", title: "Staff portal content review", body: "All SOPs and training materials are starter drafts. Process owners must review them before publishing to all staff.", date: "30 Sep 2026", audience: "All staff", priority: "Penting" },
-  { id: "onboarding", title: "New staff onboarding training", body: "Supervisors should ensure new staff complete the onboarding modules during their first week.", date: "28 Sep 2026", audience: "Supervisors & new staff", priority: "Biasa" },
-  { id: "complaint", title: "Patient complaint SOP updated", body: "Review the new escalation flow in the Reference Hub and report any unclear steps.", date: "25 Sep 2026", audience: "Front desk & operations", priority: "Biasa" },
-];
+type SearchHit = { key: string; title: string; detail: string; tab: View; score: number; onOpen: () => void; inactive?: boolean };
+
+function SearchResults({ query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog, panels, panelsLoading }: Omit<HomeProps, "search" | "setSearch"> & { query: string }) {
+  const groups = useMemo(() => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    // Every search word must appear somewhere in the item; matches in the title rank higher.
+    const score = (title: string, ...rest: (string | undefined)[]) => {
+      const head = title.toLowerCase();
+      const body = rest.filter(Boolean).join(" ").toLowerCase();
+      if (!terms.every((term) => head.includes(term) || body.includes(term))) return 0;
+      return terms.reduce((total, term) => total + (head.includes(term) ? 3 : 1), 0);
+    };
+    const hits: SearchHit[] = [];
+    const add = (hit: Omit<SearchHit, "score">, value: number) => { if (value) hits.push({ ...hit, score: value }); };
+
+    searchableTabs.forEach((tab) => add({ key: `tab-${tab.id}`, title: tab.label, detail: tab.note, tab: tab.id, onOpen: () => onNavigate(tab.id) }, score(tab.label, tab.note)));
+    resources.forEach((resource) => add({ key: `ref-${resource.id}`, title: resource.title, detail: `${resource.type} · ${resource.summary}`, tab: "knowledge", onOpen: () => onOpenResource(resource), inactive: resource.status === "TERBATAL" }, score(resource.title, resource.summary, resource.category, resource.type, resource.keywords.join(" "), resource.content.join(" "))));
+    const folderName = new Map<string, string>(serviceCatalog.folders.map((folder) => [folder.id, folder.name]));
+    serviceCatalog.services.forEach((service) => add({ key: `svc-${service.id}`, title: service.title, detail: service.summary || folderName.get(service.folder_id || "") || "Service", tab: "services", onOpen: () => onNavigate("services") }, score(service.title, service.summary, service.tags, folderName.get(service.folder_id || ""))));
+    serviceCatalog.faqs.forEach((faq) => add({ key: `faq-${faq.id}`, title: faq.question, detail: faq.answer, tab: "services", onOpen: () => onNavigate("services") }, score(faq.question, faq.answer, folderName.get(faq.folder_id || ""))));
+    panels.filter((panel) => panel.active !== false).forEach((panel) => add({ key: `panel-${panel.id}`, title: panel.name, detail: panel.availability.join(", ") || "Panel", tab: "panelTraining", onOpen: () => onNavigate("panelTraining") }, score(panel.name, panel.availability.join(" "))));
+    announcements.forEach((item) => add({ key: `ann-${item.id}`, title: item.title, detail: item.body, tab: "announcements", onOpen: () => onNavigate("announcements") }, score(item.title, item.body, item.audience)));
+    links.forEach((link) => add({ key: `link-${link.id}`, title: link.title, detail: link.description || link.url, tab: "links", onOpen: () => window.open(link.url, "_blank", "noopener,noreferrer") }, score(link.title, link.description, link.group, link.url)));
+
+    return searchableTabs
+      .map((tab) => ({ tab, hits: hits.filter((hit) => hit.tab === tab.id && !hit.key.startsWith("tab-")).sort((a, b) => b.score - a.score), tabHit: hits.some((hit) => hit.key === `tab-${tab.id}`) }))
+      .filter((group) => group.hits.length || group.tabHit);
+  }, [query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog.folders, serviceCatalog.services, serviceCatalog.faqs, panels]);
+  const loading = serviceCatalog.loading || panelsLoading;
+
+  return <section className="rounded-[28px] border border-[#dce4ed] bg-white p-6 sm:p-7">
+    <SectionHeading title="Search results" eyebrow={loading ? "Searching all tabs…" : `${groups.reduce((total, group) => total + group.hits.length, 0)} found`} />
+    {groups.length === 0 && !loading && <p className="rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-[#60758c]">Nothing matches “{query.trim()}” in any tab yet.</p>}
+    <div className="space-y-6">{groups.map(({ tab, hits }) => <div key={tab.id}>
+      <button onClick={() => onNavigate(tab.id)} className="mb-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-[#0b587b] hover:underline"><tab.icon className="h-4 w-4" />{tab.label}<span className="font-semibold normal-case tracking-normal text-slate-400">· {hits.length ? `${hits.length} match${hits.length === 1 ? "" : "es"}` : "Open tab"}</span></button>
+      {hits.length > 0 && <div className="divide-y divide-[#e7edf2] rounded-2xl border border-[#e7edf2]">{hits.slice(0, 5).map((hit) => <button key={hit.key} onClick={hit.onOpen} className="group flex w-full items-center gap-3 px-4 py-3 text-left transition first:rounded-t-2xl last:rounded-b-2xl hover:bg-[#f9fcfe]"><span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-semibold text-[#14233b]">{hit.title}</span>{hit.inactive && <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-700">Not active</span>}</span><span className="mt-0.5 block truncate text-xs text-[#60758c]">{hit.detail}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:text-[#0b587b]" /></button>)}</div>}
+      {hits.length > 5 && <button onClick={() => onNavigate(tab.id)} className="mt-2 text-xs font-bold text-[#0b587b] hover:underline">View all {hits.length} in {tab.label} →</button>}
+    </div>)}</div>
+  </section>;
+}
 
 const serviceSeed: Service[] = [
     ["General consultation", "Consultation, acute treatment and follow-up care."],
@@ -740,12 +786,93 @@ function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kin
   return <ModalShell onClose={onClose} wide><div className="sticky top-0 z-20 -mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button type="button" onClick={onClose} className="relative z-30 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="relative z-20 mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="relative z-30 shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
-function AnnouncementsView({ announcements }: { announcements: Announcement[] }) {
-  return <div className="mx-auto max-w-[1500px] space-y-6"><section className="rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Team updates</p><h2 className="mt-2 text-3xl font-semibold">Announcements</h2><p className="mt-2 text-[#b9cfdd]">Operational changes and information staff need to know.</p></section>{announcements.map((item) => <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", item.priority === "Penting" ? "border-rose-200" : "border-[#dce4ed]")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", item.priority === "Penting" ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-600")}><Bell className="h-5 w-5" /></div><div><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 leading-7 text-slate-600">{item.body}</p></div></div><div className="shrink-0 text-sm text-slate-400 sm:text-right"><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div></div></article>)}</div>;
+const fieldClass = "w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10";
+
+function formatToday() {
+  return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function LinksView({ links }: { links: typeof quickLinks }) {
-  return <div className="mx-auto max-w-[1500px]"><section className="mb-6 rounded-[30px] bg-[#0b3d59] p-8 text-white"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quick access</p><h2 className="mt-2 text-3xl font-semibold">Important links</h2><p className="mt-2 text-[#b9cfdd]">Systems and forms used in daily operations.</p></section><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className="h-5 w-5 text-[#8eb2c6] group-hover:text-white" /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3><p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p><p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>)}</div><p className="mt-6 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">These are starter links. An admin can replace them with the organisation's live links before publishing.</p></div>;
+function AnnouncementsView({ announcements, canEdit, onSave }: { announcements: Announcement[]; canEdit: boolean; onSave: (next: Announcement[], message: string) => Promise<boolean> }) {
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ title: "", body: "", audience: "Semua staf", priority: "Biasa" as Announcement["priority"] });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft.title.trim() || !draft.body.trim()) return;
+    setSaving(true);
+    const item: Announcement = { id: crypto.randomUUID(), title: draft.title.trim(), body: draft.body.trim(), audience: draft.audience.trim() || "Semua staf", priority: draft.priority, date: formatToday() };
+    const saved = await onSave([item, ...announcements], "Announcement published");
+    setSaving(false);
+    if (saved) { setDraft({ title: "", body: "", audience: "Semua staf", priority: "Biasa" }); setAdding(false); }
+  };
+
+  const remove = async (item: Announcement) => {
+    if (saving) return;
+    setSaving(true);
+    await onSave(announcements.filter((entry) => entry.id !== item.id), "Announcement removed");
+    setSaving(false);
+  };
+
+  return <div className="mx-auto max-w-[1500px] space-y-6">
+    <section className="flex flex-col gap-5 rounded-[30px] bg-[#0b3d59] p-8 text-white sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Team updates</p><h2 className="mt-2 text-3xl font-semibold">Announcements</h2><p className="mt-2 text-[#b9cfdd]">Operational changes and information staff need to know.</p></div>{canEdit && !adding && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] transition hover:bg-[#eaf6fb] sm:self-auto"><Plus className="h-4 w-4" />New announcement</button>}</section>
+    {canEdit && adding && <form onSubmit={submit} className="space-y-4 rounded-[24px] border border-[#dce4ed] bg-white p-6 sm:p-7">
+      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">New announcement</h3><button type="button" onClick={() => setAdding(false)} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
+      <label className="block text-sm font-semibold text-slate-600">Title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
+      <label className="block text-sm font-semibold text-slate-600">Message<textarea required rows={4} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} className={cn(fieldClass, "mt-1.5 resize-y")} /></label>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-sm font-semibold text-slate-600">Audience<input value={draft.audience} onChange={(event) => setDraft({ ...draft, audience: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
+        <label className="block text-sm font-semibold text-slate-600">Priority<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Announcement["priority"] })} className={cn(fieldClass, "mt-1.5")}><option value="Biasa">Normal</option><option value="Penting">Important</option></select></label>
+      </div>
+      <div className="flex justify-end gap-3"><button type="button" onClick={() => setAdding(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Publishing…" : "Publish"}</button></div>
+    </form>}
+    {announcements.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No announcements yet.</p>}
+    {announcements.map((item) => <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", item.priority === "Penting" ? "border-rose-200" : "border-[#dce4ed]")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", item.priority === "Penting" ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-600")}><Bell className="h-5 w-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 whitespace-pre-line leading-7 text-slate-600">{item.body}</p></div></div><div className="flex shrink-0 items-start gap-3 text-sm text-slate-400 sm:text-right"><div><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div>{canEdit && <button onClick={() => void remove(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Remove ${item.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div></div></article>)}
+  </div>;
+}
+
+function normalizeUrl(value: string) {
+  const url = value.trim();
+  return /^(https?:|mailto:|tel:)/i.test(url) ? url : `https://${url}`;
+}
+
+function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: boolean; onSave: (next: QuickLink[], message: string) => Promise<boolean> }) {
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ title: "", url: "", description: "", group: "" });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft.title.trim() || !draft.url.trim()) return;
+    setSaving(true);
+    const item: QuickLink = { id: crypto.randomUUID(), title: draft.title.trim(), url: normalizeUrl(draft.url), description: draft.description.trim(), group: draft.group.trim() || "General" };
+    const saved = await onSave([...links, item], "Link added");
+    setSaving(false);
+    if (saved) { setDraft({ title: "", url: "", description: "", group: "" }); setAdding(false); }
+  };
+
+  const remove = async (item: QuickLink) => {
+    if (saving) return;
+    setSaving(true);
+    await onSave(links.filter((entry) => entry.id !== item.id), "Link removed");
+    setSaving(false);
+  };
+
+  return <div className="mx-auto max-w-[1500px]">
+    <section className="mb-6 flex flex-col gap-5 rounded-[30px] bg-[#0b3d59] p-8 text-white sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quick access</p><h2 className="mt-2 text-3xl font-semibold">Important links</h2><p className="mt-2 text-[#b9cfdd]">Systems and forms used in daily operations.</p></div>{canEdit && !adding && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] transition hover:bg-[#eaf6fb] sm:self-auto"><Plus className="h-4 w-4" />New link</button>}</section>
+    {canEdit && adding && <form onSubmit={submit} className="mb-6 space-y-4 rounded-[24px] border border-[#dce4ed] bg-white p-6 sm:p-7">
+      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">New link</h3><button type="button" onClick={() => setAdding(false)} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-sm font-semibold text-slate-600">Title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
+        <label className="block text-sm font-semibold text-slate-600">URL<input required value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://" className={cn(fieldClass, "mt-1.5")} /></label>
+        <label className="block text-sm font-semibold text-slate-600">Description<input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
+        <label className="block text-sm font-semibold text-slate-600">Group<input value={draft.group} onChange={(event) => setDraft({ ...draft, group: event.target.value })} placeholder="e.g. Systems, Forms" className={cn(fieldClass, "mt-1.5")} /></label>
+      </div>
+      <div className="flex justify-end gap-3"><button type="button" onClick={() => setAdding(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Saving…" : "Add link"}</button></div>
+    </form>}
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <div key={link.id} className="relative"><a href={link.url} target="_blank" rel="noreferrer" className="group block h-full rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className={cn("h-5 w-5 text-[#8eb2c6] group-hover:text-white", canEdit && "mr-11")} /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3>{link.description && <p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p>}<p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>{canEdit && <button onClick={() => void remove(link)} disabled={saving} className="absolute right-6 top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>
+    {links.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No links yet.</p>}
+  </div>;
 }
 
 function AdminView({ staff, onAddStaff }: { staff: PortalUser[]; onAddStaff: (staff: PortalUser) => void }) {

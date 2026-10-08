@@ -323,42 +323,12 @@ export const trainingModules: TrainingModule[] = [
   },
 ];
 
-export const announcements: Announcement[] = [
-  {
-    id: "draft-review",
-    title: "Semakan kandungan portal staf",
-    body: "Semua SOP dan bahan latihan dalam versi ini ialah draf permulaan. Pemilik proses perlu menyemak sebelum diterbitkan kepada seluruh staf.",
-    date: "30 Sep 2026",
-    audience: "Semua staf",
-    priority: "Penting",
-  },
-  {
-    id: "training-week",
-    title: "Latihan onboarding staf baharu",
-    body: "Penyelia diminta memastikan staf baharu melengkapkan modul onboarding dalam minggu pertama.",
-    date: "28 Sep 2026",
-    audience: "Penyelia & staf baharu",
-    priority: "Biasa",
-  },
-  {
-    id: "sop-update",
-    title: "SOP aduan pesakit dikemas kini",
-    body: "Rujuk aliran eskalasi baharu di Pusat Rujukan dan maklumkan jika terdapat langkah yang tidak jelas.",
-    date: "25 Sep 2026",
-    audience: "Front desk & operasi",
-    priority: "Biasa",
-  },
-];
+export const announcements: Announcement[] = [];
 
 // No verified knowledge-base change records have been supplied yet.
 export const knowledgeUpdates: KnowledgeBaseUpdate[] = [];
 
-export const quickLinks: QuickLink[] = [
-  { id: "plato", title: "Plato CMS", description: "Clinic management", group: "Systems", url: "https://app.platohealth.ai" },
-  { id: "drive", title: "Operations Drive", description: "Team documents", group: "Documents", url: "https://drive.google.com" },
-  { id: "forms", title: "Internal Forms", description: "Requests & reports", group: "Forms", url: "https://forms.google.com" },
-  { id: "support", title: "IT Support", description: "Report a system issue", group: "Support", url: "mailto:support@example.com" },
-];
+export const quickLinks: QuickLink[] = [];
 
 export const demoStaff: PortalUser[] = [
   { id: "demo-admin", email: "admin@ara.local", fullName: "Dr Asyraf", role: "Superadmin", department: "Management", branch: "All branches", status: "active", lastActive: "Now" },
