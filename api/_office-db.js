@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
-/** @param {string | string[]} [requiredOffice] */
-export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality') {
+// Any signed-in account with an active profile, before office or device checks.
+export async function activeAccount(req) {
   const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
   if (!token) throw Object.assign(new Error('Sign in required.'), { status: 401 });
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -12,13 +13,51 @@ export async function officeAccess(req, adminOnly = false, requiredOffice = 'qua
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
   const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();
-  const officeAccess = data.user.app_metadata?.office_access;
+  if (profileError || profile?.status !== 'active') throw Object.assign(new Error('Access restricted.'), { status: 403 });
+  return { db, user: data.user, profile };
+}
+
+/** @param {string | string[]} [requiredOffice] */
+export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality') {
+  const { db, user, profile } = await activeAccount(req);
+  const officeAccess = user.app_metadata?.office_access;
   // requiredOffice may list several offices; access to any one of them is enough.
   const offices = [].concat(requiredOffice);
-  if (profileError || profile?.status !== 'active' || (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !offices.some((office) => officeAccess.includes(office))))) {
+  if (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !offices.some((office) => officeAccess.includes(office)))) {
     throw Object.assign(new Error('Access restricted.'), { status: 403 });
   }
-  return { db, user: data.user, profile };
+  if (profile.role !== 'super_admin' && await deviceLockEnabled(db)) {
+    const device = await currentDevice(db, req);
+    if (!device) throw Object.assign(new Error(DEVICE_REQUIRED), { status: 403 });
+  }
+  return { db, user, profile };
+}
+
+// Registered devices (see migration 202610080005). The browser sends the
+// device token in x-device-token; only its SHA-256 hash is stored.
+export const DEVICE_REQUIRED = 'This device is not registered. Enter the device security key to continue.';
+export const hashSecret = (value) => createHash('sha256').update(String(value)).digest('hex');
+
+export async function deviceLockEnabled(db) {
+  const { data, error } = await db.from('device_settings').select('key_hash').eq('id', true).maybeSingle();
+  // Before migration 202610080005 is applied the table does not exist yet: the lock is simply off.
+  if (error && ['PGRST205', '42P01'].includes(error.code)) return false;
+  if (error) throw error;
+  return Boolean(data?.key_hash);
+}
+
+export async function currentDevice(db, req) {
+  const token = String(req.headers['x-device-token'] || '');
+  if (!token) return null;
+  const now = new Date();
+  const { data, error } = await db.from('registered_devices').select('id,name,expires_at,last_seen_at')
+    .eq('token_hash', hashSecret(token)).is('revoked_at', null).gt('expires_at', now.toISOString()).maybeSingle();
+  if (error) throw error;
+  // Record activity at most hourly so Control Centre can show when a device was last used.
+  if (data && (!data.last_seen_at || now.getTime() - Date.parse(data.last_seen_at) > 60 * 60 * 1000)) {
+    await db.from('registered_devices').update({ last_seen_at: now.toISOString() }).eq('id', data.id);
+  }
+  return data;
 }
 
 // Finds a branch by name, optionally creating it. Branches double as the
