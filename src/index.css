@@ -114,10 +114,3 @@
     box-shadow: 0 0 0 4px rgba(86, 56, 245, 0.1);
   }
 }
-
-/* Birth month/day filters belong to Birthday messages, not Directory. */
-.space-y-5 > div:first-child > .mt-4.grid > select:nth-of-type(3),
-.space-y-5 > div:first-child > .mt-4.grid > input:last-child { display: none; }
-
-/* Directory keeps status as record information, not as a filter. */
-.space-y-5 > div:first-child > .mt-4.grid > select:nth-of-type(2) { display: none; }
