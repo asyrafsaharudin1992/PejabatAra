@@ -50,6 +50,7 @@ import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
 import { ManagedServices } from './ManagedServices';
 import TeamAra from './TeamAra';
+import { useVisitingFrom } from "./lib/officeVisit";
 
 type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "teamara" | "announcements" | "links" | "admin";
 
@@ -505,11 +506,12 @@ type HomeProps = {
 
 function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, panels, panelsLoading }: HomeProps) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
+  const visitor = useVisitingFrom("ca");
   const importantAnnouncement = announcements.find((announcement) => announcement.priority === "Penting");
 
   return <div className="mx-auto max-w-[1500px] space-y-8">
     <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
-      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Clinic Assistants</h2><p className="mt-3 text-base text-[#bed2df]">References and everyday work guides in one workspace.</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p></div></div>
+      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, {visitor || "Clinic Assistants"}</h2><p className="mt-3 text-base text-[#bed2df]">{visitor ? "This is the Clinic Assistants' page." : "References and everyday work guides in one workspace."}</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p></div></div>
     </section>
 
     <SearchAraSpace search={search} setSearch={setSearch} />

@@ -10,13 +10,16 @@ export default async function handler(req: any, res: any) {
       const { data: authData, error: authError } = await db.auth.admin.listUsers({ perPage: 1000 });
       if (authError) throw authError;
       const accessById = new Map((authData.users || []).map(authUser => [authUser.id, Array.isArray(authUser.app_metadata?.office_access) ? authUser.app_metadata.office_access : []]));
-      return res.json((data || []).map(p => ({ ...p, officeAccess:accessById.get(p.id) || [], fullName:p.full_name, role:p.role === 'super_admin' ? 'Superadmin' : 'Staff' })));
+      const homeById = new Map((authData.users || []).map(authUser => [authUser.id, typeof authUser.app_metadata?.home_office === 'string' ? authUser.app_metadata.home_office : '']));
+      return res.json((data || []).map(p => ({ ...p, officeAccess:accessById.get(p.id) || [], homeOffice:homeById.get(p.id) || '', fullName:p.full_name, role:p.role === 'super_admin' ? 'Superadmin' : 'Staff' })));
     }
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     if (req.method === 'POST') {
       if (!body.fullName?.trim() || !body.email?.includes('@') || typeof body.password !== 'string' || body.password.length < 12 || !['Staff','Superadmin'].includes(body.role)) return res.status(400).json({error:'Enter a name, email, valid role and password of at least 12 characters.'});
       const officeAccess = Array.isArray(body.officeAccess) ? body.officeAccess.filter((office: unknown) => typeof office === 'string') : [];
-      const { data, error } = await db.auth.admin.createUser({email:body.email.trim(), password:body.password, email_confirm:true, user_metadata:{full_name:body.fullName.trim()}, app_metadata:{office_access:officeAccess}});
+      // The home office is the account's own team; other offices in its access are visits.
+      const homeOffice = officeAccess.includes(body.homeOffice) ? body.homeOffice : officeAccess[0] || '';
+      const { data, error } = await db.auth.admin.createUser({email:body.email.trim(), password:body.password, email_confirm:true, user_metadata:{full_name:body.fullName.trim()}, app_metadata:{office_access:officeAccess, home_office:homeOffice}});
       if (error) throw error;
       const { error: profileError } = await db.from('profiles').upsert({id:data.user.id,email:body.email.trim(),full_name:body.fullName.trim(),role:body.role === 'Superadmin' ? 'super_admin' : 'staff',status:'active',department:body.department || null});
       if (profileError) throw new Error('Account created, but profile setup failed. Check this account before retrying.');
@@ -29,10 +32,16 @@ export default async function handler(req: any, res: any) {
     if (req.method === 'PATCH') {
       const authUpdate: Record<string, unknown> = {};
       const profileUpdate: Record<string, unknown> = {};
-      if (body.officeAccess !== undefined) {
-        if (!Array.isArray(body.officeAccess) || body.officeAccess.some((office: unknown) => typeof office !== 'string')) return res.status(400).json({error:'Choose valid office access.'});
+      if (body.officeAccess !== undefined || body.homeOffice !== undefined) {
+        if (body.officeAccess !== undefined && (!Array.isArray(body.officeAccess) || body.officeAccess.some((office: unknown) => typeof office !== 'string'))) return res.status(400).json({error:'Choose valid office access.'});
         if (target.role === 'super_admin') return res.status(400).json({error:'System Admin access is managed automatically.'});
-        authUpdate.app_metadata = {office_access:body.officeAccess};
+        const { data: current, error: currentError } = await db.auth.admin.getUserById(target.id);
+        if (currentError) throw currentError;
+        const metadata = current.user.app_metadata || {};
+        const access: string[] = body.officeAccess ?? (Array.isArray(metadata.office_access) ? metadata.office_access : []);
+        const home = body.homeOffice ?? metadata.home_office;
+        if (body.homeOffice !== undefined && !access.includes(body.homeOffice)) return res.status(400).json({error:'The home office must be one of the offices this person can access.'});
+        authUpdate.app_metadata = {...metadata, office_access:access, home_office:access.includes(home) ? home : access[0] || ''};
       }
       if (body.password !== undefined) {
         if (typeof body.password !== 'string' || body.password.length < 12) return res.status(400).json({error:'Use at least 12 characters.'});

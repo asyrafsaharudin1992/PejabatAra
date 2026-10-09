@@ -42,6 +42,7 @@ import { loadQualityWorkspace } from "./lib/qualityData";
 import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ResourceModal } from "./ReferenceHub";
 import { KnowledgeResource, knowledgeResources } from "./portalData";
+import { useVisitingFrom } from "./lib/officeVisit";
 
 type Category = "Quality of Service" | "Marketing" | "Locum Doctors" | "TeamARA" | "Collaborations";
 
@@ -120,6 +121,7 @@ interface UserData {
   location?: string;
   profilePic?: string;
   officeAccess?: string[];
+  homeOffice?: string;
 }
 
 const INITIAL_CATEGORIES: CategoryData[] = [
@@ -1196,6 +1198,7 @@ export default function App() {
   const trackerHistory = history.filter(entry => entry.source === "tracker");
   const recordedWorkdays = new Set(trackerHistory.map(entry => String(entry.dateCompleted).slice(0, 10))).size;
   const latestRecordedDate = history[0]?.dateCompleted ? new Date(history[0].dateCompleted) : null;
+  const visitor = useVisitingFrom("quality");
   const latestRecordedKey = history[0]?.dateCompleted ? String(history[0].dateCompleted).slice(0, 10) : "";
   const latestDayActivity = latestRecordedKey
     ? history.filter(entry => String(entry.dateCompleted).slice(0, 10) === latestRecordedKey)
@@ -1350,10 +1353,10 @@ export default function App() {
                     <div className="max-w-2xl">
                       <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#79d6f7]">Quality &amp; Corporate Office</p>
                       <h2 className="text-[38px] font-semibold leading-tight tracking-[-0.035em]">
-                        Welcome back, {user?.fullName?.split(' ')[0]}.
+                        {visitor ? `Welcome, ${visitor}.` : `Welcome back, ${user?.fullName?.split(' ')[0]}.`}
                       </h2>
                       <p className="mt-3 max-w-xl text-[15px] leading-6 text-white/70">
-                        A clear view of today’s priorities and the work already recorded by your team.
+                        {visitor ? "This is the Quality & Corporate page." : "A clear view of today’s priorities and the work already recorded by your team."}
                       </p>
                     </div>
                     <div className="min-w-[230px] rounded-[20px] border border-white/15 bg-white/10 px-5 py-4 backdrop-blur-sm">
@@ -2640,7 +2643,13 @@ const OFFICE_ACCESS_OPTIONS = [
   { id: 'clinical', label: 'Clinical Administration' }, { id: 'ca', label: 'Clinical Assistants' },
 ];
 
-type UserUpdate = { fullName?: string; newEmail?: string; password?: string; officeAccess?: string[] };
+type UserUpdate = { fullName?: string; newEmail?: string; password?: string; officeAccess?: string[]; homeOffice?: string };
+// The account's own team, used to greet it when it visits another office. Defaults to the first office in its access.
+const resolveHomeOffice = (home: string | undefined, access: string[]) => home && access.includes(home) ? home : access[0] || "";
+function HomeOfficeSelect({ access, value, onChange }: { access: string[]; value: string; onChange: (office: string) => void }) {
+  if (access.length < 2) return null;
+  return <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Home office</label><select value={resolveHomeOffice(value, access)} onChange={(e) => onChange(e.target.value)} className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue">{OFFICE_ACCESS_OPTIONS.filter(office => access.includes(office.id)).map(office => <option key={office.id} value={office.id}>{office.label}</option>)}</select><p className="ml-1 text-xs text-slate-500">Their own team. In other offices they are welcomed as a visitor from this office.</p></div>;
+}
 
 export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser, isLoading }: {
   allUsers: UserData[], 
@@ -2651,12 +2660,12 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
 }) {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
-  const [editDraft, setEditDraft] = useState({ fullName: "", email: "", password: "", officeAccess: [] as string[] });
+  const [editDraft, setEditDraft] = useState({ fullName: "", email: "", password: "", officeAccess: [] as string[], homeOffice: "" });
   const [editError, setEditError] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const openEdit = (u: UserData) => {
     setEditingUser(u);
-    setEditDraft({ fullName: u.fullName || "", email: u.email, password: "", officeAccess: u.officeAccess || [] });
+    setEditDraft({ fullName: u.fullName || "", email: u.email, password: "", officeAccess: u.officeAccess || [], homeOffice: u.homeOffice || "" });
     setEditError("");
   };
   const saveEdit = async () => {
@@ -2670,13 +2679,15 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
     }
     const currentAccess = [...(editingUser.officeAccess || [])].sort().join(",");
     if (editingUser.role !== "Superadmin" && [...editDraft.officeAccess].sort().join(",") !== currentAccess) changes.officeAccess = editDraft.officeAccess;
+    const nextHome = resolveHomeOffice(editDraft.homeOffice, editDraft.officeAccess);
+    if (editingUser.role !== "Superadmin" && nextHome && nextHome !== (editingUser.homeOffice || "")) changes.homeOffice = nextHome;
     if (!Object.keys(changes).length) { setEditingUser(null); return; }
     setSavingEdit(true); setEditError("");
     const error = await onUpdateUser(editingUser.email, changes);
     setSavingEdit(false);
     if (error) setEditError(error); else setEditingUser(null);
   };
-  const [newUser, setNewUser] = useState({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] as string[] });
+  const [newUser, setNewUser] = useState({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] as string[], homeOffice: "" });
   const toggleOffice = (officeId: string, current: string[], update: (next: string[]) => void) => update(current.includes(officeId) ? current.filter(id => id !== officeId) : [...current, officeId]);
 
   if (isLoading) {
@@ -2828,6 +2839,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
                     {OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 text-xs font-medium text-slate-700"><input type="checkbox" checked={newUser.officeAccess.includes(office.id)} onChange={() => toggleOffice(office.id, newUser.officeAccess, officeAccess => setNewUser({ ...newUser, officeAccess }))} />{office.label}</label>)}
                   </div>
                 </div>
+                {newUser.role !== "Superadmin" && <HomeOfficeSelect access={newUser.officeAccess} value={newUser.homeOffice} onChange={homeOffice => setNewUser({ ...newUser, homeOffice })} />}
                 <div className="flex gap-3 pt-4">
                   <button 
                     onClick={() => setIsAddUserModalOpen(false)}
@@ -2839,7 +2851,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
                     onClick={() => {
                       onAddUser(newUser);
                       setIsAddUserModalOpen(false);
-                      setNewUser({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [] });
+                      setNewUser({ email: "", fullName: "", role: "Staff", password: "", officeAccess: [], homeOffice: "" });
                     }}
                     className="flex-1 bg-accent-blue text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20"
                   >
@@ -2860,6 +2872,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
             <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Email Address</label><input type="email" value={editDraft.email} onChange={(e) => setEditDraft({ ...editDraft, email: e.target.value })} className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all" />{editDraft.email.trim().toLowerCase() !== editingUser.email.toLowerCase() && <p className="ml-1 text-xs text-amber-700">They will sign in with the new email from now on.</p>}</div>
             <div className="flex flex-col gap-1.5"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">New Password</label><input type="password" autoComplete="new-password" value={editDraft.password} onChange={(e) => setEditDraft({ ...editDraft, password: e.target.value })} placeholder="Leave blank to keep the current password" className="bg-[#F8F9FA] border border-border-apple rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-blue transition-all" /></div>
             <div className="flex flex-col gap-2"><label className="text-[10px] font-bold text-text-secondary uppercase tracking-widest ml-1">Office access</label>{editingUser.role === "Superadmin" ? <p className="rounded-xl bg-[#F8F9FA] p-3 text-xs font-semibold text-[#0b587b]">System Admin has access to all offices.</p> : <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F8F9FA] p-3">{OFFICE_ACCESS_OPTIONS.map(office => <label key={office.id} className="flex items-center gap-2 text-xs font-medium text-slate-700"><input type="checkbox" checked={editDraft.officeAccess.includes(office.id)} onChange={() => toggleOffice(office.id, editDraft.officeAccess, officeAccess => setEditDraft({ ...editDraft, officeAccess }))} />{office.label}</label>)}</div>}</div>
+            {editingUser.role !== "Superadmin" && <HomeOfficeSelect access={editDraft.officeAccess} value={editDraft.homeOffice} onChange={homeOffice => setEditDraft({ ...editDraft, homeOffice })} />}
             {editError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-600">{editError}</p>}
           </div>
           <div className="mt-6 flex gap-3"><button onClick={() => setEditingUser(null)} disabled={savingEdit} className="flex-1 rounded-xl border border-border-apple px-4 py-3 text-sm font-bold disabled:opacity-50">Cancel</button><button onClick={() => void saveEdit()} disabled={savingEdit || !editDraft.fullName.trim() || !editDraft.email.trim()} className="flex-1 rounded-xl bg-accent-blue px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{savingEdit ? "Saving…" : "Save changes"}</button></div>
