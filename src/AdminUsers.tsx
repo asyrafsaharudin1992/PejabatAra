@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { UserManagement } from './App';
 import { officeFetch } from './lib/officeApi';
+import AssessmentStaff from './AssessmentStaff';
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<any[]>([]);
@@ -28,6 +29,7 @@ export default function AdminUsers() {
       <UserManagement allUsers={users} isLoading={loading} onAddUser={data => void act('POST',data)}
         onDeleteUser={email => { if(window.confirm(`Delete ${email}? This removes their sign-in account.`)) void act('DELETE',{email}); }}
         onUpdateUser={(email, changes) => act('PATCH',{email,...changes})} />
+      <AssessmentStaff />
     </div>
   </main>;
 }

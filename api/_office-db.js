@@ -2,14 +2,19 @@ import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
+// Service-role client: bypasses RLS, so callers must do their own access checks.
+export function serviceDb() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('Supabase server configuration is missing.');
+  return createClient(url, key, { auth: { persistSession: false }, realtime: { transport: WebSocket } });
+}
+
 // Any signed-in account with an active profile, before office or device checks.
 export async function activeAccount(req) {
   const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
   if (!token) throw Object.assign(new Error('Sign in required.'), { status: 401 });
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error('Supabase server configuration is missing.');
-  const db = createClient(url, key, { auth: { persistSession: false }, realtime: { transport: WebSocket } });
+  const db = serviceDb();
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
   const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();

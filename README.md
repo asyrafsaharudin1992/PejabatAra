@@ -18,6 +18,9 @@ src/
   PortalApp.tsx       Workspace CA (portal staf)
   AdminUsers.tsx      Pengurusan pengguna
   ShiftHandover.tsx   Serah tugas syif
+  AssessmentRoom.tsx  Assessment Room: staf jawab kuiz dari telefon sendiri
+  AssessmentAdmin.tsx Control Centre: urus assessment dan lihat keputusan
+  AssessmentStaff.tsx User Management: senarai staf Assessment Room
   lib/                Klien Supabase, officeApi, hook dan utiliti
 api/                  Endpoint backend (fail berawalan _ ialah modul dalaman)
   local.ts            Pelayan Express untuk dev tempatan
@@ -75,6 +78,17 @@ Rujuk `.env.example` untuk senarai penuh.
 
 Jangan sekali-kali letak kunci rahsia (service role, private key) dalam
 pemboleh ubah berawalan `VITE_` kerana ia akan didedahkan kepada pelayar.
+
+## Assessment Room
+
+Pintu di lobi (`#office/assessment`) untuk assessment berkala staf. Ia tidak
+menggunakan akaun office yang dikongsi atau kunci peranti: staf log masuk dari
+telefon sendiri dengan nama, kod staf dan 4 digit terakhir IC (disimpan sebagai
+hash scrypt). API berada di `/api/status?resource=assessment` (`api/_assessment.ts`)
+kerana had 12 function pelan Vercel Hobby. Jadual `assessment_*` hanya boleh
+dibaca oleh service role; jawapan betul tidak dihantar kepada staf. Akaun
+*preview* (untuk pengurusan) boleh melihat semua assessment berserta jawapan
+tetapi tidak boleh menghantar dan tidak dikira dalam keputusan.
 
 ## Pangkalan data
 
