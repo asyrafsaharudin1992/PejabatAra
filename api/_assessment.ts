@@ -10,6 +10,8 @@ import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
 const SESSION_HOURS = 12;
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 15;
+// Every assessment is passed only with full marks; anything less must be retaken.
+const PASS_MARK = 100;
 
 // Staff may type the code with spaces, dashes or lower case.
 const normaliseCode = (value: unknown) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -102,15 +104,17 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (!staff.can_preview) quizQuery = quizQuery.eq('active', true);
     const [{ data: quizzes, error: quizError }, { data: attempts, error: attemptError }] = await Promise.all([
       quizQuery,
-      db.from('assessment_attempts').select('quiz_id,score,total,submitted_at').eq('staff_id', staff.id),
+      db.from('assessment_attempts').select('quiz_id,score,total,attempt_no,submitted_at').eq('staff_id', staff.id),
     ]);
     if (quizError || attemptError) throw quizError || attemptError;
-    const byQuiz = new Map((attempts || []).map((row: any) => [row.quiz_id, row]));
+    // Staff see their latest try; its attempt_no is how many tries they have made.
+    const byQuiz = new Map<string, any>();
+    for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
       staff: { name: staff.name, branch: staff.branch, preview: staff.can_preview },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
-        return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, submittedAt: attempt.submitted_at } : null };
+        return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
       }),
     });
   }
@@ -133,11 +137,19 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
     const questions = quiz.questions as { id: string; answer: number }[];
     if (questions.some((question) => !Number.isInteger(answers[question.id]))) throw fail(400, 'Answer every question before submitting.');
-    const score = questions.filter((question) => answers[question.id] === question.answer).length;
-    const { error: insertError } = await db.from('assessment_attempts').insert({ quiz_id: quiz.id, staff_id: staff.id, answers, score, total: questions.length });
-    if (insertError?.code === '23505') throw fail(409, 'You have already submitted this assessment.');
-    if (insertError) throw insertError;
-    return res.status(200).json({ score, total: questions.length, passMark: quiz.pass_mark });
+    // Below full marks the staff member retakes; every try is kept as its own row.
+    const { data: previous, error: previousError } = await db.from('assessment_attempts').select('score,total,attempt_no').eq('quiz_id', quiz.id).eq('staff_id', staff.id);
+    if (previousError) throw previousError;
+    if ((previous || []).some((row: any) => row.score >= row.total)) throw fail(409, 'You have already passed this assessment.');
+    const attemptNo = Math.max(0, ...(previous || []).map((row: any) => row.attempt_no)) + 1;
+    // Only which questions were wrong is returned, never the correct answers.
+    const wrong = questions.filter((question) => answers[question.id] !== question.answer).map((question) => question.id);
+    const score = questions.length - wrong.length;
+    const { error: saveError } = await db.from('assessment_attempts').insert({ quiz_id: quiz.id, staff_id: staff.id, answers, score, total: questions.length, attempt_no: attemptNo });
+    // Two screens submitting at once would claim the same attempt number.
+    if (saveError?.code === '23505') throw fail(409, 'This assessment was just submitted from another screen. Go back to see your result.');
+    if (saveError) throw saveError;
+    return res.status(200).json({ score, total: questions.length, passMark: PASS_MARK, attempt: attemptNo, wrong });
   }
 
   throw fail(405, 'Method not allowed.');
@@ -159,13 +171,14 @@ async function adminAction(req: any, res: any, action: string, body: any) {
     const [staff, quizzes, attempts] = await Promise.all([
       db.from('assessment_staff').select('id,name,staff_code,branch,active,can_preview').order('name'),
       db.from('assessment_quizzes').select('id,title,description,pass_mark,active,questions,updated_at').order('created_at', { ascending: false }),
-      db.from('assessment_attempts').select('id,quiz_id,staff_id,score,total,submitted_at').order('submitted_at', { ascending: false }),
+      // Answers are left out to keep this list small; attempt_detail fetches them for one staff member.
+      db.from('assessment_attempts').select('id,quiz_id,staff_id,score,total,attempt_no,submitted_at').order('submitted_at', { ascending: false }),
     ]);
     if (staff.error || quizzes.error || attempts.error) throw staff.error || quizzes.error || attempts.error;
     return res.status(200).json({
       staff: (staff.data || []).map((row: any) => ({ id: row.id, name: row.name, code: row.staff_code, branch: row.branch, active: row.active, preview: row.can_preview })),
       quizzes: (quizzes.data || []).map((row: any) => ({ id: row.id, title: row.title, description: row.description, passMark: row.pass_mark, active: row.active, questions: row.questions, updatedAt: row.updated_at })),
-      attempts: (attempts.data || []).map((row: any) => ({ id: row.id, quizId: row.quiz_id, staffId: row.staff_id, score: row.score, total: row.total, submittedAt: row.submitted_at })),
+      attempts: (attempts.data || []).map((row: any) => ({ id: row.id, quizId: row.quiz_id, staffId: row.staff_id, score: row.score, total: row.total, attemptNo: row.attempt_no, submittedAt: row.submitted_at })),
     });
   }
 
@@ -198,9 +211,7 @@ async function adminAction(req: any, res: any, action: string, body: any) {
   if (req.method === 'POST' && action === 'save_quiz') {
     const title = text(body.title, 160);
     if (!title) throw fail(400, 'Give the assessment a title.');
-    const passMark = Math.round(Number(body.passMark));
-    if (!Number.isFinite(passMark) || passMark < 0 || passMark > 100) throw fail(400, 'Pass mark must be between 0 and 100%.');
-    const row = { title, description: text(body.description, 2000), pass_mark: passMark, active: Boolean(body.active), questions: cleanQuestions(body.questions), updated_at: now, updated_by: user.id };
+    const row = { title, description: text(body.description, 2000), pass_mark: PASS_MARK, active: Boolean(body.active), questions: cleanQuestions(body.questions), updated_at: now, updated_by: user.id };
     const { error } = body.id ? await db.from('assessment_quizzes').update(row).eq('id', text(body.id)) : await db.from('assessment_quizzes').insert(row);
     if (error) throw error;
     return res.status(200).json({ success: true });
@@ -218,8 +229,17 @@ async function adminAction(req: any, res: any, action: string, body: any) {
     return res.status(200).json({ success: true });
   }
 
+  // Every try one staff member made at one assessment, with their answers.
+  if (req.method === 'GET' && action === 'attempt_detail') {
+    const { data, error } = await db.from('assessment_attempts').select('id,score,total,attempt_no,answers,submitted_at')
+      .eq('quiz_id', text(req.query.quizId)).eq('staff_id', text(req.query.staffId)).order('attempt_no');
+    if (error) throw error;
+    return res.status(200).json({ attempts: (data || []).map((row: any) => ({ id: row.id, score: row.score, total: row.total, attemptNo: row.attempt_no, answers: row.answers, submittedAt: row.submitted_at })) });
+  }
+
+  // Clears every try a staff member made at one assessment, so they start over.
   if (req.method === 'POST' && action === 'reset_attempt') {
-    const { error } = await db.from('assessment_attempts').delete().eq('id', text(body.id));
+    const { error } = await db.from('assessment_attempts').delete().eq('quiz_id', text(body.quizId)).eq('staff_id', text(body.staffId));
     if (error) throw error;
     return res.status(200).json({ success: true });
   }
@@ -227,7 +247,7 @@ async function adminAction(req: any, res: any, action: string, body: any) {
   throw fail(405, 'Method not allowed.');
 }
 
-const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'reset_attempt']);
+const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt']);
 
 export async function assessmentHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');

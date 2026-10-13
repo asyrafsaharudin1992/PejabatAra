@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Eye, LogOut, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Eye, LogOut, RotateCcw, XCircle } from 'lucide-react';
 
 // Staff side of the Assessment Room. Staff use their own phones, so this page
 // does not use the shared office accounts or the device lock: it signs in with
@@ -7,13 +7,16 @@ import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Eye, 
 const API = '/api/status?resource=assessment';
 const TOKEN_KEY = 'ara_assessment_token';
 
-type Quiz = { id: string; title: string; description: string; passMark: number; active: boolean; questionCount: number; attempt: { score: number; total: number; submittedAt: string } | null };
+type Quiz = { id: string; title: string; description: string; passMark: number; active: boolean; questionCount: number; attempt: { score: number; total: number; count: number; submittedAt: string } | null };
 type Me = { staff: { name: string; branch: string; preview: boolean }; quizzes: Quiz[] };
 // `answer` is only sent to preview accounts.
 type OpenQuiz = { id: string; title: string; description: string; passMark: number; preview: boolean; questions: { id: string; text: string; options: string[]; answer?: number }[] };
-type Result = { score: number; total: number; passMark: number };
+// `wrong` lists the ids of questions answered wrongly; correct answers are never sent.
+type Result = { score: number; total: number; passMark: number; attempt: number; wrong: string[] };
 
 const percent = (score: number, total: number) => total ? Math.round((score / total) * 100) : 0;
+// Only full marks pass; anything less is retaken.
+const fullMarks = (score: number, total: number) => total > 0 && score >= total;
 const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 async function assessmentFetch(query: string, options: RequestInit = {}) {
@@ -66,8 +69,9 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   </Shell>;
 }
 
-// One question per screen. Staff answer and submit once; preview accounts step
-// through with the correct answer marked and cannot submit.
+// One question per screen. Staff retake until they score 100%, seeing after each
+// try which questions they got wrong; preview accounts step through with the
+// correct answer marked and cannot submit.
 function TakeQuiz({ quizId, onDone, onBack }: { quizId: string; onDone: () => void; onBack: () => void }) {
   const [quiz, setQuiz] = useState<OpenQuiz | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -83,23 +87,39 @@ function TakeQuiz({ quizId, onDone, onBack }: { quizId: string; onDone: () => vo
     if (!quiz) return;
     const firstUnanswered = quiz.questions.findIndex((question) => answers[question.id] === undefined);
     if (firstUnanswered >= 0) { setStep(firstUnanswered); setError(`Question ${firstUnanswered + 1} has not been answered.`); return; }
-    if (!window.confirm('Submit your answers? You can only submit once.')) return;
+    if (!window.confirm('Submit your answers? You need 100% to pass.')) return;
     setError(''); setSaving(true);
     try { setResult(await assessmentFetch('action=submit', { method: 'POST', body: JSON.stringify({ id: quiz.id, answers }) })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to submit.'); }
     finally { setSaving(false); }
   };
 
-  if (result) {
-    const mark = percent(result.score, result.total);
-    const passed = mark >= result.passMark;
-    return <Shell><div className="rounded-[28px] bg-white p-8 text-center shadow-[0_18px_45px_rgba(20,35,59,0.1)]">
-      {passed ? <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" /> : <XCircle className="mx-auto h-14 w-14 text-rose-500" />}
-      <h1 className="mt-5 text-2xl font-semibold">{passed ? 'Well done, you passed!' : 'Not passed this time'}</h1>
-      <p className="mt-6 text-5xl font-semibold tracking-tight">{mark}%</p>
-      <p className="mt-2 text-sm text-slate-500">{result.score} of {result.total} correct · pass mark {result.passMark}%</p>
-      <button onClick={onDone} className="mt-8 h-12 w-full rounded-xl bg-[#0b587b] text-sm font-semibold text-white hover:bg-[#083a55]">Back to assessments</button>
-    </div></Shell>;
+  if (result && quiz) {
+    const passed = fullMarks(result.score, result.total);
+    const retake = () => { setResult(null); setAnswers({}); setStep(0); setError(''); };
+    return <Shell>
+      <div className="rounded-[28px] bg-white p-8 text-center shadow-[0_18px_45px_rgba(20,35,59,0.1)]">
+        {passed ? <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" /> : <XCircle className="mx-auto h-14 w-14 text-rose-500" />}
+        <h1 className="mt-5 text-2xl font-semibold">{passed ? 'Well done, you passed!' : 'Not passed yet'}</h1>
+        <p className="mt-6 text-5xl font-semibold tracking-tight">{percent(result.score, result.total)}%</p>
+        <p className="mt-2 text-sm text-slate-500">{result.score} of {result.total} correct · attempt {result.attempt} · 100% needed to pass</p>
+        {!passed && <p className="mt-4 text-sm leading-6 text-slate-600">Check the {result.wrong.length === 1 ? 'question' : `${result.wrong.length} questions`} you got wrong below, then try again.</p>}
+        {passed
+          ? <button onClick={onDone} className="mt-8 h-12 w-full rounded-xl bg-[#0b587b] text-sm font-semibold text-white hover:bg-[#083a55]">Back to assessments</button>
+          : <div className="mt-8 grid gap-2 sm:grid-cols-2">
+            <button onClick={onDone} className="h-12 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50">Back to assessments</button>
+            <button onClick={retake} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white hover:bg-[#083a55]"><RotateCcw className="h-4 w-4" />Try again</button>
+          </div>}
+      </div>
+      {result.wrong.length > 0 && <div className="mt-6 space-y-3">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-rose-600">Wrong answers</h2>
+        {quiz.questions.map((question, index) => result.wrong.includes(question.id) && <div key={question.id} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
+          <p className="text-xs font-semibold text-slate-400">Question {index + 1}</p>
+          <p className="mt-1 whitespace-pre-line text-sm font-semibold leading-6">{question.text}</p>
+          <p className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><XCircle className="mt-0.5 h-4 w-4 shrink-0" /><span><span className="font-semibold">Your answer:</span> {question.options[answers[question.id]]}</span></p>
+        </div>)}
+      </div>}
+    </Shell>;
   }
 
   const question = quiz?.questions[step];
@@ -173,17 +193,20 @@ export default function AssessmentRoom() {
     {me && me.quizzes.length === 0 && <p className="mt-8 rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm">{preview ? 'No assessments have been created yet.' : 'No assessments are open right now. Check back when your admin announces the next one.'}</p>}
     <div className="mt-8 space-y-3">{me?.quizzes.map((quiz) => {
       const mark = quiz.attempt ? percent(quiz.attempt.score, quiz.attempt.total) : 0;
+      const passed = Boolean(quiz.attempt && fullMarks(quiz.attempt.score, quiz.attempt.total));
       return <div key={quiz.id} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
         <div className="flex items-start justify-between gap-4">
-          <div><h2 className="font-semibold">{quiz.title}</h2>{quiz.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{quiz.description}</p>}<p className="mt-2 text-xs text-slate-400">{quiz.questionCount} questions · pass mark {quiz.passMark}%</p></div>
+          <div><h2 className="font-semibold">{quiz.title}</h2>{quiz.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{quiz.description}</p>}<p className="mt-2 text-xs text-slate-400">{quiz.questionCount} questions · 100% needed to pass</p></div>
           {preview && <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${quiz.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{quiz.active ? 'Open' : 'Closed'}</span>}
-          {!preview && quiz.attempt && <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${mark >= quiz.passMark ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{mark}%</span>}
+          {!preview && quiz.attempt && <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${passed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{mark}%</span>}
         </div>
         {preview
           ? <button onClick={() => setOpenQuiz(quiz.id)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]"><Eye className="h-4 w-4" />View questions</button>
-          : quiz.attempt
-            ? <p className="mt-4 text-xs text-slate-500">Submitted {formatDate(quiz.attempt.submittedAt)} · {quiz.attempt.score}/{quiz.attempt.total} correct · {mark >= quiz.passMark ? 'Passed' : 'Not passed'}</p>
-            : <button onClick={() => setOpenQuiz(quiz.id)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]">Start assessment<ArrowRight className="h-4 w-4" /></button>}
+          : passed && quiz.attempt
+            ? <p className="mt-4 text-xs text-slate-500">Passed {formatDate(quiz.attempt.submittedAt)} · {quiz.attempt.score}/{quiz.attempt.total} correct · {quiz.attempt.count} {quiz.attempt.count === 1 ? 'attempt' : 'attempts'}</p>
+            : quiz.attempt
+              ? <div className="mt-4"><p className="text-xs text-rose-700">Not passed yet · last try {quiz.attempt.score}/{quiz.attempt.total} correct · you need 100%</p><button onClick={() => setOpenQuiz(quiz.id)} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]"><RotateCcw className="h-4 w-4" />Retake assessment</button></div>
+              : <button onClick={() => setOpenQuiz(quiz.id)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]">Start assessment<ArrowRight className="h-4 w-4" /></button>}
       </div>;
     })}</div>
   </Shell>;
