@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ClipboardCheck, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowLeft, ClipboardCheck, Download, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { ASSESSMENT_API as API, card, input, Modal } from './AssessmentStaff';
 
@@ -15,6 +15,42 @@ type QuizDraft = { id?: string; title: string; description: string; passMark: nu
 
 const percent = (score: number, total: number) => total ? Math.round((score / total) * 100) : 0;
 const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const head = { fontWeight: 'bold' as const, textColor: '#FFFFFF', backgroundColor: '#0B3D59', wrap: true };
+const cell = (value: string | number) => ({ value, wrap: true, alignVertical: 'top' as const });
+
+// Builds the Excel file in the browser from data already on the page, so a
+// download costs no extra database reads. The library loads only on click.
+async function downloadQuiz(quiz: Quiz, staff: Staff[], attempts: Attempt[]) {
+  const { default: writeExcelFile } = await import('write-excel-file/browser');
+  const optionCount = Math.max(...quiz.questions.map((question) => question.options.length));
+  const letters = Array.from({ length: optionCount }, (_, i) => String.fromCharCode(65 + i));
+  const questions = [
+    ['No.', 'Soalan', ...letters, 'Jawapan', 'Jawapan betul'].map((value) => ({ ...head, value })),
+    ...quiz.questions.map((question, index) => [
+      cell(index + 1), cell(question.text),
+      ...letters.map((_, i) => cell(question.options[i] ?? '')),
+      { ...cell(letters[question.answer]), fontWeight: 'bold' as const, textColor: '#047857', align: 'center' as const },
+      { ...cell(question.options[question.answer]), fontWeight: 'bold' as const, textColor: '#047857' },
+    ]),
+  ];
+  const byStaff = new Map(attempts.filter((attempt) => attempt.quizId === quiz.id).map((attempt) => [attempt.staffId, attempt]));
+  const results = [
+    ['Nama', 'Kod staf', 'Cawangan', 'Markah', 'Peratus', 'Keputusan', 'Tarikh hantar'].map((value) => ({ ...head, value })),
+    ...staff.filter((row) => !row.preview && (row.active || byStaff.has(row.id))).sort((a, b) => a.branch.localeCompare(b.branch) || a.name.localeCompare(b.name)).map((row) => {
+      const attempt = byStaff.get(row.id);
+      const mark = attempt ? percent(attempt.score, attempt.total) : 0;
+      return [cell(row.name), cell(row.code), cell(row.branch || '—'),
+        cell(attempt ? `${attempt.score}/${attempt.total}` : '—'), cell(attempt ? `${mark}%` : '—'),
+        cell(attempt ? (mark >= quiz.passMark ? 'Lulus' : 'Tidak lulus') : 'Belum ambil'), cell(attempt ? formatDate(attempt.submittedAt) : '—')];
+    }),
+  ];
+  const safeTitle = quiz.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'Assessment';
+  await writeExcelFile([
+    { data: questions, sheet: 'Soalan & Jawapan', columns: [{ width: 5 }, { width: 50 }, ...letters.map(() => ({ width: 28 })), { width: 9 }, { width: 34 }], stickyRowsCount: 1 },
+    { data: results, sheet: 'Keputusan', columns: [{ width: 16 }, { width: 12 }, { width: 14 }, { width: 10 }, { width: 10 }, { width: 13 }, { width: 22 }], stickyRowsCount: 1 },
+  ], { fontFamily: 'Arial', fontSize: 10 }).toFile(`${safeTitle} - Soalan & Keputusan.xlsx`);
+}
+
 const newQuestion = (): Question => ({ id: crypto.randomUUID(), text: '', options: ['', '', '', ''], answer: 0 });
 
 export default function AssessmentAdmin() {
@@ -84,6 +120,7 @@ export default function AssessmentAdmin() {
           <div><p className="font-semibold">{quiz.title}</p><p className="mt-1 text-xs text-slate-500">{quiz.questions.length} questions · pass mark {quiz.passMark}% · {attemptCount(quiz.id)} submitted · updated {formatDate(quiz.updatedAt)}</p></div>
           <div className="flex shrink-0 items-center gap-2">
             <button onClick={() => void act({ action: 'set_quiz_active', id: quiz.id, active: !quiz.active }, quiz.active ? `“${quiz.title}” closed.` : `“${quiz.title}” is now open to staff.`)} disabled={busy} className={`rounded-full px-3 py-1.5 text-xs font-bold ${quiz.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{quiz.active ? 'Open' : 'Closed'}</button>
+            <button onClick={() => void downloadQuiz(quiz, data.staff, data.attempts).catch(() => setMessage('Unable to create the Excel file.'))} title="Download Excel" aria-label={`Download ${quiz.title} as Excel`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]"><Download className="h-4 w-4" /></button>
             <button onClick={() => setQuizDraft({ ...quiz, questions: quiz.questions.map((question) => ({ ...question, options: [...question.options, '', '', ''].slice(0, Math.max(4, question.options.length)) })) })} title="Edit" aria-label={`Edit ${quiz.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]"><Pencil className="h-4 w-4" /></button>
             <button onClick={() => { if (window.confirm(`Delete “${quiz.title}” and all its results?`)) void act({ action: 'delete_quiz', id: quiz.id }, `“${quiz.title}” deleted.`); }} disabled={busy} title="Delete" aria-label={`Delete ${quiz.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
           </div>
