@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Pencil,
   Trash2,
   UserPlus,
   Users,
@@ -841,16 +842,20 @@ function normalizeUrl(value: string) {
 function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: boolean; onSave: (next: QuickLink[], message: string) => Promise<boolean> }) {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState({ title: "", url: "", description: "", group: "" });
+
+  const close = () => { setAdding(false); setEditingId(""); setDraft({ title: "", url: "", description: "", group: "" }); };
+  const startEdit = (item: QuickLink) => { setEditingId(item.id); setDraft({ title: item.title, url: item.url, description: item.description || "", group: item.group || "" }); setAdding(true); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft.title.trim() || !draft.url.trim()) return;
     setSaving(true);
-    const item: QuickLink = { id: crypto.randomUUID(), title: draft.title.trim(), url: normalizeUrl(draft.url), description: draft.description.trim(), group: draft.group.trim() || "General" };
-    const saved = await onSave([...links, item], "Link added");
+    const item: QuickLink = { id: editingId || crypto.randomUUID(), title: draft.title.trim(), url: normalizeUrl(draft.url), description: draft.description.trim(), group: draft.group.trim() || "General" };
+    const saved = await onSave(editingId ? links.map((entry) => entry.id === editingId ? item : entry) : [...links, item], editingId ? "Link updated" : "Link added");
     setSaving(false);
-    if (saved) { setDraft({ title: "", url: "", description: "", group: "" }); setAdding(false); }
+    if (saved) close();
   };
 
   const remove = async (item: QuickLink) => {
@@ -863,16 +868,16 @@ function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: bo
   return <div className="mx-auto max-w-[1500px]">
     <section className="mb-6 flex flex-col gap-5 rounded-[30px] bg-[#0b3d59] p-8 text-white sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quick access</p><h2 className="mt-2 text-3xl font-semibold">Important links</h2><p className="mt-2 text-[#b9cfdd]">Systems and forms used in daily operations.</p></div>{canEdit && !adding && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] transition hover:bg-[#eaf6fb] sm:self-auto"><Plus className="h-4 w-4" />New link</button>}</section>
     {canEdit && adding && <form onSubmit={submit} className="mb-6 space-y-4 rounded-[24px] border border-[#dce4ed] bg-white p-6 sm:p-7">
-      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">New link</h3><button type="button" onClick={() => setAdding(false)} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
+      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">{editingId ? "Edit link" : "New link"}</h3><button type="button" onClick={close} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-sm font-semibold text-slate-600">Title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
         <label className="block text-sm font-semibold text-slate-600">URL<input required value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://" className={cn(fieldClass, "mt-1.5")} /></label>
         <label className="block text-sm font-semibold text-slate-600">Description<input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
         <label className="block text-sm font-semibold text-slate-600">Group<input value={draft.group} onChange={(event) => setDraft({ ...draft, group: event.target.value })} placeholder="e.g. Systems, Forms" className={cn(fieldClass, "mt-1.5")} /></label>
       </div>
-      <div className="flex justify-end gap-3"><button type="button" onClick={() => setAdding(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Saving…" : "Add link"}</button></div>
+      <div className="flex justify-end gap-3"><button type="button" onClick={close} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Saving…" : editingId ? "Save changes" : "Add link"}</button></div>
     </form>}
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <div key={link.id} className="relative"><a href={link.url} target="_blank" rel="noreferrer" className="group block h-full rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className={cn("h-5 w-5 text-[#8eb2c6] group-hover:text-white", canEdit && "mr-11")} /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3>{link.description && <p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p>}<p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>{canEdit && <button onClick={() => void remove(link)} disabled={saving} className="absolute right-6 top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <div key={link.id} className="relative"><a href={link.url} target="_blank" rel="noreferrer" className="group block h-full rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className={cn("h-5 w-5 text-[#8eb2c6] group-hover:text-white", canEdit && "mr-[5.5rem]")} /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3>{link.description && <p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p>}<p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>{canEdit && <button onClick={() => startEdit(link)} disabled={saving} className="absolute right-[4.25rem] top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-[#20c7f4] hover:text-white disabled:opacity-50" aria-label={`Edit ${link.title}`} title="Edit"><Pencil className="h-4 w-4" /></button>}{canEdit && <button onClick={() => void remove(link)} disabled={saving} className="absolute right-6 top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>
     {links.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No links yet.</p>}
   </div>;
 }
