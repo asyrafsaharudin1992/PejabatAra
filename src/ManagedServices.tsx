@@ -12,7 +12,7 @@ const sizedUrl = (path: string, width: number) => import.meta.env.VITE_SUPABASE_
 const legacy = ['4.png','9.png','10.png','17.png','18.png','19.png','20.png','24.png','27.png','31.png','33.png','34.png','35.png','39.png','40.png','41.png','42.png','43.png','44.png','45.png','46.png','47.png','48.png','49.png','50.png','51.png'];
 const fallback: ServiceCatalogItem[] = legacy.map((storage_path,index)=>({id:`fallback-${storage_path}`,folder_id:null,storage_path,title:`Service guide ${String(index+1).padStart(2,'0')}`,summary:'Open the official poster for current service information.',tags:''}));
 type Upload={name:string;type:string;base64:string;size:number;originalSize:number};
-const sizeLabel=(bytes:number)=>bytes>=1e6?`${(bytes/1e6).toFixed(1)} MB`:`${Math.max(1,Math.round(bytes/1e3))} KB`;
+export const sizeLabel=(bytes:number)=>bytes>=1e6?`${(bytes/1e6).toFixed(1)} MB`:`${Math.max(1,Math.round(bytes/1e3))} KB`;
 const canvasBlob=(canvas:HTMLCanvasElement,type:string,quality?:number)=>new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,type,quality));
 // Draws an image on a white canvas, scaled down so its longest side is at most maxSide.
 // createImageBitmap rejects some files the <img> decoder accepts, so fall back to that.
@@ -24,14 +24,14 @@ async function drawImage(source:Blob,maxSide=Infinity){const url=URL.createObjec
 const readBase64=(blob:Blob)=>new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});
 // Posters are shrunk in the browser before upload (longest side 2000px, WebP, or
 // JPEG where the browser cannot write WebP) so they stay well under upload limits.
-async function shrinkPoster(file:File):Promise<Upload>{
- let canvas:HTMLCanvasElement;try{canvas=await drawImage(file,2000);}catch(cause){
+export async function shrinkPoster(file:File,maxSide=2000,quality=0.85):Promise<Upload>{
+ let canvas:HTMLCanvasElement;try{canvas=await drawImage(file,maxSide);}catch(cause){
   // Still accept a poster the browser can't redraw if it is already a supported, small file.
   console.error('Poster could not be decoded',file.name,file.type,cause);
   if(/\.(png|jpe?g|webp)$/i.test(file.name)&&file.size<=3*1024*1024)return{name:file.name,type:file.type||'image/jpeg',base64:await readBase64(file),size:file.size,originalSize:file.size};
   throw new Error(`"${file.name}" (${file.type||'unknown type'}) could not be read. Save it again as PNG or JPG and try once more.`);
  }
- let blob=await canvasBlob(canvas,'image/webp',0.85);if(!blob||blob.type!=='image/webp')blob=await canvasBlob(canvas,'image/jpeg',0.88);if(!blob)throw new Error('The poster could not be shrunk.');
+ let blob=await canvasBlob(canvas,'image/webp',quality);if(!blob||blob.type!=='image/webp')blob=await canvasBlob(canvas,'image/jpeg',0.88);if(!blob)throw new Error('The poster could not be shrunk.');
  return{name:`${file.name.replace(/\.[^.]+$/,'')||'poster'}.${blob.type==='image/webp'?'webp':'jpg'}`,type:blob.type,base64:await readBase64(blob),size:blob.size,originalSize:file.size};
 }
 

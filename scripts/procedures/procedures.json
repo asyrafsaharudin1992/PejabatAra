@@ -1,0 +1,172 @@
+{
+  "title": "Panduan Pembantu Klinik: Penyediaan Barang bagi Prosedur Klinikal",
+  "procedures": [
+    {
+      "id": "fbc",
+      "title": "Prosedur FBC (Full Blood Count)",
+      "items": ["EDTA Tube", "Needle (Blue)", "Syringe 3 mL", "Tourniquet", "Cotton Ball", "Micropore", "Alcohol swab"],
+      "steps": [],
+      "notes": [],
+      "photo": "01.webp"
+    },
+    {
+      "id": "capillary-blood",
+      "title": "Prosedur Ujian Darah Kapilari",
+      "items": ["Alcohol swab", "Blood lancet", "Capillary tube", "End to end pipe", "Lancing pen", "Cotton ball (optional)", "Micropore (optional)"],
+      "steps": [],
+      "notes": [],
+      "photo": "02.webp"
+    },
+    {
+      "id": "dxt",
+      "title": "Prosedur DXT (Random Blood Sugar)",
+      "items": ["One Touch Select Plus strips", "Glucometer", "Lancing pen", "Blood lancet", "Alcohol swab", "Micropore (optional)", "Cotton ball (optional)"],
+      "steps": [],
+      "notes": [],
+      "photo": "03.webp"
+    },
+    {
+      "id": "iv-drip",
+      "title": "Prosedur IV Drip",
+      "items": ["IV drip normal saline", "Infusion set", "Branula pink", "Alcohol swab", "Tegaderm / 3 Micropore", "IV drip stand"],
+      "steps": [],
+      "notes": [],
+      "photo": "04.webp"
+    },
+    {
+      "id": "swab-combo",
+      "title": "Prosedur Swab Combo 6-in-1",
+      "items": ["Combo test 6in1", "Nasopharyngeal swab sticks", "Oropharyngeal swab sticks", "Buffer solution", "Buffer container", "Tissue (optional)"],
+      "steps": [],
+      "notes": [],
+      "photo": "05.webp"
+    },
+    {
+      "id": "dressing",
+      "title": "Prosedur Dressing",
+      "items": ["Dressing set sterile", "Glove", "Water for irrigation / normal saline", "Underpad"],
+      "steps": [],
+      "notes": [],
+      "photo": "06.webp"
+    },
+    {
+      "id": "sunat",
+      "title": "Prosedur Sunat / Khatan",
+      "items": ["Sterile gauze", "Dressing set sterile", "Water for irrigation", "Dermacyn", "Povidone", "Syringe 5 mL", "Needle blue / needle orange", "Alcohol swab", "Injection bupivacaine", "Injection lignocaine", "Sterile glove (sterile latex dalam packaging)", "Suture plain catgut (3/0) / (0/4) absorbable", "Laser (3 set seperti gambar asal)", "Minor surgery suture set (7 set seperti gambar asal)", "Underpad / bluesheet", "Kain pelikat (pastikan inform pesakit sebelum prosedur)"],
+      "steps": [],
+      "notes": [
+        "Procedure wajib dalam keadaan sterile.",
+        "Guna sterile dressing set.",
+        "Forceps / artery perlu sterile - jangan biarkan terdedah dan ambil menggunakan glove yang bersih.",
+        "Procedure sunat dilakukan oleh Dr / Mudim / Pembantu Klinik wajib menggunakan sterile glove.",
+        "Tiada penggunaan rolled gauze potong / dry swab - hanya sterile gauze sahaja.",
+        "Haram menggunakan normal saline.",
+        "Penggunaan water for irrigation / povidone / dermacyn sahaja."
+      ],
+      "photo": "07.webp"
+    },
+    {
+      "id": "buka-implanon",
+      "title": "Prosedur Buka Implanon",
+      "items": [],
+      "steps": ["Syringe out injection lignocaine sebanyak 3 mL sahaja dengan menggunakan syringe 3 mL dan needle blue, selepas itu tukar dengan menggunakan needle orange."],
+      "notes": [
+        "Pastikan semua peralatan dalam keadaan sterile.",
+        "Susun peralatan dalam kidney dish dengan kemas.",
+        "Sediakan antiseptik (Acriflavine / Hibitane) sebelum mula.",
+        "Gunakan elastic bandage selepas prosedur jika perlu."
+      ],
+      "photo": "08.webp"
+    },
+    {
+      "id": "pasang-implanon",
+      "title": "Prosedur Pasang Implanon",
+      "items": [],
+      "steps": ["Syringe out injection lignocaine sebanyak 3 mL sahaja dengan menggunakan syringe 3 mL dan needle blue, selepas itu tukar dengan menggunakan needle orange."],
+      "notes": [
+        "Pastikan semua peralatan dalam keadaan sterile.",
+        "Susun peralatan dalam kidney dish dengan kemas.",
+        "Sediakan antiseptik (Acriflavine / Hibitane) sebelum mula.",
+        "Gunakan elastic bandage selepas prosedur jika perlu."
+      ],
+      "photo": "09.webp"
+    },
+    {
+      "id": "dengue-combo",
+      "title": "Prosedur Combo Dengue Test",
+      "items": ["Dengue combo test cassette", "Pipette tube", "Buffer / diluent"],
+      "steps": [],
+      "notes": [],
+      "photo": "10.webp"
+    },
+    {
+      "id": "eye-irrigation",
+      "title": "Prosedur Eye Irrigation / Fluoro Test",
+      "items": ["Glove", "Underpad", "Water for irrigation", "Galley pot", "Syringe 10 mL", "UV light", "Fluoro test"],
+      "steps": [],
+      "notes": [],
+      "photo": "11.webp"
+    },
+    {
+      "id": "ear-irrigation",
+      "title": "Prosedur Ear Irrigation",
+      "items": ["Glove", "Underpad", "Earwax removal spray", "Opticblok", "Digital otoscope", "Ear examination set", "Kidney dish (untuk menadah air dan sisa cecair)"],
+      "steps": [],
+      "notes": [],
+      "photo": "12.webp"
+    },
+    {
+      "id": "urine-drug-test",
+      "title": "Prosedur Urine Drug Test",
+      "items": ["Urine drug test kits", "Glove", "Urine pesakit"],
+      "steps": [
+        "Buka penutup test kit.",
+        "Celup bahagian strip ke dalam urine pesakit mengikut paras yang ditetapkan.",
+        "Keluarkan strip dan tutup semula penutup test kit.",
+        "Tunggu 15 minit dan baca keputusan."
+      ],
+      "notes": ["2 line = Negative", "1 line = Positive (presumptive)"],
+      "photo": "13.webp"
+    },
+    {
+      "id": "upt",
+      "title": "Prosedur Urine Pregnancy Test",
+      "items": [],
+      "steps": [
+        "Ambil urine pesakit.",
+        "Gunakan dropper untuk titis urine ke ruang sampel pada cassette UPT mengikut jumlah titisan yang ditetapkan pada kit.",
+        "Tunggu 15 minit dan baca keputusan."
+      ],
+      "notes": ["2 line = Positive (Pregnant)", "1 line = Negative"],
+      "photo": "14.webp"
+    },
+    {
+      "id": "syr-oseltamivir",
+      "title": "Prosedur Bancuh Syr Oseltamivir",
+      "items": ["Botol sterile", "Cup measurement 50 mL", "Oseltamivir 75 mg (10 capsule)", "Syrup simplex (50 mL)"],
+      "steps": [
+        "Pastikan botol dan peralatan dalam keadaan sterile.",
+        "Ambil 10 capsule oseltamivir 75 mg untuk 50 mL syrup simplex.",
+        "Masukkan semua serbuk 10 capsule ke dalam botol kemudian tuangkan syrup simplex 50 mL.",
+        "Goncang sehingga serbuk larut sepenuhnya.",
+        "Selepas siap bancuh, inform kepada pesakit selepas makan ubat tersebut perlulah disimpan di dalam peti ais. Jika tidak disimpan dalam peti ais ubat akan rosak."
+      ],
+      "notes": [],
+      "photo": "15.webp"
+    },
+    {
+      "id": "ufeme",
+      "title": "Prosedur UFEME",
+      "items": ["Urine container", "Bekas bawa urine", "Urine reagent strips", "Machine URIT-50"],
+      "steps": [
+        "Ambil urine pesakit terlebih dahulu.",
+        "Ambil urine reagent strip dan celupkan ke dalam urine sehingga semua bahagian pada strip terkena urine.",
+        "Keluarkan strip dan masukkan ke dalam mesin UFEME untuk dianalisis.",
+        "Tunggu sehingga keputusan keluar daripada mesin.",
+        "Ambil result tersebut dan berikan kepada doktor untuk pemeriksaan."
+      ],
+      "notes": [],
+      "photo": "16.webp"
+    }
+  ]
+}

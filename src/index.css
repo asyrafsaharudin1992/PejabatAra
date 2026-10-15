@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+
 .office-lobby { min-height: 100vh; background: #f5f7f9; }
 .office-signin-page { min-height: 100vh; background: #f5f7f9; }
 .office-signin-copy { border-radius: 26px; padding: 48px 42px; background: linear-gradient(110deg, #0b3046, #0d4865); color: white; }
@@ -113,4 +114,12 @@
     border-color: #0b587b;
     box-shadow: 0 0 0 4px rgba(86, 56, 245, 0.1);
   }
+}
+
+/* On computers the whole app is shown at 95%, a little smaller than the browser default.
+   Phones and tablets keep full size. */
+@media (min-width: 1024px) {
+  html { zoom: 0.95; }
+  /* Zoom shrinks viewport units too, so full-height pages are stretched back to the whole window. */
+  .min-h-screen, .office-lobby, .office-signin-page { min-height: calc(100vh / 0.95); }
 }

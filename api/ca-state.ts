@@ -3,6 +3,7 @@ import { officeAccess } from './_office-db.js';
 const BRANCH_NAME = 'AraSpace Clinical Assistants';
 const WORKSPACE_KEY = 'ca_workspace';
 const READS_KEY = 'ca_announcement_reads';
+const PROCEDURES_KEY = 'ca_procedures';
 
 async function stateBranch(db: any) {
   const { data: existing, error: lookupError } = await db.from('branches').select('id').eq('name', BRANCH_NAME).maybeSingle();
@@ -41,25 +42,53 @@ async function announcementReads(req: any, res: any, db: any, branchId: string, 
   return res.status(200).json({ staff, reads: next });
 }
 
+const PHOTO_BUCKET = 'procedure-photos';
+const photosOf = (payload: any) => new Set<string>((payload?.procedures || []).map((item: any) => item.photo).filter(Boolean));
+
+// A new or replaced procedure photo arrives with the save; store it and point that procedure at it.
+async function uploadProcedurePhoto(db: any, body: any) {
+  const target = (body.payload.procedures || []).find((item: any) => item.id === body.photoFor);
+  if (!target) throw Object.assign(new Error('That procedure no longer exists.'), { status: 400 });
+  const ext = String(body.photo.name || '').toLowerCase().match(/\.(png|jpe?g|webp)$/)?.[1];
+  if (!ext || !body.photo.base64) throw Object.assign(new Error('Use a PNG, JPG or WebP photo.'), { status: 400 });
+  const bytes = Buffer.from(body.photo.base64, 'base64');
+  if (bytes.byteLength > 2 * 1024 * 1024) throw Object.assign(new Error('Photo must be 2MB or smaller.'), { status: 400 });
+  // A fresh name each time, so the year-long browser cache never shows an old photo.
+  const path = `uploads/${crypto.randomUUID()}.${ext}`;
+  const { error } = await db.storage.from(PHOTO_BUCKET).upload(path, bytes, { contentType: body.photo.type || 'image/webp', cacheControl: '31536000', upsert: false });
+  if (error) throw error;
+  target.photo = path;
+}
+
+// Photos of deleted procedures, and photos that were replaced, are removed from Storage.
+async function removeUnusedPhotos(db: any, before: any, after: any) {
+  const kept = photosOf(after);
+  const unused = [...photosOf(before)].filter((photo) => !kept.has(photo));
+  if (unused.length) await db.storage.from(PHOTO_BUCKET).remove(unused);
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const { db, user, profile } = await officeAccess(req, false, 'ca');
     const branchId = await stateBranch(db);
     if (req.query.scope === 'reads') return await announcementReads(req, res, db, branchId, user.id, profile.role === 'super_admin');
-    const scope = req.query.scope === 'personal' ? 'personal' : 'workspace';
-    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : WORKSPACE_KEY;
+    // Clinical procedures live in their own row so the workspace payload stays small.
+    const scope = req.query.scope === 'personal' ? 'personal' : req.query.scope === 'procedures' ? 'procedures' : 'workspace';
+    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : WORKSPACE_KEY;
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branchId).eq('state_key', stateKey).maybeSingle();
     if (readError) throw readError;
 
     if (req.method === 'GET') return res.status(200).json({ payload: existing?.payload || null, updatedAt: existing?.updated_at || null });
     if (!['POST', 'PATCH', 'PUT'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed.' });
-    if (scope === 'workspace' && profile.role !== 'super_admin') return res.status(403).json({ error: 'Only System Admin can update shared CA content.' });
+    if (scope !== 'personal' && profile.role !== 'super_admin') return res.status(403).json({ error: 'Only System Admin can update shared CA content.' });
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return res.status(400).json({ error: 'A valid portal payload is required.' });
+    if (scope === 'procedures' && body.photo) await uploadProcedurePhoto(db, body);
     const { data, error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: stateKey, payload: body.payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' }).select('payload,updated_at').single();
     if (error) throw error;
+    if (scope === 'procedures') await removeUnusedPhotos(db, existing?.payload, data.payload);
     return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at });
   } catch (error: any) {
     return res.status(error.status || 400).json({ error: error.message || 'Unable to save CA portal content.' });
