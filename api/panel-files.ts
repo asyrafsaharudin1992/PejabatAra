@@ -49,6 +49,10 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ ...(await payload(db, true)), added });
     }
     if (body.action === 'link_guide') {
+      // A panel shows one guide: the one being linked replaces any earlier guide,
+      // which is archived (the PDF stays in Drive).
+      const { error: archiveError } = await db.from('panel_guides').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('panel_id', body.panelId).eq('status', 'linked').neq('id', body.guideId);
+      if (archiveError) throw archiveError;
       const { error } = await db.from('panel_guides').update({ panel_id: body.panelId, status: 'linked', decided_at: new Date().toISOString(), decided_by: user.id, updated_at: new Date().toISOString() }).eq('id', body.guideId);
       if (error) throw error;
     } else if (body.action === 'create_panel') {

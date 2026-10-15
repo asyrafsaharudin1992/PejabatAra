@@ -280,7 +280,7 @@ export default function PortalApp() {
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">AraSpace</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">AraOffice</p>
               <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">{viewTitles[view]}</h1>
             </div>
             <div className="hidden w-full max-w-sm items-center gap-2 rounded-2xl border border-[#dce4ed] bg-white px-4 py-2.5 md:flex">
@@ -301,7 +301,7 @@ export default function PortalApp() {
               <Avatar name="Clinic Assistants" />
               <div className="hidden text-left sm:block">
                 <p className="text-sm font-bold leading-tight">Clinic Assistants</p>
-                <p className="text-xs text-slate-500">AraSpace portal</p>
+                <p className="text-xs text-slate-500">AraOffice portal</p>
               </div>
             </button>
           </div>
@@ -418,7 +418,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: PortalUser) => void }) {
         <div className="relative flex items-center gap-3">
           <LogoMark />
           <div>
-            <p className="text-xl font-semibold tracking-tight">AraSpace</p>
+            <p className="text-xl font-semibold tracking-tight">AraOffice</p>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#67cff4]">Knowledge & Training</p>
           </div>
         </div>
@@ -434,10 +434,10 @@ function LoginScreen({ onLogin }: { onLogin: (user: PortalUser) => void }) {
         <div className="w-full max-w-md">
           <div className="mb-10 flex items-center gap-3 lg:hidden">
             <LogoMark />
-            <p className="text-xl font-semibold">AraSpace</p>
+            <p className="text-xl font-semibold">AraOffice</p>
           </div>
           <p className="text-sm font-semibold text-[#0b587b]">Welcome</p>
-          <h2 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">Sign in to AraSpace</h2>
+          <h2 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">Sign in to AraOffice</h2>
           <p className="mt-3 text-base leading-7 text-slate-500">{isSupabaseConfigured ? "Use the individual account invited by your administrator." : "The backend is not connected. Use a preview account to explore the system."}</p>
 
           <form onSubmit={submit} className="mt-8 space-y-5">
@@ -475,21 +475,21 @@ function LoginScreen({ onLogin }: { onLogin: (user: PortalUser) => void }) {
 }
 
 function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCount = 0, announcementCount = 0 }: { user: PortalUser; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void; panelAlertCount?: number; announcementCount?: number }) {
-  const items: { id: View; label: string; icon: typeof Home }[] = [{ id: "home", label: "Home", icon: Home }, ...portalTabs];
+  const items: { id: View; label: string; icon: typeof Home; tone: string }[] = [{ id: "home", label: "Home", icon: Home, tone: "text-[#818cf8]" }, ...portalTabs];
 
   return (
     <>
       {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
-      <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/10 bg-[#083a55] p-6 text-white transition-transform duration-300 lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
+      <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex items-center justify-between px-2 py-3">
-          <div className="flex items-center gap-3"><LogoMark /><div><p className="font-semibold tracking-tight">ARASPACE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinic Assistants</p></div></div>
+          <div className="flex items-center gap-3"><LogoMark /><div><p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinic Assistants</p></div></div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
         </div>
-        <div className="mx-1 mt-8 h-px bg-white/10" />
-        <nav className="mt-7 flex-1 space-y-2">
+        <div className="mx-1 mt-6 h-px bg-white/10" />
+        <nav className="mt-6 flex-1 space-y-1 overflow-y-auto">
           {items.map((item) => (
-            <button key={item.id} onClick={() => onNavigate(item.id)} className={cn("flex w-full items-center gap-3 rounded-[14px] px-4 py-3.5 text-sm font-semibold transition", view === item.id ? "bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.14)] [&>svg]:text-[#7357ff]" : "text-[#b8cddd] hover:bg-white/8 hover:text-white")}>
-              <item.icon className="h-5 w-5" />{item.label}
+            <button key={item.id} onClick={() => onNavigate(item.id)} className={cn("flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition", view === item.id ? "bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]" : "text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white")}>
+              <item.icon className={cn("h-[18px] w-[18px] shrink-0", item.tone, view === item.id && item.id === "home" && "text-[#5b4cf0]")} strokeWidth={1.8} />{item.label}
               {item.id === "panelTraining" && panelAlertCount > 0 && <span className="ml-auto rounded-full bg-rose-500 px-2 py-0.5 text-xs text-white">{panelAlertCount}</span>}
               {item.id === "announcements" && announcementCount > 0 && <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{announcementCount}</span>}
               {!(item.id === "announcements" && announcementCount > 0) && <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
@@ -497,13 +497,24 @@ function Sidebar({ user, view, open, onClose, onNavigate, onLogout, panelAlertCo
           ))}
         </nav>
         <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-          <div className="flex items-center gap-3"><Avatar name="Clinic Assistants" dark /><div className="min-w-0"><p className="truncate text-sm font-semibold">Clinic Assistants</p><p className="truncate text-xs text-[#9bb5c7]">AraSpace portal</p></div></div>
+          <div className="flex items-center gap-3"><Avatar name="Clinic Assistants" dark /><div className="min-w-0"><p className="truncate text-sm font-semibold">Clinic Assistants</p><p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p></div></div>
           <button onClick={onLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
         </div>
       </aside>
     </>
   );
 }
+
+// One quote is picked each time the page loads, so it changes between visits but not while staff work.
+const homeQuotes = [
+  "Clear at work. Confident at handover.",
+  "In healthcare, no task is too small when it comes to helping others feel better.",
+  "Small acts of kindness every day create a big impact on patient care.",
+  "Organized care starts with us. We handle the details so our patients can focus on healing.",
+  "Multitasking, organizing, reassuring—just another day in the life of a clinic assistant!",
+  "Behind every smooth clinic day and cared-for patient is a dedicated clinic assistant working tirelessly.",
+];
+const homeQuote = homeQuotes[Math.floor(Math.random() * homeQuotes.length)];
 
 // Every tab in the sidebar (besides Home). Quick access on Home is built from this list,
 // so a new tab only needs to be added here to appear in both places.
@@ -514,7 +525,7 @@ const portalTabs: { id: View; label: string; note: string; icon: typeof Home; to
   { id: "procedures", label: "Clinical Procedures", note: "Item prep for each procedure", icon: Syringe, tone: "text-[#4ade80]" },
   { id: "forms", label: "Print Forms", note: "Forms staff print often", icon: Printer, tone: "text-[#a78bfa]" },
   { id: "teamara", label: "TeamAra", note: "Members & cards", icon: Users, tone: "text-[#ff7ab6]" },
-  { id: "handover", label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, tone: "text-[#7258ff]" },
+  { id: "handover", label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, tone: "text-[#9b8cff]" },
   { id: "announcements", label: "Announcements", note: "Team updates", icon: Bell, tone: "text-[#ff6b81]" },
   { id: "links", label: "Important Links", note: "Work systems", icon: Link2, tone: "text-[#20c7f4]" },
 ];
@@ -542,13 +553,13 @@ function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements
 
   return <div className="mx-auto max-w-[1500px] space-y-8">
     <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
-      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, {visitor || "Clinic Assistants"}</h2><p className="mt-3 text-base text-[#bed2df]">{visitor ? "This is the Clinic Assistants' page." : "References and everyday work guides in one workspace."}</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic text-[#a9c1d0]">“Clear at work. Confident at handover.”</p></div></div>
+      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinic Assistants</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, {visitor || "Clinic Assistants"}</h2><p className="mt-3 text-base text-[#bed2df]">{visitor ? "This is the Clinic Assistants' page." : "References and everyday work guides in one workspace."}</p></div><div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold capitalize text-[#d9e7ef]">{today}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div></div>
     </section>
 
-    <SearchAraSpace search={search} setSearch={setSearch} />
+    <SearchAraOffice search={search} setSearch={setSearch} />
     {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} procedures={procedures} onOpenProcedure={onOpenProcedure} printForms={printForms} panels={panels} panelsLoading={panelsLoading} />}
 
-    <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{portalTabs.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}</div></section>
+    <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{portalTabs.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}<a href="#office/assessment" className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-[#91d7ed]"><GraduationCap className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">Assessment Room</p><p className="mt-1 text-xs text-[#9fb8c7]">Periodic staff assessments</p></a></div></section>
 
     {importantAnnouncement && <section className="rounded-[28px] border border-rose-100 bg-white p-6 sm:p-7"><div className="flex items-center gap-2 text-[#f04464]"><span className="h-2 w-2 rounded-full bg-[#f04464]" /><span className="text-xs font-bold uppercase tracking-[0.18em]">Important announcement</span></div><h3 className="mt-4 text-xl font-semibold">{importantAnnouncement.title}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{importantAnnouncement.body}</p><button onClick={() => onNavigate("announcements")} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#0b587b]">View all announcements <ArrowRight className="h-4 w-4" /></button></section>}
   </div>;
@@ -558,7 +569,7 @@ function SectionHeading({ title, eyebrow }: { title: string; eyebrow: string }) 
   return <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">{title}</h3><span className="text-right text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">{eyebrow}</span></div>;
 }
 
-function SearchAraSpace({ search, setSearch }: { search: string; setSearch: (value: string) => void }) {
+function SearchAraOffice({ search, setSearch }: { search: string; setSearch: (value: string) => void }) {
   return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search references, memos, services, procedures, forms, panels, announcements and links.</p></div></div><div className="flex w-full max-w-xl items-center gap-2 rounded-[16px] bg-white p-2 shadow-sm"><Search className="ml-2 h-4 w-4 shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setSearch("")} placeholder="Try: AraSihat, panel registration, FBC, complaints..." className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-sm outline-none placeholder:text-slate-400" />{search && <button onClick={() => setSearch("")} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}</div></section>;
 }
 
@@ -745,7 +756,8 @@ function PanelTrainingView({ training, canEdit }: { training: ReturnType<typeof 
   };
   let rows = training.panels.map((panel) => ({
     id: panel.id, panel: panel.name, availability: panel.availability || [], portalUrl: panel.portal_url || '',
-    guideUrl: training.guides.find((guide) => guide.status === 'linked' && guide.panel_id === panel.id)?.drive_url || '',
+    // Guides arrive oldest first, so the last match is the newest guide for the panel.
+    guideUrl: training.guides.filter((guide) => guide.status === 'linked' && guide.panel_id === panel.id).at(-1)?.drive_url || '',
   }));
   const panelCount = rows.length;
   const searchTerm = search.trim().toLowerCase();
@@ -818,7 +830,7 @@ function PanelGuideImportPrompt({ file, panels, saving, onCreatePanel, onLinkPan
 
 function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kind: "guide" | "portal"; onClose: () => void }) {
   const url = kind === "guide" ? row.guideUrl : row.portalUrl;
-  return <ModalShell onClose={onClose} wide><div className="-mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button type="button" onClick={onClose} className="relative z-30 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="relative z-20 mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="relative z-30 shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
+  return <ModalShell onClose={onClose} wide><div className="-mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraOffice reference</p></div><button type="button" onClick={onClose} className="relative z-30 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="relative z-20 mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="relative z-30 shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
 const fieldClass = "w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10";

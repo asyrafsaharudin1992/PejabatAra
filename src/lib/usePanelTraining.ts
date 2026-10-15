@@ -33,15 +33,9 @@ export function usePanelTraining(active: boolean, canEdit: boolean) {
     finally { setLoading(false); }
   }, [active, canEdit, request]);
 
-  // Load the saved panel list first. A Drive scan is comparatively slow and is
-  // only needed when an admin explicitly presses Refresh.
+  // Load the saved panel list once. It is fetched again (and Drive scanned, for
+  // admins) only when Refresh is pressed, to keep Supabase egress low.
   useEffect(() => { void refresh(false); }, [refresh]);
-  useEffect(() => {
-    if (!active) return;
-    const onFocus = () => { if (document.visibilityState === 'visible') void refresh(canEdit); };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [active, canEdit, refresh]);
 
   const mutate = useCallback(async (body: unknown) => {
     setLoading(true); setError('');

@@ -123,3 +123,14 @@
   /* Zoom shrinks viewport units too, so full-height pages are stretched back to the whole window. */
   .min-h-screen, .office-lobby, .office-signin-page { min-height: calc(100vh / 0.95); }
 }
+
+/* Cash Voucher printing: only the voucher sheet prints, at its real size. */
+.cv-print { display: none; }
+@media print {
+  html:has(body.cv-printing), body.cv-printing { background: #fff !important; }
+  body.cv-printing > *:not(.cv-print) { display: none !important; }
+  body.cv-printing .cv-print { display: block; padding: 0 0.6mm; color: #000; font-family: Arial, Helvetica, sans-serif; }
+  html:has(body.cv-printing) { zoom: 1 !important; }
+  .cv-page { break-after: page; }
+  .cv-page:last-child { break-after: auto; }
+}

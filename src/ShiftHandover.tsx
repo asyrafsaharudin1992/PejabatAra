@@ -56,7 +56,7 @@ export default function ShiftHandoverView({ guides = shiftGuides }: { guides?: S
       <section className="flex flex-col gap-5 rounded-[26px] border border-[#8cdbf7] bg-[#edf9fe] p-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-4">
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><MessageCircle className="h-6 w-6" /></div>
-          <div><p className="font-semibold text-[#14233b]">Actual passover stays on WhatsApp</p><p className="mt-1 max-w-2xl text-sm leading-6 text-[#60758c]">AraSpace does not record, submit or replace the WhatsApp passover channel. This page is only a template and daily-task guide for staff training.</p></div>
+          <div><p className="font-semibold text-[#14233b]">Actual passover stays on WhatsApp</p><p className="mt-1 max-w-2xl text-sm leading-6 text-[#60758c]">AraOffice does not record, submit or replace the WhatsApp passover channel. This page is only a template and daily-task guide for staff training.</p></div>
         </div>
         <span className="shrink-0 rounded-full bg-white px-4 py-2 text-xs font-bold text-[#0b587b] shadow-sm">Reference only</span>
       </section>

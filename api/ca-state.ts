@@ -5,6 +5,7 @@ const WORKSPACE_KEY = 'ca_workspace';
 const READS_KEY = 'ca_announcement_reads';
 const PROCEDURES_KEY = 'ca_procedures';
 const FORMS_KEY = 'ca_print_forms';
+const CV_KEY = 'ca_cash_voucher_numbers';
 
 async function stateBranch(db: any) {
   const { data: existing, error: lookupError } = await db.from('branches').select('id').eq('name', BRANCH_NAME).maybeSingle();
@@ -92,12 +93,32 @@ async function removeUnusedFormFiles(db: any, before: any, after: any) {
   if (unused.length) await db.storage.from(FORMS_BUCKET).remove(unused);
 }
 
+// The last cash voucher number each branch printed. Any CA account records a number once staff
+// confirm it printed; a short history is kept so a skipped or repeated number can be traced.
+async function cashVoucherNumbers(req: any, res: any, db: any, branchId: string, userId: string) {
+  const { data: existing, error: readError } = await db.from('portal_state').select('payload').eq('branch_id', branchId).eq('state_key', CV_KEY).maybeSingle();
+  if (readError) throw readError;
+  const stored = existing?.payload || { last: {}, history: [] };
+  if (req.method === 'GET') return res.status(200).json({ last: stored.last || {} });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed.' });
+  const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+  const voucherId = String(body.voucherId || '').slice(0, 40);
+  const cvNo = String(body.cvNo || '').trim().toUpperCase().slice(0, 20);
+  if (!voucherId || !cvNo) return res.status(400).json({ error: 'Voucher and CV number are required.' });
+  const entry = { cvNo, date: String(body.date || '').slice(0, 10), at: new Date().toISOString() };
+  const payload = { last: { ...(stored.last || {}), [voucherId]: entry }, history: [{ voucherId, ...entry }, ...(stored.history || [])].slice(0, 200) };
+  const { error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: CV_KEY, payload, updated_by: userId }, { onConflict: 'branch_id,state_key' });
+  if (error) throw error;
+  return res.status(200).json({ last: payload.last });
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const { db, user, profile } = await officeAccess(req, false, 'ca');
     const branchId = await stateBranch(db);
     if (req.query.scope === 'reads') return await announcementReads(req, res, db, branchId, user.id, profile.role === 'super_admin');
+    if (req.query.scope === 'cv') return await cashVoucherNumbers(req, res, db, branchId, user.id);
     // Clinical procedures and print forms live in their own rows so the workspace payload stays small.
     const scope = ['personal', 'procedures', 'forms'].includes(req.query.scope) ? req.query.scope : 'workspace';
     const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : WORKSPACE_KEY;

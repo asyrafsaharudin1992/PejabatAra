@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
 export type PrintForm = { id: string; title: string; group: string; file: string; size?: number };
-export type PrintFormList = { forms: PrintForm[] };
+export type Voucher = { id: string; label: string; company: string[]; sections: { title: string; lines: string[] }[] };
+// Cash vouchers are printed from the app; until an admin saves them, the built-in KJ voucher is used.
+export type PrintFormList = { forms: PrintForm[]; vouchers?: Voucher[] };
 export type PrintFormFile = { name: string; type: string; base64: string };
 
 const fileRoot = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/print-forms` : '';
