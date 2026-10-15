@@ -1,0 +1,14 @@
+{
+  "forms": [
+    { "id": "consent-madani-dewasa", "title": "Consent Skim Perubatan Madani (Dewasa)", "group": "Consent forms", "file": "consent-madani-dewasa.pdf" },
+    { "id": "consent-madani-bawah-umur", "title": "Consent Skim Perubatan Madani (Bawah Umur)", "group": "Consent forms", "file": "consent-madani-bawah-umur.pdf" },
+    { "id": "consent-great-eastern", "title": "Consent Form Great Eastern", "group": "Consent forms", "file": "consent-great-eastern.pdf" },
+    { "id": "consent-peka-b40", "title": "PeKa B40 Personal Data Consent Form (BM)", "group": "Consent forms", "file": "consent-peka-b40.pdf" },
+    { "id": "roa-madani", "title": "ROA Madani", "group": "Panel & claims", "file": "roa-madani.pdf" },
+    { "id": "tnb-gp-visit-form", "title": "TNB GP Visit Form", "group": "Panel & claims", "file": "tnb-gp-visit-form.pdf" },
+    { "id": "cara-claim-panel-tnb", "title": "Cara Claim Panel TNB Healthcare", "group": "Panel & claims", "file": "cara-claim-panel-tnb.pdf" },
+    { "id": "referral-letter", "title": "Referral Letter", "group": "Referral & X-ray", "file": "referral-letter.pdf" },
+    { "id": "borang-xray-julia", "title": "Borang X-ray Poliklinik Julia", "group": "Referral & X-ray", "file": "borang-xray-julia.pdf" },
+    { "id": "notifikasi-penyakit-berjangkit", "title": "Borang Notifikasi Penyakit Berjangkit", "group": "KKM", "file": "notifikasi-penyakit-berjangkit.pdf" }
+  ]
+}

@@ -4,6 +4,7 @@ const BRANCH_NAME = 'AraSpace Clinical Assistants';
 const WORKSPACE_KEY = 'ca_workspace';
 const READS_KEY = 'ca_announcement_reads';
 const PROCEDURES_KEY = 'ca_procedures';
+const FORMS_KEY = 'ca_print_forms';
 
 async function stateBranch(db: any) {
   const { data: existing, error: lookupError } = await db.from('branches').select('id').eq('name', BRANCH_NAME).maybeSingle();
@@ -67,15 +68,39 @@ async function removeUnusedPhotos(db: any, before: any, after: any) {
   if (unused.length) await db.storage.from(PHOTO_BUCKET).remove(unused);
 }
 
+const FORMS_BUCKET = 'print-forms';
+const formFilesOf = (payload: any) => new Set<string>((payload?.forms || []).map((item: any) => item.file).filter(Boolean));
+
+// A new or replaced print form PDF arrives with the save; store it and point that form at it.
+async function uploadFormFile(db: any, body: any) {
+  const target = (body.payload.forms || []).find((item: any) => item.id === body.fileFor);
+  if (!target) throw Object.assign(new Error('That form no longer exists.'), { status: 400 });
+  const bytes = Buffer.from(String(body.file.base64 || ''), 'base64');
+  if (bytes.subarray(0, 5).toString() !== '%PDF-') throw Object.assign(new Error('Use a PDF file.'), { status: 400 });
+  if (bytes.byteLength > 3 * 1024 * 1024) throw Object.assign(new Error('PDF must be 3MB or smaller.'), { status: 400 });
+  // A fresh name each time, so the year-long browser cache never prints an old version.
+  const path = `uploads/${crypto.randomUUID()}.pdf`;
+  const { error } = await db.storage.from(FORMS_BUCKET).upload(path, bytes, { contentType: 'application/pdf', cacheControl: '31536000', upsert: false });
+  if (error) throw error;
+  target.file = path;
+  target.size = bytes.byteLength;
+}
+
+async function removeUnusedFormFiles(db: any, before: any, after: any) {
+  const kept = formFilesOf(after);
+  const unused = [...formFilesOf(before)].filter((file) => !kept.has(file));
+  if (unused.length) await db.storage.from(FORMS_BUCKET).remove(unused);
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const { db, user, profile } = await officeAccess(req, false, 'ca');
     const branchId = await stateBranch(db);
     if (req.query.scope === 'reads') return await announcementReads(req, res, db, branchId, user.id, profile.role === 'super_admin');
-    // Clinical procedures live in their own row so the workspace payload stays small.
-    const scope = req.query.scope === 'personal' ? 'personal' : req.query.scope === 'procedures' ? 'procedures' : 'workspace';
-    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : WORKSPACE_KEY;
+    // Clinical procedures and print forms live in their own rows so the workspace payload stays small.
+    const scope = ['personal', 'procedures', 'forms'].includes(req.query.scope) ? req.query.scope : 'workspace';
+    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : WORKSPACE_KEY;
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branchId).eq('state_key', stateKey).maybeSingle();
     if (readError) throw readError;
 
@@ -86,9 +111,11 @@ export default async function handler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return res.status(400).json({ error: 'A valid portal payload is required.' });
     if (scope === 'procedures' && body.photo) await uploadProcedurePhoto(db, body);
+    if (scope === 'forms' && body.file) await uploadFormFile(db, body);
     const { data, error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: stateKey, payload: body.payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' }).select('payload,updated_at').single();
     if (error) throw error;
     if (scope === 'procedures') await removeUnusedPhotos(db, existing?.payload, data.payload);
+    if (scope === 'forms') await removeUnusedFormFiles(db, existing?.payload, data.payload);
     return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at });
   } catch (error: any) {
     return res.status(error.status || 400).json({ error: error.message || 'Unable to save CA portal content.' });

@@ -33,6 +33,7 @@ import {
   HeartPulse,
   CalendarDays,
   Syringe,
+  Printer,
 } from "lucide-react";
 import {
   Announcement,
@@ -59,10 +60,12 @@ import { ManagedServices } from './ManagedServices';
 import TeamAra from './TeamAra';
 import ClinicalProcedures from "./ClinicalProcedures";
 import { useProcedures } from "./lib/useProcedures";
+import PrintForms from "./PrintForms";
+import { printFormUrl, usePrintForms } from "./lib/usePrintForms";
 import { useAnnouncementReads } from './lib/useAnnouncementReads';
 import { useVisitingFrom } from "./lib/officeVisit";
 
-type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "procedures" | "teamara" | "announcements" | "links" | "admin";
+type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "procedures" | "forms" | "teamara" | "announcements" | "links" | "admin";
 
 
 const viewTitles: Record<View, string> = {
@@ -73,6 +76,7 @@ const viewTitles: Record<View, string> = {
   panelTraining: "Panel Training",
   services: "Our Services",
   procedures: "Clinical Procedures",
+  forms: "Print Forms",
   teamara: "TeamAra",
   announcements: "Announcements",
   links: "Important Links",
@@ -157,6 +161,7 @@ export default function PortalApp() {
   // Fetched once per page load, either when the tab opens or when Home search starts.
   const procedures = useProcedures(view === 'procedures' || homeSearching);
   const [openProcedure, setOpenProcedure] = useState("");
+  const printForms = usePrintForms(view === 'forms' || homeSearching);
 
   useEffect(() => {
     if (!toast) return;
@@ -315,6 +320,7 @@ export default function PortalApp() {
               serviceCatalog={serviceCatalog}
               procedures={procedures}
               onOpenProcedure={(id) => { navigate("procedures"); setOpenProcedure(id); }}
+              printForms={printForms}
               panels={panelTraining.panels}
               panelsLoading={panelTraining.loading}
             />
@@ -341,6 +347,7 @@ export default function PortalApp() {
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
           {view === "procedures" && <ClinicalProcedures key={openProcedure} startId={openProcedure} state={procedures} canEdit={user.role === "Superadmin"} />}
+          {view === "forms" && <PrintForms state={printForms} canEdit={user.role === "Superadmin"} />}
           {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
           {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} currentUserId={user.id} />}
           {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
@@ -505,6 +512,7 @@ const portalTabs: { id: View; label: string; note: string; icon: typeof Home; to
   { id: "panelTraining", label: "Panel Training", note: "Panel workflows & guides", icon: BookOpen, tone: "text-emerald-400" },
   { id: "services", label: "Our Services", note: "Clinic services & FAQs", icon: Sparkles, tone: "text-[#ffb000]" },
   { id: "procedures", label: "Clinical Procedures", note: "Item prep for each procedure", icon: Syringe, tone: "text-[#4ade80]" },
+  { id: "forms", label: "Print Forms", note: "Forms staff print often", icon: Printer, tone: "text-[#a78bfa]" },
   { id: "teamara", label: "TeamAra", note: "Members & cards", icon: Users, tone: "text-[#ff7ab6]" },
   { id: "handover", label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, tone: "text-[#7258ff]" },
   { id: "announcements", label: "Announcements", note: "Team updates", icon: Bell, tone: "text-[#ff6b81]" },
@@ -522,11 +530,12 @@ type HomeProps = {
   serviceCatalog: ReturnType<typeof useServiceCatalog>;
   procedures: ReturnType<typeof useProcedures>;
   onOpenProcedure: (id: string) => void;
+  printForms: ReturnType<typeof usePrintForms>;
   panels: PanelRecord[];
   panelsLoading: boolean;
 };
 
-function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, panels, panelsLoading }: HomeProps) {
+function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading }: HomeProps) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
   const visitor = useVisitingFrom("ca");
   const importantAnnouncement = announcements.find((announcement) => announcement.priority === "Penting");
@@ -537,7 +546,7 @@ function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements
     </section>
 
     <SearchAraSpace search={search} setSearch={setSearch} />
-    {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} procedures={procedures} onOpenProcedure={onOpenProcedure} panels={panels} panelsLoading={panelsLoading} />}
+    {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} procedures={procedures} onOpenProcedure={onOpenProcedure} printForms={printForms} panels={panels} panelsLoading={panelsLoading} />}
 
     <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{portalTabs.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}</div></section>
 
@@ -550,7 +559,7 @@ function SectionHeading({ title, eyebrow }: { title: string; eyebrow: string }) 
 }
 
 function SearchAraSpace({ search, setSearch }: { search: string; setSearch: (value: string) => void }) {
-  return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search references, memos, services, procedures, panels, announcements and links.</p></div></div><div className="flex w-full max-w-xl items-center gap-2 rounded-[16px] bg-white p-2 shadow-sm"><Search className="ml-2 h-4 w-4 shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setSearch("")} placeholder="Try: AraSihat, panel registration, FBC, complaints..." className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-sm outline-none placeholder:text-slate-400" />{search && <button onClick={() => setSearch("")} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}</div></section>;
+  return <section className="flex flex-col gap-5 rounded-[28px] border border-[#aee7fb] bg-[#edf9fe] p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#0b3d59] text-[#70d8fa]"><Search className="h-5 w-5" /></div><div><h3 className="font-semibold">Need an answer quickly?</h3><p className="mt-1 text-sm text-[#60758c]">Search references, memos, services, procedures, forms, panels, announcements and links.</p></div></div><div className="flex w-full max-w-xl items-center gap-2 rounded-[16px] bg-white p-2 shadow-sm"><Search className="ml-2 h-4 w-4 shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setSearch("")} placeholder="Try: AraSihat, panel registration, FBC, complaints..." className="min-w-0 flex-1 bg-transparent px-1 py-2.5 text-sm outline-none placeholder:text-slate-400" />{search && <button onClick={() => setSearch("")} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}</div></section>;
 }
 
 // Shift Passover is a daily checklist, not reference material, so it stays out of search.
@@ -558,7 +567,7 @@ const searchableTabs = portalTabs.filter((tab) => tab.id !== "handover");
 
 type SearchHit = { key: string; title: string; detail: string; tab: View; score: number; onOpen: () => void; inactive?: boolean };
 
-function SearchResults({ query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, panels, panelsLoading }: Omit<HomeProps, "search" | "setSearch"> & { query: string }) {
+function SearchResults({ query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading }: Omit<HomeProps, "search" | "setSearch"> & { query: string }) {
   const groups = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     // Every search word must appear somewhere in the item; matches in the title rank higher.
@@ -577,6 +586,7 @@ function SearchResults({ query, onNavigate, onOpenResource, announcements, resou
     serviceCatalog.services.forEach((service) => add({ key: `svc-${service.id}`, title: service.title, detail: service.summary || folderName.get(service.folder_id || "") || "Service", tab: "services", onOpen: () => onNavigate("services") }, score(service.title, service.summary, service.tags, folderName.get(service.folder_id || ""))));
     serviceCatalog.faqs.forEach((faq) => add({ key: `faq-${faq.id}`, title: faq.question, detail: faq.answer, tab: "services", onOpen: () => onNavigate("services") }, score(faq.question, faq.answer, folderName.get(faq.folder_id || ""))));
     (procedures.guide?.procedures || []).forEach((item) => add({ key: `proc-${item.id}`, title: item.title, detail: item.items.join(", ") || item.steps[0] || "Clinical procedure", tab: "procedures", onOpen: () => onOpenProcedure(item.id) }, score(item.title, ...item.items, ...item.steps, ...item.notes)));
+    (printForms.list?.forms || []).forEach((form) => add({ key: `form-${form.id}`, title: form.title, detail: form.group || "Print form", tab: "forms", onOpen: () => window.open(printFormUrl(form.file), "_blank", "noopener,noreferrer") }, score(form.title, form.group)));
     panels.filter((panel) => panel.active !== false).forEach((panel) => add({ key: `panel-${panel.id}`, title: panel.name, detail: panel.availability.join(", ") || "Panel", tab: "panelTraining", onOpen: () => onNavigate("panelTraining") }, score(panel.name, panel.availability.join(" "))));
     announcements.forEach((item) => add({ key: `ann-${item.id}`, title: item.title, detail: item.body, tab: "announcements", onOpen: () => onNavigate("announcements") }, score(item.title, item.body, item.audience)));
     links.forEach((link) => add({ key: `link-${link.id}`, title: link.title, detail: link.description || link.url, tab: "links", onOpen: () => window.open(link.url, "_blank", "noopener,noreferrer") }, score(link.title, link.description, link.group, link.url)));
@@ -584,8 +594,8 @@ function SearchResults({ query, onNavigate, onOpenResource, announcements, resou
     return searchableTabs
       .map((tab) => ({ tab, hits: hits.filter((hit) => hit.tab === tab.id && !hit.key.startsWith("tab-")).sort((a, b) => b.score - a.score), tabHit: hits.some((hit) => hit.key === `tab-${tab.id}`) }))
       .filter((group) => group.hits.length || group.tabHit);
-  }, [query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog.folders, serviceCatalog.services, serviceCatalog.faqs, procedures.guide, onOpenProcedure, panels]);
-  const loading = serviceCatalog.loading || procedures.loading || panelsLoading;
+  }, [query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog.folders, serviceCatalog.services, serviceCatalog.faqs, procedures.guide, onOpenProcedure, printForms.list, panels]);
+  const loading = serviceCatalog.loading || procedures.loading || printForms.loading || panelsLoading;
 
   return <section className="rounded-[28px] border border-[#dce4ed] bg-white p-6 sm:p-7">
     <SectionHeading title="Search results" eyebrow={loading ? "Searching all tabs…" : `${groups.reduce((total, group) => total + group.hits.length, 0)} found`} />
@@ -808,7 +818,7 @@ function PanelGuideImportPrompt({ file, panels, saving, onCreatePanel, onLinkPan
 
 function PanelTrainingModal({ row, kind, onClose }: { row: PanelTrainingRow; kind: "guide" | "portal"; onClose: () => void }) {
   const url = kind === "guide" ? row.guideUrl : row.portalUrl;
-  return <ModalShell onClose={onClose} wide><div className="sticky top-0 z-20 -mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button type="button" onClick={onClose} className="relative z-30 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="relative z-20 mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="relative z-30 shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
+  return <ModalShell onClose={onClose} wide><div className="-mx-6 -mt-6 flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-6 py-5 sm:-mx-8 sm:-mt-8 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Panel training</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">{row.panel} · {kind === "guide" ? "Panel guide" : "Panel portal"}</h2><p className="mt-2 text-sm text-slate-500">{row.availability.join(", ") || "Availability not assigned"} · Official AraSpace reference</p></div><button type="button" onClick={onClose} className="relative z-30 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200" aria-label="Close"><X className="h-5 w-5" /></button></div><div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"><iframe title={`${row.panel} ${kind}`} src={panelEmbedUrl(url)} scrolling="yes" className="h-[62vh] min-h-[480px] w-full" /></div><div className="relative z-20 mt-5 flex items-center justify-between gap-4"><p className="text-xs leading-5 text-slate-500">Scroll inside the guide to read the document. If the source does not support embedded scrolling, open the official source.</p><a href={url} target="_blank" rel="noreferrer" className="relative z-30 shrink-0 text-sm font-semibold text-[#0b587b] hover:text-[#0071e3]">Open source <ExternalLink className="inline h-3.5 w-3.5" /></a></div></ModalShell>;
 }
 
 const fieldClass = "w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10";
