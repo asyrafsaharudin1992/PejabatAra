@@ -13,7 +13,7 @@ export function useServiceCatalog(active: boolean) {
     if (!supabase) throw new Error('Supabase is not configured.');
     const { data: session } = await supabase.auth.getSession(); if (!session.session) throw new Error('Sign in with your staff account to load services.');
     const response = await fetch('/api/panel-files?resource=services', { method: body ? 'PUT' : 'GET', headers: { Authorization: `Bearer ${session.session.access_token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
-    const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Unable to load services.');
+    const result = await response.json().catch(() => ({})); if (!response.ok) throw new Error(result.error || (response.status === 413 ? 'The poster is too large to upload.' : 'Unable to load services.'));
     setData({ folders: result.folders || [], services: result.services || [], faqs: result.faqs || [] }); return result;
   }, []);
   const refresh = useCallback(async () => { if (!active) return; setLoading(true); setError(''); try { await request(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load services.'); } finally { setLoading(false); setLoaded(true); } }, [active, request]);

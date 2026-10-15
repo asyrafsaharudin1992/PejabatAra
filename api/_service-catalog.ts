@@ -27,8 +27,28 @@ export async function serviceCatalogHandler(req: any, res: any) {
     const path = `uploads/${crypto.randomUUID()}.${ext}`; const bytes = Buffer.from(file.base64, 'base64'); if (bytes.byteLength > 5 * 1024 * 1024) return res.status(400).json({ error: 'Poster must be 5MB or smaller.' });
     const { error: uploadError } = await db.storage.from('service-posters').upload(path, bytes, { contentType: file.type || 'image/png', upsert: false }); if (uploadError) throw uploadError;
     const { error } = await db.from('service_catalog_items').insert({ folder_id: body.folderId || null, storage_path: path, title: body.title, summary: body.summary || '', tags: body.tags || '' }); if (error) throw error;
-  } else if (body.action === 'update_service') { const { error } = await db.from('service_catalog_items').update({ title: body.title, summary: body.summary || '', tags: body.tags || '', folder_id: body.folderId || null, updated_at: now }).eq('id', body.id); if (error) throw error; }
-  else if (body.action === 'delete_service') { const { error } = await db.from('service_catalog_items').update({ active: false, updated_at: now }).eq('id', body.id); if (error) throw error; }
+  } else if (body.action === 'update_service') {
+    // A service can have several posters (rows sharing a title); `ids` updates them together.
+    const ids: string[] = Array.isArray(body.ids) ? body.ids : [body.id];
+    const { error } = await db.from('service_catalog_items').update({ title: body.title, summary: body.summary || '', tags: body.tags || '', folder_id: body.folderId || null, updated_at: now }).in('id', ids); if (error) throw error;
+  }
+  else if (body.action === 'move_services') {
+    const ids: string[] = Array.isArray(body.ids) ? body.ids.filter(Boolean) : []; if (!ids.length) return res.status(400).json({ error: 'Pick at least one service to move.' });
+    const { error } = await db.from('service_catalog_items').update({ folder_id: body.folderId || null, updated_at: now }).in('id', ids); if (error) throw error;
+  }
+  else if (body.action === 'delete_service') {
+    // `id` deletes one poster, `ids` a whole service. Rows and poster files are removed for good.
+    const ids: string[] = Array.isArray(body.ids) ? body.ids : [body.id]; if (!ids.length || ids.some((id) => !id)) return res.status(400).json({ error: 'A service id is required.' });
+    const { data: rows, error: rowsError } = await db.from('service_catalog_items').select('id, title, storage_path').in('id', ids); if (rowsError) throw rowsError;
+    if (!rows?.length) return res.status(404).json({ error: 'That poster no longer exists.' });
+    if (!Array.isArray(body.ids)) {
+      // FAQs cascade with their row, so hand them to a remaining poster of the same service first.
+      const { data: sibling, error: siblingError } = await db.from('service_catalog_items').select('id').eq('title', rows[0].title).eq('active', true).neq('id', rows[0].id).order('created_at').limit(1).maybeSingle(); if (siblingError) throw siblingError;
+      if (sibling) { const { error } = await db.from('service_faqs').update({ service_id: sibling.id }).eq('service_id', rows[0].id); if (error) throw error; }
+    }
+    const { error } = await db.from('service_catalog_items').delete().in('id', ids); if (error) throw error;
+    const { error: storageError } = await db.storage.from('service-posters').remove(rows.map((row: any) => row.storage_path)); if (storageError) throw storageError;
+  }
   else if (body.action === 'create_faq') { const { error } = await db.from('service_faqs').insert({ question: body.question, answer: body.answer, service_id: body.serviceId || null, folder_id: body.folderId || null, sort_order: body.sortOrder || 0 }); if (error) throw error; }
   else if (body.action === 'delete_faq') { const { error } = await db.from('service_faqs').update({ active: false }).eq('id', body.id); if (error) throw error; }
   else return res.status(400).json({ error: 'Unknown service action.' });
