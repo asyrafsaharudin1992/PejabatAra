@@ -14,6 +14,10 @@ export async function serviceCatalogHandler(req: any, res: any) {
   if (req.method !== 'PUT' || !isAdmin) return res.status(403).json({ error: 'Only System Admin can manage services.' });
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {}; const now = new Date().toISOString();
   if (body.action === 'create_folder') { const { error } = await db.from('service_folders').insert({ name: body.name, description: body.description || '' }); if (error) throw error; }
+  else if (body.action === 'rename_folder') {
+    const name = String(body.name || '').trim(); if (!body.id || !name) return res.status(400).json({ error: 'A folder name is required.' });
+    const { error } = await db.from('service_folders').update({ name }).eq('id', body.id); if (error) throw error;
+  }
   else if (body.action === 'delete_folder') {
     if (!body.id) return res.status(400).json({ error: 'A folder id is required.' });
     const { error: servicesError } = await db.from('service_catalog_items').update({ folder_id: null, updated_at: now }).eq('folder_id', body.id);
