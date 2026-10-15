@@ -2,7 +2,7 @@ import { officeAccess } from './_office-db.js';
 
 async function payload(db: any, isAdmin: boolean) {
   const [{ data: folders, error: folderError }, { data: services, error: serviceError }, { data: faqs, error: faqError }] = await Promise.all([
-    db.from('service_folders').select('*').eq('active', true).order('name'), db.from('service_catalog_items').select('*').eq('active', true).order('created_at'), db.from('service_faqs').select('*').eq('active', true).order('sort_order').order('created_at'),
+    db.from('service_folders').select('*').eq('active', true).order('name'), db.from('service_catalog_items').select('*').eq('active', true).order('sort_order').order('created_at'), db.from('service_faqs').select('*').eq('active', true).order('sort_order').order('created_at'),
   ]);
   if (folderError || serviceError || faqError) throw folderError || serviceError || faqError;
   return { folders: folders || [], services: services || [], faqs: faqs || [], isAdmin };
@@ -35,6 +35,12 @@ export async function serviceCatalogHandler(req: any, res: any) {
   else if (body.action === 'move_services') {
     const ids: string[] = Array.isArray(body.ids) ? body.ids.filter(Boolean) : []; if (!ids.length) return res.status(400).json({ error: 'Pick at least one service to move.' });
     const { error } = await db.from('service_catalog_items').update({ folder_id: body.folderId || null, updated_at: now }).in('id', ids); if (error) throw error;
+  }
+  else if (body.action === 'reorder_services') {
+    // `titles` is one folder's services in their new order; every poster of a service takes its position.
+    const titles: string[] = Array.isArray(body.titles) ? body.titles.filter(Boolean) : []; if (!titles.length) return res.status(400).json({ error: 'Nothing to reorder.' });
+    const results = await Promise.all(titles.map((title, index) => db.from('service_catalog_items').update({ sort_order: index, updated_at: now }).eq('title', title).eq('active', true)));
+    const failed = results.find((result: any) => result.error); if (failed) throw failed.error;
   }
   else if (body.action === 'delete_service') {
     // `id` deletes one poster, `ids` a whole service. Rows and poster files are removed for good.
