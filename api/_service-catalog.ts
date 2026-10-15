@@ -18,6 +18,13 @@ export async function serviceCatalogHandler(req: any, res: any) {
     const name = String(body.name || '').trim(); if (!body.id || !name) return res.status(400).json({ error: 'A folder name is required.' });
     const { error } = await db.from('service_folders').update({ name }).eq('id', body.id); if (error) throw error;
   }
+  else if (body.action === 'set_cover') {
+    if (!body.id) return res.status(400).json({ error: 'A poster id is required.' });
+    const { data: poster, error: posterError } = await db.from('service_catalog_items').select('title').eq('id', body.id).maybeSingle(); if (posterError) throw posterError;
+    if (!poster) return res.status(404).json({ error: 'That poster no longer exists.' });
+    const { error: clearError } = await db.from('service_catalog_items').update({ is_cover: false }).eq('title', poster.title); if (clearError) throw clearError;
+    const { error } = await db.from('service_catalog_items').update({ is_cover: true, updated_at: now }).eq('id', body.id); if (error) throw error;
+  }
   else if (body.action === 'delete_folder') {
     if (!body.id) return res.status(400).json({ error: 'A folder id is required.' });
     const { error: servicesError } = await db.from('service_catalog_items').update({ folder_id: null, updated_at: now }).eq('folder_id', body.id);
