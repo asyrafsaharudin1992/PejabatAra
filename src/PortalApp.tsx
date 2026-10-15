@@ -27,6 +27,11 @@ import {
   UserPlus,
   Users,
   X,
+  ListOrdered,
+  Stethoscope,
+  MessageSquare,
+  HeartPulse,
+  CalendarDays,
 } from "lucide-react";
 import {
   Announcement,
@@ -51,6 +56,7 @@ import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
 import { ManagedServices } from './ManagedServices';
 import TeamAra from './TeamAra';
+import { useAnnouncementReads } from './lib/useAnnouncementReads';
 import { useVisitingFrom } from "./lib/officeVisit";
 
 type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "teamara" | "announcements" | "links" | "admin";
@@ -131,6 +137,7 @@ export default function PortalApp() {
   const personal = useCaPortalState<CaPersonalContent>({ completedLessons: [], readResources: [] }, user?.email, true, "personal");
   const references = useSharedReferences(workspace.data.resources, user?.email, user?.role === "Superadmin", (saved, message) => { setToastError(!saved); setToast(message); });
   const content = { ...workspace.data, resources: references.resources };
+  const announcementReads = useAnnouncementReads(user?.email);
   const completedLessons = personal.data.completedLessons;
   const readResources = personal.data.readResources;
   const [staff, setStaff] = useState<PortalUser[]>(() => readLocal<PortalUser[]>("ara_portal_staff", demoStaff).map(normalizeUser));
@@ -221,7 +228,7 @@ export default function PortalApp() {
     <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
       <Sidebar
         panelAlertCount={panelTraining.guides.filter((guide) => guide.status === 'pending').length}
-        announcementCount={content.announcements.length}
+        announcementCount={announcementReads.loaded ? content.announcements.filter((item) => !announcementReads.allRead(item.id)).length : 0}
         user={user}
         view={view}
         open={mobileNavOpen}
@@ -324,7 +331,7 @@ export default function PortalApp() {
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
           {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
-          {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} />}
+          {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} currentUserId={user.id} />}
           {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
           {view === "admin" && user.role === "Superadmin" && (
             <AdminView staff={staff} onAddStaff={addStaff} />
@@ -795,19 +802,26 @@ function formatToday() {
   return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function AnnouncementsView({ announcements, canEdit, onSave }: { announcements: Announcement[]; canEdit: boolean; onSave: (next: Announcement[], message: string) => Promise<boolean> }) {
+function AnnouncementsView({ announcements, canEdit, onSave, readState, currentUserId }: { announcements: Announcement[]; canEdit: boolean; onSave: (next: Announcement[], message: string) => Promise<boolean>; readState: ReturnType<typeof useAnnouncementReads>; currentUserId?: string }) {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState({ title: "", body: "", audience: "Semua staf", priority: "Biasa" as Announcement["priority"] });
+
+  const close = () => { setAdding(false); setEditingId(""); setDraft({ title: "", body: "", audience: "Semua staf", priority: "Biasa" }); };
+  const startEdit = (item: Announcement) => { setEditingId(item.id); setDraft({ title: item.title, body: item.body, audience: item.audience, priority: item.priority }); setAdding(true); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft.title.trim() || !draft.body.trim()) return;
     setSaving(true);
-    const item: Announcement = { id: crypto.randomUUID(), title: draft.title.trim(), body: draft.body.trim(), audience: draft.audience.trim() || "Semua staf", priority: draft.priority, date: formatToday() };
-    const saved = await onSave([item, ...announcements], "Announcement published");
+    const fields = { title: draft.title.trim(), body: draft.body.trim(), audience: draft.audience.trim() || "Semua staf", priority: draft.priority };
+    // Editing keeps the id (and so who has read it) and the original date.
+    const saved = editingId
+      ? await onSave(announcements.map((entry) => entry.id === editingId ? { ...entry, ...fields } : entry), "Announcement updated")
+      : await onSave([{ id: crypto.randomUUID(), ...fields, date: formatToday() }, ...announcements], "Announcement published");
     setSaving(false);
-    if (saved) { setDraft({ title: "", body: "", audience: "Semua staf", priority: "Biasa" }); setAdding(false); }
+    if (saved) close();
   };
 
   const remove = async (item: Announcement) => {
@@ -820,23 +834,64 @@ function AnnouncementsView({ announcements, canEdit, onSave }: { announcements: 
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <section className="flex flex-col gap-5 rounded-[30px] bg-[#0b3d59] p-8 text-white sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Team updates</p><h2 className="mt-2 text-3xl font-semibold">Announcements</h2><p className="mt-2 text-[#b9cfdd]">Operational changes and information staff need to know.</p></div>{canEdit && !adding && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] transition hover:bg-[#eaf6fb] sm:self-auto"><Plus className="h-4 w-4" />New announcement</button>}</section>
     {canEdit && adding && <form onSubmit={submit} className="space-y-4 rounded-[24px] border border-[#dce4ed] bg-white p-6 sm:p-7">
-      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">New announcement</h3><button type="button" onClick={() => setAdding(false)} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
+      <div className="flex items-center justify-between"><h3 className="text-lg font-semibold">{editingId ? "Edit announcement" : "New announcement"}</h3><button type="button" onClick={close} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-5 w-5" /></button></div>
       <label className="block text-sm font-semibold text-slate-600">Title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
       <label className="block text-sm font-semibold text-slate-600">Message<textarea required rows={4} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} className={cn(fieldClass, "mt-1.5 resize-y")} /></label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-sm font-semibold text-slate-600">Audience<input value={draft.audience} onChange={(event) => setDraft({ ...draft, audience: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
         <label className="block text-sm font-semibold text-slate-600">Priority<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Announcement["priority"] })} className={cn(fieldClass, "mt-1.5")}><option value="Biasa">Normal</option><option value="Penting">Important</option></select></label>
       </div>
-      <div className="flex justify-end gap-3"><button type="button" onClick={() => setAdding(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Publishing…" : "Publish"}</button></div>
+      <div className="flex justify-end gap-3"><button type="button" onClick={close} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? (editingId ? "Saving…" : "Publishing…") : editingId ? "Save changes" : "Publish"}</button></div>
     </form>}
     {announcements.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No announcements yet.</p>}
-    {announcements.map((item) => <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", item.priority === "Penting" ? "border-rose-200" : "border-[#dce4ed]")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", item.priority === "Penting" ? "bg-rose-50 text-rose-600" : "bg-sky-50 text-sky-600")}><Bell className="h-5 w-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 whitespace-pre-line leading-7 text-slate-600">{item.body}</p></div></div><div className="flex shrink-0 items-start gap-3 text-sm text-slate-400 sm:text-right"><div><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div>{canEdit && <button onClick={() => void remove(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Remove ${item.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div></div></article>)}
+    {announcements.map((item) => { const done = readState.allRead(item.id); return <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", done ? "border-[#dce4ed]" : "border-rose-300")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", done ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>{done ? <Check className="h-5 w-5" /> : <Bell className="h-5 w-5" />}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 whitespace-pre-line leading-7 text-slate-600">{item.body}</p></div></div><div className="flex shrink-0 items-start gap-3 text-sm text-slate-400 sm:text-right"><div><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div>{canEdit && <button onClick={() => startEdit(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-sky-50 hover:text-sky-600 disabled:opacity-50" aria-label={`Edit ${item.title}`} title="Edit"><Pencil className="h-4 w-4" /></button>}{canEdit && <button onClick={() => void remove(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Remove ${item.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div></div><AnnouncementReadBar announcementId={item.id} readState={readState} currentUserId={currentUserId} canEdit={canEdit} /></article>; })}
+  </div>;
+}
+
+// Staff pick their own name and tick Done; the announcement stays red until everyone has.
+function AnnouncementReadBar({ announcementId, readState, currentUserId, canEdit }: { announcementId: string; readState: ReturnType<typeof useAnnouncementReads>; currentUserId?: string; canEdit: boolean }) {
+  const { staff, reads, loaded, markRead } = readState;
+  const read = reads[announcementId] || {};
+  const unread = staff.filter((item) => !read[item.id]);
+  const [choice, setChoice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const picked = unread.some((item) => item.id === choice) ? choice : unread.find((item) => item.id === currentUserId)?.id || "";
+  if (!loaded || !staff.length) return null;
+  const tick = async () => {
+    if (!picked) return;
+    setSaving(true); setMessage("");
+    const problem = await markRead(announcementId, picked);
+    setSaving(false); setChoice("");
+    setMessage(problem || `✓ Thank you, ${staff.find((item) => item.id === picked)?.name}.`);
+  };
+  const untick = async (item: { id: string; name: string }) => {
+    setSaving(true); setMessage("");
+    const problem = await markRead(announcementId, item.id, true);
+    setSaving(false);
+    setMessage(problem || `✓ ${item.name} unticked.`);
+  };
+  return <div className="mt-5 border-t border-slate-100 pt-4">
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className={cn("text-sm font-semibold", unread.length ? "text-rose-600" : "text-emerald-600")}>{unread.length ? `Read by ${staff.length - unread.length} of ${staff.length} staff` : `✓ All ${staff.length} staff have read this`}</p>
+    {unread.length > 0 && <div className="flex flex-wrap items-center gap-2"><select value={picked} onChange={(event) => setChoice(event.target.value)} className="rounded-xl border border-[#dce4ed] bg-white px-3 py-2 text-sm"><option value="">Choose your name…</option>{unread.map((item) => <option key={item.id} value={item.id}>{item.name}{item.branch ? ` (${item.branch})` : ""}</option>)}</select><button onClick={() => void tick()} disabled={!picked || saving} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />{saving ? "Saving…" : "Done, I've read it"}</button></div>}</div>
+    {message && <p className={cn("mt-2 text-xs", message.startsWith("✓") ? "text-emerald-600" : "text-amber-600")}>{message}</p>}
+    <div className="mt-3 flex flex-wrap gap-1.5">{staff.map((item) => <span key={item.id} title={read[item.id] ? `Read ${new Date(read[item.id]).toLocaleString()}` : "Not read yet"} className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium", read[item.id] ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400")}>{read[item.id] ? "✓ " : ""}{item.name}{canEdit && read[item.id] && <button type="button" onClick={() => void untick(item)} disabled={saving} className="-mr-1 grid h-4 w-4 place-items-center rounded-full text-emerald-700 hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Untick ${item.name}`} title={`Untick ${item.name}`}><X className="h-3 w-3" /></button>}</span>)}</div>
   </div>;
 }
 
 function normalizeUrl(value: string) {
   const url = value.trim();
   return /^(https?:|mailto:|tel:)/i.test(url) ? url : `https://${url}`;
+}
+
+// Quick Access style icon: picked from the link's words, coloured from its title.
+const linkIcons: [RegExp, typeof Link2][] = [[/queue|giliran/i, ListOrdered], [/locum|doctor|doktor/i, Stethoscope], [/feedback|maklum ?balas|survey/i, MessageSquare], [/care|sihat|health|patient|pesakit/i, HeartPulse], [/rujukan|reference|guide|panduan/i, BookOpen], [/form|borang/i, FileText], [/jadual|schedule|roster|calendar/i, CalendarDays]];
+const linkTones = ["text-[#20c7f4]", "text-emerald-400", "text-[#ffb000]", "text-[#ff7ab6]", "text-[#7258ff]", "text-[#ff6b81]"];
+function LinkLogo({ link }: { link: QuickLink }) {
+  const words = `${link.title} ${link.description || ""} ${link.group || ""}`;
+  const Icon = linkIcons.find(([pattern]) => pattern.test(words))?.[1] || Link2;
+  const tone = linkTones[[...link.title].reduce((sum, char) => sum + char.charCodeAt(0), 0) % linkTones.length];
+  return <span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", tone)}><Icon className="h-5 w-5" /></span>;
 }
 
 function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: boolean; onSave: (next: QuickLink[], message: string) => Promise<boolean> }) {
@@ -877,7 +932,7 @@ function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: bo
       </div>
       <div className="flex justify-end gap-3"><button type="button" onClick={close} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? "Saving…" : editingId ? "Save changes" : "Add link"}</button></div>
     </form>}
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{links.map((link) => <div key={link.id} className="relative"><a href={link.url} target="_blank" rel="noreferrer" className="group block h-full rounded-[24px] bg-[#0b3d59] p-6 text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-[#67cff4]"><Link2 className="h-5 w-5" /></div><ExternalLink className={cn("h-5 w-5 text-[#8eb2c6] group-hover:text-white", canEdit && "mr-[5.5rem]")} /></div><h3 className="mt-5 text-xl font-semibold">{link.title}</h3>{link.description && <p className="mt-2 text-sm text-[#b9cfdd]">{link.description}</p>}<p className="mt-5 text-xs font-bold uppercase tracking-wider text-[#67cff4]">{link.group}</p></a>{canEdit && <button onClick={() => startEdit(link)} disabled={saving} className="absolute right-[4.25rem] top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-[#20c7f4] hover:text-white disabled:opacity-50" aria-label={`Edit ${link.title}`} title="Edit"><Pencil className="h-4 w-4" /></button>}{canEdit && <button onClick={() => void remove(link)} disabled={saving} className="absolute right-6 top-7 grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#b9cfdd] transition hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{links.map((link) => <div key={link.id} className="relative"><a href={link.url} target="_blank" rel="noreferrer" title={link.url} className="group block min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><LinkLogo link={link} /><ArrowRight className={cn("h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1", canEdit && "mr-16")} /></div><p className="mt-5 truncate font-semibold">{link.title}</p><p className="mt-1 truncate text-xs text-[#9fb8c7]">{link.description || link.group}</p></a>{canEdit && <div className="absolute right-4 top-5 flex gap-1"><button onClick={() => startEdit(link)} disabled={saving} className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-[#9fb8c7] transition hover:bg-[#20c7f4] hover:text-white disabled:opacity-50" aria-label={`Edit ${link.title}`} title="Edit"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => void remove(link)} disabled={saving} className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-[#9fb8c7] transition hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-3.5 w-3.5" /></button></div>}</div>)}</div>
     {links.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No links yet.</p>}
   </div>;
 }
