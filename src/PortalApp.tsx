@@ -741,7 +741,8 @@ function PanelTrainingCards({ rows, canEdit, saving, onUpdate, onGuide, onPortal
   return <div className="grid gap-3">{rows.map((row) => <article key={row.id} className="rounded-2xl border border-slate-100 bg-[#fbfdfe] p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0 flex-1">{canEdit ? <input aria-label={`Panel name for ${row.panel}`} defaultValue={row.panel} onBlur={(event) => void onUpdate(row.id, { panel: event.target.value })} className="w-full rounded-lg bg-white px-2 py-1 text-sm font-bold text-[#14233b] outline-none ring-1 ring-slate-100 focus:ring-[#0b587b]/30" /> : <h3 className="text-sm font-bold text-[#14233b]">{row.panel}</h3>}<p className="mt-2 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Branches</p><div className="mt-1.5">{canEdit ? <PanelAvailabilityEditor value={row.availability} onChange={(availability) => void onUpdate(row.id, { availability })} /> : <div className="flex flex-wrap gap-1">{row.availability.length ? row.availability.map((location) => <span key={location} className="rounded-full bg-[#e8f7fd] px-2 py-1 text-[10px] font-medium text-[#0b587b]">{location}</span>) : <span className="text-xs text-slate-400">Not assigned</span>}</div>}</div></div>{canEdit && <button type="button" onClick={() => onDelete(row)} disabled={saving} className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 disabled:opacity-50" aria-label={`Remove ${row.panel}`}><Trash2 className="h-4 w-4" /></button>}</div><div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">{row.guideUrl ? <button type="button" onClick={() => onGuide(row)} className="rounded-lg bg-[#e8f7fd] px-3 py-2 text-xs font-medium text-[#0b587b]"><BookOpen className="mr-1 inline h-3.5 w-3.5" />Open guide</button> : <span className="px-1 py-2 text-xs text-slate-400">No guide yet</span>}{canEdit ? <PanelPortalEditor value={row.portalUrl} onSave={(portalUrl) => onUpdate(row.id, { portalUrl })} onOpen={() => onPortal(row)} /> : row.portalUrl ? <button type="button" onClick={() => onPortal(row)} className="rounded-lg px-3 py-2 text-xs font-medium text-[#0b587b] hover:bg-slate-100">Open portal <ExternalLink className="inline h-3.5 w-3.5" /></button> : null}</div></article>)}</div>;
 }
 
-function PanelTrainingView({ training, canEdit }: { training: ReturnType<typeof usePanelTraining>; canEdit: boolean }) {
+// Also used by the Clinical Admin office, where the tab is called "Panel".
+export function PanelTrainingView({ training, canEdit, title = "Panel Training" }: { training: ReturnType<typeof usePanelTraining>; canEdit: boolean; title?: string }) {
   const [selectedPanel, setSelectedPanelState] = useState<{ row: PanelTrainingRow; kind: "guide" | "portal" } | null>(null);
   const [importingGuide, setImportingGuide] = useState<typeof training.guides[number] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -803,7 +804,7 @@ function PanelTrainingView({ training, canEdit }: { training: ReturnType<typeof 
     </section>}
     <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Panel operations</p><h2 className="mt-2 text-3xl font-semibold tracking-tight">Panel Training</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Quick references for panel workflows, availability and portal access by branch.</p></div>
+        <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Panel operations</p><h2 className="mt-2 text-3xl font-semibold tracking-tight">{title}</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Quick references for panel workflows, availability and portal access by branch.</p></div>
         <span className="inline-flex shrink-0 items-center gap-2 rounded-[14px] bg-white/10 px-4 py-3 text-sm font-semibold text-[#d8edf6]"><BookOpen className="h-4 w-4" />Direct document links</span>
       </div>
     </section>
@@ -931,7 +932,8 @@ function LinkLogo({ link }: { link: QuickLink }) {
   return <span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", tone)}><Icon className="h-5 w-5" /></span>;
 }
 
-function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: boolean; onSave: (next: QuickLink[], message: string) => Promise<boolean> }) {
+// Also used by the Clinical Admin office for its own list of links.
+export function LinksView({ links, canEdit, onSave }: { links: QuickLink[]; canEdit: boolean; onSave: (next: QuickLink[], message: string) => Promise<boolean> }) {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState("");

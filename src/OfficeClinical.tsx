@@ -1,9 +1,12 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, CalendarClock, Coins, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpen, Clock3, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
 import ClinicalIncentives from './ClinicalIncentives';
+import { LinksView, PanelTrainingView } from './PortalApp';
+import { usePanelTraining } from './lib/usePanelTraining';
+import type { QuickLink } from './portalData';
 
 // Office Clinical Administration, laid out like the CA office. Each branch's
 // Clinical Admin ticks the daily checklist here and sends it to the WhatsApp
@@ -60,7 +63,16 @@ const MONTHLY: { id: string; due: number | null; label: (thisMonth: string, last
 ];
 
 const MARK: Record<CheckStatus, string> = { done: '✅', pending: '☑️', na: '❌' };
-const STATUS_BUTTONS: [CheckStatus, string, string][] = [['done', 'Done', 'bg-emerald-600 text-white'], ['pending', 'Not done', 'bg-amber-500 text-white'], ['na', 'Not needed', 'bg-slate-500 text-white']];
+// Status choices for each checklist item. Pressing the chosen one again clears it.
+const STATUS_BUTTONS: [CheckStatus, string, string][] = [['done', 'Done', 'bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-200'], ['pending', 'Not done', 'bg-white text-amber-700 shadow-sm ring-1 ring-amber-200'], ['na', 'Not needed', 'bg-white text-slate-600 shadow-sm ring-1 ring-slate-200']];
+
+// The round tick at the start of each row: empty until marked, then shows the status.
+function TickCircle({ status, onClick, label }: { status?: CheckStatus; onClick: () => void; label: string }) {
+  const look = status === 'done' ? 'border-emerald-500 bg-emerald-500 text-white' : status === 'pending' ? 'border-amber-400 bg-amber-50 text-amber-600' : status === 'na' ? 'border-slate-300 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-transparent hover:border-emerald-400 hover:text-emerald-300';
+  return <button type="button" onClick={onClick} aria-label={status === 'done' ? `Untick ${label}` : `Tick ${label}`} aria-pressed={status === 'done'} className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border-[1.5px] transition ${look}`}>
+    {status === 'pending' ? <Clock3 className="h-3.5 w-3.5" strokeWidth={2.2} /> : status === 'na' ? <Minus className="h-3.5 w-3.5" strokeWidth={2.5} /> : <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+  </button>;
+}
 const BOOKING_LABEL: Record<BookingStatus, string> = { waiting: 'Waiting for stock', reserved: 'Reserved', done: 'Done', cancelled: 'Cancelled' };
 // The WhatsApp report keeps the wording the Clinical Admins already use.
 const BOOKING_REPORT: Record<BookingStatus, string> = { waiting: 'Tunggu stok', reserved: 'Dah simpan', done: 'Selesai', cancelled: 'Batal' };
@@ -146,6 +158,9 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
   const [openNote, setOpenNote] = useState<string | null>(null);
   const change = (next: Partial<Draft>) => { setDraft((current) => ({ ...current, ...next })); setDirty(true); setNotice(''); };
   const setCheck = (id: string, next: Partial<Checks[string]>) => change({ checks: { ...draft.checks, [id]: { status: 'pending', note: '', ...draft.checks[id], ...next } } });
+  // Unmarking removes the item, so it goes out as ☑️ not done until it is marked again.
+  const clearCheck = (id: string) => { const { [id]: _removed, ...rest } = draft.checks; change({ checks: rest }); };
+  const choose = (id: string, status: CheckStatus) => draft.checks[id]?.status === status ? clearCheck(id) : setCheck(id, { status });
 
   useEffect(() => {
     if (!dirty) return;
@@ -175,9 +190,13 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
     if (!ready()) return;
     const tab = window.open('', '_blank');
     if (!(await save())) { tab?.close(); return; }
-    const url = `https://wa.me/?text=${encodeURIComponent(buildReport(day, draft))}`;
+    const text = buildReport(day, draft);
+    // wa.me loses emoji on its redirect (they arrive as �), so go to api.whatsapp.com directly.
+    // The report is also copied, so it can be pasted if WhatsApp Desktop still mangles it.
+    await navigator.clipboard.writeText(text).catch(() => undefined);
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     if (tab) tab.location.href = url; else window.location.href = url;
-    setNotice('Saved. Choose the WhatsApp group and press Send.');
+    setNotice('Saved and copied. Choose the WhatsApp group and press Send. If the ticks show as �, clear the message and paste (⌘V / Ctrl+V) instead.');
   };
   const copy = async () => {
     if (!ready() || !(await save())) return;
@@ -219,9 +238,10 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
         const check = draft.checks[id];
         return <div key={id} className="py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm leading-6">{label}</p>
-            <div className="flex shrink-0 gap-1.5">{STATUS_BUTTONS.map(([status, text, active]) => <button key={status} onClick={() => setCheck(id, { status })} className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${check?.status === status ? active : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{MARK[status]} {text}</button>)}
-              <button onClick={() => setOpenNote(openNote === id ? null : id)} title="Note" aria-label={`Note for ${label}`} className={`rounded-lg px-2 py-1.5 ${check?.note ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-400 hover:bg-slate-100'}`}><Pencil className="h-3.5 w-3.5" /></button>
+            <div className="flex items-start gap-3"><TickCircle status={check?.status} label={label} onClick={() => choose(id, 'done')} /><p className={`text-sm leading-6 ${check?.status === 'done' ? 'text-slate-500' : check?.status === 'na' ? 'text-slate-400' : ''}`}>{label}</p></div>
+            <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
+              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([status, text, active]) => <button key={status} onClick={() => choose(id, status)} aria-pressed={check?.status === status} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${check?.status === status ? active : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>
+              <button onClick={() => setOpenNote(openNote === id ? null : id)} title="Note" aria-label={`Note for ${label}`} className={`rounded-lg p-1.5 ${check?.note ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-400 hover:bg-slate-100'}`}><Pencil className="h-3.5 w-3.5" /></button>
             </div>
           </div>
           {(openNote === id || check?.note) && <textarea value={check?.note || ''} onChange={(event) => setCheck(id, { note: event.target.value })} rows={1} placeholder="Note (e.g. Recheck email influenza vaccine)" className={`${input} mt-2 h-auto py-2`} />}
@@ -234,18 +254,21 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
       </div>}
     </section>)}
 
+    <AdHocTasks day={day} reload={reload} onError={onError} />
+
     <section className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">Monthly tasks</h2>
       <div className="mt-3 space-y-2">{MONTHLY.map((task) => {
         const done = day.monthlyDone.includes(task.id);
         const late = !done && task.due !== null && today > task.due;
         return <label key={task.id} className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm hover:bg-slate-50">
-          <input type="checkbox" checked={done} onChange={(event) => void toggleMonthly(task.id, event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+          <input type="checkbox" checked={done} onChange={(event) => void toggleMonthly(task.id, event.target.checked)} className="sr-only" />
+          <span aria-hidden="true" className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border-[1.5px] transition ${done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-transparent'}`}><Check className="h-3.5 w-3.5" strokeWidth={3} /></span>
           <span className={done ? 'text-slate-400 line-through' : ''}>{task.label(monthName(day.date), monthName(day.date, -1))}</span>
           {late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}
         </label>;
       })}</div>
-      <p className="mt-3 text-xs text-slate-400">Active vaccine bookings and open ad hoc tasks are added to the report automatically.</p>
+      <p className="mt-3 text-xs text-slate-400">Active vaccine bookings and ad hoc tasks are added to the report automatically.</p>
     </section>
 
   </div>;
@@ -352,7 +375,8 @@ function Bookings({ day, reload, onError }: { day: Day; reload: () => Promise<vo
   </div>;
 }
 
-function Tasks({ day, reload, onError }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void }) {
+// Ad hoc tasks, shown inside the daily checklist. They carry over until ticked done.
+function AdHocTasks({ day, reload, onError }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void }) {
   const [draft, setDraft] = useState<{ id?: string; title: string; details: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (body: Record<string, unknown>) => {
@@ -362,13 +386,12 @@ function Tasks({ day, reload, onError }: { day: Day; reload: () => Promise<void>
     finally { setBusy(false); }
   };
   const submit = async (event: FormEvent) => { event.preventDefault(); if (draft && await run({ action: 'save_task', branch: day.branch, ...draft })) setDraft(null); };
-  return <div className="mx-auto max-w-[1500px] space-y-7">
-    <Hero branch={day.branch} title="Ad hoc tasks" text="Tasks stay in the daily report until ticked done. Tasks finished today still show with ✅." action={<button onClick={() => setDraft({ title: '', details: '' })} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b3d59] hover:bg-[#e9f6fb]"><Plus className="h-4 w-4" />New task</button>} />
-    <section className={card}>
-    {!day.tasks.length && <p className="mt-5 rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-slate-500">No ad hoc tasks.</p>}
-    <div className="mt-5 space-y-2">{day.tasks.map((task) => <div key={task.id} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-4">
-      <input type="checkbox" checked={Boolean(task.doneOn)} disabled={busy} onChange={(event) => void run({ action: 'set_task_done', id: task.id, done: event.target.checked })} aria-label={`Done: ${task.title}`} className="mt-1 h-4 w-4 accent-emerald-600" />
-      <div className="min-w-0 flex-1 text-sm"><p className={`font-semibold ${task.doneOn ? 'text-slate-400 line-through' : ''}`}>{task.title}</p>{task.details && <p className="mt-1 whitespace-pre-line text-slate-500">{task.details}</p>}<p className="mt-1 text-xs text-slate-400">Since {dmy(task.createdOn)}</p></div>
+  return <section className={`mt-4 ${card}`}>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Ad hoc tasks</h2><p className="mt-1 text-xs text-slate-500">Any extra task for today. It stays in the report until ticked done; tasks finished today still show with ✅.</p></div><button onClick={() => setDraft({ title: '', details: '' })} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]"><Plus className="h-4 w-4" />Add task</button></div>
+    {!day.tasks.length && <p className="mt-4 rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-slate-500">No ad hoc tasks. Press Add task to add one.</p>}
+    <div className="mt-4 divide-y divide-slate-100">{day.tasks.map((task) => <div key={task.id} className="flex items-start gap-3 py-3">
+      <TickCircle status={task.doneOn ? 'done' : undefined} label={task.title} onClick={() => { if (!busy) void run({ action: 'set_task_done', id: task.id, done: !task.doneOn }); }} />
+      <div className="min-w-0 flex-1 text-sm"><p className={`font-semibold leading-6 ${task.doneOn ? 'text-slate-400 line-through' : ''}`}>{task.title}</p>{task.details && <p className="mt-1 whitespace-pre-line text-slate-500">{task.details}</p>}<p className="mt-1 text-xs text-slate-400">Since {dmy(task.createdOn)}</p></div>
       <button onClick={() => setDraft(task)} title="Edit" aria-label={`Edit ${task.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]"><Pencil className="h-4 w-4" /></button>
       <button onClick={() => { if (window.confirm(`Delete the task “${task.title}”?`)) void run({ action: 'delete_task', id: task.id }); }} disabled={busy} title="Delete" aria-label={`Delete ${task.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
     </div>)}</div>
@@ -379,8 +402,7 @@ function Tasks({ day, reload, onError }: { day: Day; reload: () => Promise<void>
         <div className="flex justify-end gap-2"><button type="button" onClick={() => setDraft(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Cancel</button><button disabled={busy} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? 'Saving…' : 'Save task'}</button></div>
       </form>
     </Modal>}
-  </section>
-  </div>;
+  </section>;
 }
 
 function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
@@ -411,33 +433,42 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
 }
 
 
-type View = 'home' | 'report' | 'orders' | 'bookings' | 'tasks' | 'incentives';
+type View = 'home' | 'report' | 'orders' | 'bookings' | 'incentives' | 'panel' | 'links';
 
 // Sidebar tabs besides Home. Quick access on Home is built from this list too, as in the CA office.
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string }[] = [
   { id: 'report', label: 'Daily Checklist', note: 'Tick & send to WhatsApp', icon: ClipboardList, tone: 'text-[#20c7f4]' },
   { id: 'orders', label: 'Orders', note: 'Medicine & supplies on the way', icon: Package, tone: 'text-[#ffb000]' },
   { id: 'bookings', label: 'Vaccine Bookings', note: 'Patients waiting for stock', icon: Syringe, tone: 'text-emerald-400' },
-  { id: 'tasks', label: 'Ad Hoc Tasks', note: 'Carried over until done', icon: CalendarClock, tone: 'text-[#ff7ab6]' },
   { id: 'incentives', label: 'Incentive Claims', note: 'Approve staff monthly claims', icon: Coins, tone: 'text-[#ffd36b]' },
+  { id: 'panel', label: 'Panel', note: 'Panel guides & portals', icon: BookOpen, tone: 'text-emerald-400' },
+  { id: 'links', label: 'Important Links', note: 'Work systems', icon: Link2, tone: 'text-[#20c7f4]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', tasks: 'Ad Hoc Tasks', incentives: 'Incentive Claims' };
+const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', panel: 'Panel', links: 'Important Links' };
+
+// Shown until System Admin saves its own list in the Important Links tab.
+const DEFAULT_LINKS: QuickLink[] = [
+  { id: 'eswis', title: 'ESWIS (Updated Clinical Waste)', url: 'https://eswisv2.doe.gov.my/', description: 'Clinical waste records', group: 'Systems' },
+  { id: 'order-ubat-kj', title: 'Order Ubat Tracker KJ', url: 'https://docs.google.com/spreadsheets/d/1MbzxDCcmexpSBHlPmfItX49Fr556UEA3Gf52o29IBYY/edit?pli=1&gid=1987617551#gid=1987617551', description: 'Medicine order tracker (Kajang)', group: 'Orders' },
+  { id: 'infotech', title: 'Login Infotech', url: 'https://login-infotech.com/Login?rUrl=https%3a%2f%2fwww.infotech-cloudhr.com.my%2fLogin.aspx', description: 'Infotech Cloud HR', group: 'Systems' },
+  { id: 'zuellig', title: 'Zuellig Pharma', url: 'https://my.ezrx.com/', description: 'eZRx ordering', group: 'Orders' },
+];
 
 function LogoMark() { return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><Stethoscope className="h-6 w-6" /></div>; }
 
 function Sidebar({ view, open, branches, branch, counts, onBranch, onClose, onNavigate, onLogout }: { view: View; open: boolean; branches: string[]; branch: string; counts: Partial<Record<View, number>>; onBranch: (name: string) => void; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
-  const items = [{ id: 'home' as View, label: 'Home', icon: Home }, ...TABS];
+  const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]' }, ...TABS];
   return <>
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
-    <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto overscroll-contain border-r border-white/10 bg-[#083a55] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+    <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto overscroll-contain border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="flex items-center justify-between px-2 py-3">
-        <div className="flex items-center gap-3"><LogoMark /><div><p className="font-semibold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinical Admin</p></div></div>
+        <div className="flex items-center gap-3"><LogoMark /><div><p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinical Admin</p></div></div>
         <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
       </div>
       {branches.length > 1 && <div className="mt-6 grid grid-cols-2 gap-1 rounded-[14px] bg-white/8 p-1">{branches.map((name) => <button key={name} onClick={() => onBranch(name)} className={`rounded-[10px] px-2 py-2 text-xs font-bold transition ${branch === name ? 'bg-white text-[#162a43]' : 'text-[#b8cddd] hover:text-white'}`}>{name}</button>)}</div>}
-      <div className="mx-1 mt-6 h-px bg-white/10" />
-      <nav className="mt-7 flex-1 space-y-2">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[14px] px-4 py-3.5 text-sm font-semibold transition ${view === item.id ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.14)] [&>svg]:text-[#7357ff]' : 'text-[#b8cddd] hover:bg-white/8 hover:text-white'}`}>
-        <item.icon className="h-5 w-5" />{item.label}
+      <div className="mx-1 mt-5 h-px bg-white/10" />
+      <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
+        <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.id === 'home' && view === 'home' ? 'text-[#5b4cf0]' : item.tone}`} strokeWidth={1.8} />{item.label}
         {counts[item.id] ? <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{counts[item.id]}</span> : <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
       </button>)}</nav>
       <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
@@ -458,7 +489,7 @@ function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null
       <h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, Clinical Admin ${day?.branch || ''}`}</h2>
       <p className="mt-3 text-base text-[#bed2df]">{date}</p>
       {!overseer && day && <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[[day.report.saved ? 'Saved' : 'Not yet', "Today's checklist", 'report'], [pendingOrders, 'Orders not arrived', 'orders'], [day.bookings.length, 'Active vaccine bookings', 'bookings'], [openTasks, 'Open ad hoc tasks', 'tasks']].map(([value, label, view]) => <button key={label as string} onClick={() => onNavigate(view as View)} className="rounded-2xl border border-white/15 bg-white/10 p-4 text-left transition hover:bg-white/15"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-sm text-[#b9cfdd]">{label}</p></button>)}
+        {[[day.report.saved ? 'Saved' : 'Not yet', "Today's checklist", 'report'], [pendingOrders, 'Orders not arrived', 'orders'], [day.bookings.length, 'Active vaccine bookings', 'bookings'], [openTasks, 'Open ad hoc tasks', 'report']].map(([value, label, view]) => <button key={label as string} onClick={() => onNavigate(view as View)} className="rounded-2xl border border-white/15 bg-white/10 p-4 text-left transition hover:bg-white/15"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-sm text-[#b9cfdd]">{label}</p></button>)}
       </div>}
     </section>
     {overseer && <section><div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Today</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Both branches</span></div><Summary onOpen={onOpenBranch} /></section>}
@@ -480,9 +511,13 @@ export default function OfficeClinical() {
   const [day, setDay] = useState<Day | null>(null);
   const [error, setError] = useState('');
   const overseer = (branches?.length || 0) > 1;
+  const [admin, setAdmin] = useState(false);
+  const [links, setLinks] = useState<QuickLink[] | null>(null);
+  // Panel list comes from the CA office's Panel Training; it is fetched only when the tab opens.
+  const panel = usePanelTraining(view === 'panel', admin);
 
   useEffect(() => {
-    officeFetch(`${API}&action=branches`).then((response) => response.json()).then(({ branches: names }) => { setBranches(names); setBranch(names[0] || ''); })
+    officeFetch(`${API}&action=branches`).then((response) => response.json()).then(({ branches: names, admin: isAdmin }) => { setBranches(names); setBranch(names[0] || ''); setAdmin(Boolean(isAdmin)); })
       .catch((cause) => setError(cause.message));
   }, []);
   const load = async () => {
@@ -491,6 +526,18 @@ export default function OfficeClinical() {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load.'); }
   };
   useEffect(() => { setDay(null); void load(); }, [branch]);
+
+  // Links are read once, the first time the tab opens.
+  useEffect(() => {
+    if (view !== 'links' || links) return;
+    officeFetch(`${API}&action=links`).then((response) => response.json()).then((result) => setLinks(result.links ?? DEFAULT_LINKS)).catch((cause) => { setLinks(DEFAULT_LINKS); setError(cause.message); });
+  }, [view, links]);
+  const saveLinks = async (next: QuickLink[]) => {
+    try {
+      const result = await (await officeFetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_links', links: next }) })).json();
+      setLinks(result.links); return true;
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save links.'); return false; }
+  };
 
   const navigate = (next: View) => { setView(next); setMenuOpen(false); setError(''); window.scrollTo({ top: 0 }); };
   const onError = (message: string) => { setError(message); window.scrollTo({ top: 0, behavior: 'smooth' }); };
@@ -503,7 +550,7 @@ export default function OfficeClinical() {
   };
   const counts = useMemo<Partial<Record<View, number>>>(() => day ? {
     orders: day.orders.filter((order) => !order.closed && !order.cancelled).length,
-    tasks: day.tasks.filter((task) => !task.doneOn).length,
+    report: day.tasks.filter((task) => !task.doneOn).length,
   } : {}, [day]);
 
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
@@ -519,12 +566,13 @@ export default function OfficeClinical() {
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
         {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setBranch(name); navigate('report'); }} />}
-        {view !== 'home' && view !== 'incentives' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
+        {view !== 'home' && view !== 'incentives' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
         {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}
         {view === 'bookings' && day && <Bookings day={day} reload={load} onError={onError} />}
-        {view === 'tasks' && day && <Tasks day={day} reload={load} onError={onError} />}
+        {view === 'panel' && <PanelTrainingView training={panel} canEdit={admin} title="Panel" />}
+        {view === 'links' && (links ? <LinksView links={links} canEdit={admin} onSave={saveLinks} /> : <p className="text-sm text-slate-500">Loading…</p>)}
         {view === 'incentives' && branch && <ClinicalIncentives key={branch} branch={branch} branches={branches || []} onError={onError} />}
       </main>
     </div>

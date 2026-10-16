@@ -7,6 +7,8 @@ import { officeAccess } from './_office-db.js';
 // System Admin, COO and CEO see every branch. Everything works on "today" in
 // Malaysia time, so a phone with the wrong clock cannot file the wrong day.
 const CLINICAL_BRANCHES = ['Kajang', 'Seri Kembangan'];
+const LINKS_BRANCH = 'AraOffice Shared';
+const LINKS_KEY = 'clinical_links';
 const CHECK_STATUSES = new Set(['done', 'pending', 'na']);
 const BOOKING_STATUSES = new Set(['waiting', 'reserved', 'done', 'cancelled']);
 
@@ -118,7 +120,23 @@ export async function clinicalHandler(req: any, res: any) {
     const scopeIds = scope.map((branch) => branch.id);
     const now = new Date().toISOString();
 
-    if (req.method === 'GET' && action === 'branches') return res.status(200).json({ branches: scope.map((branch) => branch.name), today: today() });
+    if (req.method === 'GET' && action === 'branches') return res.status(200).json({ branches: scope.map((branch) => branch.name), today: today(), admin: profile.role === 'super_admin' });
+    // Important Links for the Clinical Admin office, shared by both branches; System Admin edits them.
+    if (action === 'links' || action === 'save_links') {
+      const { data: shared, error: sharedError } = await db.from('branches').select('id').eq('name', LINKS_BRANCH).single();
+      if (sharedError) throw sharedError;
+      if (req.method === 'GET') {
+        const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', shared.id).eq('state_key', LINKS_KEY).maybeSingle();
+        if (error) throw error;
+        return res.status(200).json({ links: data?.payload?.links ?? null });
+      }
+      if (profile.role !== 'super_admin') throw fail(403, 'Only System Admin can change these links.');
+      const links = (Array.isArray(body.links) ? body.links : []).slice(0, 100).map((link: any) => ({ id: text(link?.id, 60), title: text(link?.title, 120), url: text(link?.url, 1000), description: text(link?.description, 300), group: text(link?.group, 60) || 'General' }))
+        .filter((link: any) => link.id && link.title && /^(https?:|mailto:|tel:)/i.test(link.url));
+      const { error } = await db.from('portal_state').upsert({ branch_id: shared.id, state_key: LINKS_KEY, payload: { links }, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ links });
+    }
     if (req.method === 'GET' && action === 'day') return res.status(200).json(await dayView(db, pickBranch(scope, req.query.branch)));
     if (req.method === 'GET' && action === 'overview') return res.status(200).json(await overview(db, scope));
     // Staff incentive claims for one branch and month. Drafts are listed too, so the
