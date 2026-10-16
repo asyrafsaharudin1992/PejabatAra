@@ -152,7 +152,7 @@ function Hero({ branch, title, text, action }: { branch: string; title: string; 
   </section>;
 }
 
-function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void }) {
+function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void; onPatch: (change: (day: Day) => Day) => void }) {
   const [draft, setDraft] = useState<Draft>(() => ({ ...day.report, preparedBy: day.report.preparedBy || localStorage.getItem(PREPARED_KEY(day.branch)) || '' }));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -223,10 +223,12 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
   // report always carries the latest ticks.
   const [syncing, setSyncing] = useState(0);
   const track = (busy: boolean) => setSyncing((count) => Math.max(0, count + (busy ? 1 : -1)));
+  // The tick shows at once; only the tick is sent, and the day is reloaded only if saving fails.
   const toggleMonthly = async (taskId: string, done: boolean) => {
+    onPatch((current) => ({ ...current, monthlyDone: done ? [...current.monthlyDone.filter((id) => id !== taskId), taskId] : current.monthlyDone.filter((id) => id !== taskId) }));
     track(true);
-    try { await post({ action: 'set_monthly', branch: day.branch, taskId, done }); await reload(); }
-    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); }
+    try { await post({ action: 'set_monthly', branch: day.branch, taskId, done }); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); await reload(); }
     finally { track(false); }
   };
 
@@ -276,7 +278,7 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
       </div>}
     </section>)}
 
-    <AdHocTasks day={day} reload={reload} onError={onError} onBusy={track} />
+    <AdHocTasks day={day} reload={reload} onError={onError} onBusy={track} onPatch={onPatch} />
 
     <section className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">Monthly tasks</h2>
@@ -398,7 +400,7 @@ function Bookings({ day, reload, onError }: { day: Day; reload: () => Promise<vo
 }
 
 // Ad hoc tasks, shown inside the daily checklist. They carry over until ticked done.
-function AdHocTasks({ day, reload, onError, onBusy }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void; onBusy: (busy: boolean) => void }) {
+function AdHocTasks({ day, reload, onError, onBusy, onPatch }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void; onBusy: (busy: boolean) => void; onPatch: (change: (day: Day) => Day) => void }) {
   const [draft, setDraft] = useState<{ id?: string; title: string; details: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (body: Record<string, unknown>) => {
@@ -407,12 +409,21 @@ function AdHocTasks({ day, reload, onError, onBusy }: { day: Day; reload: () => 
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); return false; }
     finally { setBusy(false); onBusy(false); }
   };
+  // Ticking a task done shows at once; only the tick is sent, and the day reloads only on failure.
+  const toggleDone = async (task: Task) => {
+    const doneOn = task.doneOn ? null : day.date;
+    onPatch((current) => ({ ...current, tasks: current.tasks.map((item) => item.id === task.id ? { ...item, doneOn } : item) }));
+    onBusy(true);
+    try { await post({ action: 'set_task_done', id: task.id, done: Boolean(doneOn) }); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); await reload(); }
+    finally { onBusy(false); }
+  };
   const submit = async (event: FormEvent) => { event.preventDefault(); if (draft && await run({ action: 'save_task', branch: day.branch, ...draft })) setDraft(null); };
   return <section className={`mt-4 ${card}`}>
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Ad hoc tasks</h2><p className="mt-1 text-xs text-slate-500">Any extra task for today. It stays in the report until ticked done; tasks finished today still show with ✅.</p></div><button onClick={() => setDraft({ title: '', details: '' })} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]"><Plus className="h-4 w-4" />Add task</button></div>
     {!day.tasks.length && <p className="mt-4 rounded-2xl bg-[#f7f9fc] px-4 py-4 text-sm text-slate-500">No ad hoc tasks. Press Add task to add one.</p>}
     <div className="mt-4 divide-y divide-slate-100">{day.tasks.map((task) => <div key={task.id} className="flex items-start gap-3 py-3">
-      <TickCircle status={task.doneOn ? 'done' : undefined} label={task.title} onClick={() => { if (!busy) void run({ action: 'set_task_done', id: task.id, done: !task.doneOn }); }} />
+      <TickCircle status={task.doneOn ? 'done' : undefined} label={task.title} onClick={() => void toggleDone(task)} />
       <div className="min-w-0 flex-1 text-sm"><p className={`font-semibold leading-6 ${task.doneOn ? 'text-slate-400 line-through' : ''}`}>{task.title}</p>{task.details && <p className="mt-1 whitespace-pre-line text-slate-500">{task.details}</p>}<p className="mt-1 text-xs text-slate-400">Since {dmy(task.createdOn)}</p></div>
       <button onClick={() => setDraft(task)} title="Edit" aria-label={`Edit ${task.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]"><Pencil className="h-4 w-4" /></button>
       <button onClick={() => { if (window.confirm(`Delete the task “${task.title}”?`)) void run({ action: 'delete_task', id: task.id }); }} disabled={busy} title="Delete" aria-label={`Delete ${task.title}`} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
@@ -781,7 +792,7 @@ export default function OfficeClinical() {
         {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
         {view !== 'home' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
-        {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} /></div>}
+        {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} onPatch={(change) => setDay((current) => current && change(current))} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}
         {view === 'bookings' && day && <Bookings day={day} reload={load} onError={onError} />}
         {view === 'contacts' && branch && <QuickContacts key={branch} branch={branch} onError={onError} />}
