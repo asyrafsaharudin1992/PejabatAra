@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
@@ -85,7 +85,8 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   const [savingPdf, setSavingPdf] = useState(false);
   // Each row is checked (✓ or ✗) before the month is approved; every press is saved straight away.
   const [entries, setEntries] = useState(claim.entries);
-  const [marking, setMarking] = useState('');
+  // Saves still on their way to the server; Approve waits for them.
+  const [marking, setMarking] = useState(0);
   const total = claimTotal(entries);
   const approved = approvedTotal(entries);
   const unchecked = entries.filter((entry) => !entry.review).length;
@@ -95,12 +96,25 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   usePrintSheet(printing, `Incentive Claim - ${claim.staffName} - ${claim.branch} - ${claim.month}`, () => { setPrinting(false); setSavingPdf(false); });
 
   const post = (body: Record<string, unknown>) => officeFetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  // Pressing the chosen mark again clears it back to "not checked".
-  const mark = async (entryId: string, review: 'approved' | 'rejected' | null) => {
-    setMarking(entryId);
-    try { setEntries((await (await post({ action: 'incentive_entry', id: claim.id, entryId, review })).json()).entries); }
-    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
-    finally { setMarking(''); }
+  // Pressing the chosen mark again clears it back to "not checked". The mark shows at once and
+  // is saved in the background; saves go one after another (the server rewrites the whole
+  // claim each time), and if one fails the rows go back to what the server holds.
+  const queue = useRef(Promise.resolve());
+  const applyMark = (list: IncentiveEntry[], entryId: string, review: 'approved' | 'rejected' | null) => list.map((entry) => {
+    if (entryId === '*' ? entry.review : entry.id !== entryId) return entry;
+    const { review: _previous, ...rest } = entry;
+    return review ? { ...rest, review } : rest;
+  });
+  const mark = (entryId: string, review: 'approved' | 'rejected' | null) => {
+    setEntries((current) => applyMark(current, entryId, review));
+    setMarking((count) => count + 1);
+    queue.current = queue.current.then(async () => {
+      try { await post({ action: 'incentive_entry', id: claim.id, entryId, review }); }
+      catch (cause) {
+        onError(cause instanceof Error ? cause.message : 'Unable to save.');
+        try { setEntries((await (await officeFetch(`${API}&action=incentives&branch=${encodeURIComponent(claim.branch)}&month=${claim.month}`)).json()).claims.find((item: Claim) => item.id === claim.id)?.entries || claim.entries); } catch { /* keep what is shown */ }
+      } finally { setMarking((count) => count - 1); }
+    });
   };
   const decide = async (decision: 'approve' | 'return') => {
     if (decision === 'return' && !note.trim()) { onError('Write a note telling the staff member what to fix.'); return; }
@@ -118,7 +132,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   const markButton = (entry: IncentiveEntry, review: 'approved' | 'rejected') => {
     const chosen = entry.review === review;
     const tone = review === 'approved' ? (chosen ? 'bg-emerald-600 text-white' : 'border border-slate-200 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700') : (chosen ? 'bg-rose-600 text-white' : 'border border-slate-200 text-slate-400 hover:bg-rose-50 hover:text-rose-700');
-    return <button onClick={() => void mark(entry.id, chosen ? null : review)} disabled={marking === entry.id} title={review === 'approved' ? 'Approve' : 'Do not approve'} aria-label={review === 'approved' ? 'Approve entry' : 'Do not approve entry'} aria-pressed={chosen} className={`grid h-8 w-8 place-items-center rounded-lg transition disabled:opacity-50 ${tone}`}>{review === 'approved' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}</button>;
+    return <button onClick={() => mark(entry.id, chosen ? null : review)} title={review === 'approved' ? 'Approve' : 'Do not approve'} aria-label={review === 'approved' ? 'Approve entry' : 'Do not approve entry'} aria-pressed={chosen} className={`grid h-8 w-8 place-items-center rounded-lg transition disabled:opacity-50 ${tone}`}>{review === 'approved' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}</button>;
   };
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
@@ -126,7 +140,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
     <section className="rounded-[28px] bg-[#0b3d59] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{claim.branch} · {monthLabel(claim.month)}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{claim.staffName}</h2><p className="mt-2 text-[#b9cfdd]"><span className={`mr-2 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[claim.status]}`}>{STATUS_LABEL[claim.status]}</span>{entries.length} entries · {rm(total)} claimed{claim.approvedBy ? ` · approved by ${claim.approvedBy}` : ''}</p></section>
     {claim.status === 'returned' && <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">Returned to {claim.staffName}: {claim.adminNote}</p>}
     <section className={`${card} overflow-x-auto`}>
-      {open && entries.length > 0 && <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">{unchecked ? <><strong className="text-amber-700">{unchecked} of {entries.length}</strong> rows not checked yet. Tick ✓ to approve or ✗ to not approve each row.</> : <span className="font-semibold text-emerald-700">Every row has been checked.</span>}</p>{unchecked > 0 && <button onClick={() => void mark('*', 'approved')} disabled={Boolean(marking)} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">✓ Approve all {unchecked} unchecked rows</button>}</div>}
+      {open && entries.length > 0 && <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">{unchecked ? <><strong className="text-amber-700">{unchecked} of {entries.length}</strong> rows not checked yet. Tick ✓ to approve or ✗ to not approve each row.</> : <span className="font-semibold text-emerald-700">Every row has been checked.</span>}</p>{unchecked > 0 && <button onClick={() => mark('*', 'approved')} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">✓ Approve all {unchecked} unchecked rows</button>}</div>}
       <table className="w-full min-w-[720px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-400"><tr><th className="py-2 pr-3">Date</th><th className="pr-3">Patient</th><th className="pr-3">Clinic ID</th><th className="pr-3">Outstanding</th><th className="pr-3">Code</th><th className="pr-3 text-right">RM</th><th className="text-center">Approve</th></tr></thead>
         <tbody className="divide-y divide-slate-100">{entries.map((entry) => {
           const rejected = entry.review === 'rejected';
@@ -151,9 +165,9 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
         <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Note to staff {open ? '(needed to return)' : '(why it is being returned)'}</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. 12/10 DXT entered twice" className={input} /></label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {open && <button onClick={() => void decide('approve')} disabled={saving || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />Approve {monthLabel(claim.month)} · {rm(approved)}</button>}
+        {open && <button onClick={() => void decide('approve')} disabled={saving || marking > 0 || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />Approve {monthLabel(claim.month)} · {rm(approved)}</button>}
         <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff</button>
-        {open && unchecked > 0 && <span className="text-xs text-amber-700">Check every row first ({unchecked} left).</span>}
+        {open && unchecked > 0 && <span className="text-xs text-amber-700">Check every row first ({unchecked} left).</span>}{marking > 0 && <span className="text-xs text-slate-500">Saving ticks…</span>}
       </div>
     </section>
     {savingPdf && printing && <PdfHint />}
