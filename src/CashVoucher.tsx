@@ -16,6 +16,17 @@ export const defaultVouchers: Voucher[] = [{
     { title: "LOCUM 2ND DOCTOR", lines: ["Night Shift (6pm-10pm)", "Payment:", "1. 6pm - 10pm (RM 45/hr with incentives)", "2. 8pm - 10pm (RM 60/hr without incentives)"] },
     { title: "LOCUM CA", lines: ["Flexible Working Hours Rate", "Payment:", "Normal Rate : RM 12 X __________", "Public Holiday Rate : RM 16 X __________"] },
   ],
+}, {
+  // From the Seri Kembangan voucher (CV SK_1.7.24.xlsx): same rates, its own address and "Bayaran:".
+  id: "sk",
+  label: "SK",
+  company: ["HSO HEALTHCARE SDN BHD", "No. F-1-G, Blok F Putra Walk, Jalan PP 25", "Taman Pinggiran Putra, Pusat Bandar Putra Permai", "Phone: 019 9120892  e-mail: araserikembangan@hsohealthcare.com"],
+  sections: [
+    { title: "LOCUM 1ST DOCTOR", lines: ["Day Shift (8am - 8pm)", "Bayaran:", "1. 8am-6pm (RM 45 X 10hrs)", "2. 6pm-8pm (RM 50 X 2hrs)"] },
+    { title: "LOCUM 1ST DOCTOR", lines: ["Night Shift (8pm-8am)", "Bayaran:", "1. 8pm-11pm (RM 50 X 3hrs)", "2. 11pm-8am (Flat Rate)", "      a. 0-10 patients : RM 300", "      b. 11-15 patients : RM 350", "      c. More than 15 patients : RM 400"] },
+    { title: "LOCUM 2ND DOCTOR", lines: ["Night Shift (6pm-10pm)", "Bayaran:", "1. 6pm-10pm (RM 45/hr with incentives)", "2. 8pm-10pm (RM 60/hr without incentives)"] },
+    { title: "LOCUM CA", lines: ["Flexible Working Hours Rate", "Bayaran:", "Normal Rate : RM 12 X __________", "Public Holiday Rate : RM 16 X __________"] },
+  ],
 }];
 
 type LastPrinted = Record<string, { cvNo: string; date: string; at: string }>;
