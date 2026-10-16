@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
-import { ClaimSheet, PdfHint, usePrintSheet } from './IncentiveSheet';
+import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
+import { PrintPage, PrintPortal } from './PrintPortal';
 
 // Clinical Admin side of the staff incentive claims: the branch's claims for a month,
 // approved or returned to the staff member with a note. Loaded when the tab opens or
@@ -70,10 +70,10 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
       <p className="mt-1 text-xs text-slate-500">{claim.entries.length} entries{claim.submittedAt ? ` · submitted ${new Date(claim.submittedAt).toLocaleDateString('en-GB')}` : ''}</p>
     </button>)}</div>}
     {printing === 'pdf' && <PdfHint />}
-    {printing && createPortal(<div className="cv-print"><style>{'@page{size:A4 landscape;margin:10mm}'}</style>
-      <section className="cv-page"><MonthSummary claims={sorted} title={`${branchFilter === 'all' ? 'All branches' : branchFilter} · ${month === 'all' ? 'All months' : monthLabel(month)}`} /></section>
-      {sorted.map((claim) => <section key={claim.id} className="cv-page"><ClaimSheet claim={claim} /></section>)}
-    </div>, document.body)}
+    {printing && <PrintPortal>
+      <PrintPage><MonthSummary claims={sorted} title={`${branchFilter === 'all' ? 'All branches' : branchFilter} · ${month === 'all' ? 'All months' : monthLabel(month)}`} /></PrintPage>
+      {sorted.map((claim) => <ClaimPages key={claim.id} claim={claim} />)}
+    </PrintPortal>}
   </div>;
 }
 
@@ -157,7 +157,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       </div>
     </section>
     {savingPdf && printing && <PdfHint />}
-    {printing && createPortal(<div className="cv-print"><style>{'@page{size:A4 landscape;margin:10mm}'}</style><ClaimSheet claim={{ ...claim, entries }} /></div>, document.body)}
+    {printing && <PrintPortal><ClaimPages claim={{ ...claim, entries }} /></PrintPortal>}
   </div>;
 }
 

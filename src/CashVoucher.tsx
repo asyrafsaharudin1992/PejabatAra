@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { PrintPage, PrintPortal } from "./PrintPortal";
 import { Copy, Pencil, Printer, Trash2 } from "lucide-react";
 import { Voucher } from "./lib/usePrintForms";
 import { supabase } from "./lib/supabase";
@@ -93,7 +93,7 @@ export function VoucherCard({ voucher, canEdit, onEdit, onCopy, onDelete, last, 
     <p className="text-[11px] text-slate-500">{last === undefined ? "Loading last CV number…" : last ? <>Last printed: <strong className="text-[#14233b]">{last.cvNo}</strong>{last.date ? ` · ${dmy(last.date)}` : ""}</> : "No CV number recorded yet."}</p>
     {confirming ? <div className="mt-auto rounded-xl bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Did {cvNo.trim()} print successfully?</p><div className="mt-2 flex gap-2"><button onClick={() => void confirm(true)} disabled={recording} className="flex-1 rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">{recording ? "Saving…" : "Yes, printed"}</button><button onClick={() => void confirm(false)} disabled={recording} className="flex-1 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">No</button></div>{problem && <p className="mt-2 text-xs text-rose-700">{problem}</p>}</div>
     : <button onClick={() => setPrinting(true)} disabled={!cvNo.trim() || printing} className="mt-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Printer className="h-3.5 w-3.5" />{cvNo.trim() ? "Print" : "Type the CV No to print"}</button>}
-    {printing && createPortal(<div className="cv-print"><style>{"@page{size:A4 landscape;margin:8mm}"}</style><VoucherSheet voucher={voucher} cvNo={cvNo.trim()} date={dmy(date)} /></div>, document.body)}
+    {printing && <PrintPortal margin={8}><VoucherSheet voucher={voucher} cvNo={cvNo.trim()} date={dmy(date)} /></PrintPortal>}
   </article>;
 }
 
@@ -101,7 +101,7 @@ function VoucherSheet({ voucher, cvNo, date }: { voucher: Voucher; cvNo: string;
   const [name, ...address] = voucher.company;
   const cell = "border border-black px-[2mm]";
   return <>
-    <section className="cv-page">
+    <PrintPage>
       <header className="relative pb-[3mm] text-center">
         <img src="/forms/ara-logo.jpg" alt="" className="absolute left-[30mm] top-0 h-[24mm] w-[24mm] object-contain" />
         <h1 className="text-[16pt] font-bold tracking-wide">CASH VOUCHER</h1>
@@ -125,8 +125,8 @@ function VoucherSheet({ voucher, cvNo, date }: { voucher: Voucher; cvNo: string;
           </tr>))}
         </tbody>
       </table>
-    </section>
-    <section className="cv-page">
+    </PrintPage>
+    <PrintPage>
       <table className="w-full border-collapse text-[9pt]"><colgroup><col className="w-[8%]" /><col /><col className="w-[12%]" /><col className="w-[14%]" /></colgroup>
         <thead><tr className="h-[7mm] bg-[#d8d8d8]"><th className={cell}>No.</th><th className={cell}>Payment Details</th><th className={cell}>Quantity</th><th className={cell}>Amount (RM)</th></tr></thead>
         <tbody>
@@ -139,6 +139,6 @@ function VoucherSheet({ voucher, cvNo, date }: { voucher: Voucher; cvNo: string;
         <tr className="h-[9mm] align-top"><td className={cell}>Prepared By:</td><td className={cell}>Approved By:</td><td className={cell}>Received By:</td><td rowSpan={2} className={`${cell} w-[25%]`}>Remarks:</td></tr>
         <tr className="h-[7mm] align-top"><td className={cell}>Date:</td><td className={cell}>Date:</td><td className={cell}>Date:</td></tr>
       </tbody></table>
-    </section>
+    </PrintPage>
   </>;
 }

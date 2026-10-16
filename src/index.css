@@ -134,3 +134,10 @@
   .cv-page { break-after: page; }
   .cv-page:last-child { break-after: auto; }
 }
+
+/* Safari prints portrait only: PrintPortal adds .cv-rotate and each page's content is turned
+   90° onto the portrait paper (see src/PrintPortal.tsx). */
+@media print {
+  .cv-rotate .cv-page { position: relative; width: var(--page-h); height: var(--page-w); overflow: hidden; }
+  .cv-rotate .cv-turn { position: absolute; top: 0; left: 0; width: var(--page-w); height: var(--page-h); transform-origin: top left; transform: translateX(var(--page-h)) rotate(90deg); }
+}

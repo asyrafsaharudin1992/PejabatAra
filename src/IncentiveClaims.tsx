@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, FileDown, FileText, LogOut, Plus, Printer, Send, Trash2, Undo2, X } from 'lucide-react';
 import { assessmentFetch, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
-import { ClaimSheet, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
+import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
+import { PrintPortal } from './PrintPortal';
 import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
@@ -85,7 +85,7 @@ function ViewForm({ claim, onClose }: { claim: SheetClaim; onClose: () => void }
       <SheetPreview claim={claim} />
     </div>
     {printing === 'pdf' && <PdfHint />}
-    {printing && createPortal(<div className="cv-print"><style>{'@page{size:A4 landscape;margin:10mm}'}</style><ClaimSheet claim={claim} /></div>, document.body)}
+    {printing && <PrintPortal><ClaimPages claim={claim} /></PrintPortal>}
   </div>;
 }
 
