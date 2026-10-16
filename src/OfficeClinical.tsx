@@ -1,10 +1,10 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, BookOpen, Clock3, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
 import ClinicalIncentives from './ClinicalIncentives';
-import { LinksView, PanelTrainingView } from './PortalApp';
+import { homeQuote, LinksView, PanelTrainingView } from './PortalApp';
 import { usePanelTraining } from './lib/usePanelTraining';
 import PrintForms from './PrintForms';
 import { usePrintForms } from './lib/usePrintForms';
@@ -250,7 +250,7 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
         </div>;
       })}</div>
       {section.id === 'staff' && <label className="mt-3 block"><span className="mb-2 block text-xs font-bold text-slate-700">Today's shifts <span className="font-normal text-slate-400">(copied from yesterday's report; update it for today)</span></span><textarea value={draft.staffing} onChange={(event) => change({ staffing: event.target.value })} rows={6} placeholder={'Shift am :\n•  Era, Athirah (9am-9pm)\nShift pm :\n•  Puteri, Amy (9pm-9am)'} className={`${input} h-auto py-3 font-mono text-xs`} /></label>}
-      {section.id === 'pharmacy' && <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {section.id === 'pharmacy' && SHOW_ORDERS && <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl bg-emerald-50 p-4 text-sm"><p className="font-semibold text-emerald-800">Arrived today</p>{received.length ? <ul className="mt-2 space-y-1 text-emerald-900">{received.map(({ order, item }, i) => <li key={i}>{order.supplier}: {item.name}{item.qty && ` - ${item.qty}`}</li>)}</ul> : <p className="mt-2 text-emerald-700/70">Nothing yet. Tick deliveries under Orders.</p>}</div>
         <div className="rounded-2xl bg-amber-50 p-4 text-sm"><p className="font-semibold text-amber-800">Orders not yet arrived</p>{pendingOrders.length ? <ul className="mt-2 space-y-1 text-amber-900">{pendingOrders.map((order) => <li key={order.id}>{order.supplier} ({dmy(order.orderedOn)}): {order.items.filter((item) => !item.receivedOn).length} item(s)</li>)}</ul> : <p className="mt-2 text-amber-700/70">None.</p>}</div>
       </div>}
@@ -435,19 +435,23 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
 }
 
 
-type View = 'home' | 'report' | 'orders' | 'bookings' | 'incentives' | 'forms' | 'panel' | 'links';
+type View = 'home' | 'report' | 'history' | 'orders' | 'bookings' | 'contacts' | 'incentives' | 'forms' | 'panel' | 'links';
 
 // Sidebar tabs besides Home. Quick access on Home is built from this list too, as in the CA office.
+// Turn back on together with the Orders tab.
+const SHOW_ORDERS = false;
+
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string }[] = [
   { id: 'report', label: 'Daily Checklist', note: 'Tick & send to WhatsApp', icon: ClipboardList, tone: 'text-[#20c7f4]' },
-  { id: 'orders', label: 'Orders', note: 'Medicine & supplies on the way', icon: Package, tone: 'text-[#ffb000]' },
-  { id: 'bookings', label: 'Vaccine Bookings', note: 'Patients waiting for stock', icon: Syringe, tone: 'text-emerald-400' },
+  { id: 'history', label: 'History', note: 'What was done each day', icon: History, tone: 'text-[#9b8cff]' },
+  // Orders and Vaccine Bookings are hidden for now; their data and screens are kept.
+  { id: 'contacts', label: 'Quick Contact', note: 'Suppliers & services', icon: Phone, tone: 'text-emerald-400' },
   { id: 'incentives', label: 'Incentive Claims', note: 'Approve staff monthly claims', icon: Coins, tone: 'text-[#ffd36b]' },
   { id: 'forms', label: 'Print Forms', note: 'Forms admin prints often', icon: Printer, tone: 'text-[#a78bfa]' },
   { id: 'panel', label: 'Panel', note: 'Panel guides & portals', icon: BookOpen, tone: 'text-emerald-400' },
   { id: 'links', label: 'Important Links', note: 'Work systems', icon: Link2, tone: 'text-[#20c7f4]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', forms: 'Print Forms', panel: 'Panel', links: 'Important Links' };
+const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', history: 'History', contacts: 'Quick Contact', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', forms: 'Print Forms', panel: 'Panel', links: 'Important Links' };
 
 // Shown until System Admin saves its own list in the Important Links tab.
 const DEFAULT_LINKS: QuickLink[] = [
@@ -459,7 +463,7 @@ const DEFAULT_LINKS: QuickLink[] = [
 
 function LogoMark() { return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><Stethoscope className="h-6 w-6" /></div>; }
 
-function Sidebar({ view, open, branches, branch, counts, onBranch, onClose, onNavigate, onLogout }: { view: View; open: boolean; branches: string[]; branch: string; counts: Partial<Record<View, number>>; onBranch: (name: string) => void; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
+function Sidebar({ view, open, branches, branch, viewAs, counts, onViewAs, onClose, onNavigate, onLogout }: { view: View; open: boolean; branches: string[]; branch: string; viewAs: string; counts: Partial<Record<View, number>>; onViewAs: (name: string) => void; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
   const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]' }, ...TABS];
   return <>
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
@@ -468,32 +472,212 @@ function Sidebar({ view, open, branches, branch, counts, onBranch, onClose, onNa
         <div className="flex items-center gap-3"><LogoMark /><div><p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Clinical Admin</p></div></div>
         <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
       </div>
-      {branches.length > 1 && <div className="mt-6 grid grid-cols-2 gap-1 rounded-[14px] bg-white/8 p-1">{branches.map((name) => <button key={name} onClick={() => onBranch(name)} className={`rounded-[10px] px-2 py-2 text-xs font-bold transition ${branch === name ? 'bg-white text-[#162a43]' : 'text-[#b8cddd] hover:text-white'}`}>{name}</button>)}</div>}
+      {/* Accounts that see every branch (System Admin, COO, CEO) can view the office as each branch's admin. */}
+      {branches.length > 1 && <div className="mt-6"><p className="mb-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#8fb3c9]">View as</p><div className="grid gap-1 rounded-[14px] bg-white/8 p-1" style={{ gridTemplateColumns: `repeat(${branches.length + 1}, minmax(0, 1fr))` }}>{['all', ...branches].map((name) => <button key={name} onClick={() => onViewAs(name)} title={name === 'all' ? 'Both branches' : name} className={`rounded-[10px] px-1.5 py-2 text-xs font-bold leading-tight transition ${viewAs === name ? 'bg-white text-[#162a43]' : 'text-[#b8cddd] hover:text-white'}`}>{name === 'all' ? 'All' : ADMIN_NAMES[name] || name}<span className={`block text-[9px] font-semibold ${viewAs === name ? 'text-slate-400' : 'text-[#8fb3c9]'}`}>{name === 'all' ? 'Overview' : BRANCH_CODES[name] || name}</span></button>)}</div></div>}
       <div className="mx-1 mt-5 h-px bg-white/10" />
       <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
         <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.id === 'home' && view === 'home' ? 'text-[#5b4cf0]' : item.tone}`} strokeWidth={1.8} />{item.label}
         {counts[item.id] ? <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{counts[item.id]}</span> : <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
       </button>)}</nav>
       <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-        <div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">{branches.length > 1 ? 'All' : branch === 'Seri Kembangan' ? 'SK' : branch === 'Kajang' ? 'KJ' : '—'}</div><div className="min-w-0"><p className="truncate text-sm font-semibold">Clinical Admin</p><p className="truncate text-xs text-[#9bb5c7]">{branches.length > 1 ? 'All branches' : branch || 'No branch assigned'}</p></div></div>
+        <div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">{branches.length > 1 && viewAs === 'all' ? 'All' : BRANCH_CODES[branch] || '—'}</div><div className="min-w-0"><p className="truncate text-sm font-semibold">{branches.length > 1 && viewAs !== 'all' ? `Viewing as ${ADMIN_NAMES[branch] || branch}` : ADMIN_NAMES[branch] && branches.length === 1 ? `${ADMIN_NAMES[branch]} · Clinical Admin` : 'Clinical Admin'}</p><p className="truncate text-xs text-[#9bb5c7]">{branches.length > 1 && viewAs === 'all' ? 'All branches' : branch || 'No branch assigned'}</p></div></div>
         <button onClick={onLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
       </div>
     </aside>
   </>;
 }
 
+// History: a month of the branch's checklists on a calendar, like the Quality office's
+// Task History. Each day is coloured by how much of the checklist was done; pressing a
+// day shows what was ticked, the notes, ad hoc tasks finished and deliveries received.
+type HistoryData = { month: string; branch: string; today: string; since: string; reports: { date: string; preparedBy: string; checks: Checks; issues: string; updatedAt: string }[]; tasks: Task[]; monthly: { taskId: string; doneOn: string }[]; received: { supplier: string; name: string; qty: string; receivedOn: string }[] };
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const STATUS_ICON: Record<CheckStatus | 'unmarked', { icon: typeof Check; tone: string; label: string }> = {
+  done: { icon: Check, tone: 'bg-emerald-500 text-white', label: 'Done' },
+  pending: { icon: Clock3, tone: 'bg-amber-100 text-amber-700', label: 'Not done' },
+  na: { icon: Minus, tone: 'bg-slate-200 text-slate-500', label: 'Not needed' },
+  unmarked: { icon: Minus, tone: 'bg-white text-slate-300 ring-1 ring-slate-200', label: 'Not marked' },
+};
+const shiftMonthKey = (month: string, by: number) => { const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 + by; return `${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`; };
+// Done / (items that were needed); "not needed" items do not count against the day.
+function dayScore(checks: Checks) {
+  const statuses = ALL_ITEMS.map((id) => checks[id]?.status);
+  const done = statuses.filter((status) => status === 'done').length;
+  const na = statuses.filter((status) => status === 'na').length;
+  const pending = statuses.filter((status) => status === 'pending').length;
+  const needed = ALL_ITEMS.length - na;
+  return { done, na, pending, unmarked: ALL_ITEMS.length - done - na - pending, percent: needed ? Math.round((done / needed) * 100) : 100 };
+}
+const scoreTone = (percent: number) => percent >= 90 ? 'bg-emerald-500' : percent >= 60 ? 'bg-amber-400' : 'bg-rose-400';
+
+function ClinicalHistory({ branch, onError }: { key?: string; branch: string; onError: (message: string) => void }) {
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+  const [month, setMonth] = useState(todayKey.slice(0, 7));
+  const [data, setData] = useState<HistoryData | null>(null);
+  const [selected, setSelected] = useState(todayKey);
+
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    officeFetch(`${API}&action=history&branch=${encodeURIComponent(branch)}&month=${month}`).then((response) => response.json())
+      .then((result: HistoryData) => { if (!live) return; setData(result); if (selected.slice(0, 7) !== month) setSelected(result.reports.at(-1)?.date || `${month}-01`); })
+      .catch((cause) => { if (live) onError(cause instanceof Error ? cause.message : 'Unable to load history.'); });
+    return () => { live = false; };
+  }, [branch, month]);
+
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const offset = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
+  const key = (day: number) => `${month}-${String(day).padStart(2, '0')}`;
+  const reportOn = (date: string) => data?.reports.find((report) => report.date === date);
+  // Days that have passed (today included) are the ones a checklist was due.
+  // Days that have passed (today included) since the branch's first checklist are the ones a checklist was due.
+  const dueDays = Array.from({ length: daysInMonth }, (_, i) => key(i + 1)).filter((date) => date <= todayKey && date >= (data?.since || todayKey));
+  const scores = (data?.reports || []).map((report) => dayScore(report.checks).percent);
+  const average = scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : 0;
+  const monthlyDone = new Set((data?.monthly || []).map((item) => item.taskId));
+
+  const report = reportOn(selected);
+  const score = report && dayScore(report.checks);
+  const dayTasks = (data?.tasks || []).filter((task) => task.doneOn === selected);
+  const dayReceived = (data?.received || []).filter((item) => item.receivedOn === selected);
+  const dayMonthly = (data?.monthly || []).filter((item) => item.doneOn === selected);
+  const dateLabel = new Date(`${selected}T12:00:00+08:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
+
+  return <div className="mx-auto max-w-[1500px] space-y-5">
+    <Hero branch={branch} title="History" text="Every day's checklist for the month. Pick a day to see what was done, the notes, ad hoc tasks finished and deliveries received." />
+    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {[[data ? `${data.reports.length} / ${dueDays.length}` : '—', 'Days with a checklist'], [data ? `${average}%` : '—', 'Average done'], [data ? data.tasks.length : '—', 'Ad hoc tasks finished'], [data ? `${monthlyDone.size} / ${MONTHLY.length}` : '—', 'Monthly tasks done']].map(([value, label]) => <div key={label as string} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.05)]"><p className="text-2xl font-semibold tracking-tight">{value}</p><p className="mt-1 text-xs font-semibold text-slate-500">{label}</p></div>)}
+    </section>
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
+      <section className={card}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{monthName(`${month}-01`)}</h2>
+          <div className="flex items-center gap-1"><button onClick={() => setMonth(shiftMonthKey(month, -1))} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" aria-label="Previous month"><ChevronLeft className="h-5 w-5" /></button><button onClick={() => { setMonth(todayKey.slice(0, 7)); setSelected(todayKey); }} className="rounded-xl px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-100">Today</button><button onClick={() => setMonth(shiftMonthKey(month, 1))} disabled={month >= todayKey.slice(0, 7)} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label="Next month"><ChevronRight className="h-5 w-5" /></button></div>
+        </div>
+        <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
+          {WEEKDAYS.map((day) => <p key={day} className="pb-1 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">{day}</p>)}
+          {Array.from({ length: offset }, (_, i) => <span key={`blank-${i}`} />)}
+          {Array.from({ length: daysInMonth }, (_, i) => {
+            const date = key(i + 1);
+            const dayReport = reportOn(date);
+            const percent = dayReport ? dayScore(dayReport.checks).percent : null;
+            const future = date > todayKey;
+            const missed = !dayReport && !future && data && date >= data.since;
+            const chosen = date === selected;
+            return <button key={date} onClick={() => setSelected(date)} disabled={future} className={`relative flex aspect-square flex-col items-center justify-center rounded-2xl border text-sm transition ${chosen ? 'border-[#0b587b] bg-[#0b587b] text-white shadow-lg shadow-[#0b587b]/20' : 'border-slate-100 bg-[#f8fafb] hover:border-slate-300 hover:bg-white'} ${future ? 'opacity-35' : ''}`}>
+              <span className={`font-semibold ${date === todayKey && !chosen ? 'text-[#0b9aca]' : ''}`}>{i + 1}</span>
+              {percent !== null && <span className={`mt-1 text-[10px] font-semibold ${chosen ? 'text-white/85' : 'text-slate-500'}`}>{percent}%</span>}
+              {percent !== null && <span className={`absolute bottom-1.5 h-1 w-6 rounded-full ${chosen ? 'bg-white/70' : scoreTone(percent)}`} />}
+              {missed && <span className={`absolute bottom-1.5 h-1.5 w-1.5 rounded-full ${chosen ? 'bg-white/70' : 'bg-rose-300'}`} />}
+              {(data?.tasks || []).some((task) => task.doneOn === date) && <span className={`absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full ${chosen ? 'bg-white' : 'bg-[#9b8cff]'}`} title="Ad hoc task finished" />}
+            </button>;
+          })}
+        </div>
+        <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-500">
+          <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-emerald-500" />90% or more done</span>
+          <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-amber-400" />60–89%</span>
+          <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-rose-400" />Below 60%</span>
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-rose-300" />No checklist</span>
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#9b8cff]" />Ad hoc task finished</span>
+        </div>
+      </section>
+
+      <section className={`${card} lg:max-h-[calc(100vh/0.95-120px)] lg:overflow-y-auto`}>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0b9aca]">{dateLabel}</p>
+        {!data ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !report ? <p className={`mt-4 rounded-2xl p-4 text-sm ${selected < data.since ? 'bg-slate-50 text-slate-500' : 'bg-rose-50 text-rose-700'}`}>{selected < data.since ? 'This was before the first checklist was saved here.' : 'No checklist was saved for this day.'}</p> : <>
+          <p className="mt-2 text-sm text-slate-600">Prepared by <strong className="text-[#14233b]">{report.preparedBy || '—'}</strong> · saved {new Date(report.updatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p>
+          {score && <div className="mt-4"><div className="flex items-baseline justify-between"><span className="text-3xl font-semibold tracking-tight">{score.percent}%</span><span className="text-xs text-slate-500">{score.done} done · {score.pending} not done · {score.na} not needed{score.unmarked ? ` · ${score.unmarked} not marked` : ''}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${scoreTone(score.percent)}`} style={{ width: `${score.percent}%` }} /></div></div>}
+          {lines(report.issues).length > 0 && <div className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm text-rose-800"><p className="font-semibold">Outstanding issues</p><ul className="mt-1 list-disc pl-5">{lines(report.issues).map((issue, i) => <li key={i}>{issue}</li>)}</ul></div>}
+          <div className="mt-5 space-y-4">{SECTIONS.map((section) => <div key={section.id}>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{section.label}</p>
+            <ul className="mt-2 space-y-1.5">{section.items.map(([id, label]) => {
+              const check = report.checks[id];
+              const look = STATUS_ICON[check?.status || 'unmarked'];
+              return <li key={id} className="flex items-start gap-2.5 text-sm"><span title={look.label} className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${look.tone}`}><look.icon className="h-3 w-3" strokeWidth={3} /></span><span className={check?.status === 'na' ? 'text-slate-400' : ''}>{label}{check?.note && <span className="mt-0.5 block text-xs text-slate-500">{check.note}</span>}</span></li>;
+            })}</ul>
+          </div>)}</div>
+        </>}
+        {data && (dayTasks.length > 0 || dayReceived.length > 0 || dayMonthly.length > 0) && <div className="mt-5 space-y-4 border-t border-slate-100 pt-5">
+          {dayTasks.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Ad hoc tasks finished</p><ul className="mt-2 space-y-1.5">{dayTasks.map((task) => <li key={task.id} className="flex items-start gap-2.5 text-sm"><span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#9b8cff] text-white"><Check className="h-3 w-3" strokeWidth={3} /></span><span>{task.title}<span className="block text-xs text-slate-500">Added {dmy(task.createdOn)}</span></span></li>)}</ul></div>}
+          {dayReceived.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Deliveries received</p><ul className="mt-2 space-y-1 text-sm">{dayReceived.map((item, i) => <li key={i}>{item.supplier}: {item.name}{item.qty ? ` - ${item.qty}` : ''}</li>)}</ul></div>}
+          {dayMonthly.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Monthly tasks done</p><ul className="mt-2 space-y-1 text-sm">{dayMonthly.map((item) => <li key={item.taskId}>{MONTHLY.find((task) => task.id === item.taskId)?.label(monthName(`${month}-01`), monthName(`${month}-01`, -1)) || item.taskId}</li>)}</ul></div>}
+        </div>}
+      </section>
+    </div>
+  </div>;
+}
+
+// Quick Contact: the branch's phone list (suppliers, pharmacies, services) with one-tap
+// WhatsApp and Call. Read once when the tab opens; the Clinical Admin keeps it up to date.
+type Contact = { id: string; name: string; phone: string; note: string; group: string };
+const waNumber = (phone: string) => { const digits = phone.replace(/\D/g, ''); return digits.startsWith('0') ? `6${digits}` : digits; };
+const initials = (name: string) => name.replace(/[^A-Za-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toUpperCase() || '?';
+const CONTACT_TONES = ['bg-[#e9f6fb] text-[#0b587b]', 'bg-emerald-50 text-emerald-700', 'bg-amber-50 text-amber-700', 'bg-rose-50 text-rose-700', 'bg-violet-50 text-violet-700'];
+
+function QuickContacts({ branch, onError }: { key?: string; branch: string; onError: (message: string) => void }) {
+  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState<Contact | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    officeFetch(`${API}&action=contacts&branch=${encodeURIComponent(branch)}`).then((response) => response.json()).then((result) => setContacts(result.contacts))
+      .catch((cause) => { setContacts([]); onError(cause instanceof Error ? cause.message : 'Unable to load contacts.'); });
+  }, [branch]);
+  const store = async (next: Contact[]) => {
+    setSaving(true);
+    try { setContacts((await (await officeFetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_contacts', branch, contacts: next }) })).json()).contacts); return true; }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); return false; }
+    finally { setSaving(false); }
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft || !contacts) return;
+    const item = { ...draft, name: draft.name.trim(), phone: draft.phone.trim(), note: draft.note.trim() };
+    const exists = contacts.some((contact) => contact.id === item.id);
+    const next = (exists ? contacts.map((contact) => contact.id === item.id ? item : contact) : [...contacts, item]).sort((a, b) => a.name.localeCompare(b.name));
+    if (await store(next)) setDraft(null);
+  };
+  const remove = async (contact: Contact) => { if (contacts && window.confirm(`Delete ${contact.name}?`)) await store(contacts.filter((item) => item.id !== contact.id)); };
+
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (contacts || []).filter((contact) => words.every((word) => `${contact.name} ${contact.note} ${contact.phone.replace(/\D/g, '')}`.toLowerCase().includes(word)));
+  return <div className="mx-auto max-w-[1500px] space-y-5">
+    <Hero branch={branch} title="Quick contact" text="Suppliers, pharmacies and services. Tap WhatsApp or Call to reach them straight away." action={<button onClick={() => setDraft({ id: crypto.randomUUID(), name: '', phone: '', note: '', group: '' })} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b3d59] hover:bg-[#e9f6fb]"><Plus className="h-4 w-4" />Add contact</button>} />
+    <section className="flex items-center gap-2 rounded-2xl bg-white p-4 shadow-sm"><Search className="h-4 w-4 shrink-0 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Escape' && setQuery('')} placeholder="Search name, item or number, e.g. Pharmaniaga, dengue, vaccine…" className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-400" />{query && <button onClick={() => setQuery('')} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}<span className="shrink-0 text-xs text-slate-400">{contacts ? `${shown.length} of ${contacts.length}` : ''}</span></section>
+    {!contacts ? <p className="text-sm text-slate-500">Loading…</p> : !contacts.length ? <p className={`${card} text-sm text-slate-500`}>No contacts yet. Press Add contact to add one.</p> : !shown.length ? <p className={`${card} text-sm text-slate-500`}>No contacts match “{query.trim()}”.</p>
+      : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{shown.map((contact) => <article key={contact.id} className="group flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.05)]">
+        <div className="flex items-start gap-3">
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold ${CONTACT_TONES[[...contact.name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % CONTACT_TONES.length]}`}>{initials(contact.name)}</span>
+          <div className="min-w-0 flex-1"><p className="truncate font-semibold leading-snug" title={contact.name}>{contact.name}</p>{contact.note && <p className="truncate text-xs text-[#0b9aca]">{contact.note}</p>}<p className="mt-0.5 font-mono text-xs text-slate-500">{contact.phone}</p></div>
+          <div className="-mr-1 -mt-1 flex shrink-0 opacity-60 transition group-hover:opacity-100"><button onClick={() => setDraft(contact)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]" aria-label={`Edit ${contact.name}`}><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => void remove(contact)} disabled={saving} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${contact.name}`}><Trash2 className="h-3.5 w-3.5" /></button></div>
+        </div>
+        <div className="mt-auto grid grid-cols-2 gap-2"><a href={`https://wa.me/${waNumber(contact.phone)}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1ebe5a]"><MessageCircle className="h-3.5 w-3.5" />WhatsApp</a><a href={`tel:+${waNumber(contact.phone)}`} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Phone className="h-3.5 w-3.5" />Call</a></div>
+      </article>)}</div>}
+    {draft && <Modal title={contacts?.some((contact) => contact.id === draft.id) ? 'Edit contact' : 'New contact'} onClose={() => setDraft(null)}>
+      <form onSubmit={submit} className="mt-6 space-y-4">
+        <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Name</span><input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. Pharmaniaga" className={input} /></label>
+        <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Phone</span><input required inputMode="tel" value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} placeholder="e.g. 012-345 6789" className={`${input} font-mono`} /></label>
+        <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">What for <span className="font-normal text-slate-400">(optional)</span></span><input value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="e.g. Dengue test, Order, Payment" className={input} /></label>
+        <div className="flex justify-end gap-2"><button type="button" onClick={() => setDraft(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save contact'}</button></div>
+      </form>
+    </Modal>}
+  </div>;
+}
+
+// The Clinical Admin at each branch, greeted by name on Home.
+const ADMIN_NAMES: Record<string, string> = { Kajang: 'Izzah', 'Seri Kembangan': 'Amirah' };
+const BRANCH_CODES: Record<string, string> = { Kajang: 'KJ', 'Seri Kembangan': 'SK' };
+
 function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
-  const pendingOrders = day ? day.orders.filter((order) => !order.closed && !order.cancelled).length : 0;
-  const openTasks = day ? day.tasks.filter((task) => !task.doneOn).length : 0;
   return <div className="mx-auto max-w-[1500px] space-y-8">
+    {/* Same layout as the CA office's Home: greeting on the left, date and a quote on the right. */}
     <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
-      <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p>
-      <h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, Clinical Admin ${day?.branch || ''}`}</h2>
-      <p className="mt-3 text-base text-[#bed2df]">{date}</p>
-      {!overseer && day && <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[[day.report.saved ? 'Saved' : 'Not yet', "Today's checklist", 'report'], [pendingOrders, 'Orders not arrived', 'orders'], [day.bookings.length, 'Active vaccine bookings', 'bookings'], [openTasks, 'Open ad hoc tasks', 'report']].map(([value, label, view]) => <button key={label as string} onClick={() => onNavigate(view as View)} className="rounded-2xl border border-white/15 bg-white/10 p-4 text-left transition hover:bg-white/15"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-sm text-[#b9cfdd]">{label}</p></button>)}
-      </div>}
+      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
+        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 text-base text-[#bed2df]">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
+        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
+      </div>
     </section>
     {overseer && <section><div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Today</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Both branches</span></div><Summary onOpen={onOpenBranch} /></section>}
     <section>
@@ -513,11 +697,15 @@ export default function OfficeClinical() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [day, setDay] = useState<Day | null>(null);
   const [error, setError] = useState('');
-  const overseer = (branches?.length || 0) > 1;
+  // 'all' shows the both-branch overview; a branch name shows the office as that branch's admin sees it.
+  const [viewAs, setViewAs] = useState('all');
+  const overseer = (branches?.length || 0) > 1 && viewAs === 'all';
   const [admin, setAdmin] = useState(false);
   const [links, setLinks] = useState<QuickLink[] | null>(null);
   // Panel list comes from the CA office's Panel Training; it is fetched only when the tab opens.
-  const panel = usePanelTraining(view === 'panel', admin);
+  // Viewing as Izzah or Amirah shows exactly what they see, so System Admin editing is off there.
+  const canEdit = admin && viewAs === 'all';
+  const panel = usePanelTraining(view === 'panel', canEdit);
   // Clinical Admin's own Print Forms list, separate from the CA office's.
   const printForms = usePrintForms(view === 'forms', 'clinical_forms');
 
@@ -554,12 +742,11 @@ export default function OfficeClinical() {
     window.location.hash = '';
   };
   const counts = useMemo<Partial<Record<View, number>>>(() => day ? {
-    orders: day.orders.filter((order) => !order.closed && !order.cancelled).length,
     report: day.tasks.filter((task) => !task.doneOn).length,
   } : {}, [day]);
 
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar view={view} open={menuOpen} branches={branches || []} branch={branch} counts={counts} onBranch={setBranch} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
+    <Sidebar view={view} open={menuOpen} branches={branches || []} branch={branch} viewAs={viewAs} counts={counts} onViewAs={(name) => { setViewAs(name); if (name !== 'all') setBranch(name); }} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
     <div className="min-h-screen lg:pl-[300px]">
       <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
@@ -569,16 +756,19 @@ export default function OfficeClinical() {
       </header>
       <main className="p-4 sm:p-6 lg:p-[38px]">
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
+        {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
-        {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setBranch(name); navigate('report'); }} />}
-        {view !== 'home' && view !== 'incentives' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
+        {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
+        {view !== 'home' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
         {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}
         {view === 'bookings' && day && <Bookings day={day} reload={load} onError={onError} />}
-        {view === 'forms' && <PrintForms state={printForms} canEdit={admin} vouchersShown={false} eyebrow="Clinical Administration" />}
-        {view === 'panel' && <PanelTrainingView training={panel} canEdit={admin} title="Panel" />}
-        {view === 'links' && (links ? <LinksView links={links} canEdit={admin} onSave={saveLinks} /> : <p className="text-sm text-slate-500">Loading…</p>)}
+        {view === 'contacts' && branch && <QuickContacts key={branch} branch={branch} onError={onError} />}
+        {view === 'history' && branch && <ClinicalHistory key={branch} branch={branch} onError={onError} />}
+        {view === 'forms' && <PrintForms state={printForms} canEdit={canEdit} vouchersShown={false} eyebrow="Clinical Administration" />}
+        {view === 'panel' && <PanelTrainingView training={panel} canEdit={canEdit} title="Panel" />}
+        {view === 'links' && (links ? <LinksView links={links} canEdit={canEdit} onSave={saveLinks} /> : <p className="text-sm text-slate-500">Loading…</p>)}
         {view === 'incentives' && branch && <ClinicalIncentives key={branch} branch={branch} branches={branches || []} onError={onError} />}
       </main>
     </div>

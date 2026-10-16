@@ -514,7 +514,8 @@ const homeQuotes = [
   "Multitasking, organizing, reassuring—just another day in the life of a clinic assistant!",
   "Behind every smooth clinic day and cared-for patient is a dedicated clinic assistant working tirelessly.",
 ];
-const homeQuote = homeQuotes[Math.floor(Math.random() * homeQuotes.length)];
+// Also shown on the Clinical Admin office's Home.
+export const homeQuote = homeQuotes[Math.floor(Math.random() * homeQuotes.length)];
 
 // Every tab in the sidebar (besides Home). Quick access on Home is built from this list,
 // so a new tab only needs to be added here to appear in both places.

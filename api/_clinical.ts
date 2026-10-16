@@ -9,6 +9,7 @@ import { officeAccess } from './_office-db.js';
 const CLINICAL_BRANCHES = ['Kajang', 'Seri Kembangan'];
 const LINKS_BRANCH = 'AraOffice Shared';
 const LINKS_KEY = 'clinical_links';
+const CONTACTS_KEY = 'clinical_contacts';
 const CHECK_STATUSES = new Set(['done', 'pending', 'na']);
 const BOOKING_STATUSES = new Set(['waiting', 'reserved', 'done', 'cancelled']);
 
@@ -110,6 +111,33 @@ async function overview(db: any, scope: Branch[]) {
   };
 }
 
+// One month of what the branch's Clinical Admin did: the daily checklists, ad hoc tasks
+// finished, monthly tasks ticked and deliveries received. Read only, loaded per month.
+async function history(db: any, branch: Branch, month: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+  const first = `${month}-01`;
+  const [year, monthNumber] = month.split('-').map(Number);
+  const next = `${monthNumber === 12 ? year + 1 : year}-${String(monthNumber === 12 ? 1 : monthNumber + 1).padStart(2, '0')}-01`;
+  const [reports, tasks, monthly, orders, first_report] = await Promise.all([
+    db.from('clinical_reports').select('report_date,prepared_by,checks,issues,updated_at').eq('branch_id', branch.id).gte('report_date', first).lt('report_date', next).order('report_date'),
+    db.from('clinical_tasks').select('id,title,details,created_on,done_on').eq('branch_id', branch.id).gte('done_on', first).lt('done_on', next).order('done_on'),
+    db.from('clinical_monthly_done').select('task_id,done_on').eq('branch_id', branch.id).eq('month', month),
+    // Deliveries are dated per item, so look at orders touched since the month began.
+    db.from('clinical_orders').select('supplier,items,updated_at').eq('branch_id', branch.id).gte('updated_at', `${first}T00:00:00+08:00`),
+    // The branch's first checklist: days before it are not counted as missed.
+    db.from('clinical_reports').select('report_date').eq('branch_id', branch.id).order('report_date').limit(1).maybeSingle(),
+  ]);
+  for (const result of [reports, tasks, monthly, orders, first_report]) if (result.error) throw result.error;
+  const received = (orders.data || []).flatMap((order: any) => (order.items || []).filter((item: any) => item.receivedOn && item.receivedOn >= first && item.receivedOn < next).map((item: any) => ({ supplier: order.supplier, name: item.name, qty: item.qty, receivedOn: item.receivedOn })));
+  return {
+    month, branch: branch.name, today: today(), since: first_report.data?.report_date || today(),
+    reports: (reports.data || []).map((row: any) => ({ date: row.report_date, preparedBy: row.prepared_by, checks: row.checks || {}, issues: row.issues, updatedAt: row.updated_at })),
+    tasks: (tasks.data || []).map(decodeTask),
+    monthly: (monthly.data || []).map((row: any) => ({ taskId: row.task_id, doneOn: row.done_on })),
+    received,
+  };
+}
+
 export async function clinicalHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -139,6 +167,22 @@ export async function clinicalHandler(req: any, res: any) {
     }
     if (req.method === 'GET' && action === 'day') return res.status(200).json(await dayView(db, pickBranch(scope, req.query.branch)));
     if (req.method === 'GET' && action === 'overview') return res.status(200).json(await overview(db, scope));
+    // Quick Contact: each branch's own phone list (suppliers, pharmacies, services). The branch's
+    // Clinical Admin keeps it up to date; it is stored in portal_state, never in the code.
+    if (action === 'contacts' || action === 'save_contacts') {
+      const branch = pickBranch(scope, req.method === 'GET' ? req.query.branch : body.branch);
+      if (req.method === 'GET') {
+        const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', CONTACTS_KEY).maybeSingle();
+        if (error) throw error;
+        return res.status(200).json({ contacts: data?.payload?.contacts || [] });
+      }
+      const contacts = (Array.isArray(body.contacts) ? body.contacts : []).slice(0, 500).map((contact: any) => ({ id: text(contact?.id, 60), name: text(contact?.name, 120), phone: text(contact?.phone, 40), note: text(contact?.note, 200), group: text(contact?.group, 60) }))
+        .filter((contact: any) => contact.id && contact.name && /\d{6,}/.test(contact.phone.replace(/\D/g, '')));
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch.id, state_key: CONTACTS_KEY, payload: { contacts }, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ contacts });
+    }
+    if (req.method === 'GET' && action === 'history') return res.status(200).json(await history(db, pickBranch(scope, req.query.branch), text(req.query.month, 7)));
     // Staff incentive claims for one branch and month. Drafts are listed too, so the
     // admin can see who is still filling theirs in.
     if (req.method === 'GET' && action === 'incentives') {

@@ -42,3 +42,12 @@ export type IncentiveEntry = { id: string; date: string; patient: string; clinic
 export type IncentiveStatus = 'draft' | 'submitted' | 'approved' | 'returned';
 export const claimTotal = (entries: IncentiveEntry[]) => Math.round(entries.reduce((total, entry) => total + Number(entry.rm || 0), 0) * 100) / 100;
 export const approvedTotal = (entries: IncentiveEntry[]) => claimTotal(entries.filter((entry) => entry.review === 'approved'));
+
+// Display helpers shared by the staff page, the Clinical Admin page and the printed sheet.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const monthLabel = (month: string) => `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+export const codeName = (code: string) => INCENTIVE_CODES.find((item) => item.code === code)?.name || code;
+export const dmy = (date: string) => date.split('-').reverse().join('/');
+export const rm = (value: number) => `RM ${value.toFixed(2)}`;
+export const STATUS_LABEL: Record<IncentiveStatus, string> = { draft: 'Still filling in', submitted: 'Waiting for approval', approved: 'Approved', returned: 'Returned to fix' };
+export const STATUS_TONE: Record<IncentiveStatus, string> = { draft: 'bg-slate-100 text-slate-600', submitted: 'bg-amber-50 text-amber-800', approved: 'bg-emerald-50 text-emerald-700', returned: 'bg-rose-50 text-rose-700' };
