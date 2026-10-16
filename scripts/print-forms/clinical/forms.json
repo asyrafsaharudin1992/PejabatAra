@@ -1,0 +1,7 @@
+{
+  "forms": [
+    { "id": "borang-mohon-kerja", "title": "Borang Mohon Kerja ARA (2026)", "group": "Recruitment", "file": "clinical/borang-mohon-kerja.pdf" },
+    { "id": "penilaian-temuduga-pembantu-klinik", "title": "Borang Penilaian Temuduga (Pembantu Klinik)", "group": "Recruitment", "file": "clinical/penilaian-temuduga-pembantu-klinik.pdf" },
+    { "id": "penilaian-bulanan-pembantu-klinik", "title": "Penilaian Bulanan Pembantu Klinik", "group": "Staff evaluation", "file": "clinical/penilaian-bulanan-pembantu-klinik.pdf" }
+  ]
+}

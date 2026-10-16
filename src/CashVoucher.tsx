@@ -36,9 +36,9 @@ async function cvRequest(body?: { voucherId: string; cvNo: string; date: string 
 
 // The last CV number each branch printed, read once each time Print Forms opens (no polling)
 // and updated when staff confirm a voucher printed.
-export function useCvNumbers() {
+export function useCvNumbers(enabled = true) {
   const [last, setLast] = useState<LastPrinted | null>(null);
-  useEffect(() => { let live = true; cvRequest().then((result) => { if (live) setLast(result); }).catch(() => { if (live) setLast({}); }); return () => { live = false; }; }, []);
+  useEffect(() => { if (!enabled) return; let live = true; cvRequest().then((result) => { if (live) setLast(result); }).catch(() => { if (live) setLast({}); }); return () => { live = false; }; }, [enabled]);
   const record = useCallback(async (voucherId: string, cvNo: string, date: string) => { setLast(await cvRequest({ voucherId, cvNo, date })); }, []);
   return { last, record };
 }

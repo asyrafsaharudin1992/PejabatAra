@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 
 // Uploads the Print Forms PDFs to Storage and saves the form list to portal_state.
 // An existing list is kept (admins may have edited it) unless run with --replace.
+// With --clinical it uploads the Clinical Admin office's list instead of the CA office's.
 config({ path: '.env.local' });
 config();
 
@@ -14,7 +15,10 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !serviceRoleKey) throw new Error('Set SUPABASE_URL (or VITE_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY before uploading print forms.');
 
 const bucket = 'print-forms';
-const directory = resolve('scripts/print-forms/files');
+const clinical = process.argv.includes('--clinical');
+const directory = resolve(clinical ? 'scripts/print-forms' : 'scripts/print-forms/files');
+const listFile = resolve(clinical ? 'scripts/print-forms/clinical/forms.json' : 'scripts/print-forms/forms.json');
+const stateKey = clinical ? 'clinical_print_forms' : 'ca_print_forms';
 const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false }, realtime: { transport: WebSocket } });
 
 const { data: existingBucket, error: bucketLookupError } = await supabase.storage.getBucket(bucket);
@@ -26,13 +30,13 @@ if (!existingBucket) {
 
 const { data: branch, error: branchError } = await supabase.from('branches').select('id').eq('name', 'AraSpace Clinical Assistants').single();
 if (branchError) throw branchError;
-const { data: existing, error: existingError } = await supabase.from('portal_state').select('state_key').eq('branch_id', branch.id).eq('state_key', 'ca_print_forms').maybeSingle();
+const { data: existing, error: existingError } = await supabase.from('portal_state').select('state_key').eq('branch_id', branch.id).eq('state_key', stateKey).maybeSingle();
 if (existingError) throw existingError;
 if (existing && !process.argv.includes('--replace')) {
   console.log('Print form list already saved; kept it. Run with --replace to overwrite.');
 } else {
   // Upload only when the list is saved, so a form an admin deleted is not put back in Storage.
-  const payload = JSON.parse(await readFile(resolve('scripts/print-forms/forms.json'), 'utf8'));
+  const payload = JSON.parse(await readFile(listFile, 'utf8'));
   // PDFs are cached by browsers for a year, so each computer downloads a form only once.
   for (const form of payload.forms) {
     const bytes = await readFile(resolve(directory, form.file));
@@ -44,7 +48,7 @@ if (existing && !process.argv.includes('--replace')) {
   // portal_state records who saved each row; credit the first System Admin.
   const { data: admin, error: adminError } = await supabase.from('profiles').select('id').eq('role', 'super_admin').eq('status', 'active').limit(1).single();
   if (adminError) throw adminError;
-  const { error } = await supabase.from('portal_state').upsert({ branch_id: branch.id, state_key: 'ca_print_forms', payload, updated_by: admin.id }, { onConflict: 'branch_id,state_key' });
+  const { error } = await supabase.from('portal_state').upsert({ branch_id: branch.id, state_key: stateKey, payload, updated_by: admin.id }, { onConflict: 'branch_id,state_key' });
   if (error) throw error;
   console.log(`Saved ${payload.forms.length} print forms.`);
 }

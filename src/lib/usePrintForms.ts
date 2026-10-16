@@ -10,15 +10,18 @@ export type PrintFormFile = { name: string; type: string; base64: string };
 const fileRoot = import.meta.env.VITE_SUPABASE_URL ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/print-forms` : '';
 export const printFormUrl = (file: string) => file ? `${fileRoot}/${file}` : '';
 
+// Each office keeps its own list: 'forms' is the CA office, 'clinical_forms' the Clinical Admin office.
+export type PrintFormScope = 'forms' | 'clinical_forms';
+
 // Kept for the whole page load, like the procedure list: it only changes when an
 // admin saves it, and saving returns the new list.
-let cached: PrintFormList | null = null;
+const cached: Partial<Record<PrintFormScope, PrintFormList>> = {};
 
-async function request(payload?: PrintFormList, upload?: { file: PrintFormFile; formId: string }) {
+async function request(scope: PrintFormScope, payload?: PrintFormList, upload?: { file: PrintFormFile; formId: string }) {
   if (!supabase) throw new Error('Supabase is not configured.');
   const { data: session } = await supabase.auth.getSession();
   if (!session.session) throw new Error('Please sign in again.');
-  const response = await fetch('/api/ca-state?scope=forms', {
+  const response = await fetch(`/api/ca-state?scope=${scope}`, {
     method: payload ? 'PUT' : 'GET',
     headers: { Authorization: `Bearer ${session.session.access_token}`, ...(payload ? { 'Content-Type': 'application/json' } : {}) },
     ...(payload ? { body: JSON.stringify({ payload, ...(upload ? { file: upload.file, fileFor: upload.formId } : {}) }) } : {}),
@@ -28,28 +31,28 @@ async function request(payload?: PrintFormList, upload?: { file: PrintFormFile; 
   return (result.payload as PrintFormList | null) || { forms: [] };
 }
 
-export function usePrintForms(active: boolean) {
-  const [list, setList] = useState<PrintFormList | null>(cached);
+export function usePrintForms(active: boolean, scope: PrintFormScope = 'forms') {
+  const [list, setList] = useState<PrintFormList | null>(cached[scope] || null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!active || cached) return;
+    if (!active || cached[scope]) return;
     let live = true;
-    request().then((result) => { cached = result; if (live) setList(result); }).catch((cause) => { if (live) setError(cause instanceof Error ? cause.message : 'Unable to load print forms.'); });
+    request(scope).then((result) => { cached[scope] = result; if (live) setList(result); }).catch((cause) => { if (live) setError(cause instanceof Error ? cause.message : 'Unable to load print forms.'); });
     return () => { live = false; };
   }, [active]);
 
   // A PDF, when given, is uploaded with the save and attached to that form.
   const save = useCallback(async (next: PrintFormList, upload?: { file: PrintFormFile; formId: string }) => {
     try {
-      const saved = await request(next, upload);
-      cached = saved; setList(saved); setError('');
+      const saved = await request(scope, next, upload);
+      cached[scope] = saved; setList(saved); setError('');
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save print forms.');
       return false;
     }
-  }, []);
+  }, [scope]);
 
   return { list, loading: active && !list && !error, error, save };
 }

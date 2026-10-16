@@ -5,6 +5,7 @@ const WORKSPACE_KEY = 'ca_workspace';
 const READS_KEY = 'ca_announcement_reads';
 const PROCEDURES_KEY = 'ca_procedures';
 const FORMS_KEY = 'ca_print_forms';
+const CLINICAL_FORMS_KEY = 'clinical_print_forms';
 const CV_KEY = 'ca_cash_voucher_numbers';
 
 async function stateBranch(db: any) {
@@ -120,8 +121,10 @@ export default async function handler(req: any, res: any) {
     if (req.query.scope === 'reads') return await announcementReads(req, res, db, branchId, user.id, profile.role === 'super_admin');
     if (req.query.scope === 'cv') return await cashVoucherNumbers(req, res, db, branchId, user.id);
     // Clinical procedures and print forms live in their own rows so the workspace payload stays small.
-    const scope = ['personal', 'procedures', 'forms'].includes(req.query.scope) ? req.query.scope : 'workspace';
-    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : WORKSPACE_KEY;
+    // clinical_forms is the Clinical Admin office's own Print Forms list (its accounts also have CA access).
+    const scope = ['personal', 'procedures', 'forms', 'clinical_forms'].includes(req.query.scope) ? req.query.scope : 'workspace';
+    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : scope === 'clinical_forms' ? CLINICAL_FORMS_KEY : WORKSPACE_KEY;
+    const formsScope = scope === 'forms' || scope === 'clinical_forms';
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branchId).eq('state_key', stateKey).maybeSingle();
     if (readError) throw readError;
 
@@ -132,11 +135,11 @@ export default async function handler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return res.status(400).json({ error: 'A valid portal payload is required.' });
     if (scope === 'procedures' && body.photo) await uploadProcedurePhoto(db, body);
-    if (scope === 'forms' && body.file) await uploadFormFile(db, body);
+    if (formsScope && body.file) await uploadFormFile(db, body);
     const { data, error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: stateKey, payload: body.payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' }).select('payload,updated_at').single();
     if (error) throw error;
     if (scope === 'procedures') await removeUnusedPhotos(db, existing?.payload, data.payload);
-    if (scope === 'forms') await removeUnusedFormFiles(db, existing?.payload, data.payload);
+    if (formsScope) await removeUnusedFormFiles(db, existing?.payload, data.payload);
     return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at });
   } catch (error: any) {
     return res.status(error.status || 400).json({ error: error.message || 'Unable to save CA portal content.' });

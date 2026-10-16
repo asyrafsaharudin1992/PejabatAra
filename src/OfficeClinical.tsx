@@ -1,11 +1,13 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, BookOpen, Clock3, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpen, Clock3, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
 import ClinicalIncentives from './ClinicalIncentives';
 import { LinksView, PanelTrainingView } from './PortalApp';
 import { usePanelTraining } from './lib/usePanelTraining';
+import PrintForms from './PrintForms';
+import { usePrintForms } from './lib/usePrintForms';
 import type { QuickLink } from './portalData';
 
 // Office Clinical Administration, laid out like the CA office. Each branch's
@@ -433,7 +435,7 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
 }
 
 
-type View = 'home' | 'report' | 'orders' | 'bookings' | 'incentives' | 'panel' | 'links';
+type View = 'home' | 'report' | 'orders' | 'bookings' | 'incentives' | 'forms' | 'panel' | 'links';
 
 // Sidebar tabs besides Home. Quick access on Home is built from this list too, as in the CA office.
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string }[] = [
@@ -441,10 +443,11 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'orders', label: 'Orders', note: 'Medicine & supplies on the way', icon: Package, tone: 'text-[#ffb000]' },
   { id: 'bookings', label: 'Vaccine Bookings', note: 'Patients waiting for stock', icon: Syringe, tone: 'text-emerald-400' },
   { id: 'incentives', label: 'Incentive Claims', note: 'Approve staff monthly claims', icon: Coins, tone: 'text-[#ffd36b]' },
+  { id: 'forms', label: 'Print Forms', note: 'Forms admin prints often', icon: Printer, tone: 'text-[#a78bfa]' },
   { id: 'panel', label: 'Panel', note: 'Panel guides & portals', icon: BookOpen, tone: 'text-emerald-400' },
   { id: 'links', label: 'Important Links', note: 'Work systems', icon: Link2, tone: 'text-[#20c7f4]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', panel: 'Panel', links: 'Important Links' };
+const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', forms: 'Print Forms', panel: 'Panel', links: 'Important Links' };
 
 // Shown until System Admin saves its own list in the Important Links tab.
 const DEFAULT_LINKS: QuickLink[] = [
@@ -515,6 +518,8 @@ export default function OfficeClinical() {
   const [links, setLinks] = useState<QuickLink[] | null>(null);
   // Panel list comes from the CA office's Panel Training; it is fetched only when the tab opens.
   const panel = usePanelTraining(view === 'panel', admin);
+  // Clinical Admin's own Print Forms list, separate from the CA office's.
+  const printForms = usePrintForms(view === 'forms', 'clinical_forms');
 
   useEffect(() => {
     officeFetch(`${API}&action=branches`).then((response) => response.json()).then(({ branches: names, admin: isAdmin }) => { setBranches(names); setBranch(names[0] || ''); setAdmin(Boolean(isAdmin)); })
@@ -566,11 +571,12 @@ export default function OfficeClinical() {
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
         {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setBranch(name); navigate('report'); }} />}
-        {view !== 'home' && view !== 'incentives' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
+        {view !== 'home' && view !== 'incentives' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
         {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}
         {view === 'bookings' && day && <Bookings day={day} reload={load} onError={onError} />}
+        {view === 'forms' && <PrintForms state={printForms} canEdit={admin} vouchersShown={false} eyebrow="Clinical Administration" />}
         {view === 'panel' && <PanelTrainingView training={panel} canEdit={admin} title="Panel" />}
         {view === 'links' && (links ? <LinksView links={links} canEdit={admin} onSave={saveLinks} /> : <p className="text-sm text-slate-500">Loading…</p>)}
         {view === 'incentives' && branch && <ClinicalIncentives key={branch} branch={branch} branches={branches || []} onError={onError} />}

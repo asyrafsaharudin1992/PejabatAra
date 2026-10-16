@@ -15,14 +15,15 @@ const readPdf = (file: File) => new Promise<PrintFormFile>((resolve, reject) => 
 
 // Forms staff print often, grouped by use. `state` comes from PortalApp so Home search
 // and this tab share one fetch.
-export default function PrintForms({ canEdit, state }: { canEdit: boolean; state: ReturnType<typeof usePrintForms> }) {
+// The Clinical Admin office uses it too, with its own list and without the Cash Voucher.
+export default function PrintForms({ canEdit, state, vouchersShown = true, eyebrow = "Clinic Assistant Desk" }: { canEdit: boolean; state: ReturnType<typeof usePrintForms>; vouchersShown?: boolean; eyebrow?: string }) {
   const { list, loading, error, save } = state;
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<{ form: PrintForm; isNew: boolean } | null>(null);
   const [printing, setPrinting] = useState("");
   const [printError, setPrintError] = useState("");
   const [editingVoucher, setEditingVoucher] = useState<{ voucher: Voucher; isNew: boolean } | null>(null);
-  const cvNumbers = useCvNumbers();
+  const cvNumbers = useCvNumbers(vouchersShown);
   const forms = list?.forms || [];
   const vouchers = list?.vouchers || defaultVouchers;
 
@@ -53,15 +54,15 @@ export default function PrintForms({ canEdit, state }: { canEdit: boolean; state
   };
 
   return <div className="mx-auto max-w-[1500px] space-y-6">
-    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white"><p className="text-xs font-bold uppercase tracking-[.22em] text-[#70d8fa]">Clinic Assistant Desk</p><h2 className="mt-3 text-3xl font-semibold">Print forms</h2><p className="mt-3 text-[#b9cfdd]">Forms staff print often. Press Print to send a form straight to the printer.</p></section>
-    <section className="flex items-center gap-2 rounded-2xl bg-white p-4 shadow-sm"><Search size={16} className="shrink-0 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setQuery("")} placeholder="Search forms, e.g. consent, TNB, x-ray…" className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-400" />{query && <button type="button" onClick={() => setQuery("")} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Clear search"><X size={15} /></button>}{canEdit && list && <button onClick={() => edit({ form: blank(), isNew: true })} className="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#0a4b69]"><Plus className="h-4 w-4" />Add form</button>}</section>
+    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white"><p className="text-xs font-bold uppercase tracking-[.22em] text-[#70d8fa]">{eyebrow}</p><h2 className="mt-3 text-3xl font-semibold">Print forms</h2><p className="mt-3 text-[#b9cfdd]">Forms staff print often. Press Print to send a form straight to the printer.</p></section>
+    <section className="flex items-center gap-2 rounded-2xl bg-white p-4 shadow-sm"><Search size={16} className="shrink-0 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setQuery("")} placeholder={vouchersShown ? "Search forms, e.g. consent, TNB, x-ray…" : "Search forms…"} className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-400" />{query && <button type="button" onClick={() => setQuery("")} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Clear search"><X size={15} /></button>}{canEdit && list && <button onClick={() => edit({ form: blank(), isNew: true })} className="ml-1 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#0a4b69]"><Plus className="h-4 w-4" />Add form</button>}</section>
     {(error || printError) && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error || printError}</p>}
     {editing && <FormEditor key={editing.form.id} form={editing.form} isNew={editing.isNew} groups={[...new Set(forms.map((form) => form.group).filter(Boolean))] as string[]} onCancel={() => setEditing(null)} onDelete={editing.isNew ? undefined : () => void remove(editing.form)}
       onSave={async (next, file) => { if (await store(editing.isNew ? [...forms, next] : forms.map((item) => item.id === next.id ? next : item), file, next.id)) setEditing(null); }} />}
     {editingVoucher && <VoucherEditor key={editingVoucher.voucher.id} voucher={editingVoucher.voucher} isNew={editingVoucher.isNew} onCancel={() => setEditingVoucher(null)}
       onSave={async (next) => { if (await storeVouchers(editingVoucher.isNew ? [...vouchers, next] : vouchers.map((item) => item.id === next.id ? next : item))) setEditingVoucher(null); }} />}
     {loading ? <p className="flex items-center gap-3 rounded-2xl bg-white p-6 text-sm font-semibold text-[#0b587b]"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#b9e8f8] border-t-[#0b587b]" aria-hidden="true" />Loading forms…</p>
-      : <>{list && shownVouchers.length > 0 && <section>
+      : <>{list && vouchersShown && shownVouchers.length > 0 && <section>
         <h3 className="mb-3 text-xs font-bold uppercase tracking-[.16em] text-[#0b9aca]">Cash voucher</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{shownVouchers.map((voucher) => <VoucherCard key={voucher.id} voucher={voucher} canEdit={canEdit} last={cvNumbers.last ? cvNumbers.last[voucher.id] || null : undefined} onPrinted={(cvNo, date) => cvNumbers.record(voucher.id, cvNo, date)}
           onEdit={() => editVoucher({ voucher, isNew: false })}
@@ -69,7 +70,7 @@ export default function PrintForms({ canEdit, state }: { canEdit: boolean; state
           onDelete={vouchers.length > 1 ? () => void removeVoucher(voucher) : undefined} />)}</div>
       </section>}
       {!forms.length ? !error && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">No forms have been added yet.</p>
-      : !groups.length ? !shownVouchers.length && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">No forms match “{query.trim()}”.</p>
+      : !groups.length ? !(vouchersShown && shownVouchers.length) && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">No forms match “{query.trim()}”.</p>
       : groups.map(([group, items]) => <section key={group}>
         <h3 className="mb-3 text-xs font-bold uppercase tracking-[.16em] text-[#0b9aca]">{group}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{items.map((form) => <article key={form.id} className="flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm">
