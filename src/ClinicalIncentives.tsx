@@ -55,6 +55,8 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
     catch (cause) { setClaims([]); onError(cause instanceof Error ? cause.message : 'Unable to load claims.'); }
   };
   useEffect(() => { setOpenId(''); void load(); }, [branchFilter, month]);
+  // Hooks must run on every render, so this comes before the early return below.
+  usePrintSheet(Boolean(printing), `Incentive Claims - ${branchFilter === 'all' ? 'All branches' : branchFilter} - ${month === 'all' ? 'All months' : month}`, () => setPrinting(''));
 
   const open = claims?.find((claim) => claim.id === openId);
   if (open) return <ClaimDetail key={open.id} claim={open} onBack={() => { setOpenId(''); void load(); }} onDecided={async () => { await load(); }} onError={onError} />;
@@ -63,7 +65,6 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
   const sorted = (claims || []).filter((claim) => words.every((word) => `${claim.staffName} ${claim.staffCode}`.toLowerCase().includes(word)))
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.month.localeCompare(a.month) || a.staffName.localeCompare(b.staffName));
   const waiting = sorted.filter((claim) => claim.status === 'submitted').length;
-  usePrintSheet(Boolean(printing), `Incentive Claims - ${branchFilter === 'all' ? 'All branches' : branchFilter} - ${month === 'all' ? 'All months' : month}`, () => setPrinting(''));
   const field = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10';
   const label = month === 'all' ? 'any month' : monthLabel(month);
   return <div className="mx-auto max-w-[1500px] space-y-6">
