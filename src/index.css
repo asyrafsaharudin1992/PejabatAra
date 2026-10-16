@@ -125,19 +125,26 @@
 }
 
 /* Cash Voucher printing: only the voucher sheet prints, at its real size. */
-.cv-print { display: none; }
+.cv-print { display: none; font-family: Arial, Helvetica, sans-serif; }
+/* PrintPortal measures the print copy off screen before printing (see .cv-fit). */
+.cv-print.cv-measuring { display: block; position: fixed; left: -10000px; top: 0; width: 297mm; visibility: hidden; }
+.cv-print .cv-mm { position: absolute; width: 1mm; height: 0; }
+.cv-measuring .cv-turn { box-sizing: border-box; width: 297mm; padding: var(--pad, 10mm); }
 @media print {
   html:has(body.cv-printing), body.cv-printing { background: #fff !important; }
   body.cv-printing > *:not(.cv-print) { display: none !important; }
-  body.cv-printing .cv-print { display: block; padding: 0 0.6mm; color: #000; font-family: Arial, Helvetica, sans-serif; }
+  body.cv-printing .cv-print { display: block; color: #000; font-family: Arial, Helvetica, sans-serif; }
   html:has(body.cv-printing) { zoom: 1 !important; }
   .cv-page { break-after: page; }
   .cv-page:last-child { break-after: auto; }
 }
 
-/* Safari prints portrait only: PrintPortal adds .cv-rotate and each page's content is turned
-   90° onto the portrait paper (see src/PrintPortal.tsx). */
+/* Each printed page is one fixed A4 landscape sheet with its own white border (PrintPortal sets
+   the page margin to zero). Safari prints portrait only, so there .cv-rotate turns each sheet 90°
+   onto the portrait paper (see src/PrintPortal.tsx). Sheets are 1mm short so none spills over. */
 @media print {
-  .cv-rotate .cv-page { position: relative; width: var(--page-h); height: var(--page-w); overflow: hidden; }
-  .cv-rotate .cv-turn { position: absolute; top: 0; left: 0; width: var(--page-w); height: var(--page-h); transform-origin: top left; transform: translateX(var(--page-h)) rotate(90deg); }
+  .cv-print .cv-page { box-sizing: border-box; width: 297mm; height: 209mm; overflow: hidden; }
+  .cv-print .cv-turn { box-sizing: border-box; width: 297mm; height: 209mm; padding: var(--pad, 10mm); }
+  .cv-rotate .cv-page { position: relative; width: 210mm; height: 296mm; }
+  .cv-rotate .cv-turn { position: absolute; top: 0; left: 0; transform-origin: top left; transform: translateX(210mm) rotate(90deg); }
 }

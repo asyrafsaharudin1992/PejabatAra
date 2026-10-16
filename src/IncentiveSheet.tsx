@@ -71,10 +71,11 @@ export function ClaimSheet({ claim }: { claim: SheetClaim }) {
   return <section className="text-[9pt]"><SheetTop claim={claim} /><SheetTable claim={claim} entries={claim.entries} last /></section>;
 }
 
-// The claim split into landscape pages for printing, each with the heading repeated; totals
-// and signatures go on the last page. Fixed pages also let Safari turn each one (PrintPortal).
-const ROWS_PER_PAGE = 18;
+// The claim on one landscape page for printing, shrunk to fit (PrintPortal's .cv-fit), so each
+// staff member is one page. Beyond 50 rows the text would be too small to read, so a very long
+// claim carries on over further pages, with the totals and signatures on the last.
+const ROWS_PER_PAGE = 50;
 export function ClaimPages({ claim }: { key?: string; claim: SheetClaim }) {
   const pages = Array.from({ length: Math.max(1, Math.ceil(claim.entries.length / ROWS_PER_PAGE)) }, (_, i) => claim.entries.slice(i * ROWS_PER_PAGE, (i + 1) * ROWS_PER_PAGE));
-  return <>{pages.map((entries, i) => <PrintPage key={i}><div className="text-[9pt]"><SheetTop claim={claim} page={pages.length > 1 ? `Page ${i + 1} of ${pages.length}` : undefined} /><SheetTable claim={claim} entries={entries} last={i === pages.length - 1} /></div></PrintPage>)}</>;
+  return <>{pages.map((entries, i) => <PrintPage key={i}><div className="cv-fit text-[9pt]"><SheetTop claim={claim} page={pages.length > 1 ? `Page ${i + 1} of ${pages.length}` : undefined} /><SheetTable claim={claim} entries={entries} last={i === pages.length - 1} /></div></PrintPage>)}</>;
 }
