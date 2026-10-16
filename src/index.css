@@ -145,6 +145,8 @@
 @media print {
   .cv-print .cv-page { box-sizing: border-box; width: 297mm; height: 209mm; overflow: hidden; }
   .cv-print .cv-turn { box-sizing: border-box; width: 297mm; height: 209mm; padding: var(--pad, 10mm); }
-  .cv-rotate .cv-page { position: relative; width: 210mm; height: 296mm; }
-  .cv-rotate .cv-turn { position: absolute; top: 0; left: 0; transform-origin: top left; transform: translateX(210mm) rotate(90deg); }
+  /* Safari keeps its own page margins (more when "Print headers and footers" is on), so the
+     turned sheet is drawn at 86% in a 180 x 255mm box that fits inside them on A4. */
+  .cv-rotate .cv-page { position: relative; width: 180mm; height: 255mm; margin: 0 auto; }
+  .cv-rotate .cv-turn { position: absolute; top: 0; left: 0; transform-origin: top left; transform: translateX(180mm) rotate(90deg) scale(0.858); }
 }
