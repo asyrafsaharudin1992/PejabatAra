@@ -110,17 +110,18 @@ function VoucherSheet({ voucher, cvNo, date }: { voucher: Voucher; cvNo: string;
       </header>
       <table className="w-full border-collapse text-[9.5pt]"><colgroup><col className="w-[20%]" /><col className="w-[34%]" /><col className="w-[16%]" /><col className="w-[30%]" /></colgroup><tbody>
         {[["Payee/Dr Name", "CV No", cvNo], ["MMC/IC No.", "Date", date], ["Bank Name", "Payment Method", ""], ["Account No.", "", null]].map(([label, right, value], index) => <tr key={index} className="h-[6.5mm]">
-          <td className="pr-[2mm]">{label}</td><td className="border-b border-black" /><td className="pl-[4mm]">{right}</td>{value === null ? <td /> : <td className="border-b border-black text-[11pt] font-semibold">{value}</td>}
+          <td className="pr-[2mm]">{label}</td><td className="border border-black" /><td className="pr-[3mm] text-right">{right}</td>{value === null ? <td /> : <td className="border border-black text-center text-[11pt] font-semibold">{value}</td>}
         </tr>)}
       </tbody></table>
       <table className="mt-[3mm] w-full border-collapse text-[9pt]"><colgroup><col className="w-[20%]" /><col /><col className="w-[12%]" /><col className="w-[12%]" /></colgroup>
         <thead><tr className="h-[7mm] bg-[#d8d8d8]"><th className={cell}>NO.</th><th className={cell}>PAYMENT DETAILS</th><th className={cell}>( / )</th><th className={cell}>( RM )</th></tr></thead>
         <tbody>
           <tr className="h-[15mm]"><td className={`${cell} text-center font-bold leading-tight`}>EXPENSES<br /><span className="font-normal">(beli brg, refund etc)</span></td><td className={cell} /><td className={cell} /><td className={cell} /></tr>
+          {/* Every line is its own ruled row, as on the clinic's Excel voucher, so each can be ticked and priced. */}
           {voucher.sections.map((section, sectionIndex) => section.lines.map((line, lineIndex) => <tr key={`${sectionIndex}-${lineIndex}`} className="h-[5.4mm]">
-            {lineIndex === 0 && <td rowSpan={section.lines.length} className={`${cell} text-center align-top pt-[1mm] font-bold`}>{section.title}</td>}
-            <td className={`border-x border-black px-[2mm] whitespace-pre ${lineIndex === 0 ? "border-t font-bold" : ""} ${lineIndex === section.lines.length - 1 ? "border-b" : ""}`}>{line}</td>
-            {lineIndex === 0 && <><td rowSpan={section.lines.length} className={cell} /><td rowSpan={section.lines.length} className={cell} /></>}
+            <td className={`${cell} text-center font-bold leading-tight`}>{lineIndex === 0 ? section.title : ""}</td>
+            <td className={`${cell} whitespace-pre ${lineIndex === 0 ? "font-bold" : ""}`}>{line}</td>
+            <td className={cell} /><td className={cell} />
           </tr>))}
         </tbody>
       </table>
