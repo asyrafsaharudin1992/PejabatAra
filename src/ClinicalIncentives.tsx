@@ -4,7 +4,7 @@ import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
-import { PrintPortal } from './PrintPortal';
+import { PrintPage, PrintPortal } from './PrintPortal';
 
 // Clinical Admin side of the staff incentive claims: the branch's claims for a month,
 // approved or returned to the staff member with a note. Loaded when the tab opens or
@@ -59,7 +59,7 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
         <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Month</span><select value={month} onChange={(event) => setMonth(event.target.value)} className={field}><option value="all">All months</option>{months.map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select></label>
       </div>
       <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-500">{claims ? `${sorted.length} ${sorted.length === 1 ? 'claim' : 'claims'}${waiting ? ` · ${waiting} waiting for approval` : ''}${sorted.length !== claims.length ? ` (of ${claims.length})` : ''}` : 'Loading…'}</span>
-        <button onClick={() => setPrinting('pdf')} disabled={!sorted.length} title="Every claim listed, one page per staff member" className="ml-auto inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({sorted.length})</button>
+        <button onClick={() => setPrinting('pdf')} disabled={!sorted.length} title="A summary page, then one page per staff member" className="ml-auto inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({sorted.length})</button>
         <button onClick={() => setPrinting('print')} disabled={!sorted.length} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" />Print all</button>
         <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button></div>
     </section>
@@ -71,6 +71,7 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
     </button>)}</div>}
     {printing === 'pdf' && <PdfHint />}
     {printing && <PrintPortal>
+      <PrintPage><MonthSummary claims={sorted} title={`${branchFilter === 'all' ? 'All branches' : branchFilter} · ${month === 'all' ? 'All months' : monthLabel(month)}`} /></PrintPage>
       {sorted.map((claim) => <ClaimPages key={claim.id} claim={claim} />)}
     </PrintPortal>}
   </div>;
@@ -160,3 +161,15 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   </div>;
 }
 
+// First page of a whole-month PDF: one line per claim.
+function MonthSummary({ claims, title }: { claims: Claim[]; title: string }) {
+  const cell = 'border border-black px-[1.5mm] py-[1mm]';
+  return <div className="cv-fit text-[9.5pt]">
+    <div className="flex items-center gap-[4mm]"><img src="/forms/ara-logo.jpg" alt="" className="h-[16mm] w-[16mm] object-contain" /><div><p className="text-[13pt] font-bold">KLINIK ARA 24 JAM · STAFF INCENTIVES</p><p className="text-[11pt]">Summary · {title}</p></div></div>
+    <table className="mt-[4mm] w-full border-collapse"><thead><tr className="font-bold"><th className={cell}>No.</th><th className={cell}>Staff name</th><th className={cell}>Code</th><th className={cell}>Branch</th><th className={cell}>Month</th><th className={cell}>Entries</th><th className={cell}>Claimed (RM)</th><th className={cell}>Approved (RM)</th><th className={cell}>Status</th><th className={cell}>Approved by</th></tr></thead>
+      <tbody>{claims.map((claim, index) => <tr key={claim.id}><td className={`${cell} text-center`}>{index + 1}</td><td className={cell}>{claim.staffName}</td><td className={cell}>{claim.staffCode}</td><td className={cell}>{claim.branch}</td><td className={cell}>{monthLabel(claim.month)}</td><td className={`${cell} text-center`}>{claim.entries.length}</td><td className={`${cell} text-right`}>{claimTotal(claim.entries).toFixed(2)}</td><td className={`${cell} text-right`}>{approvedTotal(claim.entries).toFixed(2)}</td><td className={cell}>{STATUS_LABEL[claim.status]}</td><td className={cell}>{claim.approvedBy}</td></tr>)}</tbody>
+      <tfoot><tr className="font-bold"><td colSpan={6} className={`${cell} text-right`}>Total</td><td className={`${cell} text-right`}>{claimTotal(claims.flatMap((claim) => claim.entries)).toFixed(2)}</td><td className={`${cell} text-right`}>{approvedTotal(claims.flatMap((claim) => claim.entries)).toFixed(2)}</td><td colSpan={2} className={cell} /></tr></tfoot>
+    </table>
+    <p className="mt-[3mm] text-[8pt]">Printed {new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur' })}. Approved (RM) counts only rows ticked ✓ by the Clinical Admin.</p>
+  </div>;
+}
