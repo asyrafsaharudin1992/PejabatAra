@@ -121,7 +121,66 @@ export async function clinicalHandler(req: any, res: any) {
     if (req.method === 'GET' && action === 'branches') return res.status(200).json({ branches: scope.map((branch) => branch.name), today: today() });
     if (req.method === 'GET' && action === 'day') return res.status(200).json(await dayView(db, pickBranch(scope, req.query.branch)));
     if (req.method === 'GET' && action === 'overview') return res.status(200).json(await overview(db, scope));
+    // Staff incentive claims for one branch and month. Drafts are listed too, so the
+    // admin can see who is still filling theirs in.
+    if (req.method === 'GET' && action === 'incentives') {
+      // branch=all and month=all list every branch this account can see, or every month.
+      const names = req.query.branch === 'all' ? scope.map((branch) => branch.name) : [pickBranch(scope, req.query.branch).name];
+      const month = text(req.query.month, 7);
+      if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      let query = db.from('incentive_claims').select('id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,assessment_staff(name,staff_code)').in('branch', names);
+      if (month !== 'all') query = query.eq('month', month);
+      const { data, error } = await query.order('month', { ascending: false }).order('submitted_at', { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return res.status(200).json({ claims: (data || []).map((row: any) => ({ id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
+    }
     if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
+
+    // Marks one entry as approved or not approved. Admins can check entries while staff are
+    // still filling in the claim; only an approved claim is final.
+    if (action === 'incentive_entry') {
+      const { data: claim, error } = await db.from('incentive_claims').select('id,branch,status,entries').eq('id', text(body.id)).maybeSingle();
+      if (error) throw error;
+      if (!claim || !scope.some((branch) => branch.name === claim.branch)) throw fail(404, 'Claim not found.');
+      if (claim.status === 'approved') throw fail(409, 'This claim is already approved. Return it first to change an entry.');
+      const entryId = text(body.entryId, 60);
+      const review = body.review === 'approved' || body.review === 'rejected' ? body.review : null;
+      // entryId '*' approves every row not checked yet.
+      if (entryId !== '*' && !(claim.entries || []).some((entry: any) => entry.id === entryId)) throw fail(404, 'Entry not found.');
+      const entries = (claim.entries || []).map(({ rejected: _old, ...entry }: any) => {
+        if (entryId === '*' ? entry.review : entry.id !== entryId) return entry;
+        const { review: _previous, ...rest } = entry;
+        return review ? { ...rest, review } : rest;
+      });
+      const { error: saveError } = await db.from('incentive_claims').update({ entries, updated_at: now }).eq('id', claim.id);
+      if (saveError) throw saveError;
+      return res.status(200).json({ entries });
+    }
+
+    if (action === 'incentive_decide') {
+      const { data: claim, error } = await db.from('incentive_claims').select('id,branch,status').eq('id', text(body.id)).maybeSingle();
+      if (error) throw error;
+      if (!claim || !scope.some((branch) => branch.name === claim.branch)) throw fail(404, 'Claim not found.');
+      // A claim can be approved before the staff member submits it; an approved claim can only be returned.
+      if (claim.status === 'approved' ? body.decision !== 'return' : !['draft', 'submitted', 'returned'].includes(claim.status)) throw fail(409, 'This claim has already been approved.');
+      const approvedBy = text(body.approvedBy, 80);
+      if (body.decision === 'approve') {
+        const { data: full, error: fullError } = await db.from('incentive_claims').select('entries').eq('id', claim.id).single();
+        if (fullError) throw fullError;
+        const unchecked = (full.entries || []).filter((entry: any) => !entry.review).length;
+        if (!(full.entries || []).length) throw fail(400, 'This claim has no entries.');
+        if (unchecked) throw fail(409, `${unchecked} ${unchecked === 1 ? 'row has' : 'rows have'} not been checked yet. Tick ✓ or ✗ on every row first.`);
+      }
+      const note = text(body.note, 1000);
+      if (body.decision === 'approve' && !approvedBy) throw fail(400, 'Enter your name for "Approved by".');
+      if (body.decision === 'return' && !note) throw fail(400, 'Tell the staff member what to fix.');
+      const row = body.decision === 'approve'
+        ? { status: 'approved', approved_by: approvedBy, admin_note: note, decided_at: now, updated_at: now }
+        : { status: 'returned', approved_by: '', admin_note: note, decided_at: now, updated_at: now };
+      const { error: saveError } = await db.from('incentive_claims').update(row).eq('id', claim.id);
+      if (saveError) throw saveError;
+      return res.status(200).json({ success: true });
+    }
 
     if (action === 'save_report') {
       const branch = pickBranch(scope, body.branch);

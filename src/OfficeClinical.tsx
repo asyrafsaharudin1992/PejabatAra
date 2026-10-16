@@ -1,8 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, CalendarClock, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, CalendarClock, Coins, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
+import ClinicalIncentives from './ClinicalIncentives';
 
 // Office Clinical Administration, laid out like the CA office. Each branch's
 // Clinical Admin ticks the daily checklist here and sends it to the WhatsApp
@@ -410,7 +411,7 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
 }
 
 
-type View = 'home' | 'report' | 'orders' | 'bookings' | 'tasks';
+type View = 'home' | 'report' | 'orders' | 'bookings' | 'tasks' | 'incentives';
 
 // Sidebar tabs besides Home. Quick access on Home is built from this list too, as in the CA office.
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string }[] = [
@@ -418,8 +419,9 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'orders', label: 'Orders', note: 'Medicine & supplies on the way', icon: Package, tone: 'text-[#ffb000]' },
   { id: 'bookings', label: 'Vaccine Bookings', note: 'Patients waiting for stock', icon: Syringe, tone: 'text-emerald-400' },
   { id: 'tasks', label: 'Ad Hoc Tasks', note: 'Carried over until done', icon: CalendarClock, tone: 'text-[#ff7ab6]' },
+  { id: 'incentives', label: 'Incentive Claims', note: 'Approve staff monthly claims', icon: Coins, tone: 'text-[#ffd36b]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', tasks: 'Ad Hoc Tasks' };
+const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', orders: 'Orders', bookings: 'Vaccine Bookings', tasks: 'Ad Hoc Tasks', incentives: 'Incentive Claims' };
 
 function LogoMark() { return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><Stethoscope className="h-6 w-6" /></div>; }
 
@@ -517,12 +519,13 @@ export default function OfficeClinical() {
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
         {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setBranch(name); navigate('report'); }} />}
-        {view !== 'home' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
+        {view !== 'home' && view !== 'incentives' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
         {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}
         {view === 'bookings' && day && <Bookings day={day} reload={load} onError={onError} />}
         {view === 'tasks' && day && <Tasks day={day} reload={load} onError={onError} />}
+        {view === 'incentives' && branch && <ClinicalIncentives key={branch} branch={branch} branches={branches || []} onError={onError} />}
       </main>
     </div>
   </div>;

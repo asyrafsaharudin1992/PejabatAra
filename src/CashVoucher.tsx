@@ -49,7 +49,6 @@ const nextCv = (cvNo: string) => {
   return match ? `${match[1]}${String(Number(match[2]) + 1).padStart(match[2].length, "0")}` : "";
 };
 
-const today = () => { const now = new Date(); return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const dmy = (iso: string) => iso ? iso.split("-").reverse().join("/") : "";
 
 // Sections are edited as text: blocks separated by a blank line, the first line "TITLE | first detail".
@@ -61,7 +60,8 @@ export const textToSections = (text: string) => text.split(/\n\s*\n/).map((block
 
 export function VoucherCard({ voucher, canEdit, onEdit, onCopy, onDelete, last, onPrinted }: { key?: string; voucher: Voucher; last?: { cvNo: string; date: string } | null; onPrinted: (cvNo: string, date: string) => Promise<void>; canEdit: boolean; onEdit: () => void; onCopy: () => void; onDelete?: () => void }) {
   const [cvNo, setCvNo] = useState("");
-  const [date, setDate] = useState(today);
+  // Left blank unless staff pick a date; a blank date prints as an empty line to fill in by pen.
+  const [date, setDate] = useState('');
   const [printing, setPrinting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -89,7 +89,7 @@ export function VoucherCard({ voucher, canEdit, onEdit, onCopy, onDelete, last, 
 
   return <article className="flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm">
     <div className="flex items-start gap-3"><img src="/forms/ara-logo.jpg" alt="" className="h-8 w-8 shrink-0 rounded-lg object-contain" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold leading-snug text-[#14233b]">Cash Voucher ({voucher.label})</p><p className="mt-0.5 text-[11px] text-slate-500">Front & back · A4 landscape</p></div>{canEdit && <div className="-mr-2 -mt-1 flex shrink-0"><button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]" title="Edit voucher" aria-label={`Edit Cash Voucher ${voucher.label}`}><Pencil className="h-3.5 w-3.5" /></button><button onClick={onCopy} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]" title="Copy for another branch" aria-label={`Copy Cash Voucher ${voucher.label}`}><Copy className="h-3.5 w-3.5" /></button>{onDelete && <button onClick={onDelete} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Delete voucher" aria-label={`Delete Cash Voucher ${voucher.label}`}><Trash2 className="h-3.5 w-3.5" /></button>}</div>}</div>
-    <div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-semibold text-slate-600">CV No<input value={cvNo} onChange={(event) => { setTyped(true); setCvNo(event.target.value.toUpperCase()); }} placeholder="e.g. CV3899" className={field} /></label><label className="text-[11px] font-semibold text-slate-600">Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label></div>
+    <div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-semibold text-slate-600">CV No<input value={cvNo} onChange={(event) => { setTyped(true); setCvNo(event.target.value.toUpperCase()); }} placeholder="e.g. CV3899" className={field} /></label><label className="text-[11px] font-semibold text-slate-600"><span className="flex items-center justify-between">Date <span className="font-normal text-slate-400">{date ? <button type="button" onClick={() => setDate("")} className="text-[#0b587b] hover:underline">Clear</button> : "optional"}</span></span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label></div>
     <p className="text-[11px] text-slate-500">{last === undefined ? "Loading last CV number…" : last ? <>Last printed: <strong className="text-[#14233b]">{last.cvNo}</strong>{last.date ? ` · ${dmy(last.date)}` : ""}</> : "No CV number recorded yet."}</p>
     {confirming ? <div className="mt-auto rounded-xl bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Did {cvNo.trim()} print successfully?</p><div className="mt-2 flex gap-2"><button onClick={() => void confirm(true)} disabled={recording} className="flex-1 rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">{recording ? "Saving…" : "Yes, printed"}</button><button onClick={() => void confirm(false)} disabled={recording} className="flex-1 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">No</button></div>{problem && <p className="mt-2 text-xs text-rose-700">{problem}</p>}</div>
     : <button onClick={() => setPrinting(true)} disabled={!cvNo.trim() || printing} className="mt-auto inline-flex items-center justify-center gap-2 rounded-xl bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Printer className="h-3.5 w-3.5" />{cvNo.trim() ? "Print" : "Type the CV No to print"}</button>}

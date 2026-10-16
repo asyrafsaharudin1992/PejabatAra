@@ -1,5 +1,6 @@
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
+import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
 // Vercel Hobby plan allows only 12 functions.
@@ -59,6 +60,93 @@ function cleanQuestions(value: unknown) {
   });
 }
 
+// Staff incentive claims: one per staff member per month, built up entry by entry and
+// submitted at month end. The API fixes each entry's RM from the code, so a claim
+// cannot be inflated from the browser.
+const FIRST_CLAIM_MONTH = '2026-10';
+const malaysiaToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+const decodeClaim = (row: any, staff: { branch: string }, month: string) => ({
+  month, branch: row?.branch || INCENTIVE_BRANCHES[staff.branch] || '', entries: row?.entries || [], status: row?.status || 'draft',
+  adminNote: row?.admin_note || '', approvedBy: row?.approved_by || '', submittedAt: row?.submitted_at || null, decidedAt: row?.decided_at || null,
+});
+
+function claimMonth(value: unknown) {
+  const month = text(value, 7);
+  if (!/^\d{4}-\d{2}$/.test(month) || month < FIRST_CLAIM_MONTH || month > malaysiaToday().slice(0, 7)) throw fail(400, 'Choose a month from October 2026 up to this month.');
+  return month;
+}
+
+async function editableClaim(db: any, staffId: string, month: string) {
+  const { data, error } = await db.from('incentive_claims').select('*').eq('staff_id', staffId).eq('month', month).maybeSingle();
+  if (error) throw error;
+  if (data && !['draft', 'returned'].includes(data.status)) throw fail(409, data.status === 'approved' ? 'This claim has been approved and can no longer be changed.' : 'This claim has been submitted. Ask your Clinical Admin to return it if something needs fixing.');
+  return data;
+}
+
+async function saveClaim(db: any, staffId: string, month: string, existing: any, patch: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  const { data, error } = existing
+    ? await db.from('incentive_claims').update({ ...patch, updated_at: now }).eq('id', existing.id).select('*').single()
+    : await db.from('incentive_claims').insert({ staff_id: staffId, month, ...patch }).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function incentiveAction(req: any, res: any, db: any, staff: { id: string; branch: string; can_preview: boolean }, action: string, body: any) {
+  if (req.method === 'GET' && action === 'incentive') {
+    const month = claimMonth(req.query.month || malaysiaToday().slice(0, 7));
+    const { data, error } = await db.from('incentive_claims').select('month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at').eq('staff_id', staff.id).order('month', { ascending: false });
+    if (error) throw error;
+    const row = (data || []).find((claim: any) => claim.month === month);
+    return res.status(200).json({
+      claim: decodeClaim(row, staff, month),
+      history: (data || []).map((claim: any) => ({ month: claim.month, status: claim.status, total: claimTotal(claim.entries || []), count: (claim.entries || []).length })),
+    });
+  }
+  if (staff.can_preview) throw fail(403, 'Preview accounts cannot make claims.');
+  const month = claimMonth(body.month);
+  const branch = Object.values(INCENTIVE_BRANCHES).includes(body.branch) ? body.branch : '';
+
+  if (req.method === 'POST' && action === 'incentive_add') {
+    const existing = await editableClaim(db, staff.id, month);
+    const entry = body.entry || {};
+    const code = INCENTIVE_CODES.find((item) => item.code === entry.code);
+    if (!code) throw fail(400, 'Choose an incentive code.');
+    const date = text(entry.date, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month || date > malaysiaToday()) throw fail(400, 'The date must be in the claim month and not in the future.');
+    const clinicId = text(entry.clinicId, 40);
+    const patient = text(entry.patient, 120);
+    // Procedures are done on a patient; the other incentives (A–I) are not.
+    if (/^(\d|L)/.test(code.code) && (!patient || !clinicId)) throw fail(400, 'Enter the patient name and clinic ID.');
+    const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : code.rate;
+    if (!Number.isFinite(rm) || rm <= 0 || rm > 2000) throw fail(400, 'Enter the amount (RM) for this incentive.');
+    const next: IncentiveEntry = { id: randomUUID(), date, patient, clinicId, outstanding: text(entry.outstanding, 60), code: code.code, rm };
+    const entries = [...(existing?.entries || []), next].sort((a: IncentiveEntry, b: IncentiveEntry) => a.date.localeCompare(b.date));
+    if (entries.length > 500) throw fail(400, 'A claim can hold up to 500 entries.');
+    // The branch is set from the first entry, so the Clinical Admin sees the claim while it is still being filled in.
+    const claimBranch = branch || existing?.branch || INCENTIVE_BRANCHES[staff.branch] || '';
+    const saved = await saveClaim(db, staff.id, month, existing, { entries, branch: claimBranch });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+  }
+
+  if (req.method === 'POST' && action === 'incentive_remove') {
+    const existing = await editableClaim(db, staff.id, month);
+    if (!existing) throw fail(404, 'Entry not found.');
+    const saved = await saveClaim(db, staff.id, month, existing, { entries: (existing.entries || []).filter((entry: IncentiveEntry) => entry.id !== text(body.id, 60)) });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+  }
+
+  if (req.method === 'POST' && action === 'incentive_submit') {
+    const existing = await editableClaim(db, staff.id, month);
+    if (!existing?.entries?.length) throw fail(400, 'Add at least one entry before submitting.');
+    const claimBranch = branch || existing.branch || INCENTIVE_BRANCHES[staff.branch];
+    if (!claimBranch) throw fail(400, 'Choose your branch before submitting.');
+    const saved = await saveClaim(db, staff.id, month, existing, { branch: claimBranch, status: 'submitted', submitted_at: new Date().toISOString() });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+  }
+  throw fail(405, 'Method not allowed.');
+}
+
 async function staffAction(req: any, res: any, action: string, body: any) {
   const db = serviceDb();
 
@@ -97,6 +185,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
+  if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
     // Preview accounts see every assessment, including closed ones.

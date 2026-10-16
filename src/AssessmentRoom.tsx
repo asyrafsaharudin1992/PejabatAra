@@ -5,7 +5,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Eye, 
 // does not use the shared office accounts or the device lock: it signs in with
 // name + staff code + last 4 IC digits and keeps its own session token.
 const API = '/api/status?resource=assessment';
-const TOKEN_KEY = 'ara_assessment_token';
+export const TOKEN_KEY = 'ara_assessment_token';
 
 type Quiz = { id: string; title: string; description: string; passMark: number; active: boolean; questionCount: number; attempt: { score: number; total: number; count: number; submittedAt: string } | null };
 type Me = { staff: { name: string; branch: string; preview: boolean }; quizzes: Quiz[] };
@@ -19,7 +19,7 @@ const percent = (score: number, total: number) => total ? Math.round((score / to
 const fullMarks = (score: number, total: number) => total > 0 && score >= total;
 const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-async function assessmentFetch(query: string, options: RequestInit = {}) {
+export async function assessmentFetch(query: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) headers.set('x-assessment-token', token);
@@ -31,13 +31,14 @@ async function assessmentFetch(query: string, options: RequestInit = {}) {
   return body;
 }
 
-function Shell({ children }: { children: ReactNode }) {
+export function Shell({ children }: { children: ReactNode }) {
   return <div className="min-h-screen bg-[#f5f7f9] px-4 py-6 text-[#14233b] sm:px-8 sm:py-10">
     <div className="mx-auto max-w-2xl">{children}</div>
   </div>;
 }
 
-function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+// The Incentive Claims page signs in the same way and shares the session.
+export function SignIn({ onSignedIn, title = 'Assessment Room', intro = 'Periodic staff assessments. Sign in with your name, staff code and the last 4 digits of your IC.', button = 'Enter Assessment Room' }: { onSignedIn: () => void; title?: string; intro?: string; button?: string }) {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [ic4, setIc4] = useState('');
@@ -57,13 +58,13 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
     <form onSubmit={submit} className="mt-6 rounded-[28px] bg-white p-7 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:p-9">
       <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#0b3d59] text-[#91d7ed]"><ClipboardCheck className="h-7 w-7" strokeWidth={1.5} /></span>
       <p className="mt-6 text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Assessment Room</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-500">Periodic staff assessments. Sign in with your name, staff code and the last 4 digits of your IC.</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{title}</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-500">{intro}</p>
       <label className="mt-6 block"><span className="mb-2 block text-xs font-bold text-slate-700">Name</span><input required autoFocus autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="As registered by your admin" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
       <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">Staff code</span><input required autoCapitalize="characters" autoComplete="username" value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ARA0012" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-wider outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
       <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">IC number: last 4 digits</span><input required type="password" inputMode="numeric" maxLength={4} autoComplete="current-password" value={ic4} onChange={(event) => setIc4(event.target.value.replace(/\D/g, ''))} placeholder="••••" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-[0.4em] outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
       {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-      <button disabled={loading} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{loading ? 'Signing in…' : 'Enter Assessment Room'}<ArrowRight size={15} /></button>
+      <button disabled={loading} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{loading ? 'Signing in…' : button}<ArrowRight size={15} /></button>
       <p className="mt-5 text-center text-[11px] leading-5 text-slate-400">Can't sign in? Ask your System Admin to check your details.</p>
     </form>
   </Shell>;
@@ -189,6 +190,7 @@ export default function AssessmentRoom() {
       <button onClick={signOut} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><LogOut className="h-4 w-4" />Sign out</button>
     </div>
     {preview && <p className="mt-6 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800"><Eye className="mt-0.5 h-4 w-4 shrink-0" />Preview account: you can read every assessment, including closed ones, with the correct answers marked. Nothing you do here is recorded.</p>}
+    {!preview && <a href="#office/incentives" className="mt-6 flex items-center justify-between gap-3 rounded-2xl bg-[#0b3d59] px-5 py-4 text-white hover:bg-[#104b6c]"><span><strong className="block text-sm">Incentive Claims</strong><span className="text-xs text-[#b9cfdd]">Record procedures and submit your monthly claim</span></span><ArrowRight className="h-4 w-4 shrink-0" /></a>}
     {error && <div className="mt-6 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
     {me && me.quizzes.length === 0 && <p className="mt-8 rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm">{preview ? 'No assessments have been created yet.' : 'No assessments are open right now. Check back when your admin announces the next one.'}</p>}
     <div className="mt-8 space-y-3">{me?.quizzes.map((quiz) => {
