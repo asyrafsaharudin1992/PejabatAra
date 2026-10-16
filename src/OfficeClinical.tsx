@@ -187,27 +187,47 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
     if (!draft.preparedBy.trim()) { onError('Enter who prepared the report first.'); return false; }
     return true;
   };
-  // The tab is opened before saving so the browser does not treat it as an unwanted pop-up.
+  // Browsers (Safari especially) only allow copying straight after the tap, so the report is
+  // copied before saving, not after. The old-style copy is a fallback where the Clipboard API is refused.
+  const copyText = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* fall back below */ }
+    const area = document.createElement('textarea');
+    area.value = text; area.setAttribute('readonly', ''); area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(area); area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    return copied;
+  };
   const sendToWhatsApp = async () => {
     if (!ready()) return;
-    const tab = window.open('', '_blank');
-    if (!(await save())) { tab?.close(); return; }
     const text = buildReport(day, draft);
+    // Copying starts first, while this page still has focus; the tab opens straight after, still
+    // within the tap, so the browser does not treat it as an unwanted pop-up.
+    const copying = copyText(text);
+    const tab = window.open('', '_blank');
+    const copied = await copying;
+    if (!(await save())) { tab?.close(); return; }
     // wa.me loses emoji on its redirect (they arrive as �), so go to api.whatsapp.com directly.
     // The report is also copied, so it can be pasted if WhatsApp Desktop still mangles it.
-    await navigator.clipboard.writeText(text).catch(() => undefined);
     const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
     if (tab) tab.location.href = url; else window.location.href = url;
-    setNotice('Saved and copied. Choose the WhatsApp group and press Send. If the ticks show as �, clear the message and paste (⌘V / Ctrl+V) instead.');
+    setNotice(copied ? 'Saved and copied. Choose the WhatsApp group and press Send. If the ticks show as �, clear the message and paste (⌘V / Ctrl+V) instead.' : 'Saved. Choose the WhatsApp group and press Send.');
   };
   const copy = async () => {
-    if (!ready() || !(await save())) return;
-    await navigator.clipboard.writeText(buildReport(day, draft));
-    setNotice('Saved and copied. Paste it into WhatsApp.');
+    if (!ready()) return;
+    const copied = await copyText(buildReport(day, draft));
+    if (!(await save())) return;
+    setNotice(copied ? 'Saved and copied. Paste it into WhatsApp (⌘V / Ctrl+V).' : 'Saved, but this browser blocked copying. Use Send to WhatsApp instead.');
   };
+  // Monthly and ad hoc ticks save straight away; Copy and Send wait until they have, so the
+  // report always carries the latest ticks.
+  const [syncing, setSyncing] = useState(0);
+  const track = (busy: boolean) => setSyncing((count) => Math.max(0, count + (busy ? 1 : -1)));
   const toggleMonthly = async (taskId: string, done: boolean) => {
+    track(true);
     try { await post({ action: 'set_monthly', branch: day.branch, taskId, done }); await reload(); }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); }
+    finally { track(false); }
   };
 
   const today = Number(day.date.slice(8, 10));
@@ -219,10 +239,10 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
     <Hero branch={day.branch} title="Daily checklist" text="Tick each item, then send the report to the WhatsApp group in one tap. Orders, vaccine bookings and ad hoc tasks are added for you." />
     <div className="sticky top-[76px] z-20 -mx-4 mt-4 lg:top-0 sm:-mx-6 lg:mx-0 border-b border-slate-200 bg-[#f5f7f9]/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-b-2xl">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {dirty && <span className="mr-auto text-xs font-semibold text-amber-700">Unsaved changes</span>}
+        {syncing > 0 ? <span className="mr-auto text-xs font-semibold text-slate-500">Saving tick…</span> : dirty && <span className="mr-auto text-xs font-semibold text-amber-700">Unsaved changes</span>}
         <button onClick={() => void save().then((ok) => ok && setNotice('Saved.'))} disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"><Save className="h-4 w-4" />Save</button>
-        <button onClick={() => void copy()} disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"><Copy className="h-4 w-4" />Copy</button>
-        <button onClick={() => void sendToWhatsApp()} disabled={saving} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#25d366] px-5 text-sm font-bold text-white hover:bg-[#1ebe5a] disabled:opacity-50"><MessageCircle className="h-4 w-4" />Send to WhatsApp</button>
+        <button onClick={() => void copy()} disabled={saving || syncing > 0} className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"><Copy className="h-4 w-4" />Copy</button>
+        <button onClick={() => void sendToWhatsApp()} disabled={saving || syncing > 0} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#25d366] px-5 text-sm font-bold text-white hover:bg-[#1ebe5a] disabled:opacity-50"><MessageCircle className="h-4 w-4" />Send to WhatsApp</button>
       </div>
       {notice && <Banner tone="ok">{notice}</Banner>}
     </div>
@@ -256,7 +276,7 @@ function DailyReport({ day, reload, onError }: { day: Day; reload: () => Promise
       </div>}
     </section>)}
 
-    <AdHocTasks day={day} reload={reload} onError={onError} />
+    <AdHocTasks day={day} reload={reload} onError={onError} onBusy={track} />
 
     <section className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">Monthly tasks</h2>
@@ -378,14 +398,14 @@ function Bookings({ day, reload, onError }: { day: Day; reload: () => Promise<vo
 }
 
 // Ad hoc tasks, shown inside the daily checklist. They carry over until ticked done.
-function AdHocTasks({ day, reload, onError }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void }) {
+function AdHocTasks({ day, reload, onError, onBusy }: { day: Day; reload: () => Promise<void>; onError: (message: string) => void; onBusy: (busy: boolean) => void }) {
   const [draft, setDraft] = useState<{ id?: string; title: string; details: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (body: Record<string, unknown>) => {
-    setBusy(true);
+    setBusy(true); onBusy(true);
     try { await post(body); await reload(); return true; }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); return false; }
-    finally { setBusy(false); }
+    finally { setBusy(false); onBusy(false); }
   };
   const submit = async (event: FormEvent) => { event.preventDefault(); if (draft && await run({ action: 'save_task', branch: day.branch, ...draft })) setDraft(null); };
   return <section className={`mt-4 ${card}`}>
