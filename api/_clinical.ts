@@ -11,6 +11,7 @@ const LINKS_BRANCH = 'AraOffice Shared';
 const LINKS_KEY = 'clinical_links';
 const CONTACTS_KEY = 'clinical_contacts';
 const MONTHLY_KEY = 'clinical_monthly_tasks';
+const monthlyNotesKey = (month: string) => `clinical_monthly_notes:${month}`;
 const CHECK_STATUSES = new Set(['done', 'pending', 'na']);
 const BOOKING_STATUSES = new Set(['waiting', 'reserved', 'done', 'cancelled']);
 
@@ -56,7 +57,7 @@ const closedAt = (items: { receivedOn: string | null }[]) => items.every((item) 
 async function dayView(db: any, branch: Branch) {
   const date = today();
   const start = `${date}T00:00:00+08:00`;
-  const [report, orders, bookings, tasks, monthly, custom] = await Promise.all([
+  const [report, orders, bookings, tasks, monthly, custom, notes] = await Promise.all([
     db.from('clinical_reports').select('prepared_by,checks,issues,staffing,updated_at').eq('branch_id', branch.id).eq('report_date', date).maybeSingle(),
     // Open orders, plus any closed today so today's deliveries still show.
     db.from('clinical_orders').select('*').eq('branch_id', branch.id).or(`closed_at.is.null,closed_at.gte.${start}`).order('ordered_on'),
@@ -64,8 +65,9 @@ async function dayView(db: any, branch: Branch) {
     db.from('clinical_tasks').select('*').eq('branch_id', branch.id).or(`done_on.is.null,done_on.eq.${date}`).order('created_at'),
     db.from('clinical_monthly_done').select('task_id,status').eq('branch_id', branch.id).eq('month', date.slice(0, 7)),
     db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', MONTHLY_KEY).maybeSingle(),
+    db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', monthlyNotesKey(date.slice(0, 7))).maybeSingle(),
   ]);
-  for (const result of [report, orders, bookings, tasks, monthly, custom]) if (result.error) throw result.error;
+  for (const result of [report, orders, bookings, tasks, monthly, custom, notes]) if (result.error) throw result.error;
   // A new day starts with yesterday's staffing text, since the roster rarely changes much.
   let staffing = report.data?.staffing;
   if (staffing === undefined) {
@@ -80,6 +82,8 @@ async function dayView(db: any, branch: Branch) {
     bookings: (bookings.data || []).map(decodeBooking),
     tasks: (tasks.data || []).map(decodeTask),
     monthlyStatus: Object.fromEntries((monthly.data || []).map((row: any) => [row.task_id, row.status])),
+    monthlyNotes: notes.data?.payload?.notes || {},
+    monthlyDues: notes.data?.payload?.dues || {},
     customMonthly: custom.data?.payload?.tasks || [],
   };
 }
@@ -344,6 +348,24 @@ export async function clinicalHandler(req: any, res: any) {
       const { error } = await db.from('portal_state').upsert({ branch_id: branch.id, state_key: MONTHLY_KEY, payload: { tasks }, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
       if (error) throw error;
       return res.status(200).json({ tasks });
+    }
+
+    // A short note or a due date on one monthly task, kept for the current month only (both live
+    // in the month's portal_state row).
+    if (action === 'save_monthly_note' || action === 'save_monthly_due') {
+      const branch = pickBranch(scope, body.branch);
+      const taskId = text(body.taskId, 40);
+      if (!/^[a-z0-9-]{1,40}$/.test(taskId)) throw fail(400, 'Unknown monthly task.');
+      const key = monthlyNotesKey(today().slice(0, 7));
+      const { data, error: readError } = await db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', key).maybeSingle();
+      if (readError) throw readError;
+      const payload = { notes: { ...(data?.payload?.notes || {}) }, dues: { ...(data?.payload?.dues || {}) } };
+      const value = action === 'save_monthly_note' ? text(body.note, 500) : isDate(body.due) ? body.due : '';
+      const bucket = action === 'save_monthly_note' ? payload.notes : payload.dues;
+      if (value) bucket[taskId] = value; else delete bucket[taskId];
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch.id, state_key: key, payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ success: true });
     }
 
     if (action === 'set_monthly') {
