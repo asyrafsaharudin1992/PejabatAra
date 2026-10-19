@@ -92,14 +92,15 @@ async function dayView(db: any, branch: Branch) {
 async function overview(db: any, scope: Branch[]) {
   const date = today();
   const ids = scope.map((branch) => branch.id);
-  const [reports, orders, bookings, tasks, monthly] = await Promise.all([
+  const [reports, orders, bookings, tasks, monthly, custom] = await Promise.all([
     db.from('clinical_reports').select('branch_id,prepared_by,checks,issues,updated_at').in('branch_id', ids).eq('report_date', date),
     db.from('clinical_orders').select('branch_id,supplier,ordered_on').in('branch_id', ids).is('closed_at', null),
     db.from('clinical_vaccine_bookings').select('branch_id').in('branch_id', ids).in('status', ['waiting', 'reserved']),
     db.from('clinical_tasks').select('branch_id').in('branch_id', ids).is('done_on', null),
     db.from('clinical_monthly_done').select('branch_id,task_id,status').in('branch_id', ids).eq('month', date.slice(0, 7)),
+    db.from('portal_state').select('branch_id,payload').in('branch_id', ids).eq('state_key', MONTHLY_KEY),
   ]);
-  for (const result of [reports, orders, bookings, tasks, monthly]) if (result.error) throw result.error;
+  for (const result of [reports, orders, bookings, tasks, monthly, custom]) if (result.error) throw result.error;
   return {
     date,
     branches: scope.map((branch) => {
@@ -113,6 +114,8 @@ async function overview(db: any, scope: Branch[]) {
         activeBookings: (bookings.data || []).filter((row: any) => row.branch_id === branch.id).length,
         openTasks: (tasks.data || []).filter((row: any) => row.branch_id === branch.id).length,
         // Done and Not needed both count as settled, so neither shows as overdue.
+        // Standard tasks this branch deleted, so they are not chased as overdue.
+        hiddenMonthly: ((custom.data || []).find((row: any) => row.branch_id === branch.id)?.payload?.tasks || []).filter((task: any) => task.hidden).map((task: any) => task.id),
         monthlyDone: (monthly.data || []).filter((row: any) => row.branch_id === branch.id && row.status !== 'pending').map((row: any) => row.task_id),
       };
     }),
@@ -343,7 +346,7 @@ export async function clinicalHandler(req: any, res: any) {
       const branch = pickBranch(scope, body.branch);
       const tasks = (Array.isArray(body.tasks) ? body.tasks : []).slice(0, 30).map((task: any) => {
         const due = Number(task?.due);
-        return { id: text(task?.id, 40), label: text(task?.label, 160), due: Number.isInteger(due) && due >= 1 && due <= 31 ? due : null };
+        return { id: text(task?.id, 40), label: text(task?.label, 160), due: Number.isInteger(due) && due >= 1 && due <= 31 ? due : null, ...(task?.hidden === true && { hidden: true }) };
       }).filter((task: any) => /^[a-z0-9-]{1,40}$/.test(task.id) && task.label);
       const { error } = await db.from('portal_state').upsert({ branch_id: branch.id, state_key: MONTHLY_KEY, payload: { tasks }, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
       if (error) throw error;

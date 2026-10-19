@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
@@ -24,8 +24,8 @@ type Order = { id: string; supplier: string; orderedOn: string; approvedBy: stri
 type BookingStatus = 'waiting' | 'reserved' | 'done' | 'cancelled';
 type Booking = { id: string; patientName: string; icLast4: string; vaccines: string; deposit: number; appointmentOn: string | null; status: BookingStatus; note: string };
 type Task = { id: string; title: string; details: string; createdOn: string; doneOn: string | null };
-type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyStatus: Record<string, CheckStatus>; monthlyNotes: Record<string, string>; monthlyDues: Record<string, string>; customMonthly: { id: string; label: string; due: number | null }[] };
-type Overview = { date: string; branches: { branch: string; report: { preparedBy: string; checks: Checks; issues: string; updatedAt: string } | null; openOrders: number; oldestOrder: { supplier: string; orderedOn: string } | null; activeBookings: number; openTasks: number; monthlyDone: string[] }[] };
+type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyStatus: Record<string, CheckStatus>; monthlyNotes: Record<string, string>; monthlyDues: Record<string, string>; customMonthly: { id: string; label: string; due: number | null; hidden?: boolean }[] };
+type Overview = { date: string; branches: { branch: string; report: { preparedBy: string; checks: Checks; issues: string; updatedAt: string } | null; openOrders: number; oldestOrder: { supplier: string; orderedOn: string } | null; activeBookings: number; openTasks: number; monthlyDone: string[]; hiddenMonthly: string[] }[] };
 
 // The daily checklist, taken from the Clinical Admin WhatsApp report. Item ids
 // are stored with each report, so keep them unchanged when editing the wording.
@@ -65,7 +65,15 @@ const MONTHLY: { id: string; due: number | null; label: (thisMonth: string, last
 ];
 
 // The standard monthly list plus any extra tasks this branch's Clinical Admin added.
-const monthlyFor = (day: Day) => [...MONTHLY, ...(day.customMonthly || []).map((task) => ({ id: task.id, due: task.due, label: () => task.label }))];
+// A saved entry with a standard task's id replaces that task's title (until it is reset).
+const monthlyFor = (day: Day) => {
+  const saved = day.customMonthly || [];
+  const fixed = (task: { id: string; label: string; due: number | null }) => ({ id: task.id, due: task.due, label: () => task.label });
+  return [
+    ...MONTHLY.filter((task) => !saved.some((item) => item.id === task.id && item.hidden)).map((task) => { const edit = saved.find((item) => item.id === task.id); return edit ? { ...fixed(edit), due: task.due } : task; }),
+    ...saved.filter((item) => !MONTHLY.some((task) => task.id === item.id)).map(fixed),
+  ];
+};
 
 const MARK: Record<CheckStatus, string> = { done: '✅', pending: '☑️', na: '❌' };
 // Status choices for each checklist item. Pressing the chosen one again clears it.
@@ -268,7 +276,24 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); await reload(); }
     finally { track(false); }
   };
+  const [editing, setEditing] = useState<{ id: string; label: string } | null>(null);
+  const saveTitle = async () => {
+    if (!editing || !editing.label.trim()) return;
+    const { id } = editing;
+    const label = editing.label.trim();
+    setEditing(null);
+    const list = day.customMonthly || [];
+    await saveMonthlyList(list.some((task) => task.id === id) ? list.map((task) => task.id === id ? { ...task, label } : task) : [...list, { id, label, due: null }]);
+  };
   const removeMonthly = (id: string) => saveMonthlyList((day.customMonthly || []).filter((task) => task.id !== id));
+  // A standard task cannot leave the code, so deleting one saves a hidden marker instead.
+  const deleteMonthly = (task: { id: string; label: (a: string, b: string) => string; due: number | null }) => {
+    if (!MONTHLY.some((item) => item.id === task.id)) return removeMonthly(task.id);
+    const rest = (day.customMonthly || []).filter((item) => item.id !== task.id);
+    return saveMonthlyList([...rest, { id: task.id, label: task.label(monthName(day.date), monthName(day.date, -1)), due: null, hidden: true }]);
+  };
+  const hiddenCount = (day.customMonthly || []).filter((item) => item.hidden).length;
+  const restoreMonthly = () => saveMonthlyList((day.customMonthly || []).filter((item) => !item.hidden));
 
   const today = Number(day.date.slice(8, 10));
   const received = day.orders.flatMap((order) => order.items.filter((item) => item.receivedOn === day.date).map((item) => ({ order, item })));
@@ -325,16 +350,25 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
         const picked = day.monthlyDues?.[task.id] || '';
         const late = !status && (picked ? day.date > picked : task.due !== null && today > task.due);
         const note = day.monthlyNotes?.[task.id] || '';
-        const custom = (day.customMonthly || []).some((item) => item.id === task.id);
+        const custom = (day.customMonthly || []).some((item) => item.id === task.id) && !MONTHLY.some((item) => item.id === task.id);
+        const renamed = (day.customMonthly || []).some((item) => item.id === task.id);
         const text = task.label(monthName(day.date), monthName(day.date, -1));
         return <div key={task.id} className="py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3"><TickCircle status={status} label={text} onClick={() => void setMonthly(task.id, 'done')} /><p className={`text-sm leading-6 ${status === 'done' ? 'text-slate-500' : status === 'na' ? 'text-slate-400' : ''}`}>{text}</p>{late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}</div>
+            <div className="flex min-w-0 flex-1 items-start gap-3"><TickCircle status={status} label={text} onClick={() => void setMonthly(task.id, 'done')} />{editing?.id === task.id
+              ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveTitle(); } if (event.key === 'Escape') setEditing(null); }} maxLength={160} aria-label="Task title" className={`${input} min-w-0 flex-1`} autoFocus />
+                <button type="button" onClick={() => void saveTitle()} disabled={!editing.label.trim()} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Save</button>
+                <button type="button" onClick={() => setEditing(null)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button>
+                {renamed && !custom && <button type="button" onClick={() => { setEditing(null); void removeMonthly(task.id); }} className="rounded-xl px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50">Reset</button>}
+              </div>
+              : <><p className={`text-sm leading-6 ${status === 'done' ? 'text-slate-500' : status === 'na' ? 'text-slate-400' : ''}`}>{text}</p>
+                <button type="button" onClick={() => setEditing({ id: task.id, label: text })} title="Edit title" aria-label={`Edit title of ${text}`} className="mt-0.5 shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><SquarePen className="h-3.5 w-3.5" /></button></>}{late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}</div>
             <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
               <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([value, name, active]) => <button key={value} type="button" onClick={() => void setMonthly(task.id, value)} aria-pressed={status === value} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${status === value ? active : 'text-slate-500 hover:text-slate-700'}`}>{name}</button>)}</div>
               <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">Due date<input type="date" value={picked} onChange={(event) => void setMonthlyDue(task.id, event.target.value)} aria-label={`Due date for ${text}`} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700" /></label>
               <button type="button" onClick={() => setOpenMonthlyNote(openMonthlyNote === task.id ? null : task.id)} title="Note" aria-label={`Note for ${text}`} className={`rounded-lg p-1.5 ${note ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-400 hover:bg-slate-100'}`}><Pencil className="h-3.5 w-3.5" /></button>
-              {custom && <button type="button" onClick={() => void removeMonthly(task.id)} title="Delete task" aria-label={`Delete ${text}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>}
+              <button type="button" onClick={() => void deleteMonthly(task)} title="Delete task" aria-label={`Delete ${text}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           </div>
           {(openMonthlyNote === task.id || note) && <textarea value={note} onChange={(event) => changeMonthlyNote(task.id, event.target.value)} onBlur={() => void saveMonthlyNote(task.id)} rows={1} maxLength={500} placeholder="Note (e.g. Waiting for Dr. to confirm)" className={`${input} mt-2 h-auto py-2`} />}
@@ -344,6 +378,7 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
         <input value={newTask} onChange={(event) => setNewTask(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void addMonthly(); } }} placeholder="Add a monthly task" maxLength={160} className={`${input} min-w-0 flex-1`} />
         <button type="button" onClick={() => void addMonthly()} disabled={!newTask.trim()} className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><Plus className="h-4 w-4" />Add</button>
       </div>
+      {hiddenCount > 0 && <button type="button" onClick={() => void restoreMonthly()} className="mt-3 text-xs font-semibold text-slate-500 underline">Restore {hiddenCount} deleted task{hiddenCount > 1 ? 's' : ''}</button>}
       <p className="mt-3 text-xs text-slate-400">Active vaccine bookings and ad hoc tasks are added to the report automatically.</p>
     </section>
 
@@ -499,7 +534,7 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
   const today = Number(data.date.slice(8, 10));
   return <div className="grid gap-4 md:grid-cols-2">{data.branches.map((row) => {
     const pending = row.report ? ALL_ITEMS.filter((id) => (row.report!.checks[id]?.status || 'pending') === 'pending').length : null;
-    const lateMonthly = MONTHLY.filter((task) => task.due !== null && today > task.due && !row.monthlyDone.includes(task.id));
+    const lateMonthly = MONTHLY.filter((task) => task.due !== null && today > task.due && !row.monthlyDone.includes(task.id) && !(row.hiddenMonthly || []).includes(task.id));
     return <section key={row.branch} className={card}>
       <div className="flex items-start justify-between gap-3"><h2 className="text-xl font-semibold">{row.branch}</h2>
         <span className={`rounded-full px-3 py-1 text-xs font-bold ${row.report ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{row.report ? 'Checklist filled' : 'Not filled yet'}</span></div>
