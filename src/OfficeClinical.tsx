@@ -24,7 +24,7 @@ type Order = { id: string; supplier: string; orderedOn: string; approvedBy: stri
 type BookingStatus = 'waiting' | 'reserved' | 'done' | 'cancelled';
 type Booking = { id: string; patientName: string; icLast4: string; vaccines: string; deposit: number; appointmentOn: string | null; status: BookingStatus; note: string };
 type Task = { id: string; title: string; details: string; createdOn: string; doneOn: string | null };
-type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyDone: string[]; customMonthly: { id: string; label: string; due: number | null }[] };
+type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyStatus: Record<string, CheckStatus>; customMonthly: { id: string; label: string; due: number | null }[] };
 type Overview = { date: string; branches: { branch: string; report: { preparedBy: string; checks: Checks; issues: string; updatedAt: string } | null; openOrders: number; oldestOrder: { supplier: string; orderedOn: string } | null; activeBookings: number; openTasks: number; monthlyDone: string[] }[] };
 
 // The daily checklist, taken from the Clinical Admin WhatsApp report. Item ids
@@ -136,7 +136,7 @@ function buildReport(day: Day, draft: Draft) {
     day.tasks.forEach((task, i) => { out.push(`${i + 1}) ${task.title} ${task.doneOn ? '✅' : '☑️'}`, ...lines(task.details).map((line) => `•  ${line}`)); });
   }
   out.push('', 'KERJA BULANAN');
-  out.push(...monthlyFor(day).map((task) => `•  ${task.label(monthName(day.date), monthName(day.date, -1))} ${day.monthlyDone.includes(task.id) ? '✅' : '☑️'}`));
+  out.push(...monthlyFor(day).map((task) => `•  ${task.label(monthName(day.date), monthName(day.date, -1))} ${MARK[day.monthlyStatus?.[task.id] || 'pending']}`));
   return out.join('\n');
 }
 
@@ -227,10 +227,12 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
   const [syncing, setSyncing] = useState(0);
   const track = (busy: boolean) => setSyncing((count) => Math.max(0, count + (busy ? 1 : -1)));
   // The tick shows at once; only the tick is sent, and the day is reloaded only if saving fails.
-  const toggleMonthly = async (taskId: string, done: boolean) => {
-    onPatch((current) => ({ ...current, monthlyDone: done ? [...current.monthlyDone.filter((id) => id !== taskId), taskId] : current.monthlyDone.filter((id) => id !== taskId) }));
+  // Pressing the chosen status again clears it.
+  const setMonthly = async (taskId: string, status: CheckStatus) => {
+    const next = day.monthlyStatus?.[taskId] === status ? undefined : status;
+    onPatch((current) => { const monthlyStatus = { ...current.monthlyStatus }; if (next) monthlyStatus[taskId] = next; else delete monthlyStatus[taskId]; return { ...current, monthlyStatus }; });
     track(true);
-    try { await post({ action: 'set_monthly', branch: day.branch, taskId, done }); }
+    try { await post({ action: 'set_monthly', branch: day.branch, taskId, status: next ?? null }); }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); await reload(); }
     finally { track(false); }
   };
@@ -251,6 +253,14 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
     const id = `c-${Date.now().toString(36)}`;
     setNewTask(''); setNewDue('');
     await saveMonthlyList([...(day.customMonthly || []), { id, label, due: due >= 1 && due <= 31 ? due : null }]);
+  };
+  const [editing, setEditing] = useState<{ id: string; label: string; due: string } | null>(null);
+  const saveEdit = async () => {
+    if (!editing || !editing.label.trim()) return;
+    const due = Number(editing.due);
+    const { id, label } = editing;
+    setEditing(null);
+    await saveMonthlyList((day.customMonthly || []).map((task) => task.id === id ? { id, label: label.trim(), due: due >= 1 && due <= 31 ? due : null } : task));
   };
   const removeMonthly = (id: string) => saveMonthlyList((day.customMonthly || []).filter((task) => task.id !== id));
 
@@ -304,15 +314,26 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
 
     <section className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">Monthly tasks</h2>
-      <div className="mt-3 space-y-2">{monthlyFor(day).map((task) => {
-        const done = day.monthlyDone.includes(task.id);
-        const late = !done && task.due !== null && today > task.due;
-        return <label key={task.id} className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm hover:bg-slate-50">
-          <input type="checkbox" checked={done} onChange={(event) => void toggleMonthly(task.id, event.target.checked)} className="sr-only" />
-          <span aria-hidden="true" className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border-[1.5px] transition ${done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-transparent'}`}><Check className="h-3.5 w-3.5" strokeWidth={3} /></span>
-          <span className={done ? 'text-slate-400 line-through' : ''}>{task.label(monthName(day.date), monthName(day.date, -1))}</span>
-          {late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}
-        </label>;
+      <div className="mt-3 space-y-1">{monthlyFor(day).map((task) => {
+        const status = day.monthlyStatus?.[task.id];
+        const late = !status && task.due !== null && today > task.due;
+        const custom = (day.customMonthly || []).find((item) => item.id === task.id);
+        if (editing?.id === task.id) return <div key={task.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-2 py-2">
+          <input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveEdit(); } }} maxLength={160} aria-label="Task name" className={`${input} min-w-0 flex-1`} autoFocus />
+          <input value={editing.due} onChange={(event) => setEditing({ ...editing, due: event.target.value.replace(/\D/g, '').slice(0, 2) })} inputMode="numeric" placeholder="Due day" aria-label="Due day of the month (optional)" className={`${input} w-24`} />
+          <button type="button" onClick={() => void saveEdit()} disabled={!editing.label.trim()} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Save</button>
+          <button type="button" onClick={() => setEditing(null)} className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button>
+        </div>;
+        const text = task.label(monthName(day.date), monthName(day.date, -1));
+        return <div key={task.id} className="rounded-xl px-2 py-2 hover:bg-slate-50">
+          <div className="flex items-start gap-3">
+            <TickCircle status={status} label={text} onClick={() => void setMonthly(task.id, 'done')} />
+            <p className={`min-w-0 flex-1 text-sm leading-6 ${status === 'done' ? 'text-slate-500' : status === 'na' ? 'text-slate-400' : ''}`}>{text}</p>
+            {late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}
+            {custom && <button type="button" onClick={() => setEditing({ id: custom.id, label: custom.label, due: custom.due ? String(custom.due) : '' })} aria-label={`Edit ${custom.label}`} className="mt-0.5 text-slate-400 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>}
+          </div>
+          <div className="ml-9 mt-1.5 inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([value, name, active]) => <button key={value} type="button" onClick={() => void setMonthly(task.id, value)} aria-pressed={status === value} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${status === value ? active : 'text-slate-500 hover:text-slate-700'}`}>{name}</button>)}</div>
+        </div>;
       })}</div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input value={newTask} onChange={(event) => setNewTask(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void addMonthly(); } }} placeholder="Add a monthly task" maxLength={160} className={`${input} min-w-0 flex-1`} />

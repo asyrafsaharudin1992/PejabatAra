@@ -62,7 +62,7 @@ async function dayView(db: any, branch: Branch) {
     db.from('clinical_orders').select('*').eq('branch_id', branch.id).or(`closed_at.is.null,closed_at.gte.${start}`).order('ordered_on'),
     db.from('clinical_vaccine_bookings').select('*').eq('branch_id', branch.id).in('status', ['waiting', 'reserved']).order('created_at'),
     db.from('clinical_tasks').select('*').eq('branch_id', branch.id).or(`done_on.is.null,done_on.eq.${date}`).order('created_at'),
-    db.from('clinical_monthly_done').select('task_id').eq('branch_id', branch.id).eq('month', date.slice(0, 7)),
+    db.from('clinical_monthly_done').select('task_id,status').eq('branch_id', branch.id).eq('month', date.slice(0, 7)),
     db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', MONTHLY_KEY).maybeSingle(),
   ]);
   for (const result of [report, orders, bookings, tasks, monthly, custom]) if (result.error) throw result.error;
@@ -79,7 +79,7 @@ async function dayView(db: any, branch: Branch) {
     orders: (orders.data || []).map(decodeOrder),
     bookings: (bookings.data || []).map(decodeBooking),
     tasks: (tasks.data || []).map(decodeTask),
-    monthlyDone: (monthly.data || []).map((row: any) => row.task_id),
+    monthlyStatus: Object.fromEntries((monthly.data || []).map((row: any) => [row.task_id, row.status])),
     customMonthly: custom.data?.payload?.tasks || [],
   };
 }
@@ -93,7 +93,7 @@ async function overview(db: any, scope: Branch[]) {
     db.from('clinical_orders').select('branch_id,supplier,ordered_on').in('branch_id', ids).is('closed_at', null),
     db.from('clinical_vaccine_bookings').select('branch_id').in('branch_id', ids).in('status', ['waiting', 'reserved']),
     db.from('clinical_tasks').select('branch_id').in('branch_id', ids).is('done_on', null),
-    db.from('clinical_monthly_done').select('branch_id,task_id').in('branch_id', ids).eq('month', date.slice(0, 7)),
+    db.from('clinical_monthly_done').select('branch_id,task_id,status').in('branch_id', ids).eq('month', date.slice(0, 7)),
   ]);
   for (const result of [reports, orders, bookings, tasks, monthly]) if (result.error) throw result.error;
   return {
@@ -108,7 +108,8 @@ async function overview(db: any, scope: Branch[]) {
         oldestOrder: open.reduce((oldest: any, row: any) => !oldest || row.ordered_on < oldest.orderedOn ? { supplier: row.supplier, orderedOn: row.ordered_on } : oldest, null),
         activeBookings: (bookings.data || []).filter((row: any) => row.branch_id === branch.id).length,
         openTasks: (tasks.data || []).filter((row: any) => row.branch_id === branch.id).length,
-        monthlyDone: (monthly.data || []).filter((row: any) => row.branch_id === branch.id).map((row: any) => row.task_id),
+        // Done and Not needed both count as settled, so neither shows as overdue.
+        monthlyDone: (monthly.data || []).filter((row: any) => row.branch_id === branch.id && row.status !== 'pending').map((row: any) => row.task_id),
       };
     }),
   };
@@ -124,7 +125,7 @@ async function history(db: any, branch: Branch, month: string) {
   const [reports, tasks, monthly, orders, first_report] = await Promise.all([
     db.from('clinical_reports').select('report_date,prepared_by,checks,issues,updated_at').eq('branch_id', branch.id).gte('report_date', first).lt('report_date', next).order('report_date'),
     db.from('clinical_tasks').select('id,title,details,created_on,done_on').eq('branch_id', branch.id).gte('done_on', first).lt('done_on', next).order('done_on'),
-    db.from('clinical_monthly_done').select('task_id,done_on').eq('branch_id', branch.id).eq('month', month),
+    db.from('clinical_monthly_done').select('task_id,done_on,status').eq('branch_id', branch.id).eq('month', month).eq('status', 'done'),
     // Deliveries are dated per item, so look at orders touched since the month began.
     db.from('clinical_orders').select('supplier,items,updated_at').eq('branch_id', branch.id).gte('updated_at', `${first}T00:00:00+08:00`),
     // The branch's first checklist: days before it are not counted as missed.
@@ -350,8 +351,10 @@ export async function clinicalHandler(req: any, res: any) {
       const taskId = text(body.taskId, 40);
       if (!/^[a-z0-9-]{1,40}$/.test(taskId)) throw fail(400, 'Unknown monthly task.');
       const key = { branch_id: branch.id, month: today().slice(0, 7), task_id: taskId };
-      const { error } = body.done
-        ? await db.from('clinical_monthly_done').upsert({ ...key, done_on: today() }, { onConflict: 'branch_id,month,task_id' })
+      // status: done / pending / na; anything else (or the old done: false) clears the mark.
+      const status = CHECK_STATUSES.has(body.status) ? body.status : body.done ? 'done' : null;
+      const { error } = status
+        ? await db.from('clinical_monthly_done').upsert({ ...key, status, done_on: today() }, { onConflict: 'branch_id,month,task_id' })
         : await db.from('clinical_monthly_done').delete().match(key);
       if (error) throw error;
       return res.status(200).json({ success: true });
