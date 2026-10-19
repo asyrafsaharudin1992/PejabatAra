@@ -24,7 +24,7 @@ type Order = { id: string; supplier: string; orderedOn: string; approvedBy: stri
 type BookingStatus = 'waiting' | 'reserved' | 'done' | 'cancelled';
 type Booking = { id: string; patientName: string; icLast4: string; vaccines: string; deposit: number; appointmentOn: string | null; status: BookingStatus; note: string };
 type Task = { id: string; title: string; details: string; createdOn: string; doneOn: string | null };
-type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyDone: string[] };
+type Day = { date: string; branch: string; report: { saved: boolean; preparedBy: string; checks: Checks; issues: string; staffing: string; updatedAt: string | null }; orders: Order[]; bookings: Booking[]; tasks: Task[]; monthlyDone: string[]; customMonthly: { id: string; label: string; due: number | null }[] };
 type Overview = { date: string; branches: { branch: string; report: { preparedBy: string; checks: Checks; issues: string; updatedAt: string } | null; openOrders: number; oldestOrder: { supplier: string; orderedOn: string } | null; activeBookings: number; openTasks: number; monthlyDone: string[] }[] };
 
 // The daily checklist, taken from the Clinical Admin WhatsApp report. Item ids
@@ -63,6 +63,9 @@ const MONTHLY: { id: string; due: number | null; label: (thisMonth: string, last
   { id: 'forecast', due: 24, label: (m) => `Forecast tenaga kerja ${m} (sebelum 24hb)` },
   { id: 'panel-report', due: null, label: (_, last) => `Laporan in-house panel ${last}` },
 ];
+
+// The standard monthly list plus any extra tasks this branch's Clinical Admin added.
+const monthlyFor = (day: Day) => [...MONTHLY, ...(day.customMonthly || []).map((task) => ({ id: task.id, due: task.due, label: () => task.label }))];
 
 const MARK: Record<CheckStatus, string> = { done: '✅', pending: '☑️', na: '❌' };
 // Status choices for each checklist item. Pressing the chosen one again clears it.
@@ -133,7 +136,7 @@ function buildReport(day: Day, draft: Draft) {
     day.tasks.forEach((task, i) => { out.push(`${i + 1}) ${task.title} ${task.doneOn ? '✅' : '☑️'}`, ...lines(task.details).map((line) => `•  ${line}`)); });
   }
   out.push('', 'KERJA BULANAN');
-  out.push(...MONTHLY.map((task) => `•  ${task.label(monthName(day.date), monthName(day.date, -1))} ${day.monthlyDone.includes(task.id) ? '✅' : '☑️'}`));
+  out.push(...monthlyFor(day).map((task) => `•  ${task.label(monthName(day.date), monthName(day.date, -1))} ${day.monthlyDone.includes(task.id) ? '✅' : '☑️'}`));
   return out.join('\n');
 }
 
@@ -232,6 +235,25 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
     finally { track(false); }
   };
 
+  const [newTask, setNewTask] = useState('');
+  const [newDue, setNewDue] = useState('');
+  const saveMonthlyList = async (tasks: Day['customMonthly']) => {
+    onPatch((current) => ({ ...current, customMonthly: tasks }));
+    track(true);
+    try { await post({ action: 'save_monthly_tasks', branch: day.branch, tasks }); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update.'); await reload(); }
+    finally { track(false); }
+  };
+  const addMonthly = async () => {
+    const label = newTask.trim();
+    if (!label) return;
+    const due = Number(newDue);
+    const id = `c-${Date.now().toString(36)}`;
+    setNewTask(''); setNewDue('');
+    await saveMonthlyList([...(day.customMonthly || []), { id, label, due: due >= 1 && due <= 31 ? due : null }]);
+  };
+  const removeMonthly = (id: string) => saveMonthlyList((day.customMonthly || []).filter((task) => task.id !== id));
+
   const today = Number(day.date.slice(8, 10));
   const received = day.orders.flatMap((order) => order.items.filter((item) => item.receivedOn === day.date).map((item) => ({ order, item })));
   const pendingOrders = day.orders.filter((order) => !order.closed && !order.cancelled);
@@ -282,7 +304,7 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
 
     <section className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">Monthly tasks</h2>
-      <div className="mt-3 space-y-2">{MONTHLY.map((task) => {
+      <div className="mt-3 space-y-2">{monthlyFor(day).map((task) => {
         const done = day.monthlyDone.includes(task.id);
         const late = !done && task.due !== null && today > task.due;
         return <label key={task.id} className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm hover:bg-slate-50">
@@ -292,6 +314,12 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
           {late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}
         </label>;
       })}</div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input value={newTask} onChange={(event) => setNewTask(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void addMonthly(); } }} placeholder="Add a monthly task" maxLength={160} className={`${input} min-w-0 flex-1`} />
+        <input value={newDue} onChange={(event) => setNewDue(event.target.value.replace(/\D/g, '').slice(0, 2))} inputMode="numeric" placeholder="Due day" aria-label="Due day of the month (optional)" className={`${input} w-24`} />
+        <button type="button" onClick={() => void addMonthly()} disabled={!newTask.trim()} className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><Plus className="h-4 w-4" />Add</button>
+      </div>
+      {(day.customMonthly || []).length > 0 && <ul className="mt-3 space-y-1 text-xs text-slate-500">{day.customMonthly.map((task) => <li key={task.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{task.label}{task.due ? ` (by the ${task.due}th)` : ''}</span><button type="button" onClick={() => void removeMonthly(task.id)} aria-label={`Remove ${task.label}`} className="text-slate-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button></li>)}</ul>}
       <p className="mt-3 text-xs text-slate-400">Active vaccine bookings and ad hoc tasks are added to the report automatically.</p>
     </section>
 

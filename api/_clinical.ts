@@ -10,6 +10,7 @@ const CLINICAL_BRANCHES = ['Kajang', 'Seri Kembangan'];
 const LINKS_BRANCH = 'AraOffice Shared';
 const LINKS_KEY = 'clinical_links';
 const CONTACTS_KEY = 'clinical_contacts';
+const MONTHLY_KEY = 'clinical_monthly_tasks';
 const CHECK_STATUSES = new Set(['done', 'pending', 'na']);
 const BOOKING_STATUSES = new Set(['waiting', 'reserved', 'done', 'cancelled']);
 
@@ -55,15 +56,16 @@ const closedAt = (items: { receivedOn: string | null }[]) => items.every((item) 
 async function dayView(db: any, branch: Branch) {
   const date = today();
   const start = `${date}T00:00:00+08:00`;
-  const [report, orders, bookings, tasks, monthly] = await Promise.all([
+  const [report, orders, bookings, tasks, monthly, custom] = await Promise.all([
     db.from('clinical_reports').select('prepared_by,checks,issues,staffing,updated_at').eq('branch_id', branch.id).eq('report_date', date).maybeSingle(),
     // Open orders, plus any closed today so today's deliveries still show.
     db.from('clinical_orders').select('*').eq('branch_id', branch.id).or(`closed_at.is.null,closed_at.gte.${start}`).order('ordered_on'),
     db.from('clinical_vaccine_bookings').select('*').eq('branch_id', branch.id).in('status', ['waiting', 'reserved']).order('created_at'),
     db.from('clinical_tasks').select('*').eq('branch_id', branch.id).or(`done_on.is.null,done_on.eq.${date}`).order('created_at'),
     db.from('clinical_monthly_done').select('task_id').eq('branch_id', branch.id).eq('month', date.slice(0, 7)),
+    db.from('portal_state').select('payload').eq('branch_id', branch.id).eq('state_key', MONTHLY_KEY).maybeSingle(),
   ]);
-  for (const result of [report, orders, bookings, tasks, monthly]) if (result.error) throw result.error;
+  for (const result of [report, orders, bookings, tasks, monthly, custom]) if (result.error) throw result.error;
   // A new day starts with yesterday's staffing text, since the roster rarely changes much.
   let staffing = report.data?.staffing;
   if (staffing === undefined) {
@@ -78,6 +80,7 @@ async function dayView(db: any, branch: Branch) {
     bookings: (bookings.data || []).map(decodeBooking),
     tasks: (tasks.data || []).map(decodeTask),
     monthlyDone: (monthly.data || []).map((row: any) => row.task_id),
+    customMonthly: custom.data?.payload?.tasks || [],
   };
 }
 
@@ -328,6 +331,18 @@ export async function clinicalHandler(req: any, res: any) {
       const { error } = await db.from('clinical_tasks').delete().eq('id', text(body.id)).in('branch_id', scopeIds);
       if (error) throw error;
       return res.status(200).json({ success: true });
+    }
+
+    // Extra monthly tasks a branch's Clinical Admin adds on top of the standard list.
+    if (action === 'save_monthly_tasks') {
+      const branch = pickBranch(scope, body.branch);
+      const tasks = (Array.isArray(body.tasks) ? body.tasks : []).slice(0, 30).map((task: any) => {
+        const due = Number(task?.due);
+        return { id: text(task?.id, 40), label: text(task?.label, 160), due: Number.isInteger(due) && due >= 1 && due <= 31 ? due : null };
+      }).filter((task: any) => /^[a-z0-9-]{1,40}$/.test(task.id) && task.label);
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch.id, state_key: MONTHLY_KEY, payload: { tasks }, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ tasks });
     }
 
     if (action === 'set_monthly') {
