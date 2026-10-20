@@ -7,6 +7,11 @@ const PROCEDURES_KEY = 'ca_procedures';
 const FORMS_KEY = 'ca_print_forms';
 const CLINICAL_FORMS_KEY = 'clinical_print_forms';
 const CV_KEY = 'ca_cash_voucher_numbers';
+const VIDEO_KEY = 'ca_video';
+
+// The training video is a Google Drive file. Only its file id is kept (never the share link), and it
+// is only sent to signed-in CA accounts, so it never sits in the public repo.
+const driveFileId = (value: unknown) => String(value ?? '').match(/^https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]{20,80})/)?.[1] || '';
 
 async function stateBranch(db: any) {
   const { data: existing, error: lookupError } = await db.from('branches').select('id').eq('name', BRANCH_NAME).maybeSingle();
@@ -122,8 +127,8 @@ export default async function handler(req: any, res: any) {
     if (req.query.scope === 'cv') return await cashVoucherNumbers(req, res, db, branchId, user.id);
     // Clinical procedures and print forms live in their own rows so the workspace payload stays small.
     // clinical_forms is the Clinical Admin office's own Print Forms list (its accounts also have CA access).
-    const scope = ['personal', 'procedures', 'forms', 'clinical_forms'].includes(req.query.scope) ? req.query.scope : 'workspace';
-    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : scope === 'clinical_forms' ? CLINICAL_FORMS_KEY : WORKSPACE_KEY;
+    const scope = ['personal', 'procedures', 'forms', 'clinical_forms', 'video'].includes(req.query.scope) ? req.query.scope : 'workspace';
+    const stateKey = scope === 'personal' ? `ca_personal_${user.id}` : scope === 'procedures' ? PROCEDURES_KEY : scope === 'forms' ? FORMS_KEY : scope === 'clinical_forms' ? CLINICAL_FORMS_KEY : scope === 'video' ? VIDEO_KEY : WORKSPACE_KEY;
     const formsScope = scope === 'forms' || scope === 'clinical_forms';
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branchId).eq('state_key', stateKey).maybeSingle();
     if (readError) throw readError;
@@ -134,6 +139,11 @@ export default async function handler(req: any, res: any) {
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return res.status(400).json({ error: 'A valid portal payload is required.' });
+    if (scope === 'video') {
+      const fileId = driveFileId(body.payload.url);
+      if (body.payload.url && !fileId) return res.status(400).json({ error: 'Paste a Google Drive file link (drive.google.com/file/d/...).' });
+      body.payload = { fileId, title: String(body.payload.title ?? '').trim().slice(0, 120) };
+    }
     if (scope === 'procedures' && body.photo) await uploadProcedurePhoto(db, body);
     if (formsScope && body.file) await uploadFormFile(db, body);
     const { data, error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: stateKey, payload: body.payload, updated_by: user.id }, { onConflict: 'branch_id,state_key' }).select('payload,updated_at').single();

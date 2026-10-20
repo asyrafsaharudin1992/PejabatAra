@@ -16,6 +16,7 @@ import {
   Home,
   Library,
   Link2,
+  Play,
   LogOut,
   Menu,
   Plus,
@@ -64,8 +65,9 @@ import PrintForms from "./PrintForms";
 import { printFormUrl, usePrintForms } from "./lib/usePrintForms";
 import { useAnnouncementReads } from './lib/useAnnouncementReads';
 import { useVisitingFrom } from "./lib/officeVisit";
+import CaVideo from "./CaVideo";
 
-type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "procedures" | "forms" | "teamara" | "announcements" | "links" | "admin";
+type View = "home" | "handover" | "knowledge" | "training" | "panelTraining" | "services" | "procedures" | "forms" | "teamara" | "announcements" | "links" | "video" | "admin";
 
 
 const viewTitles: Record<View, string> = {
@@ -80,6 +82,7 @@ const viewTitles: Record<View, string> = {
   teamara: "TeamAra",
   announcements: "Announcements",
   links: "Important Links",
+  video: "Training Video",
   admin: "Portal Management",
 };
 
@@ -351,6 +354,7 @@ export default function PortalApp() {
           {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
           {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} currentUserId={user.id} />}
           {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
+          {view === "video" && <CaVideo canEdit={user.role === "Superadmin"} />}
           {view === "admin" && user.role === "Superadmin" && (
             <AdminView staff={staff} onAddStaff={addStaff} />
           )}
@@ -529,6 +533,7 @@ const portalTabs: { id: View; label: string; note: string; icon: typeof Home; to
   { id: "handover", label: "Shift Passover", note: "Templates & guides", icon: ClipboardCheck, tone: "text-[#9b8cff]" },
   { id: "announcements", label: "Announcements", note: "Team updates", icon: Bell, tone: "text-[#ff6b81]" },
   { id: "links", label: "Important Links", note: "Work systems", icon: Link2, tone: "text-[#20c7f4]" },
+  { id: "video", label: "Training Video", note: "Watch the guide", icon: Play, tone: "text-[#ffb000]" },
 ];
 
 type HomeProps = {
