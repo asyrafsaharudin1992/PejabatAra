@@ -44,8 +44,8 @@ export default function CaVideo({ canEdit, title = 'Training Video' }: { canEdit
       {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       {!video ? !error && <p className="mt-3 text-sm text-slate-500">Loading…</p>
         : video.fileId
-          // No allow-popups, so the player cannot open the Drive page in a new tab from here.
-          ? <div className="mt-4 aspect-video overflow-hidden rounded-2xl bg-slate-900"><iframe title={video.title || title} src={`https://drive.google.com/file/d/${video.fileId}/preview`} sandbox="allow-scripts allow-same-origin allow-presentation" referrerPolicy="no-referrer" allow="fullscreen" allowFullScreen className="h-full w-full border-0" /></div>
+          // No sandbox attribute: it stops Drive's player from loading the video.
+          ? <div className="mt-4 aspect-video overflow-hidden rounded-2xl bg-slate-900"><iframe title={video.title || title} src={`https://drive.google.com/file/d/${video.fileId}/preview`} referrerPolicy="no-referrer" allow="fullscreen" allowFullScreen className="h-full w-full border-0" /></div>
           : <p className="mt-3 text-sm text-slate-500">No video has been added yet.</p>}
     </section>
     {canEdit && <form onSubmit={save} className={`mt-4 ${card}`}>
