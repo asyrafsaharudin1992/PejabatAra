@@ -1,4 +1,5 @@
 import { branchId, officeAccess } from './_office-db.js';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { listDriveFiles } from './_panel-drive.js';
 
 // Official memos are shared by every office that shows the Reference Hub, so
@@ -8,6 +9,25 @@ const STATE_KEY = 'reference_resources';
 const CA_BRANCH = 'AraSpace Clinical Assistants';
 const READER_OFFICES = ['ca', 'quality'];
 const DRIVE_SYNC_INTERVAL = 10 * 60 * 1000;
+// Memo wording for search lives in its own record so normal page loads do not carry it.
+const TEXT_KEY = 'reference_text';
+const TEXT_BATCH = 8;
+const TEXT_MAX = 20000;
+
+type TextPayload = { texts: Record<string, string>; empty: string[]; failed: string[] };
+
+const driveFileId = (resource: { sourceUrl?: string }) => String(resource.sourceUrl || '').match(/\/d\/([\w-]+)\//)?.[1] || '';
+
+// Reads the words out of one shared Drive PDF; scanned pages come back empty.
+async function pdfText(fileId: string) {
+  const response = await fetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
+  if (!response.ok) throw new Error(`Drive returned ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (String.fromCharCode(...bytes.slice(0, 4)) !== '%PDF') throw new Error('not shared as a PDF');
+  const { text } = await extractText(await getDocumentProxy(bytes), { mergePages: true });
+  return text.replace(/\s+/g, ' ').trim().slice(0, TEXT_MAX);
+}
+
 
 // Accepts either the bare folder ID or a pasted Drive folder link.
 function memoFolderId() {
@@ -56,6 +76,37 @@ export default async function handler(req: any, res: any) {
       if (error) throw error;
       return data;
     };
+
+    const loadTexts = async (): Promise<TextPayload> => {
+      const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', sharedBranch).eq('state_key', TEXT_KEY).maybeSingle();
+      if (error) throw error;
+      return { texts: data?.payload?.texts || {}, empty: data?.payload?.empty || [], failed: data?.payload?.failed || [] };
+    };
+
+    // Memo wording for Home search; fetched only when someone starts searching.
+    if (req.method === 'GET' && req.query.action === 'text') return res.status(200).json({ texts: (await loadTexts()).texts });
+
+    // Reads the next few memos not yet read; the page repeats this until none are left.
+    if (req.method === 'POST' && req.query.action === 'extract') {
+      if (profile.role !== 'super_admin') return res.status(403).json({ error: 'Only an administrator can read memo text.' });
+      const stored = await loadTexts();
+      const pending = (existing?.payload?.resources || []).map((item: Resource) => ({ id: item.id, file: driveFileId(item) })).filter((item: { id: string; file: string }) => item.file && !(item.id in stored.texts) && !stored.empty.includes(item.id));
+      // Memos that failed before go last, so a few bad files cannot block the rest.
+      const fresh = pending.filter((item: { id: string }) => !stored.failed.includes(item.id));
+      const todo = [...fresh, ...pending.filter((item: { id: string }) => stored.failed.includes(item.id))];
+      const failed: string[] = [];
+      await Promise.all(todo.slice(0, TEXT_BATCH).map(async (item: { id: string; file: string }) => {
+        try {
+          const text = await pdfText(item.file);
+          if (text.length > 20) stored.texts[item.id] = text; else stored.empty.push(item.id);
+        } catch { failed.push(item.id); }
+      }));
+      const attempted = todo.slice(0, TEXT_BATCH).map((item: { id: string }) => item.id);
+      stored.failed = [...stored.failed.filter((id) => !attempted.includes(id)), ...failed];
+      const { error } = await db.from('portal_state').upsert({ branch_id: sharedBranch, state_key: TEXT_KEY, payload: stored, updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ remaining: Math.max(0, fresh.length - TEXT_BATCH), read: Object.keys(stored.texts).length, scanned: stored.empty.length, failed: stored.failed.length });
+    }
 
     const forceSync = req.method === 'POST' && req.query.action === 'sync';
     if (req.method === 'GET' || forceSync) {

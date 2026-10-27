@@ -156,6 +156,8 @@ export default function PortalApp() {
   const [toastError, setToastError] = useState(false);
   // Home search covers every tab, so load Services and Panel Training once staff start typing there.
   const homeSearching = view === "home" && globalSearch.trim().length > 0;
+  const loadMemoText = references.loadTexts;
+  useEffect(() => { if (homeSearching) void loadMemoText(); }, [homeSearching, loadMemoText]);
   const panelTraining = usePanelTraining(personal.ready && (view === 'panelTraining' || homeSearching), user?.role === "Superadmin");
   // Start loading as soon as the Services view is opened.  The service hook
   // still uses the signed-in session for protected mutations, while the UI
@@ -315,6 +317,7 @@ export default function PortalApp() {
             <HomeView
               onNavigate={navigate}
               onOpenResource={setSelectedResource}
+              memoText={references.texts}
               search={globalSearch}
               setSearch={setGlobalSearch}
               announcements={content.announcements}
@@ -342,6 +345,10 @@ export default function PortalApp() {
               syncing={references.syncing}
               pendingMemos={references.pendingMemos}
               onApprovePendingMemo={references.approvePendingMemo}
+              memoText={references.texts}
+              onNeedText={references.loadTexts}
+              onReadText={references.readMemoText}
+              reading={references.reading}
             />
           )}
           {view === "training" && (
@@ -550,9 +557,10 @@ type HomeProps = {
   printForms: ReturnType<typeof usePrintForms>;
   panels: PanelRecord[];
   panelsLoading: boolean;
+  memoText: Record<string, string>;
 };
 
-function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading }: HomeProps) {
+function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading, memoText }: HomeProps) {
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short" }).format(new Date());
   const visitor = useVisitingFrom("ca");
   const importantAnnouncement = announcements.find((announcement) => announcement.priority === "Penting");
@@ -563,7 +571,7 @@ function HomeView({ onNavigate, onOpenResource, search, setSearch, announcements
     </section>
 
     <SearchAraOffice search={search} setSearch={setSearch} />
-    {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} procedures={procedures} onOpenProcedure={onOpenProcedure} printForms={printForms} panels={panels} panelsLoading={panelsLoading} />}
+    {search.trim() && <SearchResults query={search} onNavigate={onNavigate} onOpenResource={onOpenResource} announcements={announcements} resources={resources} links={links} serviceCatalog={serviceCatalog} procedures={procedures} onOpenProcedure={onOpenProcedure} printForms={printForms} panels={panels} panelsLoading={panelsLoading} memoText={memoText} />}
 
     <section><SectionHeading title="Quick access" eyebrow="Shortcuts" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{portalTabs.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", item.tone)}><item.icon className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">{item.label}</p><p className="mt-1 text-xs text-[#9fb8c7]">{item.note}</p></button>)}<a href="#office/assessment" className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]"><div className="flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-[#91d7ed]"><GraduationCap className="h-5 w-5" /></span><ArrowRight className="h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1" /></div><p className="mt-5 font-semibold">Assessment Room</p><p className="mt-1 text-xs text-[#9fb8c7]">Periodic staff assessments</p></a></div></section>
 
@@ -582,9 +590,19 @@ function SearchAraOffice({ search, setSearch }: { search: string; setSearch: (va
 // Shift Passover is a daily checklist, not reference material, so it stays out of search.
 const searchableTabs = portalTabs.filter((tab) => tab.id !== "handover");
 
+// A short quote from inside a memo around the first search word it contains.
+function memoSnippet(text: string | undefined, terms: string[]) {
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  const at = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  if (at === undefined) return "";
+  const start = Math.max(0, at - 40);
+  return `${start ? "…" : ""}${text.slice(start, start + 140)}…`;
+}
+
 type SearchHit = { key: string; title: string; detail: string; tab: View; score: number; onOpen: () => void; inactive?: boolean };
 
-function SearchResults({ query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading }: Omit<HomeProps, "search" | "setSearch"> & { query: string }) {
+function SearchResults({ query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog, procedures, onOpenProcedure, printForms, panels, panelsLoading, memoText }: Omit<HomeProps, "search" | "setSearch"> & { query: string }) {
   const groups = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     // Every search word must appear somewhere in the item; matches in the title rank higher.
@@ -598,7 +616,7 @@ function SearchResults({ query, onNavigate, onOpenResource, announcements, resou
     const add = (hit: Omit<SearchHit, "score">, value: number) => { if (value) hits.push({ ...hit, score: value }); };
 
     searchableTabs.forEach((tab) => add({ key: `tab-${tab.id}`, title: tab.label, detail: tab.note, tab: tab.id, onOpen: () => onNavigate(tab.id) }, score(tab.label, tab.note)));
-    resources.forEach((resource) => add({ key: `ref-${resource.id}`, title: resource.title, detail: `${resource.type} · ${resource.summary}`, tab: "knowledge", onOpen: () => onOpenResource(resource), inactive: resource.status === "TERBATAL" }, score(resource.title, resource.summary, resource.category, resource.type, resource.keywords.join(" "), resource.content.join(" "))));
+    resources.forEach((resource) => add({ key: `ref-${resource.id}`, title: resource.title, detail: `${resource.type} · ${resource.summary || memoSnippet(memoText[resource.id], terms)}`, tab: "knowledge", onOpen: () => onOpenResource(resource), inactive: resource.status === "TERBATAL" }, score(resource.title, resource.summary, resource.category, resource.type, resource.keywords.join(" "), resource.content.join(" "), memoText[resource.id])));
     const folderName = new Map<string, string>(serviceCatalog.folders.map((folder) => [folder.id, folder.name]));
     serviceCatalog.services.forEach((service) => add({ key: `svc-${service.id}`, title: service.title, detail: service.summary || folderName.get(service.folder_id || "") || "Service", tab: "services", onOpen: () => onNavigate("services") }, score(service.title, service.summary, service.tags, folderName.get(service.folder_id || ""))));
     serviceCatalog.faqs.forEach((faq) => add({ key: `faq-${faq.id}`, title: faq.question, detail: faq.answer, tab: "services", onOpen: () => onNavigate("services") }, score(faq.question, faq.answer, folderName.get(faq.folder_id || ""))));
@@ -611,7 +629,7 @@ function SearchResults({ query, onNavigate, onOpenResource, announcements, resou
     return searchableTabs
       .map((tab) => ({ tab, hits: hits.filter((hit) => hit.tab === tab.id && !hit.key.startsWith("tab-")).sort((a, b) => b.score - a.score), tabHit: hits.some((hit) => hit.key === `tab-${tab.id}`) }))
       .filter((group) => group.hits.length || group.tabHit);
-  }, [query, onNavigate, onOpenResource, announcements, resources, links, serviceCatalog.folders, serviceCatalog.services, serviceCatalog.faqs, procedures.guide, onOpenProcedure, printForms.list, panels]);
+  }, [query, onNavigate, onOpenResource, announcements, resources, memoText, links, serviceCatalog.folders, serviceCatalog.services, serviceCatalog.faqs, procedures.guide, onOpenProcedure, printForms.list, panels]);
   const loading = serviceCatalog.loading || procedures.loading || printForms.loading || panelsLoading;
 
   return <section className="rounded-[28px] border border-[#dce4ed] bg-white p-6 sm:p-7">

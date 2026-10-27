@@ -2111,6 +2111,10 @@ export default function App() {
                 onCommit={references.saveNow}
                 onSyncDrive={references.syncDrive}
                 syncing={references.syncing}
+                memoText={references.texts}
+                onNeedText={references.loadTexts}
+                onReadText={references.readMemoText}
+                reading={references.reading}
               />
             )}
 

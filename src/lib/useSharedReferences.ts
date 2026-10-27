@@ -19,6 +19,9 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
   const lastDrive = useRef<{ added: number; error: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [pendingMemos, setPendingMemos] = useState<KnowledgeResource[]>([]);
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const [reading, setReading] = useState(false);
+  const textsLoaded = useRef(false);
   const onResult = useRef(onSaveResult);
   onResult.current = onSaveResult;
 
@@ -130,6 +133,36 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
     return () => window.removeEventListener('pagehide', onLeave);
   }, []);
 
+  // Memo wording is big, so it is fetched once, when someone first searches.
+  const loadTexts = useCallback(async () => {
+    if (textsLoaded.current) return;
+    textsLoaded.current = true;
+    try {
+      const result = await request('GET', undefined, '?action=text') as { texts?: Record<string, string> };
+      setTexts(result.texts || {});
+    } catch { textsLoaded.current = false; }
+  }, [request]);
+
+  // Reads the words out of the Drive PDFs a few at a time until none are left.
+  const readMemoText = useCallback(async (auto = false) => {
+    if (!isAdmin) return;
+    setReading(true);
+    try {
+      let last: { remaining?: number; read?: number; scanned?: number; failed?: number } = {};
+      do {
+        last = await request('POST', undefined, '?action=extract') as typeof last;
+        if (!auto) onResult.current?.(true, `Reading memos… ${last.read ?? 0} done${last.remaining ? `, ${last.remaining} to go` : ''}`);
+      } while (last.remaining);
+      textsLoaded.current = false;
+      await loadTexts();
+      if (!auto || last.failed) onResult.current?.(!last.failed, `${last.read ?? 0} memos searchable${last.scanned ? `, ${last.scanned} scanned (no text)` : ''}${last.failed ? `, ${last.failed} could not be read` : ''}`);
+    } catch (cause) {
+      if (!auto) onResult.current?.(false, cause instanceof Error ? cause.message : 'Could not read memo text.');
+    } finally {
+      setReading(false);
+    }
+  }, [isAdmin, request, loadTexts]);
+
   // Pull memos newly added to the Drive folder without waiting for the
   // server's periodic check.
   const syncDrive = useCallback(async () => {
@@ -142,12 +175,13 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
       setPendingMemos(result.pendingMemos || []);
       const added = lastDrive.current?.added || 0;
       onResult.current?.(true, added ? `${added} new memo${added === 1 ? '' : 's'} ready for review` : 'Already up to date with Drive');
+      void readMemoText(true);
     } catch (cause) {
       onResult.current?.(false, cause instanceof Error ? cause.message : 'Drive sync failed.');
     } finally {
       setSyncing(false);
     }
-  }, [isAdmin, request, saveNow]);
+  }, [isAdmin, request, saveNow, readMemoText]);
 
   const approvePendingMemo = useCallback((resource: KnowledgeResource) => {
     if (!isAdmin) return;
@@ -157,8 +191,9 @@ export function useSharedReferences(defaults: KnowledgeResource[], account?: str
       return next;
     });
     if (timer.current) window.clearTimeout(timer.current);
-    void flush();
-  }, [flush, isAdmin]);
+    // Once the approved memo is saved, read its words so search can find it.
+    void flush().then((saved) => { if (saved) void readMemoText(true); });
+  }, [flush, isAdmin, readMemoText]);
 
-  return { resources, ready, error, update, saveNow, syncDrive, syncing, pendingMemos, approvePendingMemo };
+  return { resources, ready, error, update, saveNow, syncDrive, syncing, pendingMemos, approvePendingMemo, texts, loadTexts, readMemoText, reading };
 }
