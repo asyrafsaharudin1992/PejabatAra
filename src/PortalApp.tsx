@@ -729,6 +729,10 @@ function panelEmbedUrl(url: string) {
   return url.includes("/folders/") ? "" : url;
 }
 
+function isSafari() {
+  return /safari/i.test(navigator.userAgent) && !/chrome|chromium|crios|fxios|edg|android/i.test(navigator.userAgent);
+}
+
 function normalisePanelSearch(value: string) {
   return value.toLowerCase().replace(/\.[a-z0-9]{2,5}$/i, "").replace(/[^a-z0-9]/g, "");
 }
@@ -786,6 +790,12 @@ export function PanelTrainingView({ training, canEdit, title = "Panel Training" 
   const setSelectedPanel = (next: { row: PanelTrainingRow; kind: "guide" | "portal"; guideUrl?: string } | null) => {
     if (next?.kind === "portal") {
       window.open(next.row.portalUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // Drive's embedded viewer freezes the modal in Safari (no button inside responds),
+    // so Safari opens the guide in its own tab instead.
+    if (next?.kind === "guide" && isSafari()) {
+      window.open(panelEmbedUrl(next.guideUrl || next.row.guideUrl), "_blank", "noopener,noreferrer");
       return;
     }
     setSelectedPanelState(next);
