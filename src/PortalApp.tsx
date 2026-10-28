@@ -57,6 +57,7 @@ import { useServiceCatalog } from "./lib/useServiceCatalog";
 import { useCaPortalState } from "./lib/useCaPortalState";
 import { useSharedReferences } from "./lib/useSharedReferences";
 import { KnowledgeView, ModalShell, ResourceModal } from "./ReferenceHub";
+import { LinkLogo } from "./LinkLogo";
 import { ManagedServices } from './ManagedServices';
 import TeamAra from './TeamAra';
 import ClinicalProcedures from "./ClinicalProcedures";
@@ -974,16 +975,6 @@ function AnnouncementReadBar({ announcementId, readState, currentUserId, canEdit
 function normalizeUrl(value: string) {
   const url = value.trim();
   return /^(https?:|mailto:|tel:)/i.test(url) ? url : `https://${url}`;
-}
-
-// Quick Access style icon: picked from the link's words, coloured from its title.
-const linkIcons: [RegExp, typeof Link2][] = [[/queue|giliran/i, ListOrdered], [/locum|doctor|doktor/i, Stethoscope], [/feedback|maklum ?balas|survey/i, MessageSquare], [/care|sihat|health|patient|pesakit/i, HeartPulse], [/rujukan|reference|guide|panduan/i, BookOpen], [/form|borang/i, FileText], [/jadual|schedule|roster|calendar/i, CalendarDays]];
-const linkTones = ["text-[#20c7f4]", "text-emerald-400", "text-[#ffb000]", "text-[#ff7ab6]", "text-[#7258ff]", "text-[#ff6b81]"];
-function LinkLogo({ link }: { link: QuickLink }) {
-  const words = `${link.title} ${link.description || ""} ${link.group || ""}`;
-  const Icon = linkIcons.find(([pattern]) => pattern.test(words))?.[1] || Link2;
-  const tone = linkTones[[...link.title].reduce((sum, char) => sum + char.charCodeAt(0), 0) % linkTones.length];
-  return <span className={cn("grid h-10 w-10 place-items-center rounded-full bg-white/10", tone)}><Icon className="h-5 w-5" /></span>;
 }
 
 // Also used by the Clinical Admin office for its own list of links.

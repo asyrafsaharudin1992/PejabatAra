@@ -31,11 +31,16 @@ import {
   PlusCircle,
   Globe,
   Library,
-  Zap
+  Zap,
+  Menu,
+  X,
+  LogOut,
+  ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
+import { LinkLogo } from "./LinkLogo";
 import { isSupabaseConfigured, signOutSupabase } from "./lib/supabase";
 import { officeFetch as fetch } from "./lib/officeApi";
 import { loadQualityWorkspace } from "./lib/qualityData";
@@ -161,9 +166,26 @@ const INITIAL_TASKS: Task[] = [
   {"id":"collab-health-event","category":"Collaborations","title":"Health event (eg karnival)","frequency":"UPON_SUGGESTION","completed":false,"createdAt":new Date().toISOString()}
 ];
 
+// Banner used at the top of every tab, matching the other offices.
+function PageHero({ eyebrow, title, description, children }: { eyebrow: string; title: string; description?: string; children?: React.ReactNode }) {
+  return (
+    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{eyebrow}</p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight">{title}</h2>
+          {description && <p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">{description}</p>}
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [taskCategories, setTaskCategories] = useState<CategoryData[]>(INITIAL_CATEGORIES);
   const [activeTab, setActiveTab] = useState("Overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [staffSettings, setStaffSettings] = useState<StaffSettings[]>([]);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -1214,63 +1236,62 @@ export default function App() {
   if (!sessionResolved || !user) return null;
 
   return (
-    <div className="quality-office-shell flex min-h-screen bg-[#f7fafc] text-text-primary font-sans overflow-x-hidden">
-      {/* Sidebar */}
-      <aside className="w-[260px] bg-[#083a55] text-white border-0 flex flex-col px-4 py-8">
-        <div className="px-4 mb-10">
+    <div className="quality-office-shell min-h-screen bg-[#f7f8fb] text-text-primary font-sans overflow-x-hidden">
+      {/* Sidebar: same layout as the other offices (fixed on desktop, drawer on phones) */}
+      {mobileNavOpen && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0", mobileNavOpen ? "translate-x-0" : "-translate-x-full")}>
+        <div className="flex items-center justify-between px-2 py-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#0b587b] rounded-xl flex items-center justify-center shadow-lg shadow-black/20">
-              <LayoutDashboard className="w-6 h-6 text-white" />
-            </div>
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><LayoutDashboard className="h-6 w-6" /></div>
             <div>
-              <h1 className="text-[16px] font-bold tracking-tight leading-tight">AraOffice</h1>
-              <p className="text-[11px] text-[#70d8fa] font-bold uppercase tracking-[0.18em]">Quality & Corporate</p>
+              <p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Quality & Corporate</p>
             </div>
           </div>
+          <button onClick={() => setMobileNavOpen(false)} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
         </div>
-        
-        <nav className="flex-1 space-y-1 px-2">
+        <div className="mx-1 mt-6 h-px bg-white/10" />
+        <nav className="mt-6 flex-1 space-y-1 overflow-y-auto">
           {[
-            { id: "Overview", icon: LayoutDashboard, roles: ["Superadmin", "Staff"] },
-            { id: "All Tasks", icon: CheckSquare, roles: ["Superadmin", "Staff"] },
-            { id: "Notes", icon: StickyNote, roles: ["Superadmin", "Staff"] },
-            { id: "History", icon: Clock, roles: ["Superadmin", "Staff"] },
-            { id: "Portal", icon: Globe, roles: ["Superadmin", "Staff"] },
-            { id: "Reference", icon: Library, roles: ["Superadmin", "Staff"] },
+            { id: "Overview", icon: LayoutDashboard, tone: "text-[#818cf8]", roles: ["Superadmin", "Staff"] },
+            { id: "All Tasks", icon: CheckSquare, tone: "text-emerald-400", roles: ["Superadmin", "Staff"] },
+            { id: "Notes", icon: StickyNote, tone: "text-[#ffb000]", roles: ["Superadmin", "Staff"] },
+            { id: "History", icon: Clock, tone: "text-[#a78bfa]", roles: ["Superadmin", "Staff"] },
+            { id: "Portal", icon: Globe, tone: "text-[#20c7f4]", roles: ["Superadmin", "Staff"] },
+            { id: "Reference", icon: Library, tone: "text-[#ff7ab6]", roles: ["Superadmin", "Staff"] },
           ].filter(item => item.roles.includes(user?.role || "Staff")).map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => { setActiveTab(item.id); setMobileNavOpen(false); }}
               className={cn(
-                "w-full flex items-center px-4 py-3 text-[14px] font-bold rounded-apple-sm transition-all duration-200 group",
-                activeTab === item.id 
-                  ? "bg-white text-[#162a43] shadow-lg shadow-black/10" 
-                  : "text-[#b8cddd] hover:bg-white/10 hover:text-white"
+                "flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition",
+                activeTab === item.id ? "bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]" : "text-[#e3ecf5] hover:bg-white/10"
               )}
             >
-              <item.icon className={cn(
-                "w-5 h-5 mr-3 transition-colors",
-                activeTab === item.id ? "text-[#7357ff]" : "text-[#b8cddd] group-hover:text-white"
-              )} />
+              <item.icon className={cn("h-[18px] w-[18px] shrink-0", item.tone, activeTab === item.id && item.id === "Overview" && "text-[#5b4cf0]")} strokeWidth={1.8} />
               {item.id}
+              <ChevronRight className="ml-auto h-4 w-4 opacity-45" />
             </button>
           ))}
         </nav>
-
-        <div className="mt-auto px-2 space-y-4">
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center px-4 py-3 text-[14px] font-bold rounded-apple-sm text-[#ff9eae] hover:bg-white/10 transition-all"
-          >
-            <CloudOff className="w-5 h-5 mr-3" />
-            Sign Out
-          </button>
-
+        <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold text-white">{(user?.fullName || "Quality").split(" ").slice(0, 2).map((part: string) => part[0]).join("").toUpperCase()}</div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{user?.fullName || "Quality & Corporate"}</p>
+              <p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p>
+            </div>
+          </div>
+          <button onClick={handleLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-8 flex flex-col gap-6">
+      <main className="flex min-h-screen flex-col gap-6 p-4 sm:p-6 lg:pl-[338px] lg:pr-[38px] lg:py-[38px]">
+        <div className="flex items-center gap-3 lg:hidden">
+          <button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMobileNavOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">AraOffice · Quality</p>
+        </div>
         {systemAdminAccount && (
           <section className="flex flex-col gap-3 rounded-[20px] border border-[#dce4ed] bg-white px-5 py-4 shadow-[0_10px_30px_rgba(21,53,72,0.05)] sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1294,10 +1315,7 @@ export default function App() {
             <button type="button" onClick={() => fetchData()} className="font-semibold">Try again</button>
           </div>
         )}
-        <header className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight">{activeTab}</h2>
-          </div>
+        <header className="flex justify-end items-center">
           <div className="flex items-center space-x-4">
             <div className="hidden lg:flex flex-col items-end gap-0.5 border-r border-border-apple/40 pr-4 mr-2">
               <div className="flex items-center gap-2">
@@ -1347,15 +1365,15 @@ export default function App() {
           >
             {activeTab === "Overview" && (
               <>
-                <section className="relative overflow-hidden rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_22px_60px_rgba(11,64,92,0.18)]">
+                <section className="relative overflow-hidden rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
                   <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-[#1a6a8d]/50 blur-3xl" />
                   <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
                     <div className="max-w-2xl">
-                      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#79d6f7]">Quality &amp; Corporate Office</p>
-                      <h2 className="text-[38px] font-semibold leading-tight tracking-[-0.035em]">
+                      <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quality &amp; Corporate Office</p>
+                      <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
                         {visitor ? `Welcome, ${visitor}.` : `Welcome back, ${user?.fullName?.split(' ')[0]}.`}
                       </h2>
-                      <p className="mt-3 max-w-xl text-[15px] leading-6 text-white/70">
+                      <p className="mt-3 max-w-xl leading-7 text-[#b9cfdd]">
                         {visitor ? "This is the Quality & Corporate page." : "A clear view of today’s priorities and the work already recorded by your team."}
                       </p>
                     </div>
@@ -1369,7 +1387,7 @@ export default function App() {
                   </div>
                 </section>
 
-                <section className="overflow-hidden rounded-[24px] border border-[#e3e9ed] bg-white shadow-[0_14px_40px_rgba(21,53,72,0.055)]">
+                <section className="overflow-hidden rounded-[28px] border border-[#dce4ed] bg-white ">
                   <div className="grid grid-cols-2 lg:grid-cols-4">
                     {[
                       { label: "Recorded workdays", value: recordedWorkdays, detail: "From daily tracker" },
@@ -1387,7 +1405,7 @@ export default function App() {
                 </section>
 
                 <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-                  <div className="rounded-[24px] border border-[#e3e9ed] bg-white p-7 shadow-[0_14px_40px_rgba(21,53,72,0.045)]">
+                  <div className="rounded-[28px] border border-[#dce4ed] bg-white p-7 ">
                     <div className="mb-6 flex items-end justify-between">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1b8bb6]">Latest activity</p>
@@ -1412,7 +1430,7 @@ export default function App() {
                       {latestDayActivity.length === 0 && <p className="py-8 text-sm text-[#80919d]">No completed activities have been recorded.</p>}
                     </div>
                   </div>
-                  <div className="rounded-[24px] border border-[#e3e9ed] bg-[#f3f8fa] p-7">
+                  <div className="rounded-[28px] border border-[#dce4ed] bg-[#f3f8fa] p-7">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#728895]">Workstreams recorded</p>
                     <div className="mt-5 space-y-3">
                       {latestWorkstreams.map(workstream => {
@@ -1603,12 +1621,12 @@ export default function App() {
 
             {activeTab === "All Tasks" && user?.role !== "Superadmin" && (
               <section className="flex flex-col gap-6">
-                <div className="rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_20px_55px_rgba(11,64,92,0.16)]">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#79d6f7]">Task library</p>
+                <div className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Task library</p>
                   <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end">
                     <div>
-                      <h2 className="text-[34px] font-semibold tracking-[-0.035em]">Work, clearly organised.</h2>
-                      <p className="mt-2 text-[14px] text-white/65">{tasks.length} recurring responsibilities across {dynamicCategories.length} workstreams.</p>
+                      <h2 className="text-3xl font-semibold tracking-tight">Work, clearly organised.</h2>
+                      <p className="mt-2 leading-7 text-[#b9cfdd]">{tasks.length} recurring responsibilities across {dynamicCategories.length} workstreams.</p>
                     </div>
                     <div className="rounded-[16px] border border-white/15 bg-white/10 px-5 py-3 text-right">
                       <p className="text-[10px] uppercase tracking-[0.16em] text-white/50">Current view</p>
@@ -1624,7 +1642,7 @@ export default function App() {
                     )}>{category}</button>
                   ))}
                 </div>
-                <div className="overflow-hidden rounded-[24px] border border-[#e3e9ed] bg-white shadow-[0_14px_40px_rgba(21,53,72,0.045)]">
+                <div className="overflow-hidden rounded-[28px] border border-[#dce4ed] bg-white ">
                   {tasks
                     .filter(task => selectedCategory === "All" || task.category === selectedCategory)
                     .filter(task => `${task.title} ${task.category}`.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -1644,12 +1662,12 @@ export default function App() {
             )}
             {activeTab === "All Tasks" && user?.role === "Superadmin" && (
               <div className="flex flex-col gap-6">
-                <div className="rounded-[28px] bg-[#0b405c] px-8 py-8 text-white shadow-[0_20px_55px_rgba(11,64,92,0.16)]">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#79d6f7]">Task library</p>
+                <div className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Task library</p>
                   <div className="mt-2 flex items-end justify-between gap-6">
                     <div>
-                      <h2 className="text-[34px] font-semibold tracking-[-0.035em]">A quieter way to manage work.</h2>
-                      <p className="mt-2 text-[14px] text-white/65">Review responsibilities, cadence and guidance in one place.</p>
+                      <h2 className="text-3xl font-semibold tracking-tight">A quieter way to manage work.</h2>
+                      <p className="mt-2 leading-7 text-[#b9cfdd]">Review responsibilities, cadence and guidance in one place.</p>
                     </div>
                     <div className="hidden rounded-[16px] border border-white/15 bg-white/10 px-5 py-3 text-right md:block">
                       <p className="text-[10px] uppercase tracking-[0.16em] text-white/50">Task library</p>
@@ -1657,7 +1675,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-[24px] shadow-[0_14px_40px_rgba(21,53,72,0.045)] border border-[#e3e9ed]">
+                <div className="bg-white p-8 rounded-[28px]  border border-[#dce4ed]">
                   <div className="mb-6">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#1b82a9]">Create</p>
                     <h4 className="mt-1 text-[20px] font-semibold tracking-tight">Add a new responsibility</h4>
@@ -1780,7 +1798,7 @@ export default function App() {
                   {user?.role === "Superadmin" && (
                     <button
                       onClick={() => setIsCategoryModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-bold text-text-secondary bg-gray-50 border border-border-apple/50 hover:bg-gray-100 transition-all"
+                      className="flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-bold text-text-secondary bg-gray-50 border border-[#dce4ed] hover:bg-gray-100 transition-all"
                     >
                       <Plus className="w-4 h-4" />
                       New Category
@@ -1801,7 +1819,7 @@ export default function App() {
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2 }}
-                        className="bg-white p-6 rounded-[20px] shadow-[0_10px_32px_rgba(21,53,72,0.045)] border border-[#e3e9ed] hover:border-[#c9d8df] hover:shadow-[0_16px_38px_rgba(21,53,72,0.075)] transition-all duration-300 flex flex-col"
+                        className="bg-white p-6 rounded-[20px] shadow-[0_10px_32px_rgba(21,53,72,0.045)] border border-[#dce4ed] hover:border-[#c9d8df] hover:shadow-[0_16px_38px_rgba(21,53,72,0.075)] transition-all duration-300 flex flex-col"
                       >
                         <div className="flex justify-between items-start mb-4">
                           <div className="flex-1">
@@ -1859,7 +1877,7 @@ export default function App() {
                               const text = typeof st === 'string' ? st : st.text;
                               return (
                                 <div key={idx} className="flex items-center gap-3">
-                                  <div className="w-4 h-4 rounded-full border border-border-apple/60 flex items-center justify-center" />
+                                  <div className="w-4 h-4 rounded-full border border-[#dce4ed] flex items-center justify-center" />
                                   <span className="text-[13px] font-medium leading-tight text-text-secondary">
                                     {text}
                                   </span>
@@ -1879,7 +1897,7 @@ export default function App() {
                     ))}
                   </AnimatePresence>
                   {tasks.filter(t => selectedCategory === "All" || t.category === selectedCategory).filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
-                    <div className="col-span-full py-20 flex flex-col items-center justify-center text-center bg-white rounded-[32px] border border-dashed border-border-apple/60">
+                    <div className="col-span-full py-20 flex flex-col items-center justify-center text-center bg-white rounded-[32px] border border-dashed border-[#dce4ed]">
                       <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4">
                         <Search className="w-8 h-8 text-text-secondary/30" />
                       </div>
@@ -1892,19 +1910,8 @@ export default function App() {
             )}
 
             {activeTab === "History" && (
-              <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
-                <div className="flex items-center justify-between mb-8">
-                  <div>
-                    <h4 className="text-[22px] font-bold tracking-tight">Task History</h4>
-                    <p className="text-[14px] text-text-secondary font-medium">Review and edit your daily completions</p>
-                  </div>
-                  <div className="flex items-center gap-3 bg-[#F8F9FA] p-1 rounded-xl border border-border-apple/50">
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg shadow-sm border border-border-apple/40">
-                      <div className="w-2 h-2 rounded-full bg-accent-green" />
-                      <span className="text-[11px] font-bold uppercase tracking-wider">Completed</span>
-                    </div>
-                  </div>
-                </div>
+              <div className="mx-auto w-full max-w-[1500px] space-y-5">
+                <PageHero eyebrow="Daily tracker" title="Task History" description="Every day's completed tasks for the month. Pick a day to see what was done and edit today's remarks." />
                 <HistoryCalendar 
                   history={history} 
                   onUpdateRemark={updateHistoryRemark} 
@@ -1916,46 +1923,32 @@ export default function App() {
             )}
 
             {activeTab === "Portal" && (
-              <div className="flex flex-col gap-10">
-                <div className="flex items-center justify-between">
-                  <h1 className="text-[34px] font-bold tracking-tight text-text-primary">Portal</h1>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => {
-                        setIsAddingPortal(true);
-                        setEditingPortalLink(null);
-                        setNewPortalTitle("");
-                        setNewPortalUrl("");
-                        setNewPortalFolder("");
-                      }}
-                      className="bg-white border border-border-apple text-text-primary px-6 py-3 rounded-2xl font-bold text-sm hover:bg-gray-50 transition-all shadow-apple flex items-center gap-2"
+              <div className="flex flex-col gap-6">
+                <PageHero eyebrow="Quick access" title="Portal" description="Systems, folders and dashboards used in daily operations.">
+                  <div className="flex shrink-0 flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => { setIsAddingPortal(true); setEditingPortalLink(null); setNewPortalTitle(""); setNewPortalUrl(""); setNewPortalFolder(""); }}
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
                     >
-                      <PlusCircle className="w-5 h-5 text-text-secondary" />
-                      <span>New Folder</span>
+                      <PlusCircle className="h-4 w-4" />New Folder
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
                         setIsAddingPortal(!isAddingPortal);
-                        if (isAddingPortal) {
-                          setEditingPortalLink(null);
-                          setNewPortalTitle("");
-                          setNewPortalUrl("");
-                          setNewPortalFolder("");
-                        }
+                        if (isAddingPortal) { setEditingPortalLink(null); setNewPortalTitle(""); setNewPortalUrl(""); setNewPortalFolder(""); }
                       }}
-                      className="bg-accent-blue text-white px-6 py-3 rounded-2xl font-bold text-sm hover:bg-[#0077ED] transition-all shadow-lg shadow-accent-blue/20 flex items-center gap-2"
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#18bff2] px-4 py-2.5 text-sm font-bold text-[#06364f] transition hover:bg-[#4fd0f6]"
                     >
-                      <PlusCircle className="w-5 h-5" />
-                      <span>{isAddingPortal ? "Cancel" : "New Link"}</span>
+                      <PlusCircle className="h-4 w-4" />{isAddingPortal ? "Cancel" : "New Link"}
                     </button>
                   </div>
-                </div>
+                </PageHero>
 
                 {isAddingPortal && (
                   <motion.div 
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-white p-8 rounded-[32px] border border-border-apple shadow-apple"
+                    className="bg-white p-6 sm:p-7 rounded-[24px] border border-[#dce4ed]"
                   >
                     <h3 className="text-[18px] font-bold mb-6">{editingPortalLink ? "Edit Portal Link" : "Add New Link"}</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2002,100 +1995,51 @@ export default function App() {
                   </motion.div>
                 )}
 
-                {/* Folders Section */}
-                <div className="space-y-6">
-                  <h2 className="text-[20px] font-bold text-text-primary">Folders</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {/* All Links folder */}
-                    <button 
-                      onClick={() => setSelectedPortalFolder("All")}
+                {/* Folders */}
+                <div className="flex flex-wrap gap-2">
+                  {[["All", "All links", portalLinks.length], ...Object.entries(groupedPortalLinks).map(([folder, links]) => [folder, folder, (links as PortalLink[]).length])].map(([folder, label, count]) => (
+                    <button
+                      key={folder as string}
+                      onClick={() => setSelectedPortalFolder(folder as string)}
                       className={cn(
-                        "p-6 rounded-[24px] border transition-all text-left flex flex-col gap-1",
-                        selectedPortalFolder === "All" 
-                          ? "bg-[#EBF5FF] border-accent-blue/30 shadow-sm" 
-                          : "bg-white border-border-apple hover:border-accent-blue/20"
+                        "rounded-full px-4 py-2 text-xs font-semibold transition",
+                        selectedPortalFolder === folder ? "bg-[#0b587b] text-white shadow-sm" : "border border-[#dce4ed] bg-white text-slate-600 hover:border-[#0b587b]/30 hover:text-[#0b587b]"
                       )}
                     >
-                      <h3 className={cn("text-[16px] font-bold", selectedPortalFolder === "All" ? "text-accent-blue" : "text-text-primary")}>All Links</h3>
-                      <p className="text-[12px] font-medium text-text-secondary">{portalLinks.length} items</p>
+                      {label}<span className={cn("ml-1.5", selectedPortalFolder === folder ? "text-white/70" : "text-slate-400")}>{count}</span>
                     </button>
-                    
-                    {/* Custom folders */}
-                    {Object.entries(groupedPortalLinks).map(([folder, links]) => (
-                      <button 
-                        key={folder}
-                        onClick={() => setSelectedPortalFolder(folder)}
-                        className={cn(
-                          "p-6 rounded-[24px] border transition-all text-left flex flex-col gap-1",
-                          selectedPortalFolder === folder
-                            ? "bg-[#EBF5FF] border-accent-blue/30 shadow-sm" 
-                            : "bg-white border-border-apple hover:border-accent-blue/20"
-                        )}
-                      >
-                        <h3 className={cn("text-[16px] font-bold", selectedPortalFolder === folder ? "text-accent-blue" : "text-text-primary")}>{folder}</h3>
-                        <p className="text-[12px] font-medium text-text-secondary">{(links as PortalLink[]).length} items</p>
-                      </button>
-                    ))}
-                  </div>
+                  ))}
                 </div>
 
-                {/* Links Section */}
-                <div className="space-y-6">
-                  <h2 className="text-[20px] font-bold text-text-primary">
-                    {selectedPortalFolder === "All" ? "All Links" : `${selectedPortalFolder}`}
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {(selectedPortalFolder === "All" 
-                      ? portalLinks 
-                      : (groupedPortalLinks[selectedPortalFolder] as PortalLink[] || [])
-                    ).map((link) => (
-                      <div 
-                        key={link.id} 
-                        className="group bg-white border border-border-apple rounded-[24px] p-6 flex flex-col justify-between hover:border-accent-blue/30 hover:shadow-apple transition-all duration-300"
-                      >
-                        <div>
-                          <div className="flex items-start justify-between mb-4">
-                            <h3 className="text-[17px] font-bold text-text-primary leading-tight group-hover:text-accent-blue transition-colors">{link.title}</h3>
-                            {user?.role === "Superadmin" && (
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                <button 
-                                  onClick={() => openPortalEdit(link)}
-                                  className="p-2 text-text-secondary hover:text-accent-blue hover:bg-blue-50 rounded-lg transition-all"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button 
-                                  onClick={() => deletePortalLink(link.id)}
-                                  className="p-2 text-text-secondary hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-[12px] text-text-secondary truncate mb-6">{link.url}</p>
+                {/* Links */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {(selectedPortalFolder === "All" ? portalLinks : (groupedPortalLinks[selectedPortalFolder] as PortalLink[] || [])).map((link) => (
+                    <div key={link.id} className="relative">
+                      <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} className="group block min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]">
+                        <div className="flex items-center justify-between">
+                          <LinkLogo link={{ title: link.title, group: link.folder }} />
+                          <ArrowRight className={cn("h-4 w-4 text-[#9bc8da] transition group-hover:translate-x-1", user?.role === "Superadmin" && "mr-16")} />
                         </div>
-                        <a 
-                          href={link.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="w-full bg-[#F8F9FA] text-text-primary py-3 rounded-xl font-bold text-[13px] hover:bg-accent-blue hover:text-white transition-all text-center flex items-center justify-center gap-2"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          Open Link
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                  
+                        <p className="mt-5 truncate font-semibold">{link.title}</p>
+                        <p className="mt-1 truncate text-xs text-[#9fb8c7]">{link.folder || link.url}</p>
+                      </a>
+                      {user?.role === "Superadmin" && (
+                        <div className="absolute right-4 top-5 flex gap-1">
+                          <button onClick={() => openPortalEdit(link)} className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-[#9fb8c7] transition hover:bg-[#20c7f4] hover:text-white" aria-label={`Edit ${link.title}`} title="Edit"><Edit2 className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => deletePortalLink(link.id)} className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-[#9fb8c7] transition hover:bg-rose-500 hover:text-white" aria-label={`Remove ${link.title}`} title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
                   {portalLinks.length === 0 && (
-                    <div className="py-20 flex flex-col items-center justify-center text-center opacity-60">
+                    <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[#dce4ed] bg-white py-16 text-center text-slate-500">
                       <Globe className="w-12 h-12 mb-4 text-text-secondary" />
                       <h6 className="text-[18px] font-bold">Portal is empty</h6>
                       <p className="text-sm font-medium">Add frequently used clinical resources and internal dashboards here</p>
                     </div>
                   )}
-                </div>
               </div>
             )}
 
@@ -2120,17 +2064,9 @@ export default function App() {
 
             {activeTab === "Notes" && (
               <div className="flex flex-col gap-6">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[24px] shadow-apple border border-border-apple/50">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-accent-blue/10 rounded-2xl flex items-center justify-center">
-                      <StickyNote className="w-6 h-6 text-accent-blue" />
-                    </div>
-                    <div>
-                      <h4 className="text-[20px] font-bold tracking-tight">Notes & Reminders</h4>
-                      <p className="text-[13px] text-text-secondary font-medium">Manage clinic reminders and tasks</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 w-full md:w-auto">
+                <PageHero eyebrow="Reminders" title="Notes & Reminders" description="Manage clinic reminders and tasks." />
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[28px] border border-[#dce4ed]">
+                  <div className="flex items-center gap-3 w-full md:ml-auto md:w-auto">
                     <div className="relative flex-1 md:w-64">
                       <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
                       <input 
@@ -2156,7 +2092,7 @@ export default function App() {
                     <motion.div 
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50 h-fit sticky top-6"
+                      className="bg-white p-8 rounded-[28px] border border-[#dce4ed] h-fit sticky top-6"
                     >
                       <h5 className="text-[16px] font-bold mb-6">{editingNote ? "Edit Note" : "Create Reminder"}</h5>
                       <div className="flex flex-col gap-5">
@@ -2233,12 +2169,12 @@ export default function App() {
 
                   <div className={cn("grid gap-6", isAddingNote ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3")}>
                     {isLoading ? (
-                      <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-[24px] border border-border-apple/50 shadow-apple">
+                      <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-[28px] border border-[#dce4ed]">
                         <Loader2 className="w-10 h-10 text-accent-blue animate-spin mb-4" />
                         <p className="text-text-secondary font-bold uppercase tracking-widest text-[11px]">Loading Notes...</p>
                       </div>
                     ) : !notes || notes.length === 0 ? (
-                      <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-[24px] border border-border-apple/50 shadow-apple">
+                      <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-[28px] border border-[#dce4ed]">
                         <StickyNote className="w-12 h-12 text-gray-200 mb-4" />
                         <p className="text-text-secondary font-bold uppercase tracking-widest text-[11px]">No notes found</p>
                         <button 
@@ -2261,8 +2197,8 @@ export default function App() {
                               layout
                               key={note.id} 
                               className={cn(
-                                "bg-white p-6 rounded-[24px] shadow-sm border transition-all duration-300 flex flex-col h-full group",
-                                isOverdue ? "border-red-200 bg-red-50/30" : "border-border-apple/50 hover:shadow-md"
+                                "bg-white p-6 rounded-[28px] shadow-sm border transition-all duration-300 flex flex-col h-full group",
+                                isOverdue ? "border-red-200 bg-red-50/30" : "border-[#dce4ed] hover:shadow-md"
                               )}
                             >
                               <div className="flex justify-between items-start mb-4">
@@ -2518,7 +2454,7 @@ export default function App() {
                             "px-3 py-2 rounded-xl text-[11px] font-bold transition-all border",
                             newCategoryColor === color 
                               ? "ring-2 ring-accent-blue ring-offset-2 border-transparent" 
-                              : "border-border-apple/50 hover:border-accent-blue/30"
+                              : "border-[#dce4ed] hover:border-accent-blue/30"
                           )}
                         >
                           <span className={cn("px-2 py-0.5 rounded-md", color)}>Sample</span>
@@ -2543,7 +2479,7 @@ export default function App() {
                   </div>
 
                   {/* List of existing custom categories to allow deletion */}
-                  <div className="mt-8 pt-6 border-t border-border-apple/50">
+                  <div className="mt-8 pt-6 border-t border-[#dce4ed]">
                     <h4 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-4 ml-1">Existing Categories</h4>
                     <div className="max-h-[200px] overflow-y-auto pr-1 flex flex-col gap-2 custom-scrollbar">
                       {taskCategories.filter(cat => cat.name !== "General").map((cat) => (
@@ -2562,7 +2498,7 @@ export default function App() {
                         </div>
                       ))}
                       {taskCategories.filter(cat => cat.name !== "General").length === 0 && (
-                        <p className="text-[11px] text-text-secondary italic text-center py-4 bg-[#F8F9FA] rounded-xl border border-dashed border-border-apple/50">
+                        <p className="text-[11px] text-text-secondary italic text-center py-4 bg-[#F8F9FA] rounded-xl border border-dashed border-[#dce4ed]">
                           No custom categories yet.
                         </p>
                       )}
@@ -2696,7 +2632,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
 
   if (isLoading) {
     return (
-      <div className="bg-white p-12 rounded-[24px] shadow-apple border border-border-apple/50 flex flex-col items-center justify-center">
+      <div className="bg-white p-12 rounded-[28px] shadow-apple border border-[#dce4ed] flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-4 border-accent-blue/20 border-t-accent-blue rounded-full animate-spin mb-4" />
         <p className="text-text-secondary font-medium">Loading accounts...</p>
       </div>
@@ -2704,7 +2640,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
   }
 
   return (
-    <div className="bg-white p-8 rounded-[24px] shadow-apple border border-border-apple/50">
+    <div className="bg-white p-8 rounded-[28px] border border-[#dce4ed]">
       <div className="flex justify-between items-center mb-8">
         <div>
           <h4 className="text-[22px] font-bold tracking-tight">User Management</h4>
@@ -2722,7 +2658,7 @@ export function UserManagement({ allUsers, onAddUser, onDeleteUser, onUpdateUser
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-border-apple/50">
+            <tr className="border-b border-[#dce4ed]">
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Full Name</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Email</th>
               <th className="py-4 px-4 text-[11px] font-bold text-text-secondary uppercase tracking-widest">Role</th>
@@ -2962,103 +2898,79 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
       ]
     : [];
 
+  const monthEntries = history.filter(h => { try { const d = new Date(h.dateCompleted); return !isNaN(d.getTime()) && isSameMonth(d, currentMonth); } catch { return false; } });
+  const activeDays = new Set(monthEntries.map(h => format(new Date(h.dateCompleted), "yyyy-MM-dd"))).size;
+  // Days that have passed (today included) are the ones work could have been recorded.
+  const daysDue = isSameMonth(currentMonth, today) ? today.getDate() : currentMonth < today ? endOfMonth(currentMonth).getDate() : 0;
+  const averagePerDay = activeDays ? (monthEntries.length / activeDays).toFixed(1).replace(/\.0$/, "") : "0";
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-10">
-      <div className="bg-[#F8F9FA] p-8 rounded-[24px] border border-border-apple/60">
-        <div className="flex justify-between items-center mb-8 gap-4">
-          <div>
-            <h5 className="text-[18px] font-bold tracking-tight">{format(currentMonth, "MMMM yyyy")}</h5>
-            <label className="mt-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#81929e]">
-              Jump to date
-              <input
-                type="date"
-                value={jumpDate}
-                onChange={(event) => setJumpDate(event.target.value)}
-                className="rounded-lg border border-[#dce5e9] bg-white px-2 py-1 text-[11px] font-medium tracking-normal text-[#29465a] outline-none focus:border-[#0b587b]"
-              />
-              <button
-                type="button"
-                onClick={() => jumpToDate(jumpDate)}
-                className="rounded-lg bg-[#0b587b] px-2.5 py-1.5 text-[10px] font-bold normal-case tracking-normal text-white transition-colors hover:bg-[#084866]"
-              >
-                Go
-              </button>
-            </label>
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[[`${activeDays} / ${daysDue}`, "Days with activity"], [monthEntries.length, "Tasks completed"], [averagePerDay, "Average per active day"], [completionsForDate.filter((entry: any) => !entry.isLeave).length, "Done on selected day"]].map(([value, label]) => (
+          <div key={label as string} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.05)]">
+            <p className="text-3xl font-semibold tracking-tight text-[#14233b]">{value}</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">{label}</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={prevMonth} className="p-2 hover:bg-white rounded-xl border border-transparent hover:border-border-apple transition-all"><ChevronLeft className="w-5 h-5" /></button>
-            <button onClick={nextMonth} className="p-2 hover:bg-white rounded-xl border border-transparent hover:border-border-apple transition-all"><ChevronRight className="w-5 h-5" /></button>
+        ))}
+      </section>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="rounded-[24px] bg-white p-6 shadow-[0_12px_35px_rgba(20,35,59,0.08)] sm:p-8">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{format(currentMonth, "MMMM yyyy")}</h2>
+          <div className="flex items-center gap-1">
+            <button onClick={prevMonth} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" aria-label="Previous month"><ChevronLeft className="h-5 w-5" /></button>
+            <button onClick={() => { setCurrentMonth(today); setSelectedDate(today); setJumpDate(format(today, "yyyy-MM-dd")); }} className="rounded-xl px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-[#e8f7fd]">Today</button>
+            <button onClick={nextMonth} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100" aria-label="Next month"><ChevronRight className="h-5 w-5" /></button>
           </div>
         </div>
-        <div className="grid grid-cols-7 gap-3">
+        <label className="mt-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+          Jump to date
+          <input type="date" value={jumpDate} onChange={(event) => setJumpDate(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium tracking-normal text-[#29465a] outline-none focus:border-[#0b587b]" />
+          <button type="button" onClick={() => jumpToDate(jumpDate)} className="rounded-lg bg-[#0b587b] px-2.5 py-1.5 text-[10px] font-bold normal-case tracking-normal text-white transition-colors hover:bg-[#084866]">Go</button>
+        </label>
+        <div className="mt-5 grid grid-cols-7 gap-1.5 sm:gap-2">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
-            <div key={d} className="text-center text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2">{d}</div>
+            <p key={d} className="pb-1 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">{d}</p>
           ))}
           {days.map((day, i) => {
             const isTodayDay = isSameDay(day, today);
             const isSelected = selectedDate && isSameDay(day, selectedDate);
-            
-            const hasCompletions = history.some(h => {
-              try {
-                const d = new Date(h.dateCompleted);
-                return !isNaN(d.getTime()) && isSameDay(d, day);
-              } catch { return false; }
-            });
-            
+            const count = history.filter(h => { try { const d = new Date(h.dateCompleted); return !isNaN(d.getTime()) && isSameDay(d, day); } catch { return false; } }).length;
+            const off = staffSettings.some(s => isStaffOff(s.email, day));
             return (
               <button
                 key={i}
-                onClick={() => {
-                  setSelectedDate(day);
-                  setJumpDate(format(day, "yyyy-MM-dd"));
-                }}
+                onClick={() => { setSelectedDate(day); setJumpDate(format(day, "yyyy-MM-dd")); }}
                 className={cn(
-                  "aspect-square rounded-2xl flex flex-col items-center justify-center relative transition-all border group",
-                  isSelected 
-                    ? "bg-accent-blue text-white border-accent-blue shadow-lg shadow-accent-blue/20" 
-                    : "bg-white hover:bg-gray-50 border-border-apple/40 hover:border-border-apple",
-                  !isSameMonth(day, currentMonth) && "opacity-20",
-                  !isSelected && staffSettings.some(s => isStaffOff(s.email, day)) && "bg-slate-50/50"
+                  "relative flex aspect-square flex-col items-center justify-center rounded-2xl border text-sm transition",
+                  isSelected ? "border-[#0b587b] bg-[#0b587b] text-white shadow-lg shadow-[#0b587b]/20" : "border-slate-100 bg-[#f8fafb] hover:border-slate-300 hover:bg-white",
+                  !isSameMonth(day, currentMonth) && "opacity-30"
                 )}
               >
-                <div className="flex flex-col items-center">
-                  <span className={cn("text-[15px] font-bold", isTodayDay && !isSelected && "text-accent-blue")}>
-                    {format(day, "d")}
-                  </span>
-                  {staffSettings.some(s => isStaffOff(s.email, day)) && (
-                    <span className={cn(
-                      "text-[8px] font-bold uppercase tracking-widest mt-0.5",
-                      isSelected ? "text-white/80" : "text-slate-500"
-                    )}>
-                      Off
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-1 mt-1">
-                  {hasCompletions && (
-                    <div className={cn(
-                      "w-1 h-1 rounded-full",
-                      isSelected ? "bg-white" : "bg-accent-green"
-                    )} />
-                  )}
-                </div>
+                <span className={cn("font-semibold", isTodayDay && !isSelected && "text-[#0b9aca]")}>{format(day, "d")}</span>
+                {count > 0 && <span className={cn("mt-1 text-[10px] font-semibold", isSelected ? "text-white/85" : "text-slate-500")}>{count} done</span>}
+                {off && count === 0 && <span className={cn("mt-1 text-[9px] font-bold uppercase tracking-widest", isSelected ? "text-white/80" : "text-slate-400")}>Off</span>}
+                {count > 0 && <span className={cn("absolute bottom-1.5 h-1 w-6 rounded-full", isSelected ? "bg-white/70" : "bg-emerald-500")} />}
               </button>
             );
           })}
         </div>
+        <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-500">
+          <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-emerald-500" />Tasks completed</span>
+          <span className="flex items-center gap-1.5"><span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Off</span>Staff off or on leave</span>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between px-2">
-          <h5 className="text-[18px] font-bold tracking-tight">
-            {selectedDate ? format(selectedDate, "MMMM d, yyyy") : "Select a date"}
-          </h5>
-          <div className="bg-accent-green/10 text-accent-green px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider">
-            {completionsForDate.length} Done
-          </div>
+      <div className="rounded-[24px] bg-white p-6 shadow-[0_12px_35px_rgba(20,35,59,0.08)] sm:p-8 lg:max-h-[calc(100vh/0.95-120px)] lg:overflow-y-auto">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0b9aca]">
+            {selectedDate ? format(selectedDate, "EEEE, d MMMM yyyy") : "Select a date"}
+          </p>
+          <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700">{completionsForDate.filter((entry: any) => !entry.isLeave).length} done</span>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
+        <div className="mt-4 space-y-4">
           {staffOnLeaveOnSelectedDate.length > 0 && (
             <div className="bg-slate-50 p-5 rounded-[20px] border border-slate-200 mb-2 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
@@ -3093,8 +3005,8 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
               }
               return (
                 <div key={i} className={cn(
-                  "p-5 rounded-[20px] border shadow-sm",
-                  entry.isLeave ? "bg-slate-50 border-slate-200" : "bg-white border-border-apple/50"
+                  "p-4 rounded-2xl border",
+                  entry.isLeave ? "bg-slate-50 border-slate-200" : "bg-[#fbfdfe] border-slate-100"
                 )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -3142,7 +3054,7 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
                   )}
                   <div className={cn(
                     "border rounded-xl p-3",
-                    entry.isLeave ? "bg-white border-slate-200" : "bg-[#F8F9FA] border-border-apple/60"
+                    entry.isLeave ? "bg-white border-slate-200" : "bg-[#F8F9FA] border-[#dce4ed]"
                   )}>
                     <p className={cn(
                       "text-[10px] font-bold uppercase tracking-widest mb-1",
@@ -3174,12 +3086,13 @@ function HistoryCalendar({ history, onUpdateRemark, onUndo, today, staffSettings
               );
             })
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-[#F8F9FA] rounded-[24px] border border-dashed border-border-apple">
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-[#F8F9FA] rounded-[28px] border border-dashed border-border-apple">
               <Clock className="w-8 h-8 text-text-secondary/30 mb-3" />
               <p className="text-[14px] text-text-secondary italic">No tasks completed on this day.</p>
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );
