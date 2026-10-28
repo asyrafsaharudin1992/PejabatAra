@@ -168,3 +168,48 @@
   .pdf-print-page:last-child { break-after: auto; page-break-after: auto; }
   .pdf-print-page img { display: block; margin: 0 auto; width: var(--w); height: var(--h); max-width: 180mm; max-height: 255mm; object-fit: contain; }
 }
+
+/* Performance Review printed like the paper form (see src/ReviewSheet.tsx). Colours are forced on
+   so the level colours print even with "Print backgrounds" off in Safari. */
+.rv-print { display: none; font-family: Arial, Helvetica, sans-serif; color: #000; }
+.rv-print * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.rv-page { width: 180mm; margin: 0 auto; padding-top: 4mm; font-size: 8.5pt; line-height: 1.25; }
+.rv-letterhead { display: flex; align-items: center; gap: 4mm; border-bottom: 0.4mm solid #002060; padding-bottom: 1.5mm; font-size: 9pt; }
+.rv-letterhead img { width: 15mm; height: 15mm; object-fit: contain; }
+.rv-letterhead div { display: flex; flex-direction: column; gap: 0.5mm; } .rv-letterhead strong { font-size: 12pt; }
+.rv-title { margin-top: 2mm; background: #002060; color: #fff; text-align: center; font-weight: 700; font-size: 10.5pt; padding: 1.6mm 0; }
+.rv-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8mm 4mm; margin: 2mm 0; }
+.rv-fields p { border-bottom: 0.2mm solid #999; padding: 0.5mm 0; } .rv-fields span { font-weight: 700; }
+.rv-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.rv-table th, .rv-table td { border: 0.25mm solid #000; padding: 0.8mm 1.2mm; vertical-align: middle; }
+.rv-table th { font-size: 7.5pt; text-align: center; font-weight: 700; }
+.rv-table .rv-w { text-align: center; } .rv-table .rv-lv { font-size: 7pt; }
+.rv-kra { padding: 0 !important; text-align: center; } .rv-kra span { display: block; writing-mode: vertical-rl; transform: rotate(180deg); margin: 0 auto; font-weight: 700; font-size: 7.5pt; white-space: nowrap; }
+.rv-crit { height: 7.4mm; font-size: 8pt; } .rv-weight { font-weight: 700; font-size: 10pt; } .rv-box { text-align: center; }
+.rv-mark { display: inline-block; width: 3.6mm; height: 3.6mm; border: 0.3mm solid #000; border-radius: 50%; vertical-align: middle; }
+.rv-mark.rv-on, .rv-check.rv-on { background: #000; }
+.rv-total td { height: 7.4mm; font-size: 9pt; } .rv-totalcell { border: 0 !important; } .rv-black { background: #000; color: #fff; font-weight: 700; }
+.rv-areas { margin: 1.5mm 0; font-size: 7.5pt; color: #333; text-align: center; }
+.rv-bands { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 2mm; }
+.rv-bands th, .rv-bands td { border: 0.25mm solid #000; padding: 1.2mm; text-align: center; font-size: 7.5pt; }
+.rv-bands th { width: 32mm; font-weight: 700; } .rv-bands td.rv-hit { font-weight: 700; outline: 0.7mm solid #000; outline-offset: -0.7mm; }
+.rv-bar { background: #9dc3e6; text-align: center; font-weight: 700; padding: 1mm 0; margin-top: 3mm; font-size: 9pt; }
+.rv-lines p { border-bottom: 0.2mm solid #000; min-height: 5.6mm; padding: 0.8mm 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rv-pip { border: 0.3mm solid #000; padding: 2mm 3mm; margin-top: 4mm; } .rv-pip p { margin: 0.8mm 0; }
+.rv-pipbody { display: grid; grid-template-columns: 70mm 1fr; gap: 4mm; } .rv-remarks { border-bottom: 0.2mm solid #000; min-height: 12mm; white-space: pre-wrap; }
+.rv-check { display: inline-block; width: 3.6mm; height: 3.6mm; border: 0.3mm solid #000; vertical-align: middle; margin-right: 1.5mm; }
+.rv-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin-top: 8mm; }
+.rv-sign p { margin-top: 1.5mm; } .rv-sigline { display: block; border-bottom: 0.25mm solid #000; height: 12mm; margin-bottom: 1mm; }
+.rv-hr { border: 0.3mm solid #000; padding: 2mm 3mm; margin-top: 8mm; } .rv-hr p { margin: 1.2mm 0; }
+@media print {
+  html:has(body.rv-printing), body.rv-printing { background: #fff !important; }
+  html:has(body.rv-printing) { zoom: 1 !important; }
+  body.rv-printing { margin: 0 !important; }
+  body.rv-printing > *:not(.rv-print):not(style) { display: none !important; }
+  body.rv-printing .rv-print { display: block; }
+  .rv-page { break-after: page; page-break-after: always; }
+  .rv-page:last-child { break-after: auto; page-break-after: auto; }
+}
+
+.rv-esign { position: relative; } .rv-esign span { display: block; font-family: "Snell Roundhand", "Brush Script MT", "Segoe Script", cursive; font-size: 14pt; line-height: 1; color: #1a237e; padding-top: 2mm; white-space: nowrap; overflow: hidden; }
+.rv-esign small { position: absolute; left: 0; bottom: 0.6mm; font: 5.5pt Arial, Helvetica, sans-serif; color: #444; white-space: nowrap; }

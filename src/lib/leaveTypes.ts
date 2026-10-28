@@ -1,0 +1,51 @@
+// Leave types and groups as set up for HSO in Infotech (Master → Leave Type / Leave Group),
+// with the same codes so AraOffice leave data lines up with Infotech and its payroll.
+// Entitlements (days a year) are not here yet: they are kept in Infotech's INFO-LEAVE.
+export type LeaveType = { code: string; name: string; isLeave: boolean; pay: string; group: string };
+
+export const LEAVE_GROUPS: { code: string; name: string }[] = [
+  { code: 'AL', name: 'Annual Leave' },
+  { code: 'AL OPS', name: 'Annual Leave - Operation' },
+  { code: 'DENTAL', name: 'Dental Leave' },
+  { code: 'HAJUMR', name: 'Haji/Umrah Leave' },
+  { code: 'HOSP', name: 'Hospitalization Leave' },
+  { code: 'MARRG', name: 'Marriage Leave' },
+  { code: 'MATN', name: 'Maternity Leave' },
+  { code: 'ML', name: 'Medical Leave' },
+  { code: 'MC OPS', name: 'Medical Leave - Operation' },
+  { code: 'OFF-IN-LIEU', name: 'Off-in-Lieu Leave' },
+  { code: 'GPATN', name: 'Paternity Leave' },
+  { code: 'TIME', name: 'Time Off' },
+  { code: 'ITRG', name: 'Training' },
+  { code: 'UL', name: 'Unpaid Leave' },
+];
+
+export const LEAVE_TYPES: LeaveType[] = [
+  { code: 'AL', name: 'Annual Leave', isLeave: true, pay: 'Paid', group: 'Annual Leave' },
+  { code: 'ALAM', name: 'Annual Leave (AM)', isLeave: true, pay: 'Half day paid (first half)', group: 'Annual Leave' },
+  { code: 'ALPM', name: 'Annual Leave (PM)', isLeave: true, pay: 'Half day paid (second half)', group: 'Annual Leave' },
+  { code: 'EL', name: 'Emergency Leave', isLeave: true, pay: 'Paid', group: 'Annual Leave' },
+  { code: 'ML', name: 'Medical Leave', isLeave: true, pay: 'Paid', group: 'Medical Leave' },
+  { code: 'MCAM', name: 'Medical Leave (AM)', isLeave: true, pay: 'Half day paid (first half)', group: 'Medical Leave' },
+  { code: 'MCPM', name: 'Medical Leave (PM)', isLeave: true, pay: 'Half day paid (second half)', group: 'Medical Leave' },
+  { code: 'HOSP', name: 'Hospitalization Leave', isLeave: true, pay: 'Paid', group: 'Hospitalization Leave' },
+  { code: 'MATN', name: 'Maternity Leave', isLeave: true, pay: 'Paid', group: 'Maternity Leave' },
+  { code: 'GPATN', name: 'Paternity Leave', isLeave: true, pay: 'Paid', group: 'Paternity Leave' },
+  { code: 'MARRG', name: 'Marriage Leave', isLeave: true, pay: 'Paid', group: 'Marriage Leave' },
+  { code: 'HAJI', name: 'Haji Leave (once in employment)', isLeave: true, pay: 'Paid', group: 'Haji/Umrah Leave' },
+  { code: 'UMRAH', name: 'Umrah (once in employment)', isLeave: true, pay: 'Paid', group: 'Haji/Umrah Leave' },
+  { code: 'HAJUMR', name: 'Haji / Umrah Leave', isLeave: true, pay: 'Paid', group: 'Haji/Umrah Leave' },
+  { code: 'UL', name: 'Unpaid Leave', isLeave: true, pay: 'Unpaid', group: 'Unpaid Leave' },
+  { code: 'ULEL', name: 'Unpaid Leave (Emergency)', isLeave: true, pay: 'Unpaid', group: 'Unpaid Leave' },
+  { code: 'ULAM', name: 'Unpaid Leave (AM)', isLeave: true, pay: 'Half day unpaid (first half)', group: 'Unpaid Leave' },
+  { code: 'ULPM', name: 'Unpaid Leave (PM)', isLeave: true, pay: 'Half day unpaid (second half)', group: 'Unpaid Leave' },
+  { code: 'HL', name: 'Hourly Leave', isLeave: true, pay: 'Hourly, unpaid', group: 'Unpaid Leave' },
+  { code: 'ABS', name: 'Absent', isLeave: false, pay: 'Unpaid', group: 'Absent' },
+  { code: 'PH', name: 'Public Holiday', isLeave: false, pay: 'Public holiday', group: 'Public Holiday' },
+  { code: 'RES', name: 'Rest Day', isLeave: false, pay: 'Rest day', group: 'Rest Day' },
+  { code: 'OFF', name: 'Time Off', isLeave: false, pay: 'Rest day', group: 'Time Off' },
+  { code: 'TIME', name: 'Time Slip', isLeave: false, pay: 'Paid', group: 'Time Off' },
+  { code: 'ITRG', name: 'Training', isLeave: false, pay: 'Paid', group: 'Training' },
+  { code: 'ITRGAM', name: 'Training (first half)', isLeave: false, pay: 'Half day paid (first half)', group: 'Training' },
+  { code: 'ITRGPM', name: 'Training (second half)', isLeave: false, pay: 'Half day paid (second half)', group: 'Training' },
+];

@@ -22,8 +22,11 @@ export async function activeAccount(req) {
   return { db, user: data.user, profile };
 }
 
-/** @param {string | string[]} [requiredOffice] */
-export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality') {
+/**
+ * @param {string | string[]} [requiredOffice]
+ * @param {boolean} [skipDeviceLock] for offices opened from the sign-in page without a registered device
+ */
+export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality', skipDeviceLock = false) {
   const { db, user, profile } = await activeAccount(req);
   const officeAccess = user.app_metadata?.office_access;
   // requiredOffice may list several offices; access to any one of them is enough.
@@ -31,7 +34,7 @@ export async function officeAccess(req, adminOnly = false, requiredOffice = 'qua
   if (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !offices.some((office) => officeAccess.includes(office)))) {
     throw Object.assign(new Error('Access restricted.'), { status: 403 });
   }
-  if (profile.role !== 'super_admin' && await deviceLockEnabled(db)) {
+  if (!skipDeviceLock && profile.role !== 'super_admin' && await deviceLockEnabled(db)) {
     const device = await currentDevice(db, req);
     if (!device) throw Object.assign(new Error(DEVICE_REQUIRED), { status: 403 });
   }

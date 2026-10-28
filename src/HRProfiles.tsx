@@ -1,0 +1,181 @@
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Eye, EyeOff, History, Pencil, Plus, Search, Trash2, UserPlus } from 'lucide-react';
+import { officeFetch } from './lib/officeApi';
+import { card, input } from './AssessmentStaff';
+import { LEAVE_GROUPS } from './lib/leaveTypes';
+
+// Office HR staff profiles: the employee master for leave, attendance and payroll.
+// The directory shows only names and jobs; a full profile (IC, address, bank, statutory
+// numbers) is loaded one person at a time, with IC and bank details hidden until shown.
+const API = '/api/status?resource=hr';
+
+type Child = { name: string; dateOfBirth: string | null; studying: boolean; disabled: boolean };
+type Allowance = { name: string; amount: number };
+export type Employee = {
+  id?: string; company: 'KJ' | 'SK' | ''; employeeCode: string; fullName: string; assessmentStaffId?: string | null;
+  icNo: string; passportNo: string; nationality: string; gender: '' | 'Male' | 'Female'; dateOfBirth: string | null; religion: string;
+  maritalStatus: '' | 'Single' | 'Married' | 'Divorced' | 'Widowed'; spouseWorking: boolean | null; children: Child[]; phone: string; email: string; address: string;
+  emergencyName: string; emergencyRelation: string; emergencyPhone: string;
+  branch: string; department: string; designation: string; employmentType: string; joinDate: string | null; confirmDate: string | null; resignDate: string | null;
+  status: string; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; updatedAt?: string;
+};
+type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'>;
+type Audit = { action: string; changes: Record<string, [unknown, unknown]>; at: string; by: string };
+
+const blank = (): Employee => ({ company: '', employeeCode: '', fullName: '', icNo: '', passportNo: '', nationality: 'Malaysian', gender: '', dateOfBirth: null, religion: '', maritalStatus: '', spouseWorking: null, children: [], phone: '', email: '', address: '', emergencyName: '', emergencyRelation: '', emergencyPhone: '', branch: '', department: '', designation: '', employmentType: 'Permanent', joinDate: null, confirmDate: null, resignDate: null, status: 'Active', leaveGroup: 'AL', basicSalary: 0, fixedAllowances: [], bankName: '', bankAccount: '', epfNo: '', socsoNo: '', taxNo: '', remarks: '' });
+const dmy = (date: string | null) => date ? date.split('-').reverse().join('/') : '—';
+const masked = (value: string) => value ? `•••• ${value.replace(/\s/g, '').slice(-4)}` : '—';
+const money = (value: number) => `RM ${value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Years and months since joining, for the profile header and (later) leave entitlement.
+function service(joinDate: string | null) {
+  if (!joinDate) return '';
+  const [y, m, d] = joinDate.split('-').map(Number);
+  const now = new Date();
+  let months = (now.getFullYear() - y) * 12 + now.getMonth() + 1 - m - (now.getDate() < d ? 1 : 0);
+  if (months < 0) months = 0;
+  return `${Math.floor(months / 12)}y ${months % 12}m`;
+}
+const STATUS_TONE: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
+const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances' };
+// IC, bank and salary changes are shown without their values in the history.
+const SECRET = new Set(['ic_no', 'passport_no', 'bank_account', 'basic_salary', 'fixed_allowances', 'epf_no', 'socso_no', 'tax_no']);
+
+async function api(query: string, body?: unknown) {
+  const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  return response.json();
+}
+
+export function HRProfiles({ onError }: { onError: (message: string) => void }) {
+  const [employees, setEmployees] = useState<Summary[] | null>(null);
+  const [notSetUp, setNotSetUp] = useState('');
+  const [openId, setOpenId] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
+  const [company, setCompany] = useState('');
+  const [status, setStatus] = useState('Active');
+  const [sort, setSort] = useState<{ key: keyof Summary; dir: 1 | -1 }>({ key: 'employeeCode', dir: 1 });
+
+  const load = async () => {
+    try { setEmployees((await api('action=employees')).employees); setNotSetUp(''); }
+    catch (cause) { const message = cause instanceof Error ? cause.message : 'Unable to load staff.'; if (message.includes('not set up')) setNotSetUp(message); else onError(message); setEmployees([]); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  if (adding) return <ProfileEditor employee={blank()} onCancel={() => setAdding(false)} onSaved={async (saved) => { setAdding(false); await load(); setOpenId(saved.id || ''); }} onError={onError} />;
+  if (openId) return <ProfileView id={openId} onBack={() => { setOpenId(''); void load(); }} onError={onError} />;
+
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (employees || []).filter((row) => (!company || row.company === company) && (!status || row.status === status) && words.every((word) => `${row.fullName} ${row.employeeCode} ${row.designation} ${row.department}`.toLowerCase().includes(word)));
+  // Sorted by the chosen column; ties keep company then code order.
+  const sorted = [...shown].sort((a, b) => {
+    const left = String(a[sort.key] ?? ''), right = String(b[sort.key] ?? '');
+    return (left.localeCompare(right, undefined, { numeric: true }) || a.company.localeCompare(b.company) || a.employeeCode.localeCompare(b.employeeCode, undefined, { numeric: true })) * sort.dir;
+  });
+  const columns: { key: keyof Summary; label: string; className?: string }[] = [
+    { key: 'employeeCode', label: 'Code', className: 'w-[120px]' }, { key: 'fullName', label: 'Name' }, { key: 'designation', label: 'Position' },
+    { key: 'department', label: 'Department', className: 'w-[140px]' }, { key: 'company', label: 'Branch', className: 'w-[160px]' },
+    { key: 'joinDate', label: 'Joined', className: 'w-[110px]' }, { key: 'employmentType', label: 'Type', className: 'w-[100px]' }, { key: 'status', label: 'Status', className: 'w-[100px]' },
+  ];
+  const statusTone: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
+  return <div className="mx-auto max-w-[1500px] space-y-5">
+    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9"><div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff profiles</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Each staff member's personal, employment and pay details. Leave, attendance and payroll are worked out from these. IC and bank details stay hidden until you show them, and every change is logged.</p></div>{!notSetUp && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b3d59] hover:bg-[#e9f6fb]"><UserPlus className="h-4 w-4" />Add staff</button>}</div></section>
+    {notSetUp && <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{notSetUp}</p>}
+    {!notSetUp && <section className={`${card} flex flex-wrap items-center gap-3`}>
+      <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3"><Search className="h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, code, job or department" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
+      <select value={company} onChange={(event) => setCompany(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ & SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
+      <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Any status</option>{['Active', 'Inactive'].map((item) => <option key={item}>{item}</option>)}</select>
+      <span className="ml-auto text-xs text-slate-400">{employees ? `${shown.length} of ${employees.length}` : 'Loading…'}</span>
+    </section>}
+    {employees && !employees.length && !notSetUp && <p className={`${card} text-sm text-slate-500`}>No staff profiles yet. Press Add staff, or import them from Infotech.</p>}
+    {employees && employees.length > 0 && !notSetUp && <section className="overflow-hidden rounded-[24px] bg-white shadow-[0_12px_35px_rgba(20,35,59,0.08)]">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left text-sm">
+          <thead className="bg-[#f7fafc]"><tr className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+            <th className="w-12 px-4 py-3.5">No</th>
+            {columns.map((column) => <th key={column.key} className={`px-4 py-3.5 ${column.className || ''}`}><button type="button" onClick={() => setSort((current) => ({ key: column.key, dir: current.key === column.key ? (current.dir === 1 ? -1 : 1) : 1 }))} className="inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#0b587b]">{column.label}<span className={sort.key === column.key ? 'text-[#0b587b]' : 'opacity-0'}>{sort.dir === 1 ? '▲' : '▼'}</span></button></th>)}
+          </tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {sorted.map((row, index) => <tr key={row.id} onClick={() => setOpenId(row.id || '')} className={`cursor-pointer transition hover:bg-[#f4fafd] ${row.status !== 'Active' ? 'text-slate-400' : ''}`}>
+              <td className="px-4 py-3 text-xs text-slate-400">{index + 1}</td>
+              <td className="px-4 py-3 font-mono text-xs">{row.employeeCode}</td>
+              <td className="px-4 py-3"><span className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e9f6fb] text-[11px] font-bold text-[#0b587b]">{row.fullName.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}</span><span className="font-semibold text-[#14233b]">{row.fullName}</span></span></td>
+              <td className="px-4 py-3">{row.designation || '—'}</td>
+              <td className="px-4 py-3">{row.department || '—'}</td>
+              <td className="px-4 py-3"><span className="mr-2 rounded-md bg-[#eaf6fb] px-1.5 py-0.5 text-[10px] font-bold text-[#0b587b]">{row.company}</span>{row.branch || '—'}</td>
+              <td className="px-4 py-3 whitespace-nowrap">{dmy(row.joinDate)}</td>
+              <td className="px-4 py-3">{row.employmentType}</td>
+              <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone[row.status] || 'bg-slate-100 text-slate-500'}`}>{row.status}</span></td>
+            </tr>)}
+            {sorted.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">No staff match this search.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>}
+  </div>;
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="flex gap-3 py-2 text-sm"><dt className="w-40 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words">{children || '—'}</dd></div>;
+}
+
+function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
+  const [data, setData] = useState<{ employee: Employee; audit: Audit[] } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const load = async () => { try { setData(await api(`action=employee&id=${encodeURIComponent(id)}`)); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load profile.'); } };
+  useEffect(() => { void load(); }, [id]);
+  if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
+  const e = data.employee;
+  if (editing) return <ProfileEditor employee={e} onCancel={() => setEditing(false)} onSaved={async () => { setEditing(false); await load(); }} onError={onError} />;
+  const secret = (value: string) => reveal ? value || '—' : masked(value);
+  return <div className="mx-auto max-w-[1500px] space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button><span className="flex gap-2"><button onClick={() => setReveal(!reveal)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC & bank' : 'Show IC & bank'}</button><button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#083a55]"><Pencil className="h-4 w-4" />Edit</button></span></div>
+    <section className="rounded-[28px] bg-[#0b3d59] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{e.company} · {e.employeeCode}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{e.fullName}</h2><p className="mt-2 text-[#b9cfdd]"><span className={`mr-2 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[e.status]}`}>{e.status}</span>{[e.designation, e.department, e.branch].filter(Boolean).join(' · ')}{e.joinDate ? ` · joined ${dmy(e.joinDate)} (${service(e.joinDate)})` : ''}</p></section>
+    <div className="grid gap-5 lg:grid-cols-2">
+      <section className={card}><h3 className="font-semibold">Personal</h3><dl className="mt-2 divide-y divide-slate-100">
+        <Row label="IC no.">{secret(e.icNo)}</Row>{e.passportNo && <Row label="Passport no.">{secret(e.passportNo)}</Row>}<Row label="Nationality">{e.nationality}</Row><Row label="Gender">{e.gender}</Row><Row label="Date of birth">{dmy(e.dateOfBirth)}</Row><Row label="Religion">{e.religion}</Row><Row label="Phone">{e.phone}</Row><Row label="Email">{e.email}</Row><Row label="Address"><span className="whitespace-pre-line">{e.address}</span></Row>
+      </dl></section>
+      <section className={card}><h3 className="font-semibold">Employment</h3><dl className="mt-2 divide-y divide-slate-100">
+        <Row label="Company">{e.company === 'KJ' ? 'KJ- HSO Healthcare Sdn Bhd' : e.company === 'SK' ? 'SK- HSO Healthcare Sdn Bhd' : ''}</Row><Row label="Branch">{e.branch}</Row><Row label="Department">{e.department}</Row><Row label="Designation">{e.designation}</Row><Row label="Employment type">{e.employmentType}</Row><Row label="Joined">{dmy(e.joinDate)}</Row><Row label="Confirmed">{dmy(e.confirmDate)}</Row>{e.resignDate && <Row label="Left">{dmy(e.resignDate)}</Row>}<Row label="Leave group">{LEAVE_GROUPS.find((group) => group.code === e.leaveGroup)?.name || e.leaveGroup}</Row>
+      </dl></section>
+      <section className={card}><h3 className="font-semibold">Pay & statutory</h3><dl className="mt-2 divide-y divide-slate-100">
+        <Row label="Basic salary">{reveal ? money(e.basicSalary) : '••••'}</Row><Row label="Fixed allowances">{reveal ? (e.fixedAllowances.length ? e.fixedAllowances.map((item) => `${item.name} ${money(item.amount)}`).join(', ') : 'None') : '••••'}</Row><Row label="Bank">{e.bankName}</Row><Row label="Account no.">{secret(e.bankAccount)}</Row><Row label="KWSP no.">{secret(e.epfNo)}</Row><Row label="PERKESO no.">{secret(e.socsoNo)}</Row><Row label="Income tax no.">{secret(e.taxNo)}</Row>
+      </dl></section>
+      <section className={card}><h3 className="font-semibold">Family & emergency</h3><dl className="mt-2 divide-y divide-slate-100">
+        <Row label="Marital status">{e.maritalStatus}</Row>{e.maritalStatus === 'Married' && <Row label="Spouse working">{e.spouseWorking === null ? '' : e.spouseWorking ? 'Yes' : 'No'}</Row>}<Row label="Children">{e.children.length ? e.children.map((child) => `${child.name}${child.dateOfBirth ? ` (${dmy(child.dateOfBirth)})` : ''}${child.studying ? ', studying' : ''}${child.disabled ? ', OKU' : ''}`).join('; ') : 'None'}</Row><Row label="Emergency contact">{[e.emergencyName, e.emergencyRelation, e.emergencyPhone].filter(Boolean).join(' · ')}</Row>
+      </dl></section>
+    </div>
+    {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
+    <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
+      {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{data.audit.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}
+    </section>
+  </div>;
+}
+
+function ProfileEditor({ employee, onCancel, onSaved, onError }: { employee: Employee; onCancel: () => void; onSaved: (saved: Employee) => Promise<void>; onError: (message: string) => void }) {
+  const [draft, setDraft] = useState<Employee>(employee);
+  const [saving, setSaving] = useState(false);
+  const set = <K extends keyof Employee>(key: K, value: Employee[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setSaving(true);
+    try { const result = await api('action=save_employee', { action: 'save_employee', employee: draft }); await onSaved(result.employee); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
+    finally { setSaving(false); }
+  };
+  const field = (label: string, key: keyof Employee, type = 'text', placeholder = '') => <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">{label}</span><input type={type} value={(draft[key] as string | number | null) ?? ''} onChange={(event) => set(key, (type === 'number' ? Number(event.target.value) : type === 'date' ? event.target.value || null : event.target.value) as never)} placeholder={placeholder} className={input} /></label>;
+  const choice = (label: string, key: keyof Employee, options: string[], blankLabel = '—') => <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">{label}</span><select value={(draft[key] as string) ?? ''} onChange={(event) => set(key, event.target.value as never)} className={input}>{options.map((option) => <option key={option} value={option}>{option || blankLabel}</option>)}</select></label>;
+  const section = (title: string, children: ReactNode) => <section className={card}><h3 className="font-semibold">{title}</h3><div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</div></section>;
+  const departments = useMemo(() => ['', 'OPERATION', 'OPR - DR RESIDENT', 'ADMIN'], []);
+  return <form onSubmit={submit} className="mx-auto max-w-[1500px] space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={onCancel} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : employee.id ? 'Save changes' : 'Add staff'}</button></div>
+    <section className="rounded-[28px] bg-[#0b3d59] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{employee.id ? 'Edit profile' : 'New staff'}</p><h2 className="mt-2 text-2xl font-semibold">{draft.fullName || 'Staff profile'}</h2></section>
+    {section('Identity', <>{choice('Company', 'company', ['', 'KJ', 'SK'], 'Choose…')}{field('Employee code', 'employeeCode', 'text', 'e.g. ARASK0001')}{field('Full name (as in IC)', 'fullName')}{field('IC no.', 'icNo', 'text', '900101-10-1234')}{field('Passport no. (non-Malaysian)', 'passportNo')}{field('Nationality', 'nationality')}{choice('Gender', 'gender', ['', 'Male', 'Female'])}{field('Date of birth', 'dateOfBirth', 'date')}{field('Religion', 'religion')}</>)}
+    {section('Contact', <>{field('Phone', 'phone', 'tel')}{field('Email', 'email', 'email')}<label className="block sm:col-span-2 lg:col-span-1"><span className="mb-1.5 block text-xs font-bold text-slate-700">Address</span><textarea value={draft.address} onChange={(event) => set('address', event.target.value)} rows={3} className={`${input} h-auto py-3`} /></label>{field('Emergency contact name', 'emergencyName')}{field('Relationship', 'emergencyRelation')}{field('Emergency phone', 'emergencyPhone', 'tel')}</>)}
+    {section('Employment', <>{field('Branch', 'branch', 'text', 'Kajang / Seri Kembangan')}{choice('Department', 'department', departments)}{field('Designation', 'designation', 'text', 'e.g. Clinic Assistant')}{choice('Employment type', 'employmentType', ['Permanent', 'Contract', 'Part-time', 'Locum', 'Intern'])}{field('Join date', 'joinDate', 'date')}{field('Confirm date', 'confirmDate', 'date')}{choice('Status', 'status', ['Active', 'Inactive'])}{field('Last day (if left)', 'resignDate', 'date')}{choice('Leave group', 'leaveGroup', ['', ...LEAVE_GROUPS.map((group) => group.code)])}</>)}
+    {section('Pay & statutory', <>{field('Basic salary (RM)', 'basicSalary', 'number')}{field('Bank', 'bankName', 'text', 'e.g. Maybank')}{field('Account no.', 'bankAccount')}{field('KWSP no.', 'epfNo')}{field('PERKESO no.', 'socsoNo')}{field('Income tax no.', 'taxNo')}
+      <div className="sm:col-span-2 lg:col-span-3"><p className="mb-1.5 text-xs font-bold text-slate-700">Fixed allowances (every month)</p><div className="space-y-2">{draft.fixedAllowances.map((item, i) => <div key={i} className="flex gap-2"><input value={item.name} onChange={(event) => set('fixedAllowances', draft.fixedAllowances.map((row, j) => j === i ? { ...row, name: event.target.value } : row))} placeholder="Allowance" className={input} /><input type="number" value={item.amount} onChange={(event) => set('fixedAllowances', draft.fixedAllowances.map((row, j) => j === i ? { ...row, amount: Number(event.target.value) } : row))} placeholder="RM" className={`${input} max-w-[140px]`} /><button type="button" onClick={() => set('fixedAllowances', draft.fixedAllowances.filter((_, j) => j !== i))} className="rounded-xl px-3 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove allowance"><Trash2 className="h-4 w-4" /></button></div>)}<button type="button" onClick={() => set('fixedAllowances', [...draft.fixedAllowances, { name: '', amount: 0 }])} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />Add allowance</button></div></div></>)}
+    {section('Family (for PCB)', <>{choice('Marital status', 'maritalStatus', ['', 'Single', 'Married', 'Divorced', 'Widowed'])}{draft.maritalStatus === 'Married' && <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Spouse working</span><select value={draft.spouseWorking === null ? '' : draft.spouseWorking ? 'yes' : 'no'} onChange={(event) => set('spouseWorking', event.target.value === '' ? null : event.target.value === 'yes')} className={input}><option value="">—</option><option value="yes">Yes</option><option value="no">No</option></select></label>}
+      <div className="sm:col-span-2 lg:col-span-3"><p className="mb-1.5 text-xs font-bold text-slate-700">Children</p><div className="space-y-2">{draft.children.map((child, i) => <div key={i} className="flex flex-wrap items-center gap-2"><input value={child.name} onChange={(event) => set('children', draft.children.map((row, j) => j === i ? { ...row, name: event.target.value } : row))} placeholder="Name" className={`${input} min-w-[180px] flex-1`} /><input type="date" value={child.dateOfBirth || ''} onChange={(event) => set('children', draft.children.map((row, j) => j === i ? { ...row, dateOfBirth: event.target.value || null } : row))} className={`${input} max-w-[180px]`} /><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={child.studying} onChange={(event) => set('children', draft.children.map((row, j) => j === i ? { ...row, studying: event.target.checked } : row))} />Studying</label><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={child.disabled} onChange={(event) => set('children', draft.children.map((row, j) => j === i ? { ...row, disabled: event.target.checked } : row))} />OKU</label><button type="button" onClick={() => set('children', draft.children.filter((_, j) => j !== i))} className="rounded-xl px-3 py-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove child"><Trash2 className="h-4 w-4" /></button></div>)}<button type="button" onClick={() => set('children', [...draft.children, { name: '', dateOfBirth: null, studying: false, disabled: false }])} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Plus className="h-3.5 w-3.5" />Add child</button></div></div></>)}
+    <section className={card}><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Remarks</span><textarea value={draft.remarks} onChange={(event) => set('remarks', event.target.value)} rows={3} className={`${input} h-auto py-3`} /></label></section>
+  </form>;
+}
