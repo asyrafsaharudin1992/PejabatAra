@@ -57,14 +57,18 @@ export function usePrintForms(active: boolean, scope: PrintFormScope = 'forms') 
   return { list, loading: active && !list && !error, error, save };
 }
 
-// Safari will not print a PDF from a hidden frame, so it opens the PDF in a new tab instead
-// (staff press ⌘P there). Other browsers print straight away. Either way the PDF comes from
-// the browser cache after the first time.
+// Safari will not print a PDF from a hidden frame, so there the pages are drawn to images and
+// printed from this page (see pdfPrint.ts); if that fails the PDF opens in a new tab instead.
+// Other browsers print the PDF straight away. Either way the PDF comes from the browser cache
+// after the first time.
 const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
 let printFrame: HTMLIFrameElement | null = null;
 
 export async function printPdf(url: string) {
-  if (isSafari) { window.open(url, '_blank', 'noopener'); return; }
+  if (isSafari) {
+    try { await (await import('./pdfPrint')).printPdfAsImages(url); } catch { window.open(url, '_blank', 'noopener'); }
+    return;
+  }
   const blob = await fetch(url).then((response) => { if (!response.ok) throw new Error('The form could not be downloaded.'); return response.blob(); });
   if (printFrame) { URL.revokeObjectURL(printFrame.src); printFrame.remove(); }
   const frame = document.createElement('iframe');
