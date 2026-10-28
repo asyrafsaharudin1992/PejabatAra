@@ -20,7 +20,7 @@ const decode = (row: any) => ({
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
   joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
   basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
-  epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
+  workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveApproverId: row.leave_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
 });
 
 // Turns a profile sent by the page into a database row, checking each field.
@@ -67,9 +67,16 @@ export async function hrHandler(req: any, res: any) {
 
     // Directory list: only what the cards show, no personal or pay details.
     if (req.method === 'GET' && action === 'employees') {
-      const { data, error } = await db.from('hr_employees').select(SUMMARY).order('company').order('full_name');
+      // leave_approver_id is new: until its migration is run the list is read without it.
+      let result: any = await db.from('hr_employees').select(`${SUMMARY},leave_approver_id,final_approver_id`).order('company').order('full_name');
+      if (result.error?.code === '42703') result = await db.from('hr_employees').select(SUMMARY).order('company').order('full_name');
+      const { data, error } = result;
       if (error) throw error;
-      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id })) });
+      // Whether each person's individual sign-in has a password yet: none (no sign-in), not_set, or set.
+      const linked = (data || []).map((row: any) => row.assessment_staff_id).filter(Boolean);
+      const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,password_hash').in('id', linked) : { data: [] };
+      const hasPassword = new Map((logins || []).map((login: any) => [login.id, Boolean(login.password_hash)]));
+      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
     }
 
     // One full profile, with its recent changes.
@@ -84,7 +91,145 @@ export async function hrHandler(req: any, res: any) {
       const ids = [...new Set((audit || []).map((row: any) => row.changed_by).filter(Boolean))];
       const { data: people } = ids.length ? await db.from('profiles').select('id,full_name').in('id', ids) : { data: [] };
       const names = new Map((people || []).map((row: any) => [row.id, row.full_name]));
-      return res.status(200).json({ employee: decode(data), audit: (audit || []).map((row: any) => ({ action: row.action, changes: row.changes, at: row.changed_at, by: names.get(row.changed_by) || '' })) });
+      // Whether this person's individual sign-in has a password yet (null until the migration is run).
+      let signIn: { linked: boolean; hasPassword: boolean | null } = { linked: Boolean(data.assessment_staff_id), hasPassword: null };
+      if (data.assessment_staff_id) {
+        const { data: login, error: loginError } = await db.from('assessment_staff').select('password_hash').eq('id', data.assessment_staff_id).maybeSingle();
+        if (!loginError) signIn = { linked: true, hasPassword: Boolean(login?.password_hash) };
+      }
+      return res.status(200).json({ signIn, employee: decode(data), audit: (audit || []).map((row: any) => ({ action: row.action, changes: row.changes, at: row.changed_at, by: names.get(row.changed_by) || '' })) });
+    }
+
+    // The weekdays a person works (0 = Sunday ... 6 = Saturday); leave is counted on these only.
+    if (req.method === 'POST' && action === 'set_work_days') {
+      const id = text(body.id, 60);
+      const days: number[] = [...new Set<number>((Array.isArray(body.days) ? body.days : []).map(Number).filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
+      if (!days.length) throw fail(400, 'Choose at least one working day.');
+      const { error } = await db.from('hr_employees').update({ work_days: days, updated_at: now, updated_by: user.id }).eq('id', id);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { work_days: days }, changed_by: user.id });
+      return res.status(200).json({ success: true, days });
+    }
+
+    // The public holiday group a person belongs to (SG-MNG, SG-OPS, MLHL, NO-PH, or none): leave is not counted on
+    // that group's holidays unless the duty roster says the person works the day.
+    if (req.method === 'POST' && action === 'set_holiday_group') {
+      const id = text(body.id, 60), group = text(body.group, 20);
+      if (!['', 'SG-MNG', 'SG-OPS', 'MLHL', 'NO-PH'].includes(group)) throw fail(400, 'Choose a holiday group.');
+      const { error } = await db.from('hr_employees').update({ holiday_group: group, updated_at: now, updated_by: user.id }).eq('id', id);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { holiday_group: group }, changed_by: user.id });
+      return res.status(200).json({ success: true, group });
+    }
+
+    // Who approves each person's leave: the supervisor (first level) or the final approver (second level).
+    // An empty approver clears it.
+    if (req.method === 'POST' && action === 'assign_leave_approver') {
+      const column = body.level === 'final' ? 'final_approver_id' : 'leave_approver_id';
+      const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map((id: unknown) => text(id, 60)).filter(Boolean).slice(0, 200);
+      const approverId = text(body.approverId, 60) || null;
+      if (!ids.length) throw fail(400, 'Choose the staff.');
+      if (approverId && ids.includes(approverId)) throw fail(400, 'A person cannot approve their own leave.');
+      const { data: before, error: readError } = await db.from('hr_employees').select(`id,${column}`).in('id', ids);
+      if (readError) throw readError;
+      const { error } = await db.from('hr_employees').update({ [column]: approverId, updated_at: now, updated_by: user.id }).in('id', ids);
+      if (error) throw error;
+      const changed = (before || []).filter((row: any) => (row[column] || null) !== approverId);
+      if (changed.length) await db.from('hr_audit').insert(changed.map((row: any) => ({ employee_id: row.id, action: 'update', changes: { [column]: [row[column] || null, approverId] }, changed_by: user.id })));
+      return res.status(200).json({ success: true, updated: ids.length });
+    }
+
+    // Staff incentive claims that Clinical Admin has approved and sent to HR (read only).
+    if (req.method === 'GET' && action === 'incentives') {
+      const month = text(req.query.month, 7);
+      if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      let query = db.from('incentive_claims').select('id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by,assessment_staff(name,staff_code)').not('hr_submitted_at', 'is', null);
+      if (month !== 'all') query = query.eq('month', month);
+      const { data, error } = await query.order('month', { ascending: false }).order('hr_submitted_at', { ascending: false });
+      if (error?.code === '42703') return res.status(200).json({ claims: [], notSetUp: true });
+      if (error) throw error;
+      return res.status(200).json({ claims: (data || []).map((row: any) => ({ id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+    }
+    // HR marks sent incentive claims as received (or undoes it).
+    if (req.method === 'POST' && (action === 'incentive_receive' || action === 'incentive_unreceive')) {
+      const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map((id: unknown) => text(id, 60)).filter(Boolean).slice(0, 500);
+      if (!ids.length) throw fail(400, 'Choose the claims.');
+      const by = text(body.by, 80);
+      if (action === 'incentive_receive' && !by) throw fail(400, 'Enter your name.');
+      const patch = action === 'incentive_receive' ? { hr_received_at: now, hr_received_by: by } : { hr_received_at: null, hr_received_by: '' };
+      // Pick the claims that can change first, then update them by id (a filter on the changed column would
+      // hide the updated rows from the result).
+      let pick: any = db.from('incentive_claims').select('id').in('id', ids).not('hr_submitted_at', 'is', null);
+      pick = action === 'incentive_receive' ? pick.is('hr_received_at', null) : pick.not('hr_received_at', 'is', null);
+      const { data: eligible, error: pickError } = await pick;
+      if (pickError) throw pickError;
+      const target = (eligible || []).map((row: any) => row.id);
+      if (target.length) { const { error } = await db.from('incentive_claims').update(patch).in('id', target); if (error) throw error; }
+      const data = target;
+      return res.status(200).json({ success: true, updated: (data || []).length });
+    }
+
+    // Every leave request made from Individual Sign In, for HR to follow (read only).
+    if (req.method === 'GET' && action === 'leave_requests') {
+      const year = /^\d{4}$/.test(String(req.query.year)) ? String(req.query.year) : String(new Date().getFullYear());
+      const { data, error } = await db.from('hr_leave_requests').select('*').gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`).order('start_date', { ascending: false }).limit(1000);
+      if (error) throw error;
+      const ids = [...new Set((data || []).flatMap((r: any) => [r.employee_id, r.approver_id, r.final_approver_id, r.decided_by, r.supervisor_decided_by]).filter(Boolean))];
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
+      const who = new Map((people || []).map((p: any) => [p.id, p]));
+      const name = (id: string | null) => (id && who.get(id)?.full_name) || '';
+      return res.status(200).json({ year, requests: (data || []).map((r: any) => ({ id: r.id, company: who.get(r.employee_id)?.company || '', code: who.get(r.employee_id)?.employee_code || '', applicant: name(r.employee_id), type: r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisor: name(r.approver_id), finalApprover: name(r.final_approver_id), supervisorBy: name(r.supervisor_decided_by), supervisorNote: r.supervisor_note || '', decidedBy: name(r.decided_by), note: r.decision_note || '', createdAt: r.created_at, decidedAt: r.decided_at })) });
+    }
+
+    // Duty roster: one row per person and date. `roster` reads a month; `roster_import` replaces the dates it
+    // is given for the people it names (rows: { code, company, date, shift }).
+    if (req.method === 'GET' && action === 'roster') {
+      const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';
+      if (!month) throw fail(400, 'Choose a month.');
+      const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+      const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
+      if (error) throw error;
+      const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
+      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
+    }
+    if (req.method === 'POST' && action === 'roster_import') {
+      const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
+      if (!rows.length) throw fail(400, 'There are no roster rows.');
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,employee_code');
+      if (peopleError) throw peopleError;
+      const byCode = new Map((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p.id]));
+      const NOT_WORKING = new Set(['OFF', 'OFF 1ST', 'OFF 2ND', 'REST', 'NA', 'PH', 'RESIGN', 'OD', 'RD', 'AL', 'UPL', 'MC', 'ML', 'EL', '']);
+      const LEAVE = new Set(['AL', 'UPL', 'MC', 'ML', 'EL']);
+      const unknown = new Set<string>(); const out: any[] = [];
+      for (const row of rows) {
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(row.date)) ? String(row.date) : '';
+        const id = byCode.get(`${text(row.company, 4).toUpperCase()}|${text(row.code, 20).toUpperCase()}`);
+        if (!date) continue;
+        if (!id) { unknown.add(`${row.company}|${row.code}`); continue; }
+        const shift = text(row.shift, 30).toUpperCase();
+        if (!shift) continue; // a blank cell means no schedule, so the weekly working days apply
+        out.push({ employee_id: id, work_date: date, shift, works: !NOT_WORKING.has(shift), note: LEAVE.has(shift) ? shift : '' });
+      }
+      if (unknown.size) throw fail(400, `These staff codes are not in HR: ${[...unknown].join(', ')}.`);
+      if (!out.length) throw fail(400, 'There are no valid roster rows.');
+      const { error } = await db.from('hr_roster').upsert(out, { onConflict: 'employee_id,work_date' });
+      if (error) throw error;
+      return res.status(200).json({ success: true, saved: out.length });
+    }
+
+    // Clears the staff member's individual-sign-in password: they sign in with the last 4 IC digits
+    // again and choose a new one.
+    if (req.method === 'POST' && action === 'reset_sign_in') {
+      const id = text(body.id, 60);
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,assessment_staff_id').eq('id', id).maybeSingle();
+      if (personError) throw personError;
+      if (!person?.assessment_staff_id) throw fail(404, 'This staff member has no individual sign-in yet.');
+      const { error } = await db.from('assessment_staff').update({ password_hash: null, password_set_at: null, failed_logins: 0, locked_until: null, updated_at: now }).eq('id', person.assessment_staff_id);
+      if (error) throw error;
+      await db.from('assessment_sessions').delete().eq('staff_id', person.assessment_staff_id);
+      await db.from('hr_audit').insert({ employee_id: person.id, action: 'sign_in_reset', changes: {}, changed_by: user.id });
+      return res.status(200).json({ success: true });
     }
 
     if (req.method === 'POST' && action === 'save_employee') {

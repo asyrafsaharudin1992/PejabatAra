@@ -31,8 +31,38 @@ export async function assessmentFetch(query: string, options: RequestInit = {}) 
   return body;
 }
 
+// The staff member chooses their own password: right after the first sign-in (`first`), or later to
+// change it (then the current password is asked for too).
+export function SetPassword({ first = false, onDone, onCancel }: { first?: boolean; onDone: () => void; onCancel?: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
+  const [again, setAgain] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setError('');
+    if (password.length < 8) { setError('Use at least 8 characters.'); return; }
+    if (password !== again) { setError('The two passwords do not match.'); return; }
+    setSaving(true);
+    try { await assessmentFetch('action=set_password', { method: 'POST', body: JSON.stringify({ password, current }) }); onDone(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save the password.'); }
+    finally { setSaving(false); }
+  };
+  const input = 'h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4';
+  return <form onSubmit={submit} className="mt-4 rounded-[24px] bg-white p-5 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:mt-6 sm:rounded-[28px] sm:p-9">
+    <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
+    <h1 className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] sm:mt-2 sm:text-3xl">{first ? 'Choose your password' : 'Change password'}</h1>
+    <p className="mt-2 text-sm leading-6 text-slate-500">{first ? 'From now on you sign in with your name, staff code and this password. Your IC digits are no longer used.' : 'Enter your current password and choose a new one.'}</p>
+    {!first && <label className="mt-6 block"><span className="mb-2 block text-xs font-bold text-slate-700">Current password</span><input required type="password" autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)} className={input} /></label>}
+    <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">New password</span><input required type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className={input} /><span className="mt-1.5 block text-[11px] leading-5 text-slate-400">At least 8 characters. Not your staff code or IC digits.</span></label>
+    <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">Type it again</span><input required type="password" autoComplete="new-password" value={again} onChange={(event) => setAgain(event.target.value)} className={input} /></label>
+    {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+    <div className="mt-6 flex gap-3">{onCancel && <button type="button" onClick={onCancel} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>}<button disabled={saving} className="flex h-12 flex-1 items-center justify-center rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{saving ? 'Saving…' : first ? 'Save and continue' : 'Change password'}</button></div>
+  </form>;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
-  return <div className="min-h-screen bg-[#f5f7f9] px-4 py-6 text-[#14233b] sm:px-8 sm:py-10">
+  return <div className="min-h-screen bg-[#f5f7f9] px-3 py-4 text-[#14233b] sm:px-8 sm:py-10">
     <div className="mx-auto max-w-2xl">{children}</div>
   </div>;
 }
@@ -41,31 +71,34 @@ export function Shell({ children }: { children: ReactNode }) {
 export function SignIn({ onSignedIn, title = 'Assessment Room', intro = 'Periodic staff assessments. Sign in with your name, staff code and the last 4 digits of your IC.', button = 'Enter Assessment Room' }: { onSignedIn: () => void; title?: string; intro?: string; button?: string }) {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
-  const [ic4, setIc4] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mustSet, setMustSet] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(''); setLoading(true);
     try {
-      const result = await assessmentFetch('action=login', { method: 'POST', body: JSON.stringify({ name, code, ic4 }) });
+      const result = await assessmentFetch('action=login', { method: 'POST', body: JSON.stringify({ name, code, password }) });
       localStorage.setItem(TOKEN_KEY, result.token);
-      onSignedIn();
+      // First sign-in (with the IC digits): the staff member now chooses their own password.
+      if (result.mustSetPassword) setMustSet(true); else onSignedIn();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to sign in.'); }
     finally { setLoading(false); }
   };
+  if (mustSet) return <Shell><SetPassword first onDone={onSignedIn} /></Shell>;
   return <Shell>
     <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
-    <form onSubmit={submit} className="mt-6 rounded-[28px] bg-white p-7 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:p-9">
-      <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#0b3d59] text-[#91d7ed]"><ClipboardCheck className="h-7 w-7" strokeWidth={1.5} /></span>
-      <p className="mt-6 text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{title}</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-500">{intro}</p>
-      <label className="mt-6 block"><span className="mb-2 block text-xs font-bold text-slate-700">Name</span><input required autoFocus autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="As registered by your admin" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
-      <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">Staff code</span><input required autoCapitalize="characters" autoComplete="username" value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ARA0012" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-wider outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
-      <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">IC number: last 4 digits</span><input required type="password" inputMode="numeric" maxLength={4} autoComplete="current-password" value={ic4} onChange={(event) => setIc4(event.target.value.replace(/\D/g, ''))} placeholder="••••" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-[0.4em] outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
+    <form onSubmit={submit} className="mt-4 rounded-[24px] bg-white p-5 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:mt-6 sm:rounded-[28px] sm:p-9">
+      <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#0b3d59] text-[#91d7ed] sm:h-14 sm:w-14 sm:rounded-2xl"><ClipboardCheck className="h-5 w-5 sm:h-7 sm:w-7" strokeWidth={1.5} /></span>
+      <p className="mt-4 text-[10px] sm:mt-6 font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
+      <h1 className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] sm:mt-2 sm:text-3xl">{title}</h1>
+      <p className="mt-1.5 text-[13px] leading-5 text-slate-500 sm:mt-2 sm:text-sm sm:leading-6">{intro}</p>
+      <label className="mt-4 block sm:mt-6"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Name</span><input required autoFocus autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="As registered by your admin" className="h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4" /></label>
+      <label className="mt-3 block sm:mt-4"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Staff code</span><input required autoCapitalize="characters" autoComplete="username" value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ARA0012" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-wider outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
+      <label className="mt-3 block sm:mt-4"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" className="h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4" /><span className="mt-1.5 block text-[11px] leading-5 text-slate-400">First time? Use the last 4 digits of your IC, then you will choose your own password.</span></label>
       {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-      <button disabled={loading} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{loading ? 'Signing in…' : button}<ArrowRight size={15} /></button>
-      <p className="mt-5 text-center text-[11px] leading-5 text-slate-400">Can't sign in? Ask your System Admin to check your details.</p>
+      <button disabled={loading} className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60 sm:mt-6 sm:h-12">{loading ? 'Signing in…' : button}<ArrowRight size={15} /></button>
+      <p className="mt-4 text-center text-[11px] leading-4 text-slate-400 sm:mt-5 sm:leading-5">Forgot your password? Ask HR to reset it, then sign in with the last 4 digits of your IC again.</p>
     </form>
   </Shell>;
 }
@@ -185,6 +218,7 @@ export default function AssessmentRoom() {
 
   const preview = Boolean(me?.staff.preview);
   return <Shell>
+    <a href="#office/individual" className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Menu</a>
     <div className="flex items-start justify-between gap-4">
       <div><p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ASSESSMENT ROOM</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{me ? `Hi, ${me.staff.name.split(' ')[0]}` : 'Loading…'}</h1>{me?.staff.branch && <p className="mt-1 text-sm text-slate-500">{me.staff.branch}</p>}</div>
       <button onClick={signOut} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><LogOut className="h-4 w-4" />Sign out</button>

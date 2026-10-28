@@ -17,9 +17,9 @@ export type Employee = {
   maritalStatus: '' | 'Single' | 'Married' | 'Divorced' | 'Widowed'; spouseWorking: boolean | null; children: Child[]; phone: string; email: string; address: string;
   emergencyName: string; emergencyRelation: string; emergencyPhone: string;
   branch: string; department: string; designation: string; employmentType: string; joinDate: string | null; confirmDate: string | null; resignDate: string | null;
-  status: string; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; updatedAt?: string;
+  status: string; workDays?: number[]; holidayGroup?: string; leaveApproverId?: string | null; finalApproverId?: string | null; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; updatedAt?: string;
 };
-type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'>;
+type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'> & { signIn?: 'none' | 'not_set' | 'set'; leaveApproverId?: string | null; finalApproverId?: string | null };
 type Audit = { action: string; changes: Record<string, [unknown, unknown]>; at: string; by: string };
 
 const blank = (): Employee => ({ company: '', employeeCode: '', fullName: '', icNo: '', passportNo: '', nationality: 'Malaysian', gender: '', dateOfBirth: null, religion: '', maritalStatus: '', spouseWorking: null, children: [], phone: '', email: '', address: '', emergencyName: '', emergencyRelation: '', emergencyPhone: '', branch: '', department: '', designation: '', employmentType: 'Permanent', joinDate: null, confirmDate: null, resignDate: null, status: 'Active', leaveGroup: 'AL', basicSalary: 0, fixedAllowances: [], bankName: '', bankAccount: '', epfNo: '', socsoNo: '', taxNo: '', remarks: '' });
@@ -64,17 +64,32 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
   if (adding) return <ProfileEditor employee={blank()} onCancel={() => setAdding(false)} onSaved={async (saved) => { setAdding(false); await load(); setOpenId(saved.id || ''); }} onError={onError} />;
   if (openId) return <ProfileView id={openId} onBack={() => { setOpenId(''); void load(); }} onError={onError} />;
 
+  // Clears a staff member's sign-in password: they sign in with the last 4 IC digits and choose a new one.
+  const resetSignIn = async (row: Summary) => {
+    if (!window.confirm(`Reset the sign-in password of ${row.fullName}? They will sign in with the last 4 digits of their IC and choose a new one.`)) return;
+    try { const result = await api('action=reset_sign_in', { id: row.id }); if (result.error) throw new Error(result.error); await load(); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to reset the password.'); }
+  };
+  // Who approves a person's leave: any active staff member except themselves.
+  const approvers = (employees || []).filter((row) => row.status === 'Active').sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const approverName = (id?: string | null) => (employees || []).find((row) => row.id === id)?.fullName || '';
+  const assignApprover = async (ids: string[], approverId: string, level: 'supervisor' | 'final' = 'supervisor') => {
+    const before = employees, key = level === 'final' ? 'finalApproverId' : 'leaveApproverId';
+    setEmployees((current) => (current || []).map((row) => ids.includes(row.id || '') ? { ...row, [key]: approverId || null } : row));
+    try { const result = await api('action=assign_leave_approver', { ids, approverId, level }); if (result.error) throw new Error(result.error); }
+    catch (cause) { setEmployees(before); onError(cause instanceof Error ? cause.message : 'Unable to set the leave approver.'); }
+  };
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = (employees || []).filter((row) => (!company || row.company === company) && (!status || row.status === status) && words.every((word) => `${row.fullName} ${row.employeeCode} ${row.designation} ${row.department}`.toLowerCase().includes(word)));
   // Sorted by the chosen column; ties keep company then code order.
   const sorted = [...shown].sort((a, b) => {
-    const left = String(a[sort.key] ?? ''), right = String(b[sort.key] ?? '');
+    const left = sort.key === 'leaveApproverId' || sort.key === 'finalApproverId' ? approverName(a[sort.key]) : String(a[sort.key] ?? ''), right = sort.key === 'leaveApproverId' || sort.key === 'finalApproverId' ? approverName(b[sort.key]) : String(b[sort.key] ?? '');
     return (left.localeCompare(right, undefined, { numeric: true }) || a.company.localeCompare(b.company) || a.employeeCode.localeCompare(b.employeeCode, undefined, { numeric: true })) * sort.dir;
   });
   const columns: { key: keyof Summary; label: string; className?: string }[] = [
     { key: 'employeeCode', label: 'Code', className: 'w-[120px]' }, { key: 'fullName', label: 'Name' }, { key: 'designation', label: 'Position' },
     { key: 'department', label: 'Department', className: 'w-[140px]' }, { key: 'company', label: 'Branch', className: 'w-[160px]' },
-    { key: 'joinDate', label: 'Joined', className: 'w-[110px]' }, { key: 'employmentType', label: 'Type', className: 'w-[100px]' }, { key: 'status', label: 'Status', className: 'w-[100px]' },
+    { key: 'joinDate', label: 'Joined', className: 'w-[110px]' }, { key: 'signIn', label: 'Sign-in', className: 'w-[170px]' }, { key: 'leaveApproverId', label: 'Leave supervisor', className: 'w-[200px]' }, { key: 'finalApproverId', label: 'Final approver', className: 'w-[200px]' }, { key: 'employmentType', label: 'Type', className: 'w-[100px]' }, { key: 'status', label: 'Status', className: 'w-[100px]' },
   ];
   const statusTone: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
   return <div className="mx-auto max-w-[1500px] space-y-5">
@@ -84,12 +99,14 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
       <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3"><Search className="h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, code, job or department" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
       <select value={company} onChange={(event) => setCompany(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ & SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
       <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Any status</option>{['Active', 'Inactive'].map((item) => <option key={item}>{item}</option>)}</select>
+      <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; if (window.confirm(`Make ${approverName(target)} the leave approver of the ${shown.filter((row) => row.id !== target).length} staff shown?`)) void assignApprover(shown.filter((row) => row.id !== target).map((row) => row.id || ''), target); }} aria-label="Set the leave approver for all staff shown" className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set leave supervisor for all shown…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
+      <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; if (window.confirm(`Make ${approverName(target)} the final approver of the ${shown.filter((row) => row.id !== target).length} staff shown?`)) void assignApprover(shown.filter((row) => row.id !== target).map((row) => row.id || ''), target, 'final'); }} aria-label="Set the final approver for all staff shown" className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set final approver for all shown…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
       <span className="ml-auto text-xs text-slate-400">{employees ? `${shown.length} of ${employees.length}` : 'Loading…'}</span>
     </section>}
     {employees && !employees.length && !notSetUp && <p className={`${card} text-sm text-slate-500`}>No staff profiles yet. Press Add staff, or import them from Infotech.</p>}
     {employees && employees.length > 0 && !notSetUp && <section className="overflow-hidden rounded-[24px] bg-white shadow-[0_12px_35px_rgba(20,35,59,0.08)]">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-left text-sm">
+        <table className="w-full min-w-[1350px] text-left text-sm">
           <thead className="bg-[#f7fafc]"><tr className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             <th className="w-12 px-4 py-3.5">No</th>
             {columns.map((column) => <th key={column.key} className={`px-4 py-3.5 ${column.className || ''}`}><button type="button" onClick={() => setSort((current) => ({ key: column.key, dir: current.key === column.key ? (current.dir === 1 ? -1 : 1) : 1 }))} className="inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#0b587b]">{column.label}<span className={sort.key === column.key ? 'text-[#0b587b]' : 'opacity-0'}>{sort.dir === 1 ? '▲' : '▼'}</span></button></th>)}
@@ -103,10 +120,13 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
               <td className="px-4 py-3">{row.department || '—'}</td>
               <td className="px-4 py-3"><span className="mr-2 rounded-md bg-[#eaf6fb] px-1.5 py-0.5 text-[10px] font-bold text-[#0b587b]">{row.company}</span>{row.branch || '—'}</td>
               <td className="px-4 py-3 whitespace-nowrap">{dmy(row.joinDate)}</td>
+              <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>{row.signIn === 'set' ? <span className="flex items-center gap-2"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Password set</span><button onClick={() => void resetSignIn(row)} className="text-xs font-semibold text-rose-600 hover:underline">Reset</button></span> : row.signIn === 'not_set' ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-700">Not set yet</span> : <span className="text-xs text-slate-300">No sign-in</span>}</td>
+              <td className="px-4 py-2" onClick={(event) => event.stopPropagation()}>{row.status === 'Active' ? <select value={row.leaveApproverId || ''} onChange={(event) => void assignApprover([row.id || ''], event.target.value)} aria-label={`Leave approver for ${row.fullName}`} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs"><option value="">— Not set —</option>{approvers.filter((person) => person.id !== row.id).map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</td>
+              <td className="px-4 py-2" onClick={(event) => event.stopPropagation()}>{row.status === 'Active' ? <select value={row.finalApproverId || ''} onChange={(event) => void assignApprover([row.id || ''], event.target.value, 'final')} aria-label={`Final approver for ${row.fullName}`} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs"><option value="">— Not set —</option>{approvers.filter((person) => person.id !== row.id).map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</td>
               <td className="px-4 py-3">{row.employmentType}</td>
               <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone[row.status] || 'bg-slate-100 text-slate-500'}`}>{row.status}</span></td>
             </tr>)}
-            {sorted.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">No staff match this search.</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">No staff match this search.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -118,8 +138,40 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return <div className="flex gap-3 py-2 text-sm"><dt className="w-40 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words">{children || '—'}</dd></div>;
 }
 
+const WEEK = [['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6], ['Sun', 0]] as const;
+// The weekdays a person works. Leave is counted only on these days, so a rest day is never taken off the balance.
+function WorkDaysCard({ employeeId, days, onSaved, onError }: { employeeId: string; days: number[]; onSaved: () => void; onError: (message: string) => void }) {
+  const [picked, setPicked] = useState<number[]>(days);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setPicked(days); }, [days.join(',')]);
+  const changed = [...picked].sort().join(',') !== [...days].sort().join(',');
+  const save = async () => {
+    setSaving(true);
+    try { const result = await api('action=set_work_days', { id: employeeId, days: picked }); if (result.error) throw new Error(result.error); await onSaved(); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the working days.'); }
+    setSaving(false);
+  };
+  return <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Working days</h3><p className="mt-1 text-sm text-slate-600">Leave is counted only on the days this person works.</p></div>
+    <div className="flex flex-wrap items-center gap-2">{WEEK.map(([label, value]) => { const on = picked.includes(value); return <button key={label} type="button" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((day) => day !== value) : [...picked, value])} className={`h-10 w-12 rounded-xl border text-xs font-semibold transition ${on ? 'border-[#0b587b] bg-[#0b587b] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{label}</button>; })}
+      <button type="button" onClick={() => void save()} disabled={!changed || saving || !picked.length} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div></div></section>;
+}
+
+// Which public holidays are left out of this person's leave days (the groups are the ones set up in Infotech).
+const HOLIDAY_GROUPS: [string, string][] = [['', 'None'], ['SG-MNG', 'SG-MNG · Selangor management'], ['SG-OPS', 'SG-OPS · Selangor operations'], ['MLHL', 'MLHL · Malaysia holiday'], ['NO-PH', 'NO-PH · no public holiday']];
+function HolidayGroupCard({ employeeId, group, onSaved, onError }: { employeeId: string; group: string; onSaved: () => void; onError: (message: string) => void }) {
+  const [saving, setSaving] = useState(false);
+  const change = async (next: string) => {
+    setSaving(true);
+    try { const result = await api('action=set_holiday_group', { id: employeeId, group: next }); if (result.error) throw new Error(result.error); await onSaved(); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the holiday group.'); }
+    setSaving(false);
+  };
+  return <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Public holiday group</h3><p className="mt-1 text-sm text-slate-600">Leave is not counted on this group's public holidays, unless the duty roster shows the person working that day.</p></div>
+    <select value={group} disabled={saving} onChange={(event) => void change(event.target.value)} aria-label="Public holiday group" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-50">{HOLIDAY_GROUPS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></section>;
+}
+
 function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
-  const [data, setData] = useState<{ employee: Employee; audit: Audit[] } | null>(null);
+  const [data, setData] = useState<{ employee: Employee; audit: Audit[]; signIn?: { linked: boolean; hasPassword: boolean | null } } | null>(null);
   const [editing, setEditing] = useState(false);
   const [reveal, setReveal] = useState(false);
   const load = async () => { try { setData(await api(`action=employee&id=${encodeURIComponent(id)}`)); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load profile.'); } };
@@ -131,6 +183,9 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button><span className="flex gap-2"><button onClick={() => setReveal(!reveal)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC & bank' : 'Show IC & bank'}</button><button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#083a55]"><Pencil className="h-4 w-4" />Edit</button></span></div>
     <section className="rounded-[28px] bg-[#0b3d59] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{e.company} · {e.employeeCode}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{e.fullName}</h2><p className="mt-2 text-[#b9cfdd]"><span className={`mr-2 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[e.status]}`}>{e.status}</span>{[e.designation, e.department, e.branch].filter(Boolean).join(' · ')}{e.joinDate ? ` · joined ${dmy(e.joinDate)} (${service(e.joinDate)})` : ''}</p></section>
+    <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Individual sign-in</h3><p className="mt-1 text-sm text-slate-600">{!data.signIn?.linked ? 'No individual sign-in yet (Assessment Room, Incentive Claims).' : data.signIn.hasPassword === null ? 'Sign-in password status is not available yet.' : data.signIn.hasPassword ? 'Has chosen their own password.' : 'Has not chosen a password yet: signs in with the last 4 digits of their IC and is asked to choose one.'}</p></div><button disabled={!data.signIn?.linked || !data.signIn.hasPassword} title={data.signIn?.hasPassword ? '' : 'There is no password to reset yet'} onClick={async () => { if (!window.confirm(`Reset the sign-in password of ${data.employee.fullName}? They will sign in with the last 4 digits of their IC and choose a new one.`)) return; try { const result = await api('action=reset_sign_in', { id }); if (result.error) throw new Error(result.error); await load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to reset.'); } }} className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Reset password</button></div></section>
+    <WorkDaysCard employeeId={id} days={e.workDays || [1, 2, 3, 4, 5, 6]} onSaved={load} onError={onError} />
+    <HolidayGroupCard employeeId={id} group={e.holidayGroup || ''} onSaved={load} onError={onError} />
     <div className="grid gap-5 lg:grid-cols-2">
       <section className={card}><h3 className="font-semibold">Personal</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="IC no.">{secret(e.icNo)}</Row>{e.passportNo && <Row label="Passport no.">{secret(e.passportNo)}</Row>}<Row label="Nationality">{e.nationality}</Row><Row label="Gender">{e.gender}</Row><Row label="Date of birth">{dmy(e.dateOfBirth)}</Row><Row label="Religion">{e.religion}</Row><Row label="Phone">{e.phone}</Row><Row label="Email">{e.email}</Row><Row label="Address"><span className="whitespace-pre-line">{e.address}</span></Row>
@@ -146,7 +201,7 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
       </dl></section>
     </div>
     {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
-    <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
+      <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
       {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{data.audit.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}
     </section>
   </div>;

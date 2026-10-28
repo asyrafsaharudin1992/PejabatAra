@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, X } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
@@ -7,26 +7,29 @@ import { homeQuote } from './PortalApp';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
 import { HRReviews } from './HRReviews';
+import { HRRoster } from './HRRoster';
+import { HRLeave } from './HRLeave';
+import { HRIncentives } from './HRIncentives';
 
 // Office HR, laid out like the CA and Clinical Admin offices. Built a piece at a time: the
 // staff directory and the leave types (the same codes as Infotech) come first; leave
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'reports';
+type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'reports';
 type Staff = { id: string; name: string; code: string; branch: string; active: boolean };
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
   { id: 'reviews', label: 'Performance Reviews', note: 'Reviews from supervisors', icon: ClipboardCheck, tone: 'text-[#4ade80]' },
   { id: 'staff', label: 'Staff Directory', note: 'Assessment staff list', icon: Users, tone: 'text-[#70d8fa]' },
-  { id: 'leaveTypes', label: 'Leave Types', note: 'Codes as in Infotech', icon: Tags, tone: 'text-[#ffb000]' },
-  { id: 'leave', label: 'Leave Requests', note: 'Apply & approve', icon: CalendarCheck, tone: 'text-emerald-400', soon: true },
+  { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
+  { id: 'incentives', label: 'Incentive', note: 'Sent by Clinical Admin', icon: Wallet, tone: 'text-[#ffb000]' },
   { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]', soon: true },
-  { id: 'roster', label: 'Roster', note: 'Shifts by branch', icon: CalendarDays, tone: 'text-[#9b8cff]', soon: true },
+  { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'reports', label: 'Reports', note: 'Leave & attendance', icon: FileBarChart, tone: 'text-[#4ade80]', soon: true },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave Requests', attendance: 'Attendance', roster: 'Roster', reports: 'Reports' };
+const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -54,7 +57,7 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout }: { view: View; op
         <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
       </div>
       <div className="mx-1 mt-5 h-px bg-white/10" />
-      <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
+      <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id || (item.id === 'leave' && view === 'leaveTypes') ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
         <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.tone}`} strokeWidth={1.8} />{item.label}
         {item.soon ? <span className={`ml-auto rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${view === item.id ? 'bg-slate-100 text-slate-500' : 'bg-white/10 text-[#9bb5c7]'}`}>Soon</span> : <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
       </button>)}</nav>
@@ -114,10 +117,10 @@ function StaffDirectory({ staff }: { staff: Staff[] | null }) {
   </div>;
 }
 
-function LeaveTypes() {
+function LeaveTypes({ onBack }: { onBack: () => void }) {
   const groups = [...new Set(LEAVE_TYPES.map((type) => type.group))];
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <Hero title="Leave types" text={`The ${LEAVE_TYPES.length} leave types and ${LEAVE_GROUPS.length} leave groups set up for HSO in Infotech, with the same codes so AraOffice leave lines up with Infotech payroll. Days each type allows are set next, from INFO-LEAVE.`} />
+    <Hero title="Leave types" text={`The ${LEAVE_TYPES.length} leave types and ${LEAVE_GROUPS.length} leave groups set up for HSO in Infotech, with the same codes so AraOffice leave lines up with Infotech payroll. Days each type allows are set next, from INFO-LEAVE.`}  action={<button onClick={onBack} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20">← Back to leave requests</button>} />
     <div className="grid gap-4 lg:grid-cols-2">{groups.map((group) => <section key={group} className={card}>
       <h3 className="font-semibold">{group}</h3>
       <ul className="mt-3 divide-y divide-slate-100">{LEAVE_TYPES.filter((type) => type.group === group).map((type) => <li key={type.code} className="flex items-center gap-3 py-2.5 text-sm">
@@ -169,9 +172,12 @@ export default function OfficeHR() {
         {view === 'home' && <HomeView staff={staff} onNavigate={navigate} />}
         {view === 'profiles' && <HRProfiles onError={setError} />}
         {view === 'reviews' && <HRReviews onError={setError} />}
+        {view === 'roster' && <HRRoster onError={setError} />}
+        {view === 'incentives' && <HRIncentives onError={setError} />}
         {view === 'staff' && <StaffDirectory staff={staff} />}
-        {view === 'leaveTypes' && <LeaveTypes />}
-        {(view === 'leave' || view === 'attendance' || view === 'roster' || view === 'reports') && <ComingSoon view={view} />}
+        {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
+        {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
+        {(view === 'attendance' || view === 'reports') && <ComingSoon view={view} />}
       </main>
     </div>
   </div>;

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "migrate:legacy": "tsx scripts/migrate-legacy-to-supabase.ts",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "export:data": "node scripts/export-data.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

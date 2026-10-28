@@ -39,11 +39,11 @@ const fail = (status: number, message: string) => Object.assign(new Error(messag
 async function staffSession(db: any, req: any) {
   const token = String(req.headers['x-assessment-token'] || '');
   if (!token) throw fail(401, 'Please sign in to the Assessment Room.');
-  const { data, error } = await db.from('assessment_sessions').select('staff_id,expires_at,assessment_staff(id,name,branch,active,can_preview)')
+  const { data, error } = await db.from('assessment_sessions').select('staff_id,expires_at,assessment_staff(id,name,staff_code,branch,active,can_preview,password_hash)')
     .eq('token_hash', hashSecret(token)).gt('expires_at', new Date().toISOString()).maybeSingle();
   if (error) throw error;
   if (!data?.assessment_staff?.active) throw fail(401, 'Your session has ended. Please sign in again.');
-  return data.assessment_staff as { id: string; name: string; branch: string; can_preview: boolean };
+  return data.assessment_staff as { id: string; name: string; branch: string; can_preview: boolean; staff_code: string; password_hash: string | null };
 }
 
 // Validates an admin-submitted question list; returns it with ids filled in.
@@ -147,18 +147,153 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
   throw fail(405, 'Method not allowed.');
 }
 
+// Leave: apply, history, cancel, and the approver's queue. The staff member is found through the HR record
+// linked to their sign-in; an approver is whoever HR has set as `leave_approver_id` on the applicant.
+const LEAVE_TYPES: Record<string, { name: string; group: string; half: boolean }> = {
+  AL: { name: 'Annual Leave', group: 'AL', half: true }, EL: { name: 'Emergency Leave', group: 'AL', half: false },
+  ML: { name: 'Medical Leave', group: 'ML', half: true }, HOSP: { name: 'Hospitalization Leave', group: 'HOSP', half: false },
+  MARRG: { name: 'Marriage Leave', group: 'MARRG', half: false }, HAJUMR: { name: 'Haji / Umrah Leave', group: 'HAJUMR', half: false },
+  UL: { name: 'Unpaid Leave', group: 'UL', half: true },
+};
+const isoDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
+// Days between two dates that are working days for the person: a date on their uploaded duty roster counts
+// when the roster says they work it; any other date counts when its weekday is one of their usual working
+// weekdays (0 = Sunday ... 6 = Saturday). Public holidays that are not on the roster are not taken off.
+function leaveDays(start: string, end: string, half: string | null, workDays: number[], roster: Record<string, boolean> = {}) {
+  let count = 0;
+  for (let day = new Date(`${start}T00:00:00Z`); day <= new Date(`${end}T00:00:00Z`); day.setUTCDate(day.getUTCDate() + 1)) {
+    const iso = day.toISOString().slice(0, 10);
+    if (iso in roster ? roster[iso] : workDays.includes(day.getUTCDay())) count++;
+  }
+  return half ? (start === end && count ? 0.5 : 0) : count;
+}
+// The person's calendar between two dates: false for a public holiday of their holiday group, then the duty
+// roster on top (a roster day says whether they really work it). Dates not in the map use the usual weekdays.
+async function rosterFor(db: any, employeeId: string, from: string, to: string, holidayGroup = '') {
+  const calendar: Record<string, boolean> = {};
+  if (holidayGroup) {
+    const { data } = await db.from('hr_holidays').select('holiday_date').eq('group_code', holidayGroup).gte('holiday_date', from).lte('holiday_date', to).limit(400);
+    for (const row of data || []) calendar[row.holiday_date] = false; // holiday tables not set up yet: no holidays
+  }
+  const { data, error } = await db.from('hr_roster').select('work_date,works').eq('employee_id', employeeId).gte('work_date', from).lte('work_date', to).limit(1000);
+  if (!error) for (const row of data || []) calendar[row.work_date] = !!row.works; // roster table not set up yet: weekdays only
+  return calendar;
+}
+const requestRow = (r: any, extra: Record<string, unknown> = {}) => ({ id: r.id, type: r.leave_type, typeName: LEAVE_TYPES[r.leave_type]?.name || r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, note: r.decision_note, decidedAt: r.decided_at, supervisorNote: r.supervisor_note || '', supervisorDecidedAt: r.supervisor_decided_at || null, twoLevel: !!r.final_approver_id, createdAt: r.created_at, ...extra });
+
+// Which decision is waiting on this person for the request, if any.
+const stageFor = (r: any, personId: string) => r.status === 'pending' && r.approver_id === personId ? 'supervisor' : r.status === 'supervisor_approved' && r.final_approver_id === personId ? 'final' : '';
+
+async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
+  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,leave_approver_id,final_approver_id,work_days,holiday_group').eq('assessment_staff_id', staff.id).maybeSingle();
+  if (meError) throw meError;
+  const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : [1, 2, 3, 4, 5, 6];
+  if (!me) throw fail(400, 'Your sign-in is not linked to your staff record yet. Ask HR.');
+  const today = malaysiaToday();
+
+  if (req.method === 'GET' && action === 'leave_options') {
+    let approver = '', finalApprover = '';
+    if (me.leave_approver_id) { const { data } = await db.from('hr_employees').select('full_name').eq('id', me.leave_approver_id).maybeSingle(); approver = data?.full_name || ''; }
+    if (me.final_approver_id && me.final_approver_id !== me.leave_approver_id) { const { data } = await db.from('hr_employees').select('full_name').eq('id', me.final_approver_id).maybeSingle(); finalApprover = data?.full_name || ''; }
+    const from = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10), to = new Date(Date.parse(`${today}T00:00:00Z`) + 180 * 86400000).toISOString().slice(0, 10);
+    return res.status(200).json({ approver, finalApprover, workDays, roster: await rosterFor(db, me.id, from, to, me.holiday_group || ''), types: Object.entries(LEAVE_TYPES).map(([code, type]) => ({ code, name: type.name, group: type.group, half: type.half })) });
+  }
+
+  if (req.method === 'POST' && action === 'leave_apply') {
+    const type = LEAVE_TYPES[text(body.type, 10)];
+    if (!type) throw fail(400, 'Choose the type of leave.');
+    const start = isoDate(body.start), end = isoDate(body.end || body.start);
+    if (!start || !end) throw fail(400, 'Choose the dates.');
+    if (end < start) throw fail(400, 'The end date is before the start date.');
+    const earliest = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
+    if (start < earliest) throw fail(400, 'Leave can be applied up to 30 days after the fact. Ask HR for older dates.');
+    if (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`) > 90 * 86400000) throw fail(400, 'That is more than 90 days. Split it or ask HR.');
+    const half = body.half === 'AM' || body.half === 'PM' ? body.half : null;
+    if (half && !type.half) throw fail(400, `${type.name} cannot be taken as half a day.`);
+    if (half && start !== end) throw fail(400, 'A half day is for a single date.');
+    const days = leaveDays(start, end, half, workDays, await rosterFor(db, me.id, start, end, me.holiday_group || ''));
+    if (!days) throw fail(400, 'Those dates have no working day for you (your rest days are not counted).');
+    if (!me.leave_approver_id) throw fail(400, 'HR has not set who approves your leave yet. Ask HR.');
+    const { count: clash } = await db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('employee_id', me.id).in('status', ['pending', 'supervisor_approved', 'approved']).lte('start_date', end).gte('end_date', start);
+    if (clash) throw fail(409, 'You already have a leave request on some of those dates.');
+    const { data, error } = await db.from('hr_leave_requests').insert({ employee_id: me.id, approver_id: me.leave_approver_id, final_approver_id: me.final_approver_id && me.final_approver_id !== me.leave_approver_id ? me.final_approver_id : null, leave_type: body.type, leave_group: type.group, start_date: start, end_date: end, half_day: half, days, reason: text(body.reason, 500) }).select('*').single();
+    if (error) throw error;
+    return res.status(200).json({ request: requestRow(data) });
+  }
+
+  if (req.method === 'GET' && action === 'leave_history') {
+    const { data, error } = await db.from('hr_leave_requests').select('*').eq('employee_id', me.id).order('start_date', { ascending: false }).limit(200);
+    if (error) throw error;
+    return res.status(200).json({ requests: (data || []).map((r: any) => requestRow(r)) });
+  }
+
+  if (req.method === 'POST' && action === 'leave_cancel') {
+    const { data, error } = await db.from('hr_leave_requests').update({ status: 'cancelled' }).eq('id', text(body.id, 60)).eq('employee_id', me.id).in('status', ['pending', 'supervisor_approved']).select('id');
+    if (error) throw error;
+    if (!data?.length) throw fail(409, 'Only a request that has not been finally decided can be cancelled.');
+    return res.status(200).json({ success: true });
+  }
+
+  // The approver's queue, in two levels as in Infotech: the supervisor decides first, then the final approver.
+  // `stage` says which decision is waiting on this person ('supervisor' or 'final'); the rest is recent history.
+  if (req.method === 'GET' && action === 'leave_approvals') {
+    const { data, error } = await db.from('hr_leave_requests').select('*').or(`approver_id.eq.${me.id},final_approver_id.eq.${me.id}`).in('status', ['pending', 'supervisor_approved', 'approved', 'rejected']).order('created_at', { ascending: false }).limit(150);
+    if (error) throw error;
+    const ids = [...new Set((data || []).map((r: any) => r.employee_id))];
+    const [{ data: people }, { data: balances }] = ids.length ? await Promise.all([db.from('hr_employees').select('id,full_name,employee_code').in('id', ids), db.from('hr_leave_balances').select('employee_id,leave_group,year,balance').in('employee_id', ids)]) : [{ data: [] }, { data: [] }];
+    const name = new Map<string, any>((people || []).map((p: any) => [p.id, p]));
+    const balanceOf = (employee: string, group: string) => { const rows = (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year); return rows.length ? Number(rows[0].balance) : null; };
+    const rows = (data || []).map((r: any) => requestRow(r, { applicant: name.get(r.employee_id)?.full_name || '', code: name.get(r.employee_id)?.employee_code || '', balance: balanceOf(r.employee_id, r.leave_group), stage: stageFor(r, me.id) }));
+    return res.status(200).json({ pending: rows.filter((r: any) => r.stage).reverse(), recent: rows.filter((r: any) => !r.stage).slice(0, 20) });
+  }
+
+  if (req.method === 'POST' && action === 'leave_decide') {
+    const approve = body.decision === 'approve';
+    if (!approve && body.decision !== 'reject') throw fail(400, 'Approve or reject.');
+    const { data: request, error: readError } = await db.from('hr_leave_requests').select('*').eq('id', text(body.id, 60)).maybeSingle();
+    if (readError) throw readError;
+    if (!request || (request.approver_id !== me.id && request.final_approver_id !== me.id)) throw fail(403, 'This request is not yours to decide.');
+    const stage = stageFor(request, me.id);
+    if (!stage) throw fail(409, 'This request is not waiting for your decision.');
+    // The approver may correct the number of days (for example a public holiday in the range).
+    let days = Number(request.days);
+    if (approve && body.days !== undefined) { days = Number(body.days); if (!(days > 0 && days <= 90 && Number.isInteger(days * 2))) throw fail(400, 'Days must be a number such as 1, 1.5 or 2.'); }
+    const now = new Date().toISOString(), note = text(body.note, 300);
+    // A supervisor's approval passes the request on to the final approver when there is one; every other
+    // decision (a rejection, or the final approval) closes it.
+    const passOn = approve && stage === 'supervisor' && !!request.final_approver_id;
+    const status = !approve ? 'rejected' : passOn ? 'supervisor_approved' : 'approved';
+    const patch: Record<string, unknown> = { status, days };
+    if (stage === 'supervisor') Object.assign(patch, { supervisor_decided_by: me.id, supervisor_decided_at: now, supervisor_note: note });
+    if (!passOn) Object.assign(patch, { decided_by: me.id, decided_at: now, decision_note: note });
+    const { data: decided, error } = await db.from('hr_leave_requests').update(patch).eq('id', request.id).eq('status', request.status).select('id');
+    if (error) throw error;
+    if (!decided?.length) throw fail(409, 'This request has already been decided.');
+    if (status === 'approved') {
+      // Take the days off the balance (the newest year of that leave group) only once it is finally approved.
+      const { data: rows } = await db.from('hr_leave_balances').select('id,year,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).order('year', { ascending: false }).limit(1);
+      if (rows?.length) await db.from('hr_leave_balances').update({ taken: Number(rows[0].taken) + days, balance: Number(rows[0].balance) - days, updated_at: now }).eq('id', rows[0].id);
+    }
+    return res.status(200).json({ success: true, status, stage });
+  }
+  throw fail(405, 'Method not allowed.');
+}
+
 async function staffAction(req: any, res: any, action: string, body: any) {
   const db = serviceDb();
 
   if (req.method === 'POST' && action === 'login') {
     const code = normaliseCode(body.code);
     const name = nameKey(body.name);
-    const ic4 = normaliseIc4(body.ic4);
-    if (!code || !name || ic4.length !== 4) throw fail(400, 'Enter your name, staff code and the last 4 digits of your IC.');
-    const { data: staff, error } = await db.from('assessment_staff').select('id,name,branch,active,failed_logins,locked_until,ic4_hash').eq('staff_code', code).maybeSingle();
+    // First sign-in: the last 4 IC digits. After the staff member has set a password, the password.
+    const secret = String(body.password ?? body.ic4 ?? '');
+    if (!code || !name || !secret) throw fail(400, 'Enter your name, staff code and password. First time? Use the last 4 digits of your IC.');
+    const { data: staff, error } = await db.from('assessment_staff').select('id,name,branch,active,failed_logins,locked_until,ic4_hash,password_hash').eq('staff_code', code).maybeSingle();
     if (error) throw error;
     if (staff?.locked_until && Date.parse(staff.locked_until) > Date.now()) throw fail(429, `Too many attempts. Try again in ${LOCK_MINUTES} minutes.`);
-    if (!staff || !staff.active || nameKey(staff.name) !== name || !ic4Matches(ic4, staff.ic4_hash)) {
+    const hasPassword = Boolean(staff?.password_hash);
+    const secretOk = staff && (hasPassword ? ic4Matches(secret, staff.password_hash) : normaliseIc4(secret).length === 4 && ic4Matches(normaliseIc4(secret), staff.ic4_hash));
+    if (!staff || !staff.active || nameKey(staff.name) !== name || !secretOk) {
       if (staff) {
         const failed = staff.failed_logins + 1;
         await db.from('assessment_staff').update(failed >= MAX_FAILED_LOGINS
@@ -166,7 +301,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
           : { failed_logins: failed }).eq('id', staff.id);
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      throw fail(400, 'Name, staff code or IC digits are not correct.');
+      throw fail(400, 'Name, staff code or password are not correct. If you have already set a password, use it (not your IC digits).');
     }
     await db.from('assessment_staff').update({ failed_logins: 0, locked_until: null }).eq('id', staff.id);
     const token = randomBytes(32).toString('base64url');
@@ -175,7 +310,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (sessionError) throw sessionError;
     // Housekeeping: expired sessions are useless, so drop them while we are here.
     await db.from('assessment_sessions').delete().lt('expires_at', new Date().toISOString());
-    return res.status(200).json({ token, staff: { name: staff.name, branch: staff.branch } });
+    return res.status(200).json({ token, staff: { name: staff.name, branch: staff.branch }, mustSetPassword: !hasPassword });
   }
 
   if (req.method === 'POST' && action === 'logout') {
@@ -185,9 +320,42 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
+  if (req.method === 'POST' && action === 'set_password') {
+    const { data: row, error: rowError } = await db.from('assessment_staff').select('staff_code,password_hash').eq('id', staff.id).single();
+    if (rowError) throw rowError;
+    // Changing an existing password needs the current one; the first time is allowed straight after the IC sign-in.
+    if (row.password_hash && !ic4Matches(String(body.current || ''), row.password_hash)) throw fail(400, 'Your current password is not correct.');
+    const password = String(body.password || '');
+    if (password.length < 8) throw fail(400, 'Use at least 8 characters.');
+    if (password.length > 100) throw fail(400, 'That password is too long.');
+    if (/^\d{4}$/.test(password) || password.toUpperCase() === String(row.staff_code).toUpperCase()) throw fail(400, 'Choose a password that is not your staff code or your IC digits.');
+    const token = String(req.headers['x-assessment-token'] || '');
+    const { error } = await db.from('assessment_staff').update({ password_hash: hashIc4(password), password_set_at: new Date().toISOString(), failed_logins: 0, locked_until: null }).eq('id', staff.id);
+    if (error) throw error;
+    // Any other device signed in as this person is signed out; this one stays.
+    await db.from('assessment_sessions').delete().eq('staff_id', staff.id).neq('token_hash', hashSecret(token));
+    return res.status(200).json({ success: true });
+  }
+  // The staff member's own HR record and leave balance. No IC, bank or pay details are sent.
+  if (req.method === 'GET' && (action === 'my_profile' || action === 'my_leave')) {
+    const { data: person, error: personError } = await db.from('hr_employees').select('id,company,employee_code,full_name,branch,department,designation,employment_type,join_date,confirm_date,email,phone,status').eq('assessment_staff_id', staff.id).maybeSingle();
+    if (personError) throw personError;
+    if (!person) return res.status(200).json({ linked: false });
+    if (action === 'my_profile') return res.status(200).json({ linked: true, profile: { fullName: person.full_name, code: person.employee_code, company: person.company, branch: person.branch, department: person.department, position: person.designation, employmentType: person.employment_type, joinDate: person.join_date, confirmDate: person.confirm_date, email: person.email, phone: person.phone } });
+    const { data: balances, error } = await db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,total,taken,balance,bf_expiry,as_of').eq('employee_id', person.id);
+    if (error) throw error;
+    const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
+    return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
+  }
+  if (action.startsWith('leave_')) return await leaveAction(req, res, db, staff, action, body);
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
+    let isApprover = false;
+    try {
+      const { data: self } = await db.from('hr_employees').select('id').eq('assessment_staff_id', staff.id).maybeSingle();
+      if (self) { const { count } = await db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'); isApprover = (count || 0) > 0; }
+    } catch { /* leave tables not set up yet */ }
     // Preview accounts see every assessment, including closed ones.
     let quizQuery = db.from('assessment_quizzes').select('id,title,description,pass_mark,active,questions').order('created_at', { ascending: false });
     if (!staff.can_preview) quizQuery = quizQuery.eq('active', true);
@@ -200,7 +368,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, branch: staff.branch, preview: staff.can_preview },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
@@ -251,9 +419,9 @@ async function adminAction(req: any, res: any, action: string, body: any) {
 
   // User Management only needs the staff list, so skip quizzes and results.
   if (req.method === 'GET' && action === 'staff') {
-    const { data, error } = await db.from('assessment_staff').select('id,name,staff_code,branch,active,ic4_hash,can_preview').order('name');
+    const { data, error } = await db.from('assessment_staff').select('id,name,staff_code,branch,active,ic4_hash,can_preview,password_hash').order('name');
     if (error) throw error;
-    return res.status(200).json({ staff: (data || []).map((row: any) => ({ id: row.id, name: row.name, code: row.staff_code, branch: row.branch, active: row.active, hasIc4: Boolean(row.ic4_hash), preview: row.can_preview })) });
+    return res.status(200).json({ staff: (data || []).map((row: any) => ({ id: row.id, name: row.name, code: row.staff_code, branch: row.branch, active: row.active, hasIc4: Boolean(row.ic4_hash), hasPassword: Boolean(row.password_hash), preview: row.can_preview })) });
   }
 
   if (req.method === 'GET' && action === 'admin') {
@@ -288,6 +456,14 @@ async function adminAction(req: any, res: any, action: string, body: any) {
     if (error) throw error;
     // Deactivated staff are signed out straight away.
     if (body.id && body.active === false) await db.from('assessment_sessions').delete().eq('staff_id', text(body.id));
+    return res.status(200).json({ success: true });
+  }
+
+  if (req.method === 'POST' && action === 'reset_password') {
+    const id = text(body.id);
+    const { error } = await db.from('assessment_staff').update({ password_hash: null, password_set_at: null, failed_logins: 0, locked_until: null, updated_at: now }).eq('id', id);
+    if (error) throw error;
+    await db.from('assessment_sessions').delete().eq('staff_id', id);
     return res.status(200).json({ success: true });
   }
 
@@ -336,7 +512,7 @@ async function adminAction(req: any, res: any, action: string, body: any) {
   throw fail(405, 'Method not allowed.');
 }
 
-const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt']);
+const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt', 'reset_password']);
 
 export async function assessmentHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');

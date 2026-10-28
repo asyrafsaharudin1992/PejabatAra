@@ -201,11 +201,14 @@ export async function clinicalHandler(req: any, res: any) {
       const names = req.query.branch === 'all' ? scope.map((branch) => branch.name) : [pickBranch(scope, req.query.branch).name];
       const month = text(req.query.month, 7);
       if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
-      let query = db.from('incentive_claims').select('id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,assessment_staff(name,staff_code)').in('branch', names);
-      if (month !== 'all') query = query.eq('month', month);
-      const { data, error } = await query.order('month', { ascending: false }).order('submitted_at', { ascending: true, nullsFirst: false });
+      // hr_submitted_at is new: until its migration is run the claims are read without it.
+      const read = async (columns: string) => { let query = db.from('incentive_claims').select(columns).in('branch', names); if (month !== 'all') query = query.eq('month', month); return await query.order('month', { ascending: false }).order('submitted_at', { ascending: true, nullsFirst: false }); };
+      const base = 'id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,assessment_staff(name,staff_code)';
+      let result: any = await read(`${base},hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by`);
+      if (result.error?.code === '42703') result = await read(base);
+      const { data, error } = result;
       if (error) throw error;
-      return res.status(200).json({ claims: (data || []).map((row: any) => ({ id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
+      return res.status(200).json({ claims: (data || []).map((row: any) => ({ hrSubmittedAt: row.hr_submitted_at || null, hrSubmittedBy: row.hr_submitted_by || '', hrReceivedAt: row.hr_received_at || null, hrReceivedBy: row.hr_received_by || '', id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
     }
     if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
 
@@ -235,6 +238,11 @@ export async function clinicalHandler(req: any, res: any) {
       if (error) throw error;
       if (!claim || !scope.some((branch) => branch.name === claim.branch)) throw fail(404, 'Claim not found.');
       // A claim can be approved before the staff member submits it; an approved claim can only be returned.
+      if (body.decision === 'return') {
+        // Once HR has received a claim it is no longer Clinical Admin's to take back (before the migration there is no such column).
+        const { data: received, error: receivedError } = await db.from('incentive_claims').select('hr_received_at').eq('id', claim.id).maybeSingle();
+        if (!receivedError && received?.hr_received_at) throw fail(409, 'HR has already received this claim, so it cannot be returned. Ask HR.');
+      }
       if (claim.status === 'approved' ? body.decision !== 'return' : !['draft', 'submitted', 'returned'].includes(claim.status)) throw fail(409, 'This claim has already been approved.');
       const approvedBy = text(body.approvedBy, 80);
       if (body.decision === 'approve') {
@@ -250,9 +258,34 @@ export async function clinicalHandler(req: any, res: any) {
       const row = body.decision === 'approve'
         ? { status: 'approved', approved_by: approvedBy, admin_note: note, decided_at: now, updated_at: now }
         : { status: 'returned', approved_by: '', admin_note: note, decided_at: now, updated_at: now };
-      const { error: saveError } = await db.from('incentive_claims').update(row).eq('id', claim.id);
+      let { error: saveError } = await db.from('incentive_claims').update(body.decision === 'return' ? { ...row, hr_submitted_at: null, hr_submitted_by: '', hr_received_at: null, hr_received_by: '' } : row).eq('id', claim.id);
+      // Returning also takes the claim back from HR; before the migration there is nothing to clear.
+      if (saveError?.code === '42703') ({ error: saveError } = await db.from('incentive_claims').update(row).eq('id', claim.id));
       if (saveError) throw saveError;
       return res.status(200).json({ success: true });
+    }
+
+    // Sends the approved claims of a month to HR (all branches this account sees, or one).
+    if (action === 'incentive_submit_hr') {
+      const month = text(body.month, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      const by = text(body.by, 80);
+      if (!by) throw fail(400, 'Enter your name to send to HR.');
+      const names = body.branch === 'all' ? scope.map((branch) => branch.name) : [pickBranch(scope, body.branch).name];
+      // With an id only that claim is sent (from its own page); otherwise every approved claim of the month.
+      // The claims that can be sent are picked first and then updated by id: a filter on the changed column
+      // would hide the updated rows from the result.
+      let pick: any = db.from('incentive_claims').select('id').in('branch', names).eq('month', month).eq('status', 'approved').is('hr_submitted_at', null);
+      if (text(body.id, 60)) pick = pick.eq('id', text(body.id, 60));
+      const { data: eligible, error: pickError } = await pick;
+      const missing = pickError?.code === '42703';
+      if (pickError && !missing) throw pickError;
+      if (missing) throw fail(503, 'Sending to HR is not set up yet. Ask System Admin to run the latest migration.');
+      const data = (eligible || []).map((row: any) => row.id);
+      if (!data.length) throw fail(409, 'There are no approved claims waiting to be sent for that month.');
+      const { error } = await db.from('incentive_claims').update({ hr_submitted_at: now, hr_submitted_by: by, updated_at: now }).in('id', data);
+      if (error) throw error;
+      return res.status(200).json({ success: true, sent: data.length });
     }
 
     if (action === 'save_report') {

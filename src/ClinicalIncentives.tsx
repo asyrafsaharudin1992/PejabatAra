@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Undo2, X } from 'lucide-react';
+import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Send, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
@@ -11,7 +11,7 @@ import { PrintPage, PrintPortal } from './PrintPortal';
 // Refresh is pressed; nothing polls.
 const API = '/api/status?resource=clinical';
 const APPROVER_KEY = 'ara_incentive_approver';
-type Claim = { id: string; month: string; branch: string; staffName: string; staffCode: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
+export type Claim = { hrSubmittedAt?: string | null; hrSubmittedBy?: string; hrReceivedAt?: string | null; hrReceivedBy?: string; id: string; month: string; branch: string; staffName: string; staffCode: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
 
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 7);
 const shiftMonth = (month: string, by: number) => { const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 + by; return `${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`; };
@@ -30,6 +30,9 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
   const [claims, setClaims] = useState<Claim[] | null>(null);
   const [openId, setOpenId] = useState('');
   const [printing, setPrinting] = useState<'' | 'print' | 'pdf'>('');
+  const [sender, setSender] = useState(() => { try { return localStorage.getItem(APPROVER_KEY) || ''; } catch { return ''; } });
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState('');
   const months = claimMonths();
 
   const load = async () => {
@@ -37,7 +40,25 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
     try { setClaims((await (await officeFetch(`${API}&action=incentives&branch=${encodeURIComponent(branchFilter)}&month=${month}`)).json()).claims); }
     catch (cause) { setClaims([]); onError(cause instanceof Error ? cause.message : 'Unable to load claims.'); }
   };
-  useEffect(() => { setOpenId(''); void load(); }, [branchFilter, month]);
+  useEffect(() => { setOpenId(''); setNotice(''); void load(); }, [branchFilter, month]);
+  // Approved claims of the month wait here until Clinical Admin sends them to HR.
+  const toSend = month === 'all' ? [] : (claims || []).filter((claim) => claim.status === 'approved' && !claim.hrSubmittedAt);
+  // Why nothing can be sent right now: claims must be approved first, and each is sent only once.
+  const approvedCount = (claims || []).filter((claim) => claim.status === 'approved').length;
+  const sendHint = !claims?.length ? `No claims for ${monthLabel(month)} yet.` : approvedCount ? `All ${approvedCount} approved ${approvedCount === 1 ? 'claim' : 'claims'} for ${monthLabel(month)} ${approvedCount === 1 ? 'has' : 'have'} been sent to HR.` : `Nothing to send to HR yet: approve a claim first (open it and tick every row). Approved claims can then be sent to HR from here.`;
+  const sendToHr = async () => {
+    if (!sender.trim()) { onError('Enter your name to send to HR.'); return; }
+    if (!window.confirm(`Send ${toSend.length} approved ${toSend.length === 1 ? 'claim' : 'claims'} for ${monthLabel(month)} to HR?`)) return;
+    setSending(true); setNotice('');
+    try {
+      const response = await officeFetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'incentive_submit_hr', branch: branchFilter, month, by: sender.trim() }) });
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      try { localStorage.setItem(APPROVER_KEY, sender.trim()); } catch { /* remembering the name is optional */ }
+      setNotice(`Sent ${result.sent} ${result.sent === 1 ? 'claim' : 'claims'} to HR.`); await load();
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to send to HR.'); }
+    finally { setSending(false); }
+  };
   // Hooks must run on every render, so this comes before the early return below.
   usePrintSheet(Boolean(printing), `Incentive Claims - ${branchFilter === 'all' ? 'All branches' : branchFilter} - ${month === 'all' ? 'All months' : month}`, () => setPrinting(''));
 
@@ -62,10 +83,15 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
         <button onClick={() => setPrinting('pdf')} disabled={!sorted.length} title="A summary page, then one page per staff member" className="ml-auto inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({sorted.length})</button>
         <button onClick={() => setPrinting('print')} disabled={!sorted.length} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" />Print all</button>
         <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button></div>
+      {month !== 'all' && claims && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-[#f4fafd] p-4">
+        {toSend.length > 0 ? <><p className="min-w-[200px] flex-1 text-sm text-slate-700"><strong>{toSend.length} approved {toSend.length === 1 ? 'claim' : 'claims'}</strong> for {monthLabel(month)} not sent to HR yet.</p>
+          <input value={sender} onChange={(event) => setSender(event.target.value)} placeholder="Your name" aria-label="Your name" className="h-10 w-44 rounded-xl border border-slate-200 bg-white px-3 text-sm" />
+          <button onClick={() => void sendToHr()} disabled={sending} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Send className="h-4 w-4" />{sending ? 'Sending…' : `Send ${toSend.length} to HR`}</button></> : <p className={`text-sm ${notice ? 'font-semibold text-emerald-700' : 'text-slate-600'}`}>{notice || sendHint}</p>}
+      </div>}
     </section>
     {claims && !sorted.length && <p className={`${card} text-sm text-slate-500`}>{claims.length ? `No claims match “${name.trim()}”.` : `No claims for ${label} yet.`}</p>}
     {sorted.length > 0 && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{sorted.map((claim) => <button key={claim.id} onClick={() => setOpenId(claim.id)} className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-md`}>
-      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{claim.staffName}</p><p className="mt-0.5 text-xs text-slate-400"><span className="font-mono">{claim.staffCode}</span>{branchFilter === 'all' ? ` · ${claim.branch}` : ''}{month === 'all' ? ` · ${monthLabel(claim.month)}` : ''}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[claim.status]}`}>{STATUS_LABEL[claim.status]}</span></div>
+      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{claim.staffName}</p><p className="mt-0.5 text-xs text-slate-400"><span className="font-mono">{claim.staffCode}</span>{branchFilter === 'all' ? ` · ${claim.branch}` : ''}{month === 'all' ? ` · ${monthLabel(claim.month)}` : ''}</p></div><span className="flex shrink-0 flex-col items-end gap-1"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[claim.status]}`}>{STATUS_LABEL[claim.status]}</span>{claim.hrSubmittedAt && <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${claim.hrReceivedAt ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}`}>{claim.hrReceivedAt ? 'Received by HR' : 'Sent to HR'}</span>}</span></div>
       <p className="mt-4 text-2xl font-semibold">{rm(claim.status === 'approved' ? approvedTotal(claim.entries) : claimTotal(claim.entries))}</p>
       <p className="mt-1 text-xs text-slate-500">{claim.entries.length} entries{claim.submittedAt ? ` · submitted ${new Date(claim.submittedAt).toLocaleDateString('en-GB')}` : ''}</p>
     </button>)}</div>}
@@ -116,6 +142,18 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       } finally { setMarking((count) => count - 1); }
     });
   };
+  const sendThisToHr = async () => {
+    if (!approver.trim()) { onError('Enter your name to send to HR.'); return; }
+    setSaving(true);
+    try {
+      const response = await post({ action: 'incentive_submit_hr', id: claim.id, branch: claim.branch, month: claim.month, by: approver.trim() });
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      try { localStorage.setItem(APPROVER_KEY, approver.trim()); } catch { /* remembering the name is optional */ }
+      await onDecided();
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to send to HR.'); }
+    finally { setSaving(false); }
+  };
   const decide = async (decision: 'approve' | 'return') => {
     if (decision === 'return' && !note.trim()) { onError('Write a note telling the staff member what to fix.'); return; }
     if (decision === 'approve' && !approver.trim()) { onError('Enter your name for "Approved by".'); return; }
@@ -161,12 +199,14 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       <h3 className="font-semibold">{open ? `Approve ${monthLabel(claim.month)}` : `${monthLabel(claim.month)} approved`}</h3>
       {open && claim.status !== 'submitted' && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{claim.staffName} has not submitted this claim yet{claim.status === 'returned' ? ' (it was returned to fix)' : ''}. Approving it locks it, so they cannot add more entries.</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        {open && <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Approved by</span><input value={approver} onChange={(event) => setApprover(event.target.value)} placeholder="Your name" className={input} /></label>}
+        {(open || (claim.status === 'approved' && !claim.hrSubmittedAt)) && <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">{open ? 'Approved by' : 'Your name (sent by)'}</span><input value={approver} onChange={(event) => setApprover(event.target.value)} placeholder="Your name" className={input} /></label>}
         <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Note to staff {open ? '(needed to return)' : '(why it is being returned)'}</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. 12/10 DXT entered twice" className={input} /></label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {open && <button onClick={() => void decide('approve')} disabled={saving || marking > 0 || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />Approve {monthLabel(claim.month)} · {rm(approved)}</button>}
-        <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff</button>
+        {claim.status === 'approved' && !claim.hrSubmittedAt && <button onClick={() => void sendThisToHr()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Send className="h-4 w-4" />Send to HR</button>}
+        {claim.hrSubmittedAt && <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${claim.hrReceivedAt ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}`}>{claim.hrReceivedAt ? `Received by HR ${new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}${claim.hrReceivedBy ? ` · ${claim.hrReceivedBy}` : ''}` : `Sent to HR ${new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB')}${claim.hrSubmittedBy ? ` · ${claim.hrSubmittedBy}` : ''}`}</span>}
+        {!claim.hrReceivedAt && <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff</button>}
         {open && unchecked > 0 && <span className="text-xs text-amber-700">Check every row first ({unchecked} left).</span>}{marking > 0 && <span className="text-xs text-slate-500">Saving ticks…</span>}
       </div>
     </section>
@@ -176,7 +216,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
 }
 
 // First page of a whole-month PDF: one line per claim.
-function MonthSummary({ claims, title }: { claims: Claim[]; title: string }) {
+export function MonthSummary({ claims, title }: { claims: Claim[]; title: string }) {
   const cell = 'border border-black px-[1.5mm] py-[1mm]';
   return <div className="cv-fit text-[9.5pt]">
     <div className="flex items-center gap-[4mm]"><img src="/forms/ara-logo.jpg" alt="" className="h-[16mm] w-[16mm] object-contain" /><div><p className="text-[13pt] font-bold">KLINIK ARA 24 JAM · STAFF INCENTIVES</p><p className="text-[11pt]">Summary · {title}</p></div></div>

@@ -130,7 +130,7 @@ export default function IncentiveClaims() {
   const editable = claim && (claim.status === 'draft' || claim.status === 'returned');
   const total = claim ? claimTotal(claim.entries) : 0;
   return <Shell>
-    <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
+    <a href="#office/individual" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Menu</a>
     <div className="mt-5 flex items-start justify-between gap-4">
       <div><p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">STAFF INCENTIVES</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{me ? `Hi, ${me.name.split(' ')[0]}` : 'Loading…'}</h1><p className="mt-1 text-sm text-slate-500">Tick the procedures you performed, then submit at month end.</p></div>
       <button onClick={signOut} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><LogOut className="h-4 w-4" />Sign out</button>
