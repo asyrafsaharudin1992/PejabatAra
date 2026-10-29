@@ -27,6 +27,25 @@ function PhoneFrame({ frameRef, reload }: { frameRef: RefObject<HTMLIFrameElemen
   </div>;
 }
 
+// The desktop side is laid out at a real desktop width and scaled down to fit the space beside the phone, so it
+// shows the full desktop design instead of a narrow window.
+const DESKTOP_WIDTH = 1440;
+function DesktopFrame({ frameRef, reload }: { frameRef: RefObject<HTMLIFrameElement | null>; reload: number }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: DESKTOP_WIDTH, height: 900 });
+  useEffect(() => {
+    const element = box.current; if (!element) return;
+    const measure = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const scale = Math.min(1, size.width / DESKTOP_WIDTH);
+  return <div ref={box} className="relative h-full min-w-0 flex-1 overflow-hidden bg-white">
+    <iframe key={reload} ref={frameRef} title="Desktop view" src={window.location.href} style={{ width: DESKTOP_WIDTH, height: size.height / scale, transform: `scale(${scale})`, transformOrigin: 'top left' }} className="absolute left-0 top-0 block border-0 bg-white" />
+  </div>;
+}
+
 export default function DevShell({ children }: { children: ReactNode }) {
   const inside = window.self !== window.top;
   const [mode, setMode] = useState<Mode>(readMode);
@@ -57,11 +76,10 @@ export default function DevShell({ children }: { children: ReactNode }) {
   }, [inside, mode]);
 
   if (inside) return <>{children}</>;
-  const src = window.location.href;
   return <>
     {mode === 'desktop' && children}
     {mode !== 'desktop' && <div className="fixed inset-0 z-[190] flex bg-slate-300">
-      {mode === 'split' && <iframe key={`l${reload}`} ref={left} title="Desktop view" src={src} className="h-full min-w-0 flex-1 border-0 bg-white" />}
+      {mode === 'split' && <DesktopFrame frameRef={left} reload={reload} />}
       <div className={`flex shrink-0 items-start justify-center bg-slate-800 px-6 pt-6 ${mode === 'phone' ? 'flex-1' : ''}`}>
         <PhoneFrame frameRef={right} reload={reload} />
       </div>

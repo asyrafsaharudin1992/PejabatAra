@@ -7,12 +7,16 @@ import { LEAVE_GROUPS } from './lib/leaveTypes';
 // who are someone's leave approver). Days are counted on the applicant's own working days.
 type Balance = { group: string; year: number; eligible: number; broughtForward: number; total: number; taken: number; balance: number; bfExpiry: string | null; asOf: string };
 type Option = { code: string; name: string; group: string; half: boolean };
-type Request = { id: string; type: string; typeName: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote?: string; twoLevel?: boolean; stage?: '' | 'supervisor' | 'final'; createdAt: string; applicant?: string; code?: string; balance?: number | null };
+type Request = { id: string; type: string; typeName: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote?: string; twoLevel?: boolean; stage?: '' | 'supervisor' | 'final'; alsoOff?: string[]; createdAt: string; applicant?: string; code?: string; balance?: number | null };
 
 const dmy = (date: string | null | undefined) => date ? date.split('-').reverse().join('/') : '—';
 const range = (r: { start: string; end: string; half: string | null }) => `${dmy(r.start)}${r.end !== r.start ? ` – ${dmy(r.end)}` : ''}${r.half ? ` (${r.half})` : ''}`;
 const days = (value: number) => Number.isInteger(value) ? String(value) : value.toFixed(1);
 const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+const addDays = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:00Z`) + by * 86400000).toISOString().slice(0, 10);
+// As in Infotech: leave is applied for at least 1 day before the leave date, except medical, hospitalization and emergency leave.
+const APPLY_AFTER_THE_DAY = new Set(['ML', 'HOSP', 'EL', 'MATN', 'ULEL']);
+const earliestFor = (type: string) => APPLY_AFTER_THE_DAY.has(type) ? addDays(todayKey(), -30) : addDays(todayKey(), 1);
 const field = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 const card = 'rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.06)] sm:p-5';
 const STATUS: Record<Request['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
@@ -60,8 +64,8 @@ function Apply({ onDone }: { onDone: () => void }) {
   const [options, setOptions] = useState<{ approver: string; finalApprover?: string; workDays: number[]; roster?: Record<string, boolean>; types: Option[] } | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [type, setType] = useState('AL');
-  const [start, setStart] = useState(todayKey());
-  const [end, setEnd] = useState(todayKey());
+  const [start, setStart] = useState(earliestFor('AL'));
+  const [end, setEnd] = useState(earliestFor('AL'));
   const [half, setHalf] = useState<'' | 'AM' | 'PM'>('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
@@ -89,14 +93,15 @@ function Apply({ onDone }: { onDone: () => void }) {
   };
   return <form onSubmit={submit} className={`${card} space-y-4`}>
     {!options.approver && <Notice tone="amber">HR has not set who approves your leave yet, so you cannot apply for now. Ask HR.</Notice>}
-    <label className="block text-sm font-semibold text-slate-600">Leave type<select value={type} onChange={(event) => { setType(event.target.value); setHalf(''); }} className={`${field} mt-1.5`}>{options.types.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+    <label className="block text-sm font-semibold text-slate-600">Leave type<select value={type} onChange={(event) => { const next = event.target.value, earliest = earliestFor(next); setType(next); setHalf(''); if (start < earliest) { setStart(earliest); setEnd((current) => current < earliest ? earliest : current); } }} className={`${field} mt-1.5`}>{options.types.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
     <div className="grid grid-cols-2 gap-3">
-      <label className="block text-sm font-semibold text-slate-600">From<input type="date" required min={todayKey()} value={start} onChange={(event) => { setStart(event.target.value); if (end < event.target.value) setEnd(event.target.value); }} className={`${field} mt-1.5`} /></label>
+      <label className="block text-sm font-semibold text-slate-600">From<input type="date" required min={earliestFor(type)} value={start} onChange={(event) => { setStart(event.target.value); if (end < event.target.value) setEnd(event.target.value); }} className={`${field} mt-1.5`} /></label>
       <label className="block text-sm font-semibold text-slate-600">To<input type="date" required min={start} value={end} onChange={(event) => setEnd(event.target.value)} className={`${field} mt-1.5`} /></label>
     </div>
+    <p className="-mt-2 text-xs text-slate-400">{APPLY_AFTER_THE_DAY.has(type) ? 'You can apply for this after the day.' : 'Apply at least 1 day before the leave date. Medical, hospitalization and emergency leave can be applied for after the day.'}</p>
     {chosen?.half && start === end && <div><p className="text-sm font-semibold text-slate-600">Day</p><div className="mt-1.5 inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">{([['', 'Full day'], ['AM', 'Morning'], ['PM', 'Afternoon']] as const).map(([value, label]) => <button type="button" key={value} onClick={() => setHalf(value)} className={`rounded-lg px-3.5 py-2 text-xs font-bold transition ${half === value ? 'bg-[#0b587b] text-white shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div></div>}
-    <div className="rounded-xl bg-[#f4fafd] p-3.5 text-sm"><strong className="text-lg text-[#0b587b]">{days(total)}</strong> <span className="text-slate-600">working day{total === 1 ? '' : 's'}</span>{left !== null && <span className="text-slate-500"> · balance {days(left)}</span>}{total === 0 && <p className="mt-1 text-xs text-amber-700">There is no working day in those dates (rest days are not counted).</p>}{left !== null && total > left && type !== 'UL' && <p className="mt-1 text-xs text-amber-700">This is more than your balance. Your approver will see that.</p>}</div>
-    <label className="block text-sm font-semibold text-slate-600">Reason (optional)<textarea rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10" /></label>
+    <div className="rounded-xl bg-[#f4fafd] p-3.5 text-sm"><strong className="text-lg text-[#0b587b]">{days(total)}</strong> <span className="text-slate-600">working day{total === 1 ? '' : 's'}</span>{left !== null && <span className="text-slate-500"> · balance {days(left)}</span>}{total === 0 && <p className="mt-1 text-xs text-amber-700">There is no working day in those dates (rest days and public holidays are not counted).</p>}{left !== null && total > left && type !== 'UL' && <p className="mt-1 text-xs text-amber-700">This is more than your balance. Your approver will see that.</p>}</div>
+    <label className="block text-sm font-semibold text-slate-600">Reason<textarea required minLength={2} rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10" /></label>
     {options.approver && <p className="text-xs text-slate-500">Goes to <strong className="text-slate-700">{options.approver}</strong>{options.finalApprover ? <>, then <strong className="text-slate-700">{options.finalApprover}</strong> for final approval</> : ' for approval'}.</p>}
     {error && <Notice tone="rose">{error}</Notice>}
     <button disabled={saving || !options.approver || total === 0} className="h-12 w-full rounded-xl bg-[#0b587b] text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? 'Sending…' : 'Send request'}</button>
@@ -146,7 +151,8 @@ function Approvals() {
       {request.stage === 'final' && request.supervisorNote && <p className="mt-1 text-xs text-slate-500">Supervisor said: {request.supervisorNote}</p>}
       <p className="mt-2 text-sm"><strong>{request.typeName}</strong> · <span className="text-[#2a5ea8]">{range(request)}</span> · {days(request.days)} day{request.days === 1 ? '' : 's'}</p>
       {request.reason && <p className="mt-1 text-sm text-slate-600">“{request.reason}”</p>}
-      {request.balance !== null && request.balance !== undefined && <p className={`mt-1 text-xs ${request.balance < request.days && request.type !== 'UL' ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Balance now {days(request.balance)}{request.balance < request.days && request.type !== 'UL' ? ': this request is more than the balance' : ''}</p>}
+      {request.balance !== null && request.balance !== undefined && <p className={`mt-1 text-xs ${request.balance < request.days && request.type !== 'UL' ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Balance now {days(request.balance)}{request.type !== 'UL' ? ` · ${days(request.balance - request.days)} after this leave` : ''}{request.balance < request.days && request.type !== 'UL' ? ': this request is more than the balance' : ''}</p>}
+      {request.alsoOff && request.alsoOff.length > 0 && <p className="mt-1 text-xs text-amber-700">Also off on these dates: {request.alsoOff.join(', ')}</p>}
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_120px]"><input value={notes[request.id] || ''} onChange={(event) => setNotes({ ...notes, [request.id]: event.target.value })} placeholder="Note (optional)" maxLength={300} className={field} /><input inputMode="decimal" value={adjust[request.id] || ''} onChange={(event) => setAdjust({ ...adjust, [request.id]: event.target.value.replace(/[^\d.]/g, '') })} placeholder={`Days: ${days(request.days)}`} aria-label="Change the number of days" className={field} /></div>
       <div className="mt-3 flex gap-2"><button disabled={busy === request.id} onClick={() => void decide(request, 'approve')} className="h-11 flex-1 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">Approve</button><button disabled={busy === request.id} onClick={() => void decide(request, 'reject')} className="h-11 flex-1 rounded-xl border border-rose-200 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50">Reject</button></div>
     </li>)}</ul>}

@@ -6,7 +6,7 @@ import LeaveSection from './LeaveScreens';
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean } };
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; leaveWaiting?: number } };
 type View = 'home' | 'leave' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
 
@@ -14,9 +14,9 @@ const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 
 const dmy = (date: string | null | undefined) => date ? date.split('-').reverse().join('/') : '—';
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase();
 
-function Tile({ icon: Icon, label, tone, href, onClick, soon = false }: { key?: string; icon: typeof Settings; label: string; tone: string; href?: string; onClick?: () => void; soon?: boolean }) {
+function Tile({ icon: Icon, label, tone, href, onClick, soon = false, badge = 0 }: { key?: string; icon: typeof Settings; label: string; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number }) {
   const body = <>
-    <span className={`relative grid h-14 w-14 place-items-center rounded-2xl ${tone}`}><Icon className="h-7 w-7" strokeWidth={1.7} />{soon && <span className="absolute -right-2 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}</span>
+    <span className={`relative grid h-14 w-14 place-items-center rounded-2xl ${tone}`}><Icon className="h-7 w-7" strokeWidth={1.7} />{soon && <span className="absolute -right-2 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}{badge > 0 && <span aria-label={`${badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{badge}</span>}</span>
     <span className="mt-2 text-center text-[13px] font-semibold leading-tight text-[#14233b]">{label}</span>
   </>;
   const base = 'flex flex-col items-center rounded-2xl p-3 transition';
@@ -91,10 +91,10 @@ export default function IndividualHub() {
 
   const name = me?.staff.name || '';
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
-  type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean };
+  type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
   const items: Item[] = [
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', soon: true },
-    { label: 'Leave', desc: 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e8efff] text-[#2a5ea8]', onClick: () => setView('leave') },
+    { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e8efff] text-[#2a5ea8]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', soon: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },
@@ -119,7 +119,7 @@ export default function IndividualHub() {
         </div>
       </header>
       <main className="-mt-4 rounded-t-[28px] bg-[#f5f7f9] px-4 pb-10 pt-6">
-        <div className="grid grid-cols-3 gap-y-5">{items.map((item) => <Tile key={item.label} icon={item.icon} label={item.label} tone={item.tone} href={item.href} onClick={item.onClick} soon={item.soon} />)}</div>
+        <div className="grid grid-cols-3 gap-y-5">{items.map((item) => <Tile key={item.label} icon={item.icon} label={item.label} tone={item.tone} href={item.href} onClick={item.onClick} soon={item.soon} badge={item.badge} />)}</div>
       </main>
     </div>
 
@@ -140,7 +140,7 @@ export default function IndividualHub() {
             <p className="mt-1 text-sm text-slate-500">Everything for you in one place.</p>
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => {
               const body = <>
-                <span className="flex items-start justify-between"><span className={`grid h-12 w-12 place-items-center rounded-2xl ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.7} /></span>{item.soon ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Soon</span> : <ArrowRight className="h-4 w-4 text-slate-300 transition group-hover:translate-x-1 group-hover:text-[#0b587b]" />}</span>
+                <span className="flex items-start justify-between"><span className={`relative grid h-12 w-12 place-items-center rounded-2xl ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.7} />{(item.badge || 0) > 0 && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{item.badge}</span>}</span>{item.soon ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Soon</span> : <ArrowRight className="h-4 w-4 text-slate-300 transition group-hover:translate-x-1 group-hover:text-[#0b587b]" />}</span>
                 <strong className="mt-4 block text-base font-semibold">{item.label}</strong>
                 <span className="mt-1 block text-sm leading-5 text-slate-500">{item.desc}</span>
               </>;

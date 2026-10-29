@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { HRLeaveStaff } from './HRLeaveStaff';
 
 // Office HR: every leave request made from Individual Sign In, with where each one is in the two-level approval
 // (supervisor first, then the final approver). Read only: staff apply and approvers decide in Individual Sign In.
@@ -28,6 +29,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   }, [year]);
 
   const [removing, setRemoving] = useState('');
+  const [tab, setTab] = useState<'requests' | 'staff'>('requests');
   // Deleting is final: approved leave that AraOffice took off the balance goes back on it; the person's HR history records it.
   const remove = async (row: Request) => {
     const note = row.status === 'approved' && !imported(row) ? ` The ${days(row.days)} day(s) go back on ${row.applicant}'s balance.` : imported(row) ? ' This was imported from Infotech, so no balance changes.' : '';
@@ -58,6 +60,8 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
         <button onClick={onTypes} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20"><Tags className="h-4 w-4" />Leave types</button>
       </div>
     </section>
+    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['staff', 'Staff leave']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
+    {tab === 'staff' ? <HRLeaveStaff onError={onError} /> : <>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={card}><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-1 text-3xl font-semibold ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
     {onLeaveToday.length > 0 && <p className="rounded-xl bg-[#f4fafd] p-3 text-sm text-slate-700"><strong className="text-[#0b587b]">On leave today:</strong> {onLeaveToday.map((row) => `${row.applicant} (${row.type})`).join(', ')}</p>}
     <section className={`${card} flex flex-wrap items-center gap-3`}>
@@ -83,5 +87,6 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
           </tr>)}</tbody>
         </table>}
     </section>
+    </>}
   </div>;
 }

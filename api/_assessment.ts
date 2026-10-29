@@ -155,6 +155,13 @@ const LEAVE_TYPES: Record<string, { name: string; group: string; half: boolean }
   MARRG: { name: 'Marriage Leave', group: 'MARRG', half: false }, HAJUMR: { name: 'Haji / Umrah Leave', group: 'HAJUMR', half: false },
   UL: { name: 'Unpaid Leave', group: 'UL', half: true },
 };
+// As in Infotech: leave must be applied for at least 1 day before the leave date, except medical, hospitalization and emergency leave
+// (which can be applied for after the day). Annual leave can be taken up to the full year's entitlement, which is shared by month in the year someone joins.
+const APPLY_AFTER_THE_DAY = new Set(['ML', 'HOSP', 'EL', 'MATN', 'ULEL']);
+function yearAllowance(eligible: number, joinDate: string | null, year: string) {
+  if (!joinDate || joinDate.slice(0, 4) !== year) return eligible;
+  return Math.round(eligible * (12 - Number(joinDate.slice(5, 7)) + 1) / 12);
+}
 const isoDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
 // Days between two dates that are working days for the person: a date on their uploaded duty roster counts
 // when the roster says they work it; any other date counts when its weekday is one of their usual working
@@ -167,11 +174,14 @@ function leaveDays(start: string, end: string, half: string | null, workDays: nu
   }
   return half ? (start === end && count ? 0.5 : 0) : count;
 }
+// Holiday groups whose public holidays are days off. Operations staff (SG-OPS) usually work through public holidays,
+// so for them only the duty roster decides; management and admin staff (SG-MNG) and MLHL have the day off.
+const HOLIDAY_OFF_GROUPS = new Set(['SG-MNG', 'MLHL']);
 // The person's calendar between two dates: false for a public holiday of their holiday group, then the duty
 // roster on top (a roster day says whether they really work it). Dates not in the map use the usual weekdays.
 async function rosterFor(db: any, employeeId: string, from: string, to: string, holidayGroup = '') {
   const calendar: Record<string, boolean> = {};
-  if (holidayGroup) {
+  if (HOLIDAY_OFF_GROUPS.has(holidayGroup)) {
     const { data } = await db.from('hr_holidays').select('holiday_date').eq('group_code', holidayGroup).gte('holiday_date', from).lte('holiday_date', to).limit(400);
     for (const row of data || []) calendar[row.holiday_date] = false; // holiday tables not set up yet: no holidays
   }
@@ -185,7 +195,7 @@ const requestRow = (r: any, extra: Record<string, unknown> = {}) => ({ id: r.id,
 const stageFor = (r: any, personId: string) => r.status === 'pending' && r.approver_id === personId ? 'supervisor' : r.status === 'supervisor_approved' && r.final_approver_id === personId ? 'final' : '';
 
 async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
-  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,leave_approver_id,final_approver_id,work_days,holiday_group').eq('assessment_staff_id', staff.id).maybeSingle();
+  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,leave_approver_id,final_approver_id,work_days,holiday_group,join_date').eq('assessment_staff_id', staff.id).maybeSingle();
   if (meError) throw meError;
   const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : [1, 2, 3, 4, 5, 6];
   if (!me) throw fail(400, 'Your sign-in is not linked to your staff record yet. Ask HR.');
@@ -208,15 +218,32 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     const earliest = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
     if (start < earliest) throw fail(400, 'Leave can be applied up to 30 days after the fact. Ask HR for older dates.');
     if (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`) > 90 * 86400000) throw fail(400, 'That is more than 90 days. Split it or ask HR.');
+    const reason = text(body.reason, 500);
+    if (reason.length < 2) throw fail(400, 'Write the reason for your leave.');
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+    if (!APPLY_AFTER_THE_DAY.has(text(body.type, 10)) && start < tomorrow) throw fail(400, 'Apply at least 1 day before the leave date. Only medical, hospitalization and emergency leave can be applied for after the day.');
     const half = body.half === 'AM' || body.half === 'PM' ? body.half : null;
     if (half && !type.half) throw fail(400, `${type.name} cannot be taken as half a day.`);
     if (half && start !== end) throw fail(400, 'A half day is for a single date.');
     const days = leaveDays(start, end, half, workDays, await rosterFor(db, me.id, start, end, me.holiday_group || ''));
-    if (!days) throw fail(400, 'Those dates have no working day for you (your rest days are not counted).');
+    if (!days) throw fail(400, 'Those dates have no working day for you (rest days and public holidays are not counted).');
     if (!me.leave_approver_id) throw fail(400, 'HR has not set who approves your leave yet. Ask HR.');
+    // Annual leave (and emergency leave, which comes off it): no more than the year's entitlement, counting what is already waiting for approval.
+    if (type.group === 'AL') {
+      const { data: rows } = await db.from('hr_leave_balances').select('eligible,brought_forward,credit,earn,forfeit,taken').eq('employee_id', me.id).eq('leave_group', 'AL').order('year', { ascending: false }).limit(1);
+      const b = rows?.[0];
+      if (b) {
+        const year = today.slice(0, 4);
+        const allowance = yearAllowance(Number(b.eligible), me.join_date || null, year);
+        const cap = Number(b.brought_forward) + Number(b.credit) - Number(b.forfeit) + Math.max(Number(b.earn), allowance);
+        const { data: waiting } = await db.from('hr_leave_requests').select('days').eq('employee_id', me.id).eq('leave_group', 'AL').in('status', ['pending', 'supervisor_approved']).gte('start_date', `${year}-01-01`);
+        const used = Number(b.taken) + (waiting || []).reduce((sum: number, row: any) => sum + Number(row.days), 0);
+        if (used + days > cap + 0.001) throw fail(400, `That is more than your annual leave for ${year}: ${Math.round(cap * 100) / 100} days in all, ${Math.round(used * 100) / 100} already used or waiting for approval. Ask HR if you need more.`);
+      }
+    }
     const { count: clash } = await db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('employee_id', me.id).in('status', ['pending', 'supervisor_approved', 'approved']).lte('start_date', end).gte('end_date', start);
     if (clash) throw fail(409, 'You already have a leave request on some of those dates.');
-    const { data, error } = await db.from('hr_leave_requests').insert({ employee_id: me.id, approver_id: me.leave_approver_id, final_approver_id: me.final_approver_id && me.final_approver_id !== me.leave_approver_id ? me.final_approver_id : null, leave_type: body.type, leave_group: type.group, start_date: start, end_date: end, half_day: half, days, reason: text(body.reason, 500) }).select('*').single();
+    const { data, error } = await db.from('hr_leave_requests').insert({ employee_id: me.id, approver_id: me.leave_approver_id, final_approver_id: me.final_approver_id && me.final_approver_id !== me.leave_approver_id ? me.final_approver_id : null, leave_type: body.type, leave_group: type.group, start_date: start, end_date: end, half_day: half, days, reason }).select('*').single();
     if (error) throw error;
     return res.status(200).json({ request: requestRow(data) });
   }
@@ -243,7 +270,19 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     const [{ data: people }, { data: balances }] = ids.length ? await Promise.all([db.from('hr_employees').select('id,full_name,employee_code').in('id', ids), db.from('hr_leave_balances').select('employee_id,leave_group,year,balance').in('employee_id', ids)]) : [{ data: [] }, { data: [] }];
     const name = new Map<string, any>((people || []).map((p: any) => [p.id, p]));
     const balanceOf = (employee: string, group: string) => { const rows = (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year); return rows.length ? Number(rows[0].balance) : null; };
-    const rows = (data || []).map((r: any) => requestRow(r, { applicant: name.get(r.employee_id)?.full_name || '', code: name.get(r.employee_id)?.employee_code || '', balance: balanceOf(r.employee_id, r.leave_group), stage: stageFor(r, me.id) }));
+    // Others under the same supervisor who are (or will be) off on the same dates, to help the decision.
+    const waiting = (data || []).filter((r: any) => stageFor(r, me.id));
+    let overlapping: any[] = [];
+    if (waiting.length) {
+      const supervisors = [...new Set(waiting.map((r: any) => r.approver_id).filter(Boolean))];
+      const first = waiting.reduce((a: string, r: any) => (r.start_date < a ? r.start_date : a), waiting[0].start_date), last = waiting.reduce((a: string, r: any) => (r.end_date > a ? r.end_date : a), waiting[0].end_date);
+      const { data: others } = await db.from('hr_leave_requests').select('employee_id,approver_id,start_date,end_date,status').in('approver_id', supervisors).in('status', ['pending', 'supervisor_approved', 'approved']).lte('start_date', last).gte('end_date', first).limit(500);
+      overlapping = others || [];
+      const extra = [...new Set(overlapping.map((o: any) => o.employee_id).filter((id: string) => !name.has(id)))];
+      if (extra.length) { const { data: more } = await db.from('hr_employees').select('id,full_name,employee_code').in('id', extra); for (const person of more || []) name.set(person.id, person); }
+    }
+    const short = (full: string) => full.split(' ').slice(0, 2).join(' ');
+    const rows = (data || []).map((r: any) => requestRow(r, { applicant: name.get(r.employee_id)?.full_name || '', code: name.get(r.employee_id)?.employee_code || '', balance: balanceOf(r.employee_id, r.leave_group), stage: stageFor(r, me.id), alsoOff: [...new Set(overlapping.filter((o: any) => o.approver_id === r.approver_id && o.employee_id !== r.employee_id && o.start_date <= r.end_date && o.end_date >= r.start_date).map((o: any) => short(name.get(o.employee_id)?.full_name || '')).filter(Boolean))].slice(0, 6) }));
     return res.status(200).json({ pending: rows.filter((r: any) => r.stage).reverse(), recent: rows.filter((r: any) => !r.stage).slice(0, 20) });
   }
 
@@ -351,10 +390,18 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
-    let isApprover = false;
+    let isApprover = false, leaveWaiting = 0;
     try {
       const { data: self } = await db.from('hr_employees').select('id').eq('assessment_staff_id', staff.id).maybeSingle();
-      if (self) { const { count } = await db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'); isApprover = (count || 0) > 0; }
+      if (self) {
+        const { count } = await db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'); isApprover = (count || 0) > 0;
+        // Requests waiting for this person's decision: shown as a number on the Leave icon.
+        const [{ count: first }, { count: last }] = await Promise.all([
+          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('approver_id', self.id).eq('status', 'pending'),
+          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('final_approver_id', self.id).eq('status', 'supervisor_approved'),
+        ]);
+        leaveWaiting = (first || 0) + (last || 0);
+      }
     } catch { /* leave tables not set up yet */ }
     // Preview accounts see every assessment, including closed ones.
     let quizQuery = db.from('assessment_quizzes').select('id,title,description,pass_mark,active,questions').order('created_at', { ascending: false });
@@ -368,7 +415,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
