@@ -235,13 +235,14 @@
   .ara-hero p { font-size: 0.8rem; line-height: 1.45; }
 }
 
-/* Leave History Report: print only the report pages. */
+/* Leave reports: print only the report pages. This applies only while a leave report is on the page, so the
+   other print layouts (Performance Review, Print Forms) are not hidden. */
 @media print {
-  body * { visibility: hidden; }
-  .leave-report, .leave-report * { visibility: visible; }
-  .leave-report { position: absolute; left: 0; top: 0; width: 100%; }
-  @page { size: A4; margin: 14mm; }
+  body:has(.leave-report) * { visibility: hidden; }
+  body:has(.leave-report) .leave-report, body:has(.leave-report) .leave-report * { visibility: visible; }
+  .leave-report { position: absolute; left: 0; top: 0; width: 100%; page: leave-portrait; }
 }
+@page leave-portrait { size: A4; margin: 14mm; }
 
 /* The Consolidate Report prints on a landscape page. */
 .consolidate-print { page: landscape-report; }
