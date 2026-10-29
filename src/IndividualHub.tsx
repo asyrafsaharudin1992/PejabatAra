@@ -1,13 +1,14 @@
 import { ReactNode, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CalendarDays, ClipboardCheck, Coins, KeyRound, LogOut, PiggyBank, ReceiptText, ScanFace, Settings, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarClock, CalendarDays, ClipboardCheck, Coins, KeyRound, LogOut, PiggyBank, ReceiptText, ScanFace, Settings, UserRound } from 'lucide-react';
 import { assessmentFetch, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
+import MyRoster from './MyRoster';
 
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
 type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number } };
-type View = 'home' | 'leave' | 'profile' | 'settings' | 'password';
+type View = 'home' | 'leave' | 'roster' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
 
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN. BHD.' };
@@ -83,6 +84,7 @@ export default function IndividualHub() {
 
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'leave') return <Screen title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
+  if (view === 'roster') return <Screen title="My roster" onBack={() => setView('home')}><MyRoster /></Screen>;
   if (view === 'profile') return <Screen title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
   if (view === 'settings') return <Screen title="Settings" onBack={() => setView('home')}>
     <div className="space-y-3">
@@ -97,6 +99,7 @@ export default function IndividualHub() {
   const items: Item[] = [
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', soon: true },
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
+    { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', soon: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },

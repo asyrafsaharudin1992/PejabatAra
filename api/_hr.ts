@@ -779,15 +779,18 @@ export async function hrHandler(req: any, res: any) {
       const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
       if (error) throw error;
       const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
-      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
-      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] };
+      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '' })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
       if (!rows.length) throw fail(400, 'There are no roster rows.');
-      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,employee_code');
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,employee_code,designation');
       if (peopleError) throw peopleError;
       const byCode = new Map((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p.id]));
+      const doctors = new Set((people || []).filter((p: any) => /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => p.id));
+      // SK wrote its clinic assistant shifts differently from KJ; the KJ names are saved (doctors keep AM, PM and OH).
+      const SK_CODES: Record<string, string> = { 'AM': 'AM-9', 'AM 9': 'AM-12', 'AM 5': 'AM-5' };
       const NOT_WORKING = new Set(['OFF', 'OFF 1ST', 'OFF 2ND', 'REST', 'NA', 'PH', 'RESIGN', 'OD', 'RD', 'AL', 'UPL', 'MC', 'ML', 'EL', '']);
       const LEAVE = new Set(['AL', 'UPL', 'MC', 'ML', 'EL']);
       const unknown = new Set<string>(); const out: any[] = [];
@@ -796,7 +799,8 @@ export async function hrHandler(req: any, res: any) {
         const id = byCode.get(`${text(row.company, 4).toUpperCase()}|${text(row.code, 20).toUpperCase()}`);
         if (!date) continue;
         if (!id) { unknown.add(`${row.company}|${row.code}`); continue; }
-        const shift = text(row.shift, 30).toUpperCase();
+        let shift = text(row.shift, 30).toUpperCase().replace(/\s+/g, ' ');
+        if (text(row.company, 4).toUpperCase() === 'SK' && !doctors.has(id)) shift = SK_CODES[shift] || shift;
         if (!shift) continue; // a blank cell means no schedule, so the weekly working days apply
         out.push({ employee_id: id, work_date: date, shift, works: !NOT_WORKING.has(shift), note: LEAVE.has(shift) ? shift : '' });
       }

@@ -229,6 +229,20 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     return res.status(200).json({ month, start, end, group: access.label, scope: access.scope, notice: access.notice, items: (rows || []).map((row: any) => ({ name: names.get(row.employee_id)?.full_name || '', code: names.get(row.employee_id)?.employee_code || '', department: names.get(row.employee_id)?.department || '', company: names.get(row.employee_id)?.company || '', type: LEAVE_TYPES[row.leave_type]?.name || row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day, days: Number(row.days) })) });
   }
 
+  // The signed-in person's own duty roster for a month, with their approved leave, so they can see the dates they work.
+  if (req.method === 'GET' && action === 'leave_roster') {
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today.slice(0, 7);
+    if (Number(month.slice(5, 7)) < 1 || Number(month.slice(5, 7)) > 12) throw fail(400, 'Choose a valid month.');
+    const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+    const [{ data: days, error }, { data: leave, error: leaveError }] = await Promise.all([
+      db.from('hr_roster').select('work_date,shift,works').eq('employee_id', me.id).gte('work_date', start).lte('work_date', end).limit(100),
+      db.from('hr_leave_requests').select('leave_type,start_date,end_date,half_day').eq('employee_id', me.id).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(100),
+    ]);
+    if (error) throw error;
+    if (leaveError) throw leaveError;
+    return res.status(200).json({ month, today, workDays, days: (days || []).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works })), leave: (leave || []).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
+  }
+
   if (req.method === 'POST' && action === 'leave_apply') {
     const type = LEAVE_TYPES[text(body.type, 10)];
     if (!type) throw fail(400, 'Choose the type of leave.');
