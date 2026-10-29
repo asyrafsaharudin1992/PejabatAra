@@ -1,5 +1,7 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { officeAccess } from './_office-db.js';
+import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
+import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
 // allows only 12 functions. Accounts with HR office access (and System Admin) only.
@@ -338,6 +340,7 @@ export async function hrHandler(req: any, res: any) {
         const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', Number(String(request.start_date).slice(0, 4))).limit(1);
         if (rows?.length) { restored = Number(request.days); const { error } = await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(rows[0].taken) - restored), balance: Number(rows[0].balance) + restored, updated_at: now }).eq('id', rows[0].id); if (error) throw error; }
       }
+      await removeLeaveFiles(db, request.id);
       const { error: deleteError } = await db.from('hr_leave_requests').delete().eq('id', request.id);
       if (deleteError) throw deleteError;
       const summary = `${request.leave_type} ${request.start_date}${request.end_date !== request.start_date ? ` to ${request.end_date}` : ''}, ${Number(request.days)} day(s), ${request.status}${fromInfotech ? ', imported from Infotech' : ''}`;
@@ -482,6 +485,87 @@ export async function hrHandler(req: any, res: any) {
       const { error: deleteError } = await db.from('hr_leave_credits').delete().eq('id', id);
       if (deleteError) throw deleteError;
       return res.status(200).json({ success: true });
+    }
+    // Files for leave HR enters (a medical certificate received by WhatsApp, for example): uploaded first, then named in `leave_hr_apply`.
+    if (req.method === 'POST' && action === 'leave_attachment_upload') {
+      const { count } = await db.from('hr_leave_attachments').select('id', { count: 'exact', head: true }).eq('uploaded_by', 'hr').is('request_id', null);
+      if ((count || 0) >= MAX_FILES * 3) throw fail(429, 'Too many files are waiting. Enter the leave first.');
+      return res.status(200).json({ file: await storeLeaveFile(db, { employeeId: null, fileName: body.fileName, base64: body.data, uploadedBy: 'hr' }) });
+    }
+    // HR can open or download any leave file; the link works for one minute.
+    if (req.method === 'GET' && action === 'leave_attachment_url') {
+      const { data: file, error: fileError } = await db.from('hr_leave_attachments').select('*').eq('id', text(req.query.id, 60)).maybeSingle();
+      if (fileError) throw fileError;
+      if (!file) throw fail(404, 'File not found.');
+      return res.status(200).json({ url: await leaveFileLink(db, file, String(req.query.download) === '1'), name: file.file_name });
+    }
+    // HR enters leave for one or many staff (as in Infotech's Leave Application on Behalf and Batch Leave). It is approved straight away and
+    // comes off the balance. With `preview` nothing is saved: each person's days, balance and any problem are returned.
+    if (req.method === 'POST' && action === 'leave_hr_apply') {
+      const type = LEAVE_TYPES[text(body.type, 10)];
+      if (!type) throw fail(400, 'Choose the type of leave.');
+      const ids: string[] = [...new Set<string>((Array.isArray(body.employeeIds) ? body.employeeIds : []).map((id: unknown) => text(id, 60)).filter(Boolean))];
+      if (!ids.length) throw fail(400, 'Choose at least one staff member.');
+      if (ids.length > 100) throw fail(400, 'Choose 100 staff or fewer at a time.');
+      const start = isoDate(body.start), end = isoDate(body.end || body.start);
+      if (!start || !end) throw fail(400, 'Choose the dates.');
+      if (end < start) throw fail(400, 'The end date is before the start date.');
+      if (start.slice(0, 4) !== end.slice(0, 4)) throw fail(400, 'Enter separate leave for dates in different leave years.');
+      if (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`) > 90 * 86400000) throw fail(400, 'That is more than 90 days. Split it into shorter leave.');
+      const reason = text(body.reason, 500);
+      if (reason.length < 2) throw fail(400, 'Write the reason for the leave.');
+      const half = body.half === 'AM' || body.half === 'PM' ? body.half : null;
+      if (half && !type.half) throw fail(400, `${type.name} cannot be taken as half a day.`);
+      if (half && start !== end) throw fail(400, 'A half day is for a single date.');
+      const year = Number(start.slice(0, 4));
+      const { data: closed, error: closedError } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+      if (closedError) throw closedError;
+      if (closed) throw fail(409, `The ${year} leave year is closed. Its leave can no longer be changed.`);
+      const preview = body.preview === true, allowOver = body.allowOver === true;
+      const attachmentIds: string[] = [...new Set<string>((Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map((id: unknown) => text(id, 60)).filter(Boolean))].slice(0, MAX_FILES);
+      if (!preview && ATTACHMENT_REQUIRED_FOR.has(text(body.type, 10)) && !attachmentIds.length && body.skipAttachment !== true) throw fail(400, 'Medical leave needs the medical certificate attached. If HR is entering it without one, tick "No attachment".');
+      let attachedFirst = false;
+      const byName = user?.email || 'HR';
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,company,status,join_date,work_days,holiday_group').in('id', ids);
+      if (peopleError) throw peopleError;
+      const results: { id: string; name: string; code: string; ok: boolean; days?: number; balanceAfter?: number | null; error?: string }[] = [];
+      for (const id of ids) {
+        const person: any = (people || []).find((p: any) => p.id === id);
+        if (!person) { results.push({ id, name: 'Unknown staff', code: '', ok: false, error: 'Staff member not found.' }); continue; }
+        const base = { id, name: person.full_name, code: person.employee_code };
+        try {
+          if (person.status !== 'Active') throw fail(400, 'This staff member is not active.');
+          const workDays: number[] = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : [1, 2, 3, 4, 5];
+          const days = leaveDays(start, end, half, workDays, await rosterFor(db, id, start, end, person.holiday_group || ''));
+          if (!days) throw fail(400, 'No working day in those dates (rest days and public holidays are not counted).');
+          const { count: clash } = await db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('employee_id', id).in('status', ['pending', 'supervisor_approved', 'approved']).lte('start_date', end).gte('end_date', start);
+          if (clash) throw fail(409, 'Already has leave on some of those dates.');
+          const { data: rows, error: balanceError } = await db.from('hr_leave_balances').select('id,eligible,brought_forward,credit,earn,forfeit,taken,balance').eq('employee_id', id).eq('leave_group', type.group).eq('year', year).limit(1);
+          if (balanceError) throw balanceError;
+          const balance: any = rows?.[0];
+          if (type.group === 'AL' || type.group === 'ML') {
+            if (!balance) throw fail(400, `No ${year} ${type.group === 'AL' ? 'Annual' : 'Medical'} Leave balance yet. Set it up first (HR > Leave > Staff leave).`);
+          }
+          if (type.group === 'AL' && balance && !allowOver) {
+            const allowance = yearAllowance(Number(balance.eligible), person.join_date || null, String(year));
+            const cap = Number(balance.brought_forward) + Number(balance.credit) - Number(balance.forfeit) + Math.max(Number(balance.earn), allowance);
+            const { data: waiting } = await db.from('hr_leave_requests').select('days').eq('employee_id', id).eq('leave_group', 'AL').in('status', ['pending', 'supervisor_approved']).gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`);
+            const used = Number(balance.taken) + (waiting || []).reduce((sum: number, row: any) => sum + Number(row.days), 0);
+            if (used + days > cap + 0.001) throw fail(400, `More than the ${year} annual leave (${Math.round(cap * 100) / 100} days, ${Math.round(used * 100) / 100} used or waiting). Tick "Allow over balance" to go ahead.`);
+          }
+          const after = balance ? Math.round((Number(balance.balance) - days) * 100) / 100 : null;
+          if (!preview) {
+            const now = new Date().toISOString();
+            const { data: created, error: insertError } = await db.from('hr_leave_requests').insert({ employee_id: id, approver_id: null, backup_approver_id: null, final_approver_id: null, leave_type: text(body.type, 10), leave_group: type.group, start_date: start, end_date: end, half_day: half, days, reason, status: 'approved', decided_at: now, decision_note: `Entered by HR: ${byName}` }).select('id').single();
+            if (insertError) throw insertError;
+            if (balance) await db.from('hr_leave_balances').update({ taken: Number(balance.taken) + days, balance: Number(balance.balance) - days, updated_at: now }).eq('id', balance.id);
+            if (attachmentIds.length) { await attachLeaveFiles(db, created.id, id, attachmentIds, !attachedFirst, 'hr'); attachedFirst = true; }
+            await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { leave_request: [null, `${text(body.type, 10)} ${start}${end !== start ? ` to ${end}` : ''}, ${days} day(s), approved, entered by HR (${byName})`], request_id: [null, created.id] }, changed_by: user.id });
+          }
+          results.push({ ...base, ok: true, days, balanceAfter: after });
+        } catch (cause: any) { results.push({ ...base, ok: false, error: cause?.message || 'Unable to enter this leave.' }); }
+      }
+      return res.status(200).json({ preview, results, saved: preview ? 0 : results.filter((r) => r.ok).length });
     }
     // Leave Consolidate Report (Current Year): one row per person with the Annual and Medical Leave figures. HR uses the AL balance for GCR.
     if (req.method === 'GET' && action === 'leave_consolidate') {
@@ -682,7 +766,8 @@ export async function hrHandler(req: any, res: any) {
       const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
       const who = new Map((people || []).map((p: any) => [p.id, p]));
       const name = (id: string | null) => (id && who.get(id)?.full_name) || '';
-      return res.status(200).json({ year, requests: (data || []).map((r: any) => ({ id: r.id, company: who.get(r.employee_id)?.company || '', code: who.get(r.employee_id)?.employee_code || '', applicant: name(r.employee_id), type: r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisor: name(r.approver_id), backupApprover: name(r.backup_approver_id), finalApprover: name(r.final_approver_id), supervisorBy: name(r.supervisor_decided_by), supervisorNote: r.supervisor_note || '', decidedBy: name(r.decided_by), note: r.decision_note || '', createdAt: r.created_at, decidedAt: r.decided_at })) });
+      const files = await attachmentsFor(db, (data || []).map((r: any) => r.id));
+      return res.status(200).json({ year, requests: (data || []).map((r: any) => ({ id: r.id, company: who.get(r.employee_id)?.company || '', code: who.get(r.employee_id)?.employee_code || '', applicant: name(r.employee_id), type: r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisor: name(r.approver_id), backupApprover: name(r.backup_approver_id), finalApprover: name(r.final_approver_id), supervisorBy: name(r.supervisor_decided_by), supervisorNote: r.supervisor_note || '', decidedBy: name(r.decided_by), note: r.decision_note || '', createdAt: r.created_at, decidedAt: r.decided_at, attachments: files.get(r.id) || [] })) });
     }
 
     // Duty roster: one row per person and date. `roster` reads a month; `roster_import` replaces the dates it

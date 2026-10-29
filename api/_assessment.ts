@@ -1,4 +1,5 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
+import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry } from '../src/lib/incentiveCodes.js';
@@ -150,7 +151,7 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
 
 // Leave: apply, history, cancel, and the approver's queue. The staff member is found through the HR record
 // linked to their sign-in; an approver is whoever HR has set as `leave_approver_id` on the applicant.
-const LEAVE_TYPES: Record<string, { name: string; group: string; half: boolean }> = {
+export const LEAVE_TYPES: Record<string, { name: string; group: string; half: boolean }> = {
   AL: { name: 'Annual Leave', group: 'AL', half: true }, EL: { name: 'Emergency Leave', group: 'AL', half: false },
   ML: { name: 'Medical Leave', group: 'ML', half: true }, HOSP: { name: 'Hospitalization Leave', group: 'HOSP', half: false },
   MARRG: { name: 'Marriage Leave', group: 'MARRG', half: false }, HAJUMR: { name: 'Haji / Umrah Leave', group: 'HAJUMR', half: false },
@@ -158,16 +159,16 @@ const LEAVE_TYPES: Record<string, { name: string; group: string; half: boolean }
 };
 // As in Infotech: leave must be applied for at least 1 day before the leave date, except medical, hospitalization and emergency leave
 // (which can be applied for after the day). Annual leave can be taken up to the full year's entitlement, which is shared by month in the year someone joins.
-const APPLY_AFTER_THE_DAY = new Set(['ML', 'HOSP', 'EL', 'MATN', 'ULEL']);
-function yearAllowance(eligible: number, joinDate: string | null, year: string) {
+export const APPLY_AFTER_THE_DAY = new Set(['ML', 'HOSP', 'EL', 'MATN', 'ULEL']);
+export function yearAllowance(eligible: number, joinDate: string | null, year: string) {
   if (!joinDate || joinDate.slice(0, 4) !== year) return eligible;
   return Math.round(eligible * (12 - Number(joinDate.slice(5, 7)) + 1) / 12);
 }
-const isoDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
+export const isoDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
 // Days between two dates that are working days for the person: a date on their uploaded duty roster counts
 // when the roster says they work it; any other date counts when its weekday is one of their usual working
 // weekdays (0 = Sunday ... 6 = Saturday). Public holidays that are not on the roster are not taken off.
-function leaveDays(start: string, end: string, half: string | null, workDays: number[], roster: Record<string, boolean> = {}) {
+export function leaveDays(start: string, end: string, half: string | null, workDays: number[], roster: Record<string, boolean> = {}) {
   let count = 0;
   for (let day = new Date(`${start}T00:00:00Z`); day <= new Date(`${end}T00:00:00Z`); day.setUTCDate(day.getUTCDate() + 1)) {
     const iso = day.toISOString().slice(0, 10);
@@ -180,7 +181,7 @@ function leaveDays(start: string, end: string, half: string | null, workDays: nu
 const HOLIDAY_OFF_GROUPS = new Set(['SG-MNG', 'MLHL']);
 // The person's calendar between two dates: false for a public holiday of their holiday group, then the duty
 // roster on top (a roster day says whether they really work it). Dates not in the map use the usual weekdays.
-async function rosterFor(db: any, employeeId: string, from: string, to: string, holidayGroup = '') {
+export async function rosterFor(db: any, employeeId: string, from: string, to: string, holidayGroup = '') {
   const calendar: Record<string, boolean> = {};
   if (HOLIDAY_OFF_GROUPS.has(holidayGroup)) {
     const { data } = await db.from('hr_holidays').select('holiday_date').eq('group_code', holidayGroup).gte('holiday_date', from).lte('holiday_date', to).limit(400);
@@ -240,6 +241,8 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     if (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`) > 90 * 86400000) throw fail(400, 'That is more than 90 days. Split it or ask HR.');
     const reason = text(body.reason, 500);
     if (reason.length < 2) throw fail(400, 'Write the reason for your leave.');
+    const attachmentIds: string[] = [...new Set<string>((Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map((id: unknown) => text(id, 60)).filter(Boolean))].slice(0, MAX_FILES);
+    if (ATTACHMENT_REQUIRED_FOR.has(text(body.type, 10)) && !attachmentIds.length) throw fail(400, 'Medical leave needs your medical certificate attached (PDF, PNG or JPG, up to 2 MB).');
     const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
     if (!APPLY_AFTER_THE_DAY.has(text(body.type, 10)) && start < tomorrow) throw fail(400, 'Apply at least 1 day before the leave date. Only medical, hospitalization and emergency leave can be applied for after the day.');
     const half = body.half === 'AM' || body.half === 'PM' ? body.half : null;
@@ -268,13 +271,38 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     if (clash) throw fail(409, 'You already have a leave request on some of those dates.');
     const { data, error } = await db.from('hr_leave_requests').insert({ employee_id: me.id, approver_id: me.leave_approver_id, backup_approver_id: me.leave_backup_approver_id && me.leave_backup_approver_id !== me.leave_approver_id ? me.leave_backup_approver_id : null, final_approver_id: me.final_approver_id && me.final_approver_id !== me.leave_approver_id ? me.final_approver_id : null, leave_type: body.type, leave_group: type.group, start_date: start, end_date: end, half_day: half, days, reason }).select('*').single();
     if (error) throw error;
-    return res.status(200).json({ request: requestRow(data) });
+    if (attachmentIds.length) {
+      try { await attachLeaveFiles(db, data.id, me.id, attachmentIds, true, 'staff'); }
+      catch (cause) { await db.from('hr_leave_requests').delete().eq('id', data.id); throw cause; }
+    }
+    return res.status(200).json({ request: requestRow(data, { attachments: (await attachmentsFor(db, [data.id])).get(data.id) || [] }) });
+  }
+
+  // A file for a leave request (a medical certificate): uploaded first, then named in `leave_apply`.
+  if (req.method === 'POST' && action === 'leave_attachment_upload') {
+    const { count } = await db.from('hr_leave_attachments').select('id', { count: 'exact', head: true }).eq('employee_id', me.id).is('request_id', null);
+    if ((count || 0) >= MAX_FILES * 2) throw fail(429, 'Too many files waiting. Send your leave request first.');
+    return res.status(200).json({ file: await storeLeaveFile(db, { employeeId: me.id, fileName: body.fileName, base64: body.data, uploadedBy: 'staff' }) });
+  }
+  // A link to open a file (valid for one minute): the person who applied, or whoever approves that leave.
+  if (req.method === 'GET' && action === 'leave_attachment_url') {
+    const { data: file, error: fileError } = await db.from('hr_leave_attachments').select('*').eq('id', text(req.query.id, 60)).maybeSingle();
+    if (fileError) throw fileError;
+    if (!file) throw fail(404, 'File not found.');
+    let allowed = file.employee_id === me.id;
+    if (!allowed && file.request_id) {
+      const { data: request } = await db.from('hr_leave_requests').select('approver_id,backup_approver_id,final_approver_id').eq('id', file.request_id).maybeSingle();
+      allowed = !!request && [request.approver_id, request.backup_approver_id, request.final_approver_id].includes(me.id);
+    }
+    if (!allowed) throw fail(403, 'This file is not yours to open.');
+    return res.status(200).json({ url: await leaveFileLink(db, file, false), name: file.file_name });
   }
 
   if (req.method === 'GET' && action === 'leave_history') {
     const { data, error } = await db.from('hr_leave_requests').select('*').eq('employee_id', me.id).order('start_date', { ascending: false }).limit(200);
     if (error) throw error;
-    return res.status(200).json({ requests: (data || []).map((r: any) => requestRow(r)) });
+    const files = await attachmentsFor(db, (data || []).map((r: any) => r.id));
+    return res.status(200).json({ requests: (data || []).map((r: any) => requestRow(r, { attachments: files.get(r.id) || [] })) });
   }
 
   if (req.method === 'POST' && action === 'leave_cancel') {
@@ -305,7 +333,8 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
       if (extra.length) { const { data: more } = await db.from('hr_employees').select('id,full_name,employee_code').in('id', extra); for (const person of more || []) name.set(person.id, person); }
     }
     const short = (full: string) => full.split(' ').slice(0, 2).join(' ');
-    const rows = (data || []).map((r: any) => requestRow(r, { applicant: name.get(r.employee_id)?.full_name || '', code: name.get(r.employee_id)?.employee_code || '', backupApprover: name.get(r.backup_approver_id)?.full_name || '', balance: balanceOf(r.employee_id, r.leave_group, Number(String(r.start_date).slice(0, 4))), stage: stageFor(r, me.id), alsoOff: [...new Set(overlapping.filter((o: any) => o.approver_id === r.approver_id && o.employee_id !== r.employee_id && o.start_date <= r.end_date && o.end_date >= r.start_date).map((o: any) => short(name.get(o.employee_id)?.full_name || '')).filter(Boolean))].slice(0, 6) }));
+    const files = await attachmentsFor(db, (data || []).map((r: any) => r.id));
+    const rows = (data || []).map((r: any) => requestRow(r, { attachments: files.get(r.id) || [], applicant: name.get(r.employee_id)?.full_name || '', code: name.get(r.employee_id)?.employee_code || '', backupApprover: name.get(r.backup_approver_id)?.full_name || '', balance: balanceOf(r.employee_id, r.leave_group, Number(String(r.start_date).slice(0, 4))), stage: stageFor(r, me.id), alsoOff: [...new Set(overlapping.filter((o: any) => o.approver_id === r.approver_id && o.employee_id !== r.employee_id && o.start_date <= r.end_date && o.end_date >= r.start_date).map((o: any) => short(name.get(o.employee_id)?.full_name || '')).filter(Boolean))].slice(0, 6) }));
     return res.status(200).json({ pending: rows.filter((r: any) => r.stage).reverse(), recent: rows.filter((r: any) => !r.stage).slice(0, 20) });
   }
 

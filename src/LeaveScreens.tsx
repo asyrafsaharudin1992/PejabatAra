@@ -2,12 +2,17 @@ import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { CalendarCheck, CalendarDays, CalendarPlus, CheckCircle2, ChevronLeft, ChevronRight, History, LayoutGrid } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { LEAVE_GROUPS } from './lib/leaveTypes';
+import { ATTACHMENT_REQUIRED_FOR, AttachmentLinks, AttachmentPicker, Attached } from './LeaveAttachments';
 
 // Leave inside Individual Sign In: Summary (balance), Apply Leave, History, and Approve (only for staff
 // who are someone's leave approver). Days are counted on the applicant's own working days.
 type Balance = { group: string; year: number; eligible: number; broughtForward: number; total: number; taken: number; balance: number; bfExpiry: string | null; asOf: string };
 type Option = { code: string; name: string; group: string; half: boolean };
-type Request = { id: string; type: string; typeName: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote?: string; twoLevel?: boolean; stage?: '' | 'supervisor' | 'backup' | 'final'; backupApprover?: string; alsoOff?: string[]; createdAt: string; applicant?: string; code?: string; balance?: number | null };
+type Request = { attachments?: Attached[]; id: string; type: string; typeName: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote?: string; twoLevel?: boolean; stage?: '' | 'supervisor' | 'backup' | 'final'; backupApprover?: string; alsoOff?: string[]; createdAt: string; applicant?: string; code?: string; balance?: number | null };
+
+// One-minute link to a file for this signed-in staff member (the one who applied, or their approver).
+const staffFileUrl = async (id: string) => (await assessmentFetch(`action=leave_attachment_url&id=${encodeURIComponent(id)}`)).url as string;
+const uploadStaffFile = async (name: string, data: string): Promise<Attached> => (await assessmentFetch('action=leave_attachment_upload', { method: 'POST', body: JSON.stringify({ fileName: name, data }) })).file;
 
 const dmy = (date: string | null | undefined) => date ? date.split('-').reverse().join('/') : '—';
 const range = (r: { start: string; end: string; half: string | null }) => `${dmy(r.start)}${r.end !== r.start ? ` – ${dmy(r.end)}` : ''}${r.half ? ` (${r.half})` : ''}`;
@@ -70,6 +75,7 @@ function Apply({ onDone }: { onDone: () => void }) {
   const [end, setEnd] = useState(earliestFor('AL'));
   const [half, setHalf] = useState<'' | 'AM' | 'PM'>('');
   const [reason, setReason] = useState('');
+  const [files, setFiles] = useState<Attached[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [sent, setSent] = useState<Request | null>(null);
@@ -89,7 +95,7 @@ function Apply({ onDone }: { onDone: () => void }) {
   const left = group ? group.balance : null;
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(''); setSaving(true);
-    try { const result = await assessmentFetch('action=leave_apply', { method: 'POST', body: JSON.stringify({ type, start, end, half: half1, reason }) }); setSent(result.request); }
+    try { const result = await assessmentFetch('action=leave_apply', { method: 'POST', body: JSON.stringify({ type, start, end, half: half1, reason, attachmentIds: files.map((file) => file.id) }) }); setSent(result.request); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to send the request.'); }
     setSaving(false);
   };
@@ -104,9 +110,10 @@ function Apply({ onDone }: { onDone: () => void }) {
     {chosen?.half && start === end && <div><p className="text-sm font-semibold text-slate-600">Day</p><div className="mt-1.5 inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">{([['', 'Full day'], ['AM', 'Morning'], ['PM', 'Afternoon']] as const).map(([value, label]) => <button type="button" key={value} onClick={() => setHalf(value)} className={`rounded-lg px-3.5 py-2 text-xs font-bold transition ${half === value ? 'bg-[#0b587b] text-white shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div></div>}
     <div className="rounded-xl bg-[#f4fafd] p-3.5 text-sm"><strong className="text-lg text-[#0b587b]">{days(total)}</strong> <span className="text-slate-600">working day{total === 1 ? '' : 's'}</span>{left !== null && <span className="text-slate-500"> · balance {days(left)}</span>}{total === 0 && <p className="mt-1 text-xs text-amber-700">There is no working day in those dates (rest days and public holidays are not counted).</p>}{left !== null && total > left && type !== 'UL' && <p className="mt-1 text-xs text-amber-700">This is more than your balance. Your approver will see that.</p>}</div>
     <label className="block text-sm font-semibold text-slate-600">Reason<textarea required minLength={2} rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10" /></label>
+    <AttachmentPicker files={files} onChange={setFiles} upload={uploadStaffFile} required={ATTACHMENT_REQUIRED_FOR.has(type)} onError={setError} label={type === 'ML' ? 'Medical certificate' : 'Attachment'} />
     {options.approver && <p className="text-xs text-slate-500">Goes to <strong className="text-slate-700">{options.approver}</strong>{options.backupApprover ? <> (backup: <strong className="text-slate-700">{options.backupApprover}</strong>)</> : null}{options.finalApprover ? <>, then <strong className="text-slate-700">{options.finalApprover}</strong> for final approval</> : ' for approval'}.</p>}
     {error && <Notice tone="rose">{error}</Notice>}
-    <button disabled={saving || !options.approver || total === 0} className="h-12 w-full rounded-xl bg-[#0b587b] text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? 'Sending…' : 'Send request'}</button>
+    <button disabled={saving || !options.approver || total === 0 || (ATTACHMENT_REQUIRED_FOR.has(type) && !files.length)} className="h-12 w-full rounded-xl bg-[#0b587b] text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? 'Sending…' : 'Send request'}</button>
   </form>;
 }
 
@@ -135,7 +142,7 @@ function HistoryList() {
   return <div ref={historyTop} tabIndex={-1} className="scroll-mt-5 space-y-5 outline-none" aria-label="Leave history">{error && <Notice tone="rose">{error}</Notice>}<p className="text-xs text-slate-500" aria-live="polite">Showing {first + 1}–{first + visible.length} of {list.length} requests · Page {currentPage} of {totalPages}</p>{years.map((year) => <section key={year}>
     <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{year}</h3>
     <ul className="space-y-2.5">{visible.filter((request) => request.start.startsWith(year)).map((request) => <li key={request.id} className={`${card} flex flex-wrap items-start gap-3`}>
-      <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{request.typeName}</p><p className="mt-0.5 text-sm text-[#0b587b]">{range(request)} · {days(request.days)} day{request.days === 1 ? '' : 's'}</p>{request.reason && <p className="mt-1 text-xs text-slate-500">{request.reason}</p>}{request.supervisorNote && <p className="mt-1 text-xs text-slate-600">Supervisor: {request.supervisorNote}</p>}{request.note && <p className="mt-1 text-xs text-slate-600">{request.twoLevel ? 'Final approver' : 'Approver'}: {request.note}</p>}</div>
+      <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{request.typeName}</p><p className="mt-0.5 text-sm text-[#0b587b]">{range(request)} · {days(request.days)} day{request.days === 1 ? '' : 's'}</p>{request.reason && <p className="mt-1 text-xs text-slate-500">{request.reason}</p>}<AttachmentLinks items={request.attachments} getUrl={staffFileUrl} onError={setError} />{request.supervisorNote && <p className="mt-1 text-xs text-slate-600">Supervisor: {request.supervisorNote}</p>}{request.note && <p className="mt-1 text-xs text-slate-600">{request.twoLevel ? 'Final approver' : 'Approver'}: {request.note}</p>}</div>
       <div className="flex flex-col items-end gap-2"><span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider ${STATUS[request.status]}`}>{STATUS_LABEL[request.status]}</span>{(request.status === 'pending' || request.status === 'supervisor_approved') && <button onClick={() => void cancel(request)} className="text-xs font-semibold text-rose-600 hover:underline">Cancel</button>}</div>
     </li>)}</ul>
   </section>)}{totalPages > 1 && <nav aria-label="Leave history pages" className="flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
@@ -166,6 +173,7 @@ function Approvals() {
       {request.stage === 'final' && request.supervisorNote && <p className="mt-1 text-xs text-slate-500">Supervisor said: {request.supervisorNote}</p>}
       <p className="mt-2 text-sm"><strong>{request.typeName}</strong> · <span className="text-[#0b587b]">{range(request)}</span> · {days(request.days)} day{request.days === 1 ? '' : 's'}</p>
       {request.reason && <p className="mt-1 text-sm text-slate-600">“{request.reason}”</p>}
+      <AttachmentLinks items={request.attachments} getUrl={staffFileUrl} onError={setError} />
       {request.balance !== null && request.balance !== undefined && <p className={`mt-1 text-xs ${request.balance < request.days && request.type !== 'UL' ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Balance now {days(request.balance)}{request.type !== 'UL' ? ` · ${days(request.balance - request.days)} after this leave` : ''}{request.balance < request.days && request.type !== 'UL' ? ': this request is more than the balance' : ''}</p>}
       {request.alsoOff && request.alsoOff.length > 0 && <p className="mt-1 text-xs text-amber-700">Also off on these dates: {request.alsoOff.join(', ')}</p>}
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_120px]"><input value={notes[request.id] || ''} onChange={(event) => setNotes({ ...notes, [request.id]: event.target.value })} placeholder="Note (optional)" maxLength={300} className={field} /><input inputMode="decimal" value={adjust[request.id] || ''} onChange={(event) => setAdjust({ ...adjust, [request.id]: event.target.value.replace(/[^\d.]/g, '') })} placeholder={`Days: ${days(request.days)}`} aria-label="Change the number of days" className={field} /></div>

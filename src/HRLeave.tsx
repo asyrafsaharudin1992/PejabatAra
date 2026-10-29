@@ -4,12 +4,16 @@ import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
 import { HRLeaveReport } from './HRLeaveReport';
+import { HRLeaveApply } from './HRLeaveApply';
+import { AttachmentLinks } from './LeaveAttachments';
 
 // Office HR: every leave request made from Individual Sign In, with where each one is in the two-level approval
 // (supervisor first, then the final approver). Read only: staff apply and approvers decide in Individual Sign In.
-type Request = { id: string; company: string; code: string; applicant: string; type: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisor: string; backupApprover: string; finalApprover: string; supervisorBy: string; supervisorNote: string; decidedBy: string; note: string; createdAt: string };
+type Request = { attachments?: { id: string; name: string; size: number }[]; id: string; company: string; code: string; applicant: string; type: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisor: string; backupApprover: string; finalApprover: string; supervisorBy: string; supervisorNote: string; decidedBy: string; note: string; createdAt: string };
 const LABEL: Record<Request['status'], string> = { pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for final approver', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 const TONE: Record<Request['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
+// One-minute link to a leave file for HR (view or download).
+const hrFileUrl = async (id: string, download: boolean) => { const response = await officeFetch(`/api/status?resource=hr&action=leave_attachment_url&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`); const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || 'Unable to open the file.'); return result.url as string; };
 const imported = (row: Request) => row.note.startsWith('Imported from Infotech');
 const dmy = (date: string) => date.split('-').reverse().join('/');
 const range = (r: Request) => r.start === r.end ? `${dmy(r.start)}${r.half ? ` (${r.half})` : ''}` : `${dmy(r.start)} – ${dmy(r.end)}`;
@@ -24,14 +28,15 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   const [month, setMonth] = useState(''); // 1-12, or '' for the whole year
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     setRows(null); setMonth('');
     officeFetch(`/api/status?resource=hr&action=leave_requests&year=${year}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setRows(result.requests); })
       .catch((cause: Error) => { setRows([]); onError(cause.message); });
-  }, [year]);
+  }, [year, refresh]);
 
   const [removing, setRemoving] = useState('');
-  const [tab, setTab] = useState<'requests' | 'staff' | 'year_end' | 'reports'>('requests');
+  const [tab, setTab] = useState<'requests' | 'enter' | 'staff' | 'year_end' | 'reports'>('requests');
   // Deleting is final: approved leave that AraOffice took off the balance goes back on it; the person's HR history records it.
   const remove = async (row: Request) => {
     const note = row.status === 'approved' && !imported(row) ? ` The ${days(row.days)} day(s) go back on ${row.applicant}'s balance.` : imported(row) ? ' This was imported from Infotech, so no balance changes.' : '';
@@ -70,8 +75,8 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
         <button onClick={onTypes} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20"><Tags className="h-4 w-4" />Leave types</button>
       </div>
     </section>
-    <div role="tablist" className="inline-flex flex-wrap rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['staff', 'Staff leave'], ['year_end', 'Leave year end'], ['reports', 'Reports']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
-    {tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'reports' ? <HRLeaveReport onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : <>
+    <div role="tablist" className="inline-flex flex-wrap rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['enter', 'Enter leave'], ['staff', 'Staff leave'], ['year_end', 'Leave year end'], ['reports', 'Reports']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
+    {tab === 'enter' ? <HRLeaveApply onError={onError} onSaved={() => setRefresh((count) => count + 1)} /> : tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'reports' ? <HRLeaveReport onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : <>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={card}><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-1 text-3xl font-semibold ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
     {onLeaveToday.length > 0 && <p className="rounded-xl bg-[#f4fafd] p-3 text-sm text-slate-700"><strong className="text-[#0b587b]">On leave today:</strong> {onLeaveToday.map((row) => `${row.applicant} (${row.type})`).join(', ')}</p>}
     <section className={`${card} flex flex-wrap items-center gap-3`}>
@@ -87,13 +92,13 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Leave</th><th className="py-2 pr-4 font-semibold">Dates</th><th className="py-2 pr-4 font-semibold">Days</th><th className="py-2 pr-4 font-semibold">Status</th><th className="py-2 pr-4 font-semibold">Supervisor</th><th className="py-2 pr-4 font-semibold">Backup officer</th><th className="py-2 pr-4 font-semibold">Final approver</th><th className="py-2 font-semibold"><span className="sr-only">Delete</span></th></tr></thead>
           <tbody>{visible.map((row) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3 pr-4"><p className="font-semibold">{row.applicant}</p><p className="text-xs text-slate-400">{row.company} · {row.code}</p></td>
-            <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}</td>
+            <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}<AttachmentLinks items={row.attachments} getUrl={hrFileUrl} canDownload onError={onError} /></td>
             <td className="py-3 pr-4 whitespace-nowrap text-[#0b587b]">{range(row)}</td>
             <td className="py-3 pr-4">{days(row.days)}</td>
-            <td className="py-3 pr-4"><span className={`inline-block rounded-full px-3 py-1 text-[11px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>{imported(row) && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}</td>
-            <td className="py-3 pr-4 text-xs text-slate-600">{row.supervisor || <span className="text-slate-300">Not set</span>}{row.supervisorNote && <p className="mt-0.5 text-slate-400">“{row.supervisorNote}”</p>}</td>
+            <td className="py-3 pr-4"><span className={`inline-block rounded-full px-3 py-1 text-[11px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>{imported(row) && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}{row.note.startsWith('Entered by HR') && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-sky-500">Entered by HR</span>}</td>
+            <td className="py-3 pr-4 text-xs text-slate-600">{row.supervisor || <span className="text-slate-300">{row.note.startsWith('Entered by HR') ? '—' : 'Not set'}</span>}{row.supervisorNote && <p className="mt-0.5 text-slate-400">“{row.supervisorNote}”</p>}</td>
             <td className="py-3 pr-4 text-xs text-slate-600">{row.backupApprover || <span className="text-slate-300">—</span>}</td>
-            <td className="py-3 text-xs text-slate-600">{row.finalApprover || <span className="text-slate-300">{imported(row) ? '—' : 'None (supervisor is final)'}</span>}{row.note && !imported(row) && <p className="mt-0.5 text-slate-400">“{row.note}”</p>}</td>
+            <td className="py-3 text-xs text-slate-600">{row.finalApprover || <span className="text-slate-300">{imported(row) || row.note.startsWith('Entered by HR') ? '—' : 'None (supervisor is final)'}</span>}{row.note && !imported(row) && <p className="mt-0.5 text-slate-400">“{row.note}”</p>}</td>
             <td className="py-3 text-right"><button onClick={() => void remove(row)} disabled={removing === row.id} aria-label={`Delete ${row.applicant}'s leave`} title="Delete this leave request" className="grid h-8 w-8 place-items-center rounded-lg text-slate-300 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button></td>
           </tr>)}</tbody>
         </table>}
