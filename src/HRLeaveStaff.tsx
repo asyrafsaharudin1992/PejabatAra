@@ -161,7 +161,7 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
   const load = () => api('action=leave_policy').then((result) => { if (result.error) throw new Error(result.error); setRows(result.staff); setTracks({}); setPicked(new Set()); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
 
-  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && ((row.al !== null && row.al !== want.al) || (want.ml !== null && row.ml !== null && row.ml !== want.ml) || (want.hosp !== null && row.hosp !== null && row.hosp !== want.hosp) || (!row.trackSet && !tracks[row.id] ? false : tracks[row.id] !== undefined && tracks[row.id] !== row.track)); return { row, track, want, differ }; }), [rows, tracks]);
+  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track)); return { row, track, want, differ }; }), [rows, tracks]);
   const shown = view.filter((item) => !onlyDiffer || item.differ);
   const differing = view.filter((item) => item.differ).length;
   const toggle = (id: string) => setPicked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
