@@ -50,6 +50,7 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
   const [notSetUp, setNotSetUp] = useState('');
   const [openId, setOpenId] = useState('');
   const [adding, setAdding] = useState(false);
+  const [setupNotice, setSetupNotice] = useState('');
   const [query, setQuery] = useState('');
   const [company, setCompany] = useState('');
   const [status, setStatus] = useState('Active');
@@ -61,8 +62,8 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
   };
   useEffect(() => { void load(); }, []);
 
-  if (adding) return <ProfileEditor employee={blank()} onCancel={() => setAdding(false)} onSaved={async (saved) => { setAdding(false); await load(); setOpenId(saved.id || ''); }} onError={onError} />;
-  if (openId) return <ProfileView id={openId} onBack={() => { setOpenId(''); void load(); }} onError={onError} />;
+  if (adding) return <ProfileEditor employee={blank()} onCancel={() => setAdding(false)} onSaved={async (saved, leaveSetup) => { setAdding(false); await load(); setOpenId(saved.id || ''); setSetupNotice(leaveSetup && !leaveSetup.error ? `Leave is set up as ${leaveSetup.track === 'admin' ? 'Administrative officer' : leaveSetup.track === 'parttime' ? 'part-time Doctor / clinic assistant' : 'Doctor / clinic assistant'} under the company policy. Change the category under Leave → Staff leave → Company policy if it is wrong.` : leaveSetup?.error ? `The profile was saved, but leave was not set up: ${leaveSetup.error}` : 'Add a join date so leave can be set up under Leave → Staff leave → Company policy.'); }} onError={onError} />;
+  if (openId) return <>{setupNotice && <p className="mx-auto mb-4 max-w-[1500px] rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">{setupNotice}</p>}<ProfileView id={openId} onBack={() => { setOpenId(''); setSetupNotice(''); void load(); }} onError={onError} /></>;
 
   // Clears a staff member's sign-in password: they sign in with the last 4 IC digits and choose a new one.
   const resetSignIn = async (row: Summary) => {
@@ -252,13 +253,13 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
   </div>;
 }
 
-function ProfileEditor({ employee, onCancel, onSaved, onError }: { employee: Employee; onCancel: () => void; onSaved: (saved: Employee) => Promise<void>; onError: (message: string) => void }) {
+function ProfileEditor({ employee, onCancel, onSaved, onError }: { employee: Employee; onCancel: () => void; onSaved: (saved: Employee, leaveSetup?: { track: string; changed: number; error?: string } | null) => Promise<void>; onError: (message: string) => void }) {
   const [draft, setDraft] = useState<Employee>(employee);
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof Employee>(key: K, value: Employee[K]) => setDraft((current) => ({ ...current, [key]: value }));
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true);
-    try { const result = await api('action=save_employee', { action: 'save_employee', employee: draft }); await onSaved(result.employee); }
+    try { const result = await api('action=save_employee', { action: 'save_employee', employee: draft }); await onSaved(result.employee, result.leaveSetup); }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
     finally { setSaving(false); }
   };

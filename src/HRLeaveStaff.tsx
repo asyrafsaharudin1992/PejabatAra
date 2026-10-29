@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ScrollText, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, ScrollText, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 
@@ -42,11 +42,21 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
   const [showInactive, setShowInactive] = useState(false);
   const [openId, setOpenId] = useState('');
   const [policy, setPolicy] = useState(false);
+  const [page, setPage] = useState(1);
   const load = () => api('action=leave_staff').then((result) => { if (result.error) throw new Error(result.error); setStaff(result.staff); }).catch((cause: Error) => { setStaff([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = useMemo(() => (staff || []).filter((person) => (showInactive || person.status === 'Active') && (!company || person.company === company) && words.every((word) => `${person.name} ${person.code}`.toLowerCase().includes(word))), [staff, query, company, showInactive]);
+
+  // 20 staff to a page; a new search or filter goes back to the first page.
+  const PAGE_SIZE = 20;
+  useEffect(() => { setPage(1); }, [query, company, showInactive]);
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  const visible = shown.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const goTo = (next: number) => { setPage(next); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const numbers = Array.from({ length: pages }, (_, index) => index + 1).filter((number) => pages <= 7 || number === 1 || number === pages || Math.abs(number - current) <= 1);
 
   if (policy) return <PolicyReview onBack={() => { setPolicy(false); void load(); }} onError={onError} />;
   if (openId) return <PersonLeave key={openId} id={openId} onBack={() => { setOpenId(''); void load(); }} onError={onError} />;
@@ -59,11 +69,19 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
       <button onClick={() => setPolicy(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Company policy</button>
     </section>
     {staff && !shown.length && <p className={`${card} text-sm text-slate-500`}>No staff match these filters.</p>}
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{shown.map((person) => <button key={person.id} onClick={() => setOpenId(person.id)} className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-md ${person.status === 'Active' ? '' : 'opacity-60'}`}>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visible.map((person) => <button key={person.id} onClick={() => setOpenId(person.id)} className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-md ${person.status === 'Active' ? '' : 'opacity-60'}`}>
       <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{person.name}</p><p className="mt-0.5 truncate text-xs text-slate-400">{person.company} · {person.code}{person.designation ? ` · ${person.designation}` : ''}</p></div>
         {person.waiting > 0 && <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">{person.waiting} waiting</span>}{person.status !== 'Active' && <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">{person.status}</span>}</div>
       <div className="mt-4 grid grid-cols-2 gap-5"><Meter label="Annual" pair={person.al} /><Meter label="Medical" pair={person.ml} /></div>
     </button>)}</div>
+    {pages > 1 && <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="Staff pages">
+      <p className="text-sm text-slate-500">Showing {(current - 1) * PAGE_SIZE + 1}–{Math.min(current * PAGE_SIZE, shown.length)} of {shown.length}</p>
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => goTo(current - 1)} disabled={current === 1} className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Previous</button>
+        {numbers.map((number, index) => <span key={number} className="flex items-center gap-1.5">{index > 0 && number - numbers[index - 1] > 1 && <span className="text-slate-400">…</span>}<button onClick={() => goTo(number)} aria-current={number === current ? 'page' : undefined} className={`h-10 min-w-10 rounded-xl px-3 text-sm font-semibold ${number === current ? 'bg-[#0b587b] text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{number}</button></span>)}
+        <button onClick={() => goTo(current + 1)} disabled={current === pages} className="inline-flex h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">Next<ChevronRight className="h-4 w-4" /></button>
+      </div>
+    </nav>}
   </div>;
 }
 
@@ -161,7 +179,7 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
   const load = () => api('action=leave_policy').then((result) => { if (result.error) throw new Error(result.error); setRows(result.staff); setTracks({}); setPicked(new Set()); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
 
-  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track)); return { row, track, want, differ }; }), [rows, tracks]);
+  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track) || !row.trackSet); return { row, track, want, differ }; }), [rows, tracks]);
   const shown = view.filter((item) => !onlyDiffer || item.differ);
   const differing = view.filter((item) => item.differ).length;
   const toggle = (id: string) => setPicked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -187,8 +205,8 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
       </div>
     </section>
     <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyDiffer} onChange={(event) => setOnlyDiffer(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Only those that differ from the policy</label>
-      <span className="text-sm text-slate-400">{rows ? `${differing} of ${view.length} differ` : 'Loading…'}</span>
+      <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyDiffer} onChange={(event) => setOnlyDiffer(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Only staff who need attention <span className="text-slate-400">(leave differs from the policy, or category not saved yet)</span></label>
+      <span className="text-sm text-slate-400">{rows ? `${differing} of ${view.length} need attention` : 'Loading…'}</span>
       <button onClick={() => setPicked(new Set(shown.map((item) => item.row.id)))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50">Select all shown</button>
       <button onClick={() => void apply()} disabled={!picked.size || saving} className="ml-auto h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Applying…' : `Apply to ${picked.size} selected`}</button>
     </section>

@@ -80,6 +80,45 @@ function firstYearEarn(eligible: number, joinDate: string) {
 // Sets a balance row. Annual leave: total = brought forward + credit + (earned so far, or the full entitlement once nothing more is
 // being earned) - forfeited. Other groups keep a total of 0 as in Infotech. Balance = total - taken (+ advance). Every change is written
 // to the person's HR history.
+// Gantian Cuti Rehat (GCR), as in the HR memo on paid annual leave: credit leave is used first and burns on 31 December if
+// unused (never paid, never carried); leave then comes off the yearly eligible days, then the brought forward. Staff who used
+// at least the set share of their eligible days may be paid for what is left of it, up to the set number of days, if they choose;
+// the rest is carried forward up to a limit per leave category. The numbers live in hr_gcr_settings, which HR edits in the system.
+type GcrSettings = { minUsedPercent: number; maxDays: number; carry: { admin: number; clinical: number; parttime: number } };
+const GCR_DEFAULTS: GcrSettings = { minUsedPercent: 50, maxDays: 4, carry: { admin: 25, clinical: 20, parttime: 20 } };
+async function loadGcrSettings(db: any): Promise<GcrSettings> {
+  try {
+    const { data } = await db.from('hr_gcr_settings').select('min_used_percent,max_days,carry_admin,carry_clinical,carry_parttime').eq('id', 1).maybeSingle();
+    if (!data) return GCR_DEFAULTS;
+    return { minUsedPercent: Number(data.min_used_percent), maxDays: Number(data.max_days), carry: { admin: Number(data.carry_admin), clinical: Number(data.carry_clinical), parttime: Number(data.carry_parttime) } };
+  } catch { return GCR_DEFAULTS; }
+}
+async function loadGcrChoices(db: any, year: number) {
+  try { const { data } = await db.from('hr_gcr_choices').select('employee_id,days_paid').eq('year', year).limit(4000); return new Map<string, number>((data || []).map((row: any) => [row.employee_id, Number(row.days_paid)])); } catch { return new Map<string, number>(); }
+}
+// Carry-forward days HR set by hand (management approval), with the reason. Missing means the calculated figure is used.
+async function loadCarryOverrides(db: any, year: number) {
+  try { const { data } = await db.from('hr_gcr_choices').select('employee_id,carry_override,note').eq('year', year).not('carry_override', 'is', null).limit(4000); return new Map<string, { days: number; note: string }>((data || []).map((row: any) => [row.employee_id, { days: Number(row.carry_override), note: row.note || '' }])); } catch { return new Map<string, { days: number; note: string }>(); }
+}
+function gcrFor(b: any, track: string, settings: GcrSettings, chosen = 0) {
+  const r = (v: number) => Math.round(v * 100) / 100;
+  const eligible = Number(b?.eligible || 0), bf = Number(b?.brought_forward || 0), credit = Number(b?.credit || 0), taken = Number(b?.taken || 0);
+  const creditUsed = Math.min(credit, taken);
+  let rest = taken - creditUsed;
+  const eligibleUsed = Math.min(eligible, Math.max(0, rest)); rest -= eligibleUsed;
+  const bfUsed = Math.min(Math.max(0, bf), Math.max(0, rest)); rest -= bfUsed;
+  const overdrawn = Math.max(0, rest);
+  const eligibleUnused = Math.max(0, eligible - eligibleUsed);
+  const percentUsed = eligible > 0 ? (eligibleUsed / eligible) * 100 : 0;
+  const qualifies = eligible > 0 && percentUsed >= settings.minUsedPercent;
+  const maxPay = qualifies ? Math.min(settings.maxDays, eligibleUnused) : 0;
+  const paid = Math.min(Math.max(0, chosen), maxPay);
+  const limit = (settings.carry as Record<string, number>)[track] ?? settings.carry.clinical;
+  const afterPay = eligibleUnused - paid;
+  const carry = Math.min(limit, afterPay);
+  return { eligible: r(eligible), credit: r(credit), taken: r(taken), creditUsed: r(creditUsed), burn: r(credit - creditUsed), bfExpired: r(bf - bfUsed), eligibleUsed: r(eligibleUsed), eligibleUnused: r(eligibleUnused), percentUsed: r(percentUsed), qualifies, maxPay: r(maxPay), paid: r(paid), carry: r(carry), overLimit: r(afterPay - carry), limit, overdrawn: r(overdrawn) };
+}
+
 async function saveLeaveBalance(db: any, userId: string, now: string, employeeId: string, group: string, year: number, next: { eligible: number; brought_forward: number; credit: number; earn: number; forfeit: number }) {
   const { data: before } = await db.from('hr_leave_balances').select('*').eq('employee_id', employeeId).eq('leave_group', group).eq('year', year).maybeSingle();
   const taken = Number(before?.taken ?? 0), advance = Number(before?.advance ?? 0);
@@ -91,6 +130,63 @@ async function saveLeaveBalance(db: any, userId: string, now: string, employeeId
   for (const key of ['eligible', 'brought_forward', 'credit', 'earn', 'forfeit'] as const) { const was = Number(before?.[key] ?? 0); if (!before || was !== next[key]) changes[`leave_${group}_${key}`] = [before ? was : null, next[key]]; }
   if (Object.keys(changes).length) await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes, changed_by: userId });
   return { total, balance };
+}
+
+// The leave category guessed for a staff member when HR has not set one: doctors and residents follow the Doctor / clinic assistant
+// tiers whatever their department, administrative jobs follow the Administrative tiers, part-time follows the part-time tiers.
+function guessLeaveTrack(person: { department?: string | null; designation?: string | null; employment_type?: string | null }) {
+  const designation = String(person.designation || '').toUpperCase(), department = String(person.department || '').toUpperCase();
+  if (/PART/i.test(String(person.employment_type || ''))) return 'parttime';
+  if (/\bDR\b|DOCTOR|RESIDENT/.test(designation)) return 'clinical';
+  if (/ADMIN|OFFICER|EXECUTIVE|MANAGER/.test(designation) || /^(OFFICE|ADMIN)/.test(department)) return 'admin';
+  return 'clinical';
+}
+
+// Gives one staff member their leave category and the policy balances (AL, ML, hospital and the fixed ones), as the Company policy
+// page does. Used there, and automatically when HR adds a new staff member. Returns how many balances were created or changed.
+async function applyLeavePolicy(db: any, userId: string, now: string, employeeId: string, track: string, join: string) {
+  const item = { id: employeeId, track };
+  let changed = 0;
+  const policy = policyFor(item.track, join);
+  await db.from('hr_employees').update({ leave_policy: item.track, updated_at: now, updated_by: userId }).eq('id', item.id);
+  const served = (Date.now() - Date.parse(`${join}T00:00:00Z`)) / (365.25 * 86400000);
+  const thisYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+  const part = item.track === 'parttime';
+  // The policy figures, plus the fixed entitlements everyone has in Infotech (marriage 1, Haji/Umrah 14, unpaid 30) when missing.
+  const groups: [string, number | null, number][] = [['AL', policy.al, thisYear], ['ML', policy.ml, thisYear], ['HOSP', policy.hosp, 0], ['MARRG', part ? null : 1, 0], ['HAJUMR', part ? null : 14, 0], ['UL', part ? null : 30, 0]];
+  for (const [group, value, year] of groups) {
+    if (value === null) continue;
+    const { data: rows } = await db.from('hr_leave_balances').select('*').eq('employee_id', item.id).eq('leave_group', group).order('year', { ascending: false }).limit(1);
+    const row = rows?.[0];
+    if (!row) {
+      // A new balance. Someone in their first year starts by earning 1 day (as Infotech does for the newest staff) and HR raises it each month.
+      await saveLeaveBalance(db, userId, now, item.id, group, year, { eligible: value, brought_forward: 0, credit: 0, earn: group === 'AL' ? (firstYearEarn(value, join) ?? 0) : 0, forfeit: 0 });
+      changed++; continue;
+    }
+    if (!['AL', 'ML', 'HOSP'].includes(group)) continue;
+    // In the year someone joins, annual leave is shared by month (see firstYearEarn); an amount already set is never lowered.
+    const earn = group === 'AL' ? Math.max(Number(row.earn), firstYearEarn(value, join) ?? 0) : Number(row.earn);
+    if (Number(row.eligible) === value && earn === Number(row.earn)) continue;
+    await saveLeaveBalance(db, userId, now, item.id, group, row.year, { eligible: value, brought_forward: Number(row.brought_forward), credit: Number(row.credit), earn, forfeit: Number(row.forfeit) });
+    changed++;
+  }
+  return changed;
+}
+
+// Builds the leave of any active staff member who has none yet (for example someone added before leave was set up automatically).
+// Only people with a join date and no Annual Leave balance at all are touched, so existing balances are never changed.
+async function ensureLeaveSetup(db: any, userId: string, now: string) {
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+    const [{ data: people }, { data: have }] = await Promise.all([
+      db.from('hr_employees').select('id,join_date,leave_policy,department,designation,employment_type').eq('status', 'Active').not('join_date', 'is', null).lte('join_date', `${today.slice(0, 4)}-12-31`).limit(1000),
+      db.from('hr_leave_balances').select('employee_id').eq('leave_group', 'AL').limit(5000),
+    ]);
+    const covered = new Set((have || []).map((row: any) => row.employee_id));
+    let created = 0;
+    for (const person of (people || []).filter((p: any) => !covered.has(p.id))) { created += await applyLeavePolicy(db, userId, now, person.id, person.leave_policy || guessLeaveTrack(person), person.join_date); }
+    return created;
+  } catch { return 0; }
 }
 
 export async function hrHandler(req: any, res: any) {
@@ -251,6 +347,7 @@ export async function hrHandler(req: any, res: any) {
 
     // Leave management by person: a card per staff member with their balances, and one person's balances and history.
     if (req.method === 'GET' && action === 'leave_staff') {
+      await ensureLeaveSetup(db, user.id, now);
       const { data: people, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,status').order('company').order('full_name').limit(1000);
       if (error) throw error;
       const ids = (people || []).map((p: any) => p.id);
@@ -262,6 +359,179 @@ export async function hrHandler(req: any, res: any) {
       const waiting = new Map<string, number>(); for (const row of open || []) waiting.set(row.employee_id, (waiting.get(row.employee_id) || 0) + 1);
       const pick = (b: any) => b ? { year: b.year, eligible: Number(b.eligible), total: Number(b.total), taken: Number(b.taken), balance: Number(b.balance) } : null;
       return res.status(200).json({ staff: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation, status: p.status, al: pick(latest(p.id, 'AL')), ml: pick(latest(p.id, 'ML')), waiting: waiting.get(p.id) || 0 })) });
+    }
+    // GCR report (Gantian Cuti Rehat): per person, the credit that burns, the days to pay and what carries forward.
+    if (req.method === 'GET' && action === 'leave_gcr') {
+      const year = /^\d{4}$/.test(String(req.query.year)) ? Number(req.query.year) : Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      let peopleQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation,join_date,leave_policy').eq('status', 'Active').order('company').order('employee_code').limit(1000);
+      if (company) peopleQuery = peopleQuery.eq('company', company);
+      const { data: people, error } = await peopleQuery;
+      if (error) throw error;
+      const ids = (people || []).map((p: any) => p.id);
+      const { data: balances, error: balanceError } = ids.length ? await db.from('hr_leave_balances').select('employee_id,eligible,brought_forward,credit,taken,balance').in('employee_id', ids).eq('leave_group', 'AL').eq('year', year).limit(4000) : { data: [], error: null };
+      if (balanceError) throw balanceError;
+      const settings = await loadGcrSettings(db), choices = await loadGcrChoices(db, year);
+      const rows = (people || []).map((p: any) => {
+        const b: any = (balances || []).find((x: any) => x.employee_id === p.id);
+        // The same fallback Year End uses until HR sets the leave category: 15 or more eligible days means Admin.
+        const track = p.leave_policy || (b && Number(b.eligible) >= 15 ? 'admin' : 'clinical');
+        return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', track, balance: b ? Number(b.balance) : null, chosen: choices.get(p.id) || 0, gcr: b ? gcrFor(b, track, settings, choices.get(p.id) || 0) : null };
+      });
+      return res.status(200).json({ year, settings, rows });
+    }
+    // HR edits the GCR rules in the system.
+    if (req.method === 'POST' && action === 'leave_gcr_settings_save') {
+      const pick = (value: unknown, label: string, max: number) => { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > max || Math.round(n * 100) !== n * 100) throw fail(400, `${label} must be a number from 0 to ${max}.`); return n; };
+      const next = { min_used_percent: pick(body.minUsedPercent, 'The share of eligible leave to be used', 100), max_days: pick(body.maxDays, 'The most days that can be paid', 60), carry_admin: pick(body.carryAdmin, 'The Admin carry-forward limit', 366), carry_clinical: pick(body.carryClinical, 'The Operation carry-forward limit', 366), carry_parttime: pick(body.carryParttime, 'The Part-time carry-forward limit', 366) };
+      const before = await loadGcrSettings(db);
+      const { error } = await db.from('hr_gcr_settings').upsert({ id: 1, ...next, updated_by: user.id, updated_at: now });
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { gcr_settings: [before, { minUsedPercent: next.min_used_percent, maxDays: next.max_days, carry: { admin: next.carry_admin, clinical: next.carry_clinical, parttime: next.carry_parttime } }] }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+    // Management approval at Year End: HR sets (or clears) how many days a staff member carries forward, and why.
+    if (req.method === 'POST' && action === 'leave_carry_override') {
+      const id = text(body.employeeId, 60), year = Number(body.year), note = text(body.note, 200);
+      if (!id || !Number.isInteger(year)) throw fail(400, 'Choose the staff member and year.');
+      const { data: closed } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+      if (closed) throw fail(409, `The ${year} leave year is closed.`);
+      const clear = body.days === null || body.days === '' || body.days === undefined;
+      const days = clear ? null : Number(body.days);
+      if (!clear && (!Number.isFinite(days) || (days as number) < 0 || (days as number) > 100 || Math.round((days as number) * 100) !== (days as number) * 100)) throw fail(400, 'Days carried forward must be a number from 0 to 100.');
+      const { data: existing } = await db.from('hr_gcr_choices').select('days_paid').eq('employee_id', id).eq('year', year).maybeSingle();
+      const { error } = await db.from('hr_gcr_choices').upsert({ employee_id: id, year, days_paid: Number(existing?.days_paid || 0), carry_override: days, note: clear ? '' : note, decided_by: user.id, decided_at: now });
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { year_end_carry_forward: [null, days], year_end_note: [null, clear ? '' : note] }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+    // The staff member's choice: how many of their payable days to be paid (0 = carry everything forward).
+    if (req.method === 'POST' && action === 'leave_gcr_choice') {
+      const id = text(body.employeeId, 60), year = Number(body.year), days = Number(body.days);
+      if (!id || !Number.isInteger(year)) throw fail(400, 'Choose the staff member and year.');
+      if (!Number.isFinite(days) || days < 0 || Math.round(days * 100) !== days * 100) throw fail(400, 'Days must be 0 or more.');
+      const { data: closed } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+      if (closed) throw fail(409, `The ${year} leave year is closed.`);
+      const [{ data: person }, { data: balance }] = await Promise.all([db.from('hr_employees').select('leave_policy').eq('id', id).maybeSingle(), db.from('hr_leave_balances').select('eligible,brought_forward,credit,taken').eq('employee_id', id).eq('leave_group', 'AL').eq('year', year).maybeSingle()]);
+      if (!balance) throw fail(404, `No ${year} Annual Leave balance for this staff member.`);
+      const settings = await loadGcrSettings(db);
+      const info = gcrFor(balance, person?.leave_policy || (Number(balance.eligible) >= 15 ? 'admin' : 'clinical'), settings);
+      if (days > info.maxPay) throw fail(400, info.qualifies ? `At most ${info.maxPay} day(s) can be paid for this staff member.` : `This staff member used ${info.percentUsed}% of their eligible leave, below the ${settings.minUsedPercent}% needed, so no days can be paid.`);
+      const { error } = await db.from('hr_gcr_choices').upsert({ employee_id: id, year, days_paid: days, decided_by: user.id, decided_at: now });
+      if (error) throw error;
+      return res.status(200).json({ success: true });
+    }
+    // Credit Annual Leave Report: every credit HR gave in a period, per person (from hr_leave_credits).
+    if (req.method === 'GET' && action === 'leave_credit_report') {
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      const year = new Date().getFullYear();
+      const from = iso.test(String(req.query.from)) ? String(req.query.from) : `${year}-01-01`;
+      const to = iso.test(String(req.query.to)) ? String(req.query.to) : `${year}-12-31`;
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      const { data: credits, error } = await db.from('hr_leave_credits').select('id,employee_id,credit_date,days,remarks,source').gte('credit_date', from).lte('credit_date', to).order('credit_date').limit(5000);
+      if (error) throw error;
+      const ids = [...new Set((credits || []).map((row: any) => row.employee_id))];
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
+      const who = new Map((people || []).map((p: any) => [p.id, p]));
+      const rows = (people || []).filter((p: any) => !company || p.company === company).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.employee_code.localeCompare(b.employee_code)).map((p: any) => ({
+        id: p.id, company: p.company, code: p.employee_code, name: p.full_name,
+        credits: (credits || []).filter((row: any) => row.employee_id === p.id).map((row: any) => ({ id: row.id, date: row.credit_date, days: Number(row.days), remarks: row.remarks, source: row.source })),
+      }));
+      return res.status(200).json({ from, to, people: rows, known: who.size });
+    }
+    // Give Annual Leave credit to one or more staff: adds to this year's AL credit and records each grant.
+    if (req.method === 'POST' && action === 'leave_credit_add') {
+      const staffIds: string[] = Array.isArray(body.employeeIds) ? body.employeeIds.map((id: unknown) => text(id, 60)).filter(Boolean) : [];
+      const days = Number(body.days), remarks = text(body.remarks, 160), date = text(body.date, 10);
+      if (!staffIds.length) throw fail(400, 'Choose at least one staff member.');
+      if (staffIds.length > 200) throw fail(400, 'Choose 200 staff or fewer at a time.');
+      if (!Number.isFinite(days) || days <= 0 || days > 30 || Math.round(days * 100) !== days * 100) throw fail(400, 'Days must be a number from 0.01 to 30.');
+      if (!remarks) throw fail(400, 'Write what the credit is for (for example CREDIT AL PH RAYA).');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fail(400, 'Choose the credit date.');
+      const year = Number(date.slice(0, 4));
+      const { data: closed, error: closedError } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+      if (closedError) throw closedError;
+      if (closed) throw fail(409, `The ${year} leave year is closed and its balances are locked.`);
+      const { data: balances, error: balanceError } = await db.from('hr_leave_balances').select('employee_id,eligible,brought_forward,credit,earn,forfeit').in('employee_id', staffIds).eq('leave_group', 'AL').eq('year', year);
+      if (balanceError) throw balanceError;
+      const have = new Map((balances || []).map((b: any) => [b.employee_id, b]));
+      const missing = staffIds.filter((id) => !have.has(id));
+      if (missing.length) {
+        const { data: names } = await db.from('hr_employees').select('full_name').in('id', missing);
+        throw fail(409, `No ${year} Annual Leave balance yet for: ${(names || []).map((n: any) => n.full_name).join(', ')}. Set up their balance first (HR > Leave > Staff leave).`);
+      }
+      for (const id of staffIds) {
+        const b: any = have.get(id);
+        await saveLeaveBalance(db, user.id, now, id, 'AL', year, { eligible: Number(b.eligible), brought_forward: Number(b.brought_forward), credit: Math.round((Number(b.credit) + days) * 100) / 100, earn: Number(b.earn), forfeit: Number(b.forfeit) });
+      }
+      const { error: insertError } = await db.from('hr_leave_credits').insert(staffIds.map((id) => ({ employee_id: id, leave_group: 'AL', credit_date: date, days, remarks, source: 'AraOffice', created_by: user.id })));
+      if (insertError) throw insertError;
+      return res.status(200).json({ success: true, count: staffIds.length });
+    }
+    // Undo a credit given by mistake: takes the days back off this year's AL credit and removes the record.
+    if (req.method === 'POST' && action === 'leave_credit_delete') {
+      const id = text(body.id, 60);
+      const { data: row, error } = await db.from('hr_leave_credits').select('id,employee_id,credit_date,days').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!row) throw fail(404, 'Credit not found.');
+      const year = Number(String(row.credit_date).slice(0, 4));
+      const { data: closed } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+      if (closed) throw fail(409, `The ${year} leave year is closed and its balances are locked.`);
+      const { data: b } = await db.from('hr_leave_balances').select('eligible,brought_forward,credit,earn,forfeit').eq('employee_id', row.employee_id).eq('leave_group', 'AL').eq('year', year).maybeSingle();
+      if (b) await saveLeaveBalance(db, user.id, now, row.employee_id, 'AL', year, { eligible: Number(b.eligible), brought_forward: Number(b.brought_forward), credit: Math.max(0, Math.round((Number(b.credit) - Number(row.days)) * 100) / 100), earn: Number(b.earn), forfeit: Number(b.forfeit) });
+      const { error: deleteError } = await db.from('hr_leave_credits').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+      return res.status(200).json({ success: true });
+    }
+    // Leave Consolidate Report (Current Year): one row per person with the Annual and Medical Leave figures. HR uses the AL balance for GCR.
+    if (req.method === 'GET' && action === 'leave_consolidate') {
+      const year = /^\d{4}$/.test(String(req.query.year)) ? Number(req.query.year) : Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      let peopleQuery = db.from('hr_employees').select('id,company,employee_code,full_name,join_date,designation').eq('status', 'Active').order('company').order('employee_code').limit(1000);
+      if (company) peopleQuery = peopleQuery.eq('company', company);
+      const { data: people, error } = await peopleQuery;
+      if (error) throw error;
+      const ids = (people || []).map((p: any) => p.id);
+      const { data: balances, error: balanceError } = ids.length ? await db.from('hr_leave_balances').select('employee_id,leave_group,eligible,brought_forward,bf_expiry,forfeit,credit,earn,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000) : { data: [], error: null };
+      if (balanceError) throw balanceError;
+      const num = (v: any) => Math.round(Number(v || 0) * 100) / 100;
+      const rows = (people || []).map((p: any) => {
+        const al: any = (balances || []).find((b: any) => b.employee_id === p.id && b.leave_group === 'AL');
+        const ml: any = (balances || []).find((b: any) => b.employee_id === p.id && b.leave_group === 'ML');
+        return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, joinDate: p.join_date || '', designation: p.designation || '',
+          al: al ? { eligible: num(al.eligible), broughtForward: num(al.brought_forward), forfeit: num(al.forfeit), credit: num(al.credit), earn: num(al.earn), total: num(al.total), taken: num(al.taken), balance: num(al.balance), bfExpiry: al.bf_expiry || '' } : null,
+          ml: ml ? { eligible: num(ml.eligible), earn: num(ml.earn), taken: num(ml.taken), balance: num(ml.balance) } : null };
+      });
+      return res.status(200).json({ year, rows });
+    }
+    // Leave History Report (as in Infotech): approved leave per person for a period, grouped by leave type, with the AL and ML balance box.
+    if (req.method === 'GET' && action === 'leave_history_report') {
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      const from = iso.test(String(req.query.from)) ? String(req.query.from) : `${new Date().getFullYear()}-01-01`;
+      const to = iso.test(String(req.query.to)) ? String(req.query.to) : `${new Date().getFullYear()}-12-31`;
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      const one = text(req.query.id, 60);
+      let peopleQuery = db.from('hr_employees').select('id,company,employee_code,full_name,join_date,status').order('company').order('employee_code').limit(1000);
+      if (company) peopleQuery = peopleQuery.eq('company', company);
+      if (one) peopleQuery = peopleQuery.eq('id', one); else peopleQuery = peopleQuery.eq('status', 'Active');
+      const { data: people, error } = await peopleQuery;
+      if (error) throw error;
+      const ids = (people || []).map((p: any) => p.id);
+      if (!ids.length) return res.status(200).json({ from, to, people: [] });
+      const year = Number(to.slice(0, 4));
+      const [{ data: requests, error: requestError }, { data: balances, error: balanceError }] = await Promise.all([
+        db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day,days,reason').in('employee_id', ids).eq('status', 'approved').lte('start_date', to).gte('end_date', from).order('start_date').limit(5000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance,advance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000),
+      ]);
+      if (requestError || balanceError) throw requestError || balanceError;
+      const num = (v: any) => Math.round(Number(v || 0) * 100) / 100;
+      const out = (people || []).map((p: any) => {
+        const mine = (requests || []).filter((r: any) => r.employee_id === p.id).map((r: any) => ({ type: r.leave_type, start: r.start_date, end: r.end_date, half: r.half_day, days: num(r.days), reason: r.reason || '' }));
+        const bal = (group: string) => { const b: any = (balances || []).find((x: any) => x.employee_id === p.id && x.leave_group === group); return b ? { eligible: num(b.eligible), broughtForward: num(b.brought_forward), credit: num(b.credit), earn: num(b.earn), forfeit: num(b.forfeit), total: num(b.total), taken: num(b.taken), balance: num(b.balance) } : null; };
+        return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, joinDate: p.join_date || '', requests: mine, al: bal('AL'), ml: bal('ML') };
+      });
+      // Everyone with leave in the period or a balance on record; the rest have nothing to show.
+      return res.status(200).json({ from, to, people: out.filter((p: any) => p.requests.length || p.al || p.ml) });
     }
     if (req.method === 'GET' && action === 'leave_person') {
       const id = text(req.query.id, 60);
@@ -297,6 +567,7 @@ export async function hrHandler(req: any, res: any) {
     }
 
     if (req.method === 'GET' && action === 'leave_year_end_preview') {
+      await ensureLeaveSetup(db, user.id, now);
       const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
       const [{ data: currentClosure, error: currentClosureError }, { data: latestBalance, error: latestError }] = await Promise.all([
         db.from('hr_leave_year_closures').select('target_year').eq('target_year', currentYear).maybeSingle(),
@@ -307,20 +578,21 @@ export async function hrHandler(req: any, res: any) {
       const targetYear = currentClosure && month < 10 ? currentYear : Math.max(currentYear + (month >= 10 ? 1 : 0), Number(latestBalance?.[0]?.year || currentYear - 1) + 1);
       if (/^\d{4}$/.test(String(req.query.year)) && Number(req.query.year) !== targetYear) throw fail(400, 'Year End can only preview the next open leave cycle.');
       const [{ data: people, error }, { data: balances, error: balanceError }, { data: pending, error: pendingError }, { data: closure, error: closureError }] = await Promise.all([
-        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,leave_policy,status').eq('status', 'Active').order('company').order('full_name').limit(1000),
-        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000),
+        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,leave_policy,status,department,designation,employment_type').eq('status', 'Active').order('company').order('full_name').limit(1000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance,credit,taken').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000),
         db.from('hr_leave_requests').select('id,employee_id,leave_type,start_date,end_date,status').in('status', ['pending', 'supervisor_approved']).lte('start_date', `${targetYear - 1}-12-31`).gte('end_date', `${targetYear - 1}-01-01`).limit(3000),
         db.from('hr_leave_year_closures').select('target_year,source_year,bf_expiry,staff_count,processed_at').eq('target_year', targetYear).maybeSingle(),
       ]);
       if (error || balanceError || pendingError || closureError) throw error || balanceError || pendingError || closureError;
+      const gcrSettings = await loadGcrSettings(db), gcrChoices = await loadGcrChoices(db, targetYear - 1), carryOverrides = await loadCarryOverrides(db, targetYear - 1);
       const balanceOf = (id: string, group: string) => (balances || []).find((row: any) => row.employee_id === id && row.leave_group === group);
       const rows = (people || []).map((person: any) => {
         const oldAL = balanceOf(person.id, 'AL'), oldML = balanceOf(person.id, 'ML');
-        const track = person.leave_policy || (oldAL && Number(oldAL.eligible) >= 15 ? 'admin' : 'clinical');
+        const track = person.leave_policy || (oldAL ? (Number(oldAL.eligible) >= 15 ? 'admin' : 'clinical') : guessLeaveTrack(person));
         const policy = person.join_date ? policyFor(track, person.join_date, targetYear) : null;
         return { employeeId: person.id, company: person.company, code: person.employee_code, name: person.full_name, joinDate: person.join_date, track, missingPolicy: !person.leave_policy,
-          annual: { eligible: policy?.al ?? Number(oldAL?.eligible || 0), broughtForward: Math.max(0, Number(oldAL?.balance ?? 0) - (oldAL?.bf_expiry && oldAL.bf_expiry <= `${targetYear - 1}-12-31` ? Number(oldAL?.brought_forward || 0) : 0)), sourceBalance: oldAL ? Number(oldAL.balance) : null },
-          medical: { eligible: policy?.ml ?? Number(oldML?.eligible || 0), broughtForward: Math.max(0, Number(oldML?.balance ?? 0) - (oldML?.bf_expiry && oldML.bf_expiry <= `${targetYear - 1}-12-31` ? Number(oldML?.brought_forward || 0) : 0)), sourceBalance: oldML ? Number(oldML.balance) : null },
+          annual: { eligible: policy?.al ?? Number(oldAL?.eligible || 0), broughtForward: oldAL ? (carryOverrides.get(person.id)?.days ?? gcrFor(oldAL, track, gcrSettings, gcrChoices.get(person.id) || 0).carry) : 0, calculatedCarry: oldAL ? gcrFor(oldAL, track, gcrSettings, gcrChoices.get(person.id) || 0).carry : 0, carryOverride: carryOverrides.get(person.id) ?? null, sourceBalance: oldAL ? Number(oldAL.balance) : null, gcr: oldAL ? gcrFor(oldAL, track, gcrSettings, gcrChoices.get(person.id) || 0) : null },
+          medical: { eligible: policy?.ml ?? Number(oldML?.eligible || 0), broughtForward: 0, sourceBalance: oldML ? Number(oldML.balance) : null },
           missingJoinDate: !person.join_date, missingAnnual: !oldAL, missingMedical: !oldML };
       });
       return res.status(200).json({ targetYear, sourceYear: targetYear - 1, rows, pending: pending || [], closure: closure || null });
@@ -331,24 +603,32 @@ export async function hrHandler(req: any, res: any) {
       if (!Number.isInteger(targetYear) || !isDate(expiry)) throw fail(400, 'Choose the new leave year and BF expiry date.');
       const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
       if (targetYear !== currentYear) throw fail(409, `Year End for ${targetYear} can only be processed from 1 January ${targetYear}.`);
-      const { data: people, error } = await db.from('hr_employees').select('id,full_name,join_date,leave_policy').eq('status', 'Active').limit(1000);
+      const { data: people, error } = await db.from('hr_employees').select('id,full_name,join_date,leave_policy,department,designation,employment_type').eq('status', 'Active').limit(1000);
       if (error) throw error;
-      if ((people || []).some((person: any) => !person.leave_policy)) throw fail(400, 'Choose and apply a leave category for every active staff member under Leave → Staff leave → Company policy first.');
-      const { data: old, error: oldError } = await db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000);
+      const { data: old, error: oldError } = await db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance,credit,taken').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000);
       if (oldError) throw oldError;
+      const gcrSettings = await loadGcrSettings(db), gcrChoices = await loadGcrChoices(db, targetYear - 1), carryOverrides = await loadCarryOverrides(db, targetYear - 1);
       const balances = (people || []).map((person: any) => {
         const annual = (old || []).find((row: any) => row.employee_id === person.id && row.leave_group === 'AL');
         const medical = (old || []).find((row: any) => row.employee_id === person.id && row.leave_group === 'ML');
         const track = person.leave_policy || (annual && Number(annual.eligible) >= 15 ? 'admin' : 'clinical');
         const policy = person.join_date ? policyFor(track, person.join_date, targetYear) : null;
         return { employeeId: person.id, groups: [
-          { group: 'AL', eligible: policy?.al ?? Number(annual?.eligible || 0), broughtForward: Math.max(0, Number(annual?.balance || 0) - (annual?.bf_expiry && annual.bf_expiry <= `${targetYear - 1}-12-31` ? Number(annual?.brought_forward || 0) : 0)) },
-          { group: 'ML', eligible: policy?.ml ?? Number(medical?.eligible || 0), broughtForward: Math.max(0, Number(medical?.balance || 0) - (medical?.bf_expiry && medical.bf_expiry <= `${targetYear - 1}-12-31` ? Number(medical?.brought_forward || 0) : 0)) },
+          { group: 'AL', eligible: policy?.al ?? Number(annual?.eligible || 0), broughtForward: annual ? (carryOverrides.get(person.id)?.days ?? gcrFor(annual, track, gcrSettings, gcrChoices.get(person.id) || 0).carry) : 0 },
+          { group: 'ML', eligible: policy?.ml ?? Number(medical?.eligible || 0), broughtForward: 0 },
         ] };
       });
       if ((people || []).some((person: any) => !person.join_date)) throw fail(400, 'Add a join date to every active staff profile before processing Year End.');
       const missingBalance = (people || []).filter((person: any) => !old?.some((row: any) => row.employee_id === person.id && row.leave_group === 'AL') || !old?.some((row: any) => row.employee_id === person.id && row.leave_group === 'ML'));
       if (missingBalance.length) throw fail(400, `Set up previous-year AL and ML balances for every active staff member before Year End. Missing balance for: ${missingBalance.map((person: any) => person.full_name).join(', ')}.`);
+      // Staff whose category was never saved get it now, from their current entitlement and job (HR can still change it later).
+      for (const person of people || []) {
+        if (person.leave_policy) continue;
+        const annual = (old || []).find((row: any) => row.employee_id === person.id && row.leave_group === 'AL');
+        const track = annual ? (Number(annual.eligible) >= 15 ? 'admin' : 'clinical') : guessLeaveTrack(person);
+        const { error: saveError } = await db.from('hr_employees').update({ leave_policy: track, updated_at: now, updated_by: user.id }).eq('id', person.id);
+        if (saveError) throw saveError;
+      }
       const { data, error: processError } = await db.rpc('hr_process_leave_year_end', { p_target_year: targetYear, p_bf_expiry: expiry, p_processed_by: user.id, p_balances: balances });
       if (processError) throw fail(409, processError.message || 'Unable to process leave year end.');
       return res.status(200).json(data || { success: true, targetYear });
@@ -358,14 +638,14 @@ export async function hrHandler(req: any, res: any) {
     // what they have now. Nothing changes until HR applies it.
     if (req.method === 'GET' && action === 'leave_policy') {
       const [{ data: people, error }, { data: balances }] = await Promise.all([
-        db.from('hr_employees').select('id,company,employee_code,full_name,designation,join_date,leave_policy').eq('status', 'Active').order('company').order('full_name').limit(500),
+        db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,employment_type,join_date,leave_policy').eq('status', 'Active').order('company').order('full_name').limit(500),
         db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible').in('leave_group', ['AL', 'ML', 'HOSP']).limit(3000),
       ]);
       if (error) throw error;
       const current = (employee: string, group: string) => (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year)[0];
       return res.status(200).json({ staff: (people || []).map((p: any) => {
         const al = current(p.id, 'AL'), ml = current(p.id, 'ML'), hosp = current(p.id, 'HOSP');
-        const track = p.leave_policy || (al && Number(al.eligible) >= 15 ? 'admin' : 'clinical');
+        const track = p.leave_policy || (al ? (Number(al.eligible) >= 15 ? 'admin' : 'clinical') : guessLeaveTrack(p));
         const years = p.join_date ? (Date.now() - Date.parse(`${p.join_date}T00:00:00Z`)) / (365.25 * 86400000) : null;
         const policy = p.join_date ? policyFor(track, p.join_date) : null;
         return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation, joinDate: p.join_date, years, track, trackSet: Boolean(p.leave_policy), policy, al: al ? Number(al.eligible) : null, ml: ml ? Number(ml.eligible) : null, hosp: hosp ? Number(hosp.eligible) : null };
@@ -388,29 +668,7 @@ export async function hrHandler(req: any, res: any) {
       for (const item of items) {
         const join = joined.get(item.id);
         if (!join) { skipped.push(item.id); continue; }
-        const policy = policyFor(item.track, join);
-        await db.from('hr_employees').update({ leave_policy: item.track, updated_at: now, updated_by: user.id }).eq('id', item.id);
-        const served = (Date.now() - Date.parse(`${join}T00:00:00Z`)) / (365.25 * 86400000);
-        const thisYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
-        const part = item.track === 'parttime';
-        // The policy figures, plus the fixed entitlements everyone has in Infotech (marriage 1, Haji/Umrah 14, unpaid 30) when missing.
-        const groups: [string, number | null, number][] = [['AL', policy.al, thisYear], ['ML', policy.ml, thisYear], ['HOSP', policy.hosp, 0], ['MARRG', part ? null : 1, 0], ['HAJUMR', part ? null : 14, 0], ['UL', part ? null : 30, 0]];
-        for (const [group, value, year] of groups) {
-          if (value === null) continue;
-          const { data: rows } = await db.from('hr_leave_balances').select('*').eq('employee_id', item.id).eq('leave_group', group).order('year', { ascending: false }).limit(1);
-          const row = rows?.[0];
-          if (!row) {
-            // A new balance. Someone in their first year starts by earning 1 day (as Infotech does for the newest staff) and HR raises it each month.
-            await saveLeaveBalance(db, user.id, now, item.id, group, year, { eligible: value, brought_forward: 0, credit: 0, earn: group === 'AL' ? (firstYearEarn(value, join) ?? 0) : 0, forfeit: 0 });
-            changed++; continue;
-          }
-          if (!['AL', 'ML', 'HOSP'].includes(group)) continue;
-          // In the year someone joins, annual leave is shared by month (see firstYearEarn); an amount already set is never lowered.
-          const earn = group === 'AL' ? Math.max(Number(row.earn), firstYearEarn(value, join) ?? 0) : Number(row.earn);
-          if (Number(row.eligible) === value && earn === Number(row.earn)) continue;
-          await saveLeaveBalance(db, user.id, now, item.id, group, row.year, { eligible: value, brought_forward: Number(row.brought_forward), credit: Number(row.credit), earn, forfeit: Number(row.forfeit) });
-          changed++;
-        }
+        changed += await applyLeavePolicy(db, user.id, now, item.id, item.track, join);
       }
       return res.status(200).json({ success: true, changed, skipped: skipped.length });
     }
@@ -529,7 +787,18 @@ export async function hrHandler(req: any, res: any) {
       if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
       if (error) throw error;
       await db.from('hr_audit').insert({ employee_id: data.id, action: 'create', changes: {}, changed_by: user.id });
-      return res.status(200).json({ employee: decode(data) });
+      // A new staff member gets their leave straight away, as the company policy says. HR can still change the category later.
+      let leaveSetup: { track: string; changed: number } | { error: string } | null = null;
+      if (data.join_date && data.status === 'Active') {
+        try {
+          const track = guessLeaveTrack(data);
+          const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+          const { data: closedYear } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', currentYear + 1).maybeSingle();
+          if (closedYear) throw new Error(`The ${currentYear} leave year is closed.`);
+          leaveSetup = { track, changed: await applyLeavePolicy(db, user.id, now, data.id, track, data.join_date) };
+        } catch (cause) { leaveSetup = { error: cause instanceof Error ? cause.message : 'Unable to set up leave.' }; }
+      }
+      return res.status(200).json({ employee: decode(data), leaveSetup });
     }
 
     throw fail(405, 'Method not allowed.');

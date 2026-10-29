@@ -234,3 +234,15 @@
   .ara-hero h1, .ara-hero h2 { font-size: 1.5rem; line-height: 1.2; }
   .ara-hero p { font-size: 0.8rem; line-height: 1.45; }
 }
+
+/* Leave History Report: print only the report pages. */
+@media print {
+  body * { visibility: hidden; }
+  .leave-report, .leave-report * { visibility: visible; }
+  .leave-report { position: absolute; left: 0; top: 0; width: 100%; }
+  @page { size: A4; margin: 14mm; }
+}
+
+/* The Consolidate Report prints on a landscape page. */
+.consolidate-print { page: landscape-report; }
+@page landscape-report { size: A4 landscape; margin: 10mm; }
