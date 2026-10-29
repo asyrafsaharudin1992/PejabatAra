@@ -169,7 +169,28 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, updated: (data || []).length });
     }
 
-    // Every leave request made from Individual Sign In, for HR to follow (read only).
+    // HR deletes a leave request (a mistake, or leave that is no longer wanted). If the app had already taken the days
+    // off the balance (approved and not imported from Infotech), they go back on it. The deletion is written to the
+    // person's HR history. Approving and rejecting stay in Individual Sign In.
+    if (req.method === 'POST' && action === 'leave_delete') {
+      const { data: request, error: readError } = await db.from('hr_leave_requests').select('*').eq('id', text(body.id, 60)).maybeSingle();
+      if (readError) throw readError;
+      if (!request) throw fail(404, 'This request no longer exists.');
+      const fromInfotech = String(request.decision_note || '').startsWith('Imported from Infotech');
+      let restored = 0;
+      if (request.status === 'approved' && !fromInfotech) {
+        // The balance was taken off the newest year of the leave group at approval: put the days back there.
+        const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).order('year', { ascending: false }).limit(1);
+        if (rows?.length) { restored = Number(request.days); const { error } = await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(rows[0].taken) - restored), balance: Number(rows[0].balance) + restored, updated_at: now }).eq('id', rows[0].id); if (error) throw error; }
+      }
+      const { error: deleteError } = await db.from('hr_leave_requests').delete().eq('id', request.id);
+      if (deleteError) throw deleteError;
+      const summary = `${request.leave_type} ${request.start_date}${request.end_date !== request.start_date ? ` to ${request.end_date}` : ''}, ${Number(request.days)} day(s), ${request.status}${fromInfotech ? ', imported from Infotech' : ''}`;
+      await db.from('hr_audit').insert({ employee_id: request.employee_id, action: 'delete', changes: { leave_request: [summary, 'deleted by HR'], ...(restored ? { balance_returned: [`${restored} day(s)`, request.leave_group] } : {}) }, changed_by: user.id });
+      return res.status(200).json({ success: true, restored });
+    }
+
+    // Every leave request made from Individual Sign In, for HR to follow.
     if (req.method === 'GET' && action === 'leave_requests') {
       const year = /^\d{4}$/.test(String(req.query.year)) ? String(req.query.year) : String(new Date().getFullYear());
       const { data, error } = await db.from('hr_leave_requests').select('*').gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`).order('start_date', { ascending: false }).limit(1000);
