@@ -155,7 +155,7 @@ function Banner({ tone, children }: { tone: 'error' | 'ok'; children: ReactNode 
 }
 
 function Hero({ branch, title, text, action }: { branch: string; title: string; text: string; action?: ReactNode }) {
-  return <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+  return <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
     <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Clinical Admin · {branch}</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">{title}</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">{text}</p></div>
       {action}
@@ -791,7 +791,7 @@ function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
   return <div className="mx-auto max-w-[1500px] space-y-8">
     {/* Same layout as the CA office's Home: greeting on the left, date and a quote on the right. */}
-    <section className="rounded-[30px] bg-[#0b3d59] px-7 py-9 text-white sm:px-10 lg:px-12">
+    <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
       <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
         <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 text-base text-[#bed2df]">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
         <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>

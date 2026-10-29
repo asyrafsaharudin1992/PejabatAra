@@ -6,7 +6,7 @@ import LeaveSection from './LeaveScreens';
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; leaveWaiting?: number } };
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number } };
 type View = 'home' | 'leave' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
 
@@ -16,22 +16,24 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((wor
 
 function Tile({ icon: Icon, label, tone, href, onClick, soon = false, badge = 0 }: { key?: string; icon: typeof Settings; label: string; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number }) {
   const body = <>
-    <span className={`relative grid h-14 w-14 place-items-center rounded-2xl ${tone}`}><Icon className="h-7 w-7" strokeWidth={1.7} />{soon && <span className="absolute -right-2 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}{badge > 0 && <span aria-label={`${badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{badge}</span>}</span>
-    <span className="mt-2 text-center text-[13px] font-semibold leading-tight text-[#14233b]">{label}</span>
+    <span className={`relative grid h-12 w-12 place-items-center rounded-2xl ${tone}`}><Icon className="h-6 w-6" strokeWidth={1.7} />{soon && <span className="absolute -right-2 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}{badge > 0 && <span aria-label={`${badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{badge}</span>}</span>
+    <span className="mt-1.5 text-center text-[12px] font-semibold leading-tight text-[#14233b]">{label}</span>
   </>;
-  const base = 'flex flex-col items-center rounded-2xl p-3 transition';
+  const base = 'flex flex-col items-center rounded-2xl p-2 transition';
   if (soon) return <div aria-disabled="true" className={`${base} opacity-55`}>{body}</div>;
   return href ? <a href={href} className={`${base} hover:bg-slate-50`}>{body}</a> : <button type="button" onClick={onClick} className={`${base} hover:bg-slate-50`}>{body}</button>;
 }
 
 // Wider than the sign-in pages on a desktop, a single column on a phone.
 function Screen({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
-  return <div className="min-h-screen bg-[#f5f7f9] px-3 py-4 text-[#14233b] sm:px-8 sm:py-10">
-    <div className="mx-auto max-w-4xl">
-      <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Menu</button>
-      <h1 className="mt-3 text-2xl font-semibold tracking-[-0.04em] sm:mt-4 sm:text-3xl">{title}</h1>
-      <div className="mt-5">{children}</div>
-    </div>
+  return <div className="min-h-screen bg-[#f5f7f9] text-[#14233b]">
+    <header className="relative overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-4 pb-12 pt-4 text-white sm:px-8 sm:pb-16 sm:pt-8"><i className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-white/10" />
+      <div className="relative mx-auto max-w-4xl">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-[#b9cfdd]"><ArrowLeft className="h-4 w-4" />Menu</button>
+        <h1 className="mt-3 text-2xl font-bold tracking-tight sm:mt-4 sm:text-4xl">{title}</h1>
+      </div>
+    </header>
+    <div className="relative -mt-7 rounded-t-3xl bg-[#f5f7f9] px-3 pb-10 pt-5 sm:-mt-8 sm:px-8"><div className="mx-auto max-w-4xl">{children}</div></div>
   </div>;
 }
 
@@ -94,7 +96,7 @@ export default function IndividualHub() {
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
   const items: Item[] = [
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', soon: true },
-    { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e8efff] text-[#2a5ea8]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
+    { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', soon: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },
@@ -107,19 +109,19 @@ export default function IndividualHub() {
   return <>
     {/* Phone: the icon grid, like the staff app */}
     <div className="min-h-screen bg-[#f5f7f9] text-[#14233b] md:hidden">
-      <header className="bg-[#1f3a6b] px-5 pb-8 pt-6 text-white">
+      <header className="relative overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-4 pb-8 pt-4 text-white"><i className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-white/10" />
         <div className="flex items-start justify-between">
           <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#b9cfdd]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
           <button onClick={() => void signOut()} aria-label="Sign out" className="grid h-10 w-10 place-items-center rounded-full bg-white/10 hover:bg-white/20"><LogOut className="h-5 w-5" /></button>
         </div>
         <div className="mt-4 flex flex-col items-center text-center">
-          <span className="grid h-20 w-20 place-items-center rounded-full bg-[#dfe7f3] text-2xl font-bold text-[#1f3a6b]">{me ? initials(name) : '…'}</span>
-          <h1 className="mt-4 text-2xl font-semibold tracking-tight">{me ? name : 'Loading…'}</h1>
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-[#d6eef7] text-lg font-bold text-[#0b3d59]">{me ? initials(name) : '…'}</span>
+          <h1 className="mt-2.5 text-xl font-semibold tracking-tight">{me ? name : 'Loading…'}</h1>
           {me && <p className="mt-1 text-sm text-[#b9cfdd]">{[me.staff.code, company].filter(Boolean).join(' | ')}</p>}
         </div>
       </header>
-      <main className="-mt-4 rounded-t-[28px] bg-[#f5f7f9] px-4 pb-10 pt-6">
-        <div className="grid grid-cols-3 gap-y-5">{items.map((item) => <Tile key={item.label} icon={item.icon} label={item.label} tone={item.tone} href={item.href} onClick={item.onClick} soon={item.soon} badge={item.badge} />)}</div>
+      <main className="relative -mt-5 rounded-t-3xl bg-[#f5f7f9] px-3 pb-8 pt-7">
+        <div className="grid grid-cols-3 gap-y-3">{items.map((item) => <Tile key={item.label} icon={item.icon} label={item.label} tone={item.tone} href={item.href} onClick={item.onClick} soon={item.soon} badge={item.badge} />)}</div>
       </main>
     </div>
 
@@ -128,8 +130,8 @@ export default function IndividualHub() {
       <div className="mx-auto max-w-6xl">
         <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
         <div className="mt-6 grid items-start gap-6 md:grid-cols-[280px_1fr] lg:grid-cols-[320px_1fr]">
-          <aside className="overflow-hidden rounded-[28px] bg-gradient-to-b from-[#1f3a6b] to-[#14264b] p-7 text-white shadow-[0_18px_45px_rgba(20,35,59,0.18)]">
-            <span className="grid h-20 w-20 place-items-center rounded-full bg-[#dfe7f3] text-2xl font-bold text-[#1f3a6b]">{me ? initials(name) : '…'}</span>
+          <aside className="overflow-hidden relative rounded-[28px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-7 text-white shadow-[0_18px_45px_rgba(20,35,59,0.18)]">
+            <span className="grid h-20 w-20 place-items-center rounded-full bg-[#d6eef7] text-2xl font-bold text-[#0b3d59]">{me ? initials(name) : '…'}</span>
             <h1 className="mt-5 text-2xl font-semibold leading-tight tracking-tight">{me ? name : 'Loading…'}</h1>
             {me && <p className="mt-1.5 text-sm leading-5 text-[#b9cfdd]">{me.staff.code}<br />{company}</p>}
             {facts.length > 0 && <dl className="mt-6 space-y-3 border-t border-white/15 pt-5 text-sm">{facts.map(([label, value]) => <div key={label}><dt className="text-[11px] uppercase tracking-[0.14em] text-[#8eabba]">{label}</dt><dd className="mt-0.5 font-medium">{value || '—'}</dd></div>)}</dl>}

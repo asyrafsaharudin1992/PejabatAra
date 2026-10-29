@@ -169,7 +169,7 @@ const INITIAL_TASKS: Task[] = [
 // Banner used at the top of every tab, matching the other offices.
 function PageHero({ eyebrow, title, description, children }: { eyebrow: string; title: string; description?: string; children?: React.ReactNode }) {
   return (
-    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+    <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{eyebrow}</p>
@@ -1365,7 +1365,7 @@ export default function App() {
           >
             {activeTab === "Overview" && (
               <>
-                <section className="relative overflow-hidden rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+                <section className="relative overflow-hidden ara-hero rounded-[30px] p-7 text-white sm:p-9">
                   <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-[#1a6a8d]/50 blur-3xl" />
                   <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
                     <div className="max-w-2xl">
@@ -1621,7 +1621,7 @@ export default function App() {
 
             {activeTab === "All Tasks" && user?.role !== "Superadmin" && (
               <section className="flex flex-col gap-6">
-                <div className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+                <div className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Task library</p>
                   <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end">
                     <div>
@@ -1662,7 +1662,7 @@ export default function App() {
             )}
             {activeTab === "All Tasks" && user?.role === "Superadmin" && (
               <div className="flex flex-col gap-6">
-                <div className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+                <div className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Task library</p>
                   <div className="mt-2 flex items-end justify-between gap-6">
                     <div>

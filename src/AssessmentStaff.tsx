@@ -12,7 +12,7 @@ type StaffDraft = { id?: string; name: string; code: string; ic4: string; branch
 
 const BRANCHES = ['KJ', 'SK', 'SY'];
 export const input = 'h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10';
-export const card = 'rounded-[24px] bg-white p-6 shadow-[0_12px_35px_rgba(20,35,59,0.08)] sm:p-8';
+export const card = 'rounded-2xl bg-white p-4 shadow-[0_8px_24px_rgba(20,35,59,0.07)] sm:rounded-[24px] sm:p-8 sm:shadow-[0_12px_35px_rgba(20,35,59,0.08)]';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-4 py-10">

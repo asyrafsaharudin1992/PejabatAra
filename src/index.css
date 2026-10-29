@@ -213,3 +213,24 @@
 
 .rv-esign { position: relative; } .rv-esign span { display: block; font-family: "Snell Roundhand", "Brush Script MT", "Segoe Script", cursive; font-size: 14pt; line-height: 1; color: #1a237e; padding-top: 2mm; white-space: nowrap; overflow: hidden; }
 .rv-esign small { position: absolute; left: 0; bottom: 0.6mm; font: 5.5pt Arial, Helvetica, sans-serif; color: #444; white-space: nowrap; }
+
+/* Phones: a little smaller from the Individual Sign In page onward (rem-based sizes and spacing shrink together). */
+@media (max-width: 640px) {
+  html.compact-phone { font-size: 14.5px; }
+}
+
+@media (max-width: 640px) {
+  .office-signin-copy { border-radius: 18px; padding: 18px 16px; }
+  .office-signin-panel { border-radius: 18px; padding: 18px 16px; }
+  .office-lobby-header { padding: 12px 16px; }
+}
+
+/* The blue header card at the top of every room, same look as the sign-in cards. */
+.ara-hero { position: relative; overflow: hidden; background: linear-gradient(180deg, #0f5478, #0b3d59 55%, #082c42); }
+.ara-hero::before { content: ''; position: absolute; right: -60px; top: -60px; width: 210px; height: 210px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); pointer-events: none; }
+.ara-hero > * { position: relative; }
+@media (max-width: 640px) {
+  .ara-hero { border-radius: 22px; padding: 18px 18px !important; }
+  .ara-hero h1, .ara-hero h2 { font-size: 1.5rem; line-height: 1.2; }
+  .ara-hero p { font-size: 0.8rem; line-height: 1.45; }
+}

@@ -54,7 +54,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   const tiles: [string, number, string][] = [['Waiting for supervisor', count('pending'), 'text-amber-600'], ['Waiting for final approver', count('supervisor_approved'), 'text-sky-600'], ['Approved', count('approved'), 'text-emerald-600'], ['On leave today', onLeaveToday.length, 'text-[#0b587b]']];
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
+    <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Leave</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Every leave request from Individual Sign In. Each goes to the staff member's supervisor first, then to the final approver, and the balance only comes off after the final approval.</p></div>
         <button onClick={onTypes} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20"><Tags className="h-4 w-4" />Leave types</button>
@@ -78,7 +78,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
           <tbody>{shown.map((row) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3 pr-4"><p className="font-semibold">{row.applicant}</p><p className="text-xs text-slate-400">{row.company} · {row.code}</p></td>
             <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}</td>
-            <td className="py-3 pr-4 whitespace-nowrap text-[#2a5ea8]">{range(row)}</td>
+            <td className="py-3 pr-4 whitespace-nowrap text-[#0b587b]">{range(row)}</td>
             <td className="py-3 pr-4">{days(row.days)}</td>
             <td className="py-3 pr-4"><span className={`inline-block rounded-full px-3 py-1 text-[11px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>{imported(row) && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}</td>
             <td className="py-3 pr-4 text-xs text-slate-600">{row.supervisor || <span className="text-slate-300">Not set</span>}{row.supervisorNote && <p className="mt-0.5 text-slate-400">“{row.supervisorNote}”</p>}</td>

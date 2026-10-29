@@ -390,10 +390,11 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
-    let isApprover = false, leaveWaiting = 0;
+    let isApprover = false, leaveWaiting = 0, designation = '';
     try {
-      const { data: self } = await db.from('hr_employees').select('id').eq('assessment_staff_id', staff.id).maybeSingle();
+      const { data: self } = await db.from('hr_employees').select('id,designation').eq('assessment_staff_id', staff.id).maybeSingle();
       if (self) {
+        designation = String(self.designation || '');
         const { count } = await db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'); isApprover = (count || 0) > 0;
         // Requests waiting for this person's decision: shown as a number on the Leave icon.
         const [{ count: first }, { count: last }] = await Promise.all([
@@ -415,7 +416,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
@@ -441,22 +442,31 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
     const questions = quiz.questions as { id: string; answer: number }[];
     if (questions.some((question) => !Number.isInteger(answers[question.id]))) throw fail(400, 'Answer every question before submitting.');
+    const recorded = await isAssessed(db, staff);
     // Below full marks the staff member retakes; every try is kept as its own row.
-    const { data: previous, error: previousError } = await db.from('assessment_attempts').select('score,total,attempt_no').eq('quiz_id', quiz.id).eq('staff_id', staff.id);
+    const { data: previous, error: previousError } = recorded ? await db.from('assessment_attempts').select('score,total,attempt_no').eq('quiz_id', quiz.id).eq('staff_id', staff.id) : { data: [], error: null };
     if (previousError) throw previousError;
     if ((previous || []).some((row: any) => row.score >= row.total)) throw fail(409, 'You have already passed this assessment.');
     const attemptNo = Math.max(0, ...(previous || []).map((row: any) => row.attempt_no)) + 1;
     // Only which questions were wrong is returned, never the correct answers.
     const wrong = questions.filter((question) => answers[question.id] !== question.answer).map((question) => question.id);
     const score = questions.length - wrong.length;
+    // Not recorded for anyone outside the assessed roles: they just see how they did.
+    if (!recorded) return res.status(200).json({ score, total: questions.length, passMark: PASS_MARK, attempt: 1, wrong, recorded: false });
     const { error: saveError } = await db.from('assessment_attempts').insert({ quiz_id: quiz.id, staff_id: staff.id, answers, score, total: questions.length, attempt_no: attemptNo });
     // Two screens submitting at once would claim the same attempt number.
     if (saveError?.code === '23505') throw fail(409, 'This assessment was just submitted from another screen. Go back to see your result.');
     if (saveError) throw saveError;
-    return res.status(200).json({ score, total: questions.length, passMark: PASS_MARK, attempt: attemptNo, wrong });
+    return res.status(200).json({ score, total: questions.length, passMark: PASS_MARK, attempt: attemptNo, wrong, recorded: true });
   }
 
   throw fail(405, 'Method not allowed.');
+}
+
+// Only clinic assistants and clinical admin sit the assessments for the record; anyone else may try them as practice.
+const ASSESSED_DESIGNATION = /CLINIC ASSISTANT|ADMIN CLINICAL/i;
+async function isAssessed(db: any, staff: any) {
+  try { const { data } = await db.from('hr_employees').select('designation').eq('assessment_staff_id', staff.id).maybeSingle(); return ASSESSED_DESIGNATION.test(String(data?.designation || '')); } catch { return false; }
 }
 
 async function adminAction(req: any, res: any, action: string, body: any) {

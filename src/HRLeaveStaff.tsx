@@ -31,7 +31,7 @@ function Meter({ label, pair }: { label: string; pair: Pair }) {
   return <div>
     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
     <p className="mt-1 text-sm"><strong className={`text-lg ${pair.balance < 0 ? 'text-rose-600' : 'text-[#0b587b]'}`}>{num(pair.balance)}</strong><span className="text-slate-400"> left of {num(size)}</span></p>
-    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#2a5ea8]" style={{ width: `${used}%` }} /></div>
+    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#0b587b]" style={{ width: `${used}%` }} /></div>
   </div>;
 }
 
@@ -83,7 +83,7 @@ function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack
   const missing = ['AL', 'ML'].filter((group) => !present.has(group));
   return <div className="space-y-5">
     <button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button>
-    <section className="rounded-[28px] bg-[#0b3d59] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{data.person.company} · {data.person.code}{data.person.status !== 'Active' ? ` · ${data.person.status}` : ''}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{data.person.name}</h2>{data.person.designation && <p className="mt-1 text-[#b9cfdd]">{data.person.designation}</p>}</section>
+    <section className="ara-hero rounded-[28px] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{data.person.company} · {data.person.code}{data.person.status !== 'Active' ? ` · ${data.person.status}` : ''}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{data.person.name}</h2>{data.person.designation && <p className="mt-1 text-[#b9cfdd]">{data.person.designation}</p>}</section>
     <section className={card}>
       <h3 className="font-semibold">Leave balance</h3>
       <p className="mt-1 text-sm text-slate-500">Change the entitlement and the figures below when Infotech or a policy says so. Days already taken come from approved leave and cannot be typed here; delete a wrong leave in the history below instead. Every change is written to this person's HR history.</p>
@@ -96,7 +96,7 @@ function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack
       <h3 className="font-semibold">Leave history</h3>
       {!data.requests.length ? <p className="mt-2 text-sm text-slate-500">No leave recorded for this person.</p> :
         <ul className="mt-3 divide-y divide-slate-100">{data.requests.map((request) => <li key={request.id} className="flex items-start gap-3 py-3">
-          <div className="min-w-0 flex-1"><p className="text-sm"><span className="font-mono text-xs font-bold text-[#0b587b]">{request.type}</span> <span className="text-[#2a5ea8]">{range(request)}</span> · {num(request.days)} day{request.days === 1 ? '' : 's'}</p>
+          <div className="min-w-0 flex-1"><p className="text-sm"><span className="font-mono text-xs font-bold text-[#0b587b]">{request.type}</span> <span className="text-[#0b587b]">{range(request)}</span> · {num(request.days)} day{request.days === 1 ? '' : 's'}</p>
             {request.reason && <p className="mt-0.5 text-xs text-slate-500">{request.reason}</p>}
             {(request.supervisorNote || (request.note && !imported(request))) && <p className="mt-0.5 text-xs text-slate-400">{[request.supervisorNote && `Supervisor: ${request.supervisorNote}`, request.note && !imported(request) && `Final: ${request.note}`].filter(Boolean).join(' · ')}</p>}</div>
           <div className="flex shrink-0 flex-col items-end gap-1"><span className={`rounded-full px-3 py-1 text-[11px] font-bold ${TONE[request.status]}`}>{LABEL[request.status]}</span>{imported(request) && <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}</div>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, LogOut, Plus } from 'lucide-react';
+import { AuthError, AuthShell, authButton, authInput, authLabel } from './AssessmentRoom';
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { AREAS, LEVELS, Ratings, ReviewSummary, areaScore, dmy, overallLabel, percentLabel, reviewApi, scoreTone, totalScore } from './lib/performanceReview';
@@ -51,19 +52,15 @@ function ReviewSignIn({ onSignedIn }: { onSignedIn: () => void }) {
     } catch (cause) { setError(cause instanceof Error && cause.message.includes('supervisor') ? cause.message : 'Unable to sign in with these details. Check your email and password.'); }
     finally { setLoading(false); }
   };
-  return <div className="min-h-screen bg-[#f5f7f9] px-4 py-6 text-[#14233b] sm:px-8 sm:py-10"><div className="mx-auto max-w-2xl">
-    <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
-    <form onSubmit={submit} className="mt-6 rounded-[28px] bg-white p-7 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:p-9">
-      <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#0b3d59] text-[#91d7ed]"><ClipboardCheck className="h-7 w-7" strokeWidth={1.5} /></span>
-      <p className="mt-6 text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Performance Review</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-500">For supervisors. Sign in with your office email and password (CEO, CFO, COO, CPO, CHRO or Clinical Admin). No registered device is needed.</p>
-      <label className="mt-6 block"><span className="mb-2 block text-xs font-bold text-slate-700">Email address</span><input required type="email" autoFocus autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@organisation.com" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
-      <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
-      {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-      <button disabled={loading} className="mt-6 flex h-12 w-full items-center justify-center rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{loading ? 'Signing in…' : 'Enter Performance Review'}</button>
+  return <AuthShell>
+    <form onSubmit={submit}>
+      <div className="text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-white/70 sm:h-16 sm:w-16 sm:rounded-2xl"><ClipboardCheck className="h-6 w-6 sm:h-8 sm:w-8" strokeWidth={1.3} /></span><h1 className="mt-5 text-[26px] font-bold tracking-tight sm:text-4xl">Performance Review</h1><p className="mt-1.5 text-[13px] leading-5 text-white/80 sm:mt-3 sm:text-base sm:leading-7">For supervisors. Sign in with your office email and password (CEO, CFO, COO, CPO, CHRO or Clinical Admin). No registered device is needed.</p></div>
+      <label className={authLabel}>Email<input required type="email" autoFocus autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@organisation.com" className={authInput} /></label>
+      <label className={authLabel}>Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" className={authInput} /></label>
+      {error && <AuthError message={error} />}
+      <button disabled={loading} className={authButton}>{loading ? 'Signing in…' : 'Enter Performance Review'}</button>
     </form>
-  </div></div>;
+  </AuthShell>;
 }
 
 function ReviewRoom({ onSignedOut }: { onSignedOut: () => void }) {

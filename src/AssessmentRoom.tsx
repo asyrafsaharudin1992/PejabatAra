@@ -8,11 +8,11 @@ const API = '/api/status?resource=assessment';
 export const TOKEN_KEY = 'ara_assessment_token';
 
 type Quiz = { id: string; title: string; description: string; passMark: number; active: boolean; questionCount: number; attempt: { score: number; total: number; count: number; submittedAt: string } | null };
-type Me = { staff: { name: string; branch: string; preview: boolean }; quizzes: Quiz[] };
+type Me = { staff: { name: string; branch: string; preview: boolean; canAssess?: boolean }; quizzes: Quiz[] };
 // `answer` is only sent to preview accounts.
 type OpenQuiz = { id: string; title: string; description: string; passMark: number; preview: boolean; questions: { id: string; text: string; options: string[]; answer?: number }[] };
 // `wrong` lists the ids of questions answered wrongly; correct answers are never sent.
-type Result = { score: number; total: number; passMark: number; attempt: number; wrong: string[] };
+type Result = { score: number; total: number; passMark: number; attempt: number; wrong: string[]; recorded?: boolean };
 
 const percent = (score: number, total: number) => total ? Math.round((score / total) * 100) : 0;
 // Only full marks pass; anything less is retaken.
@@ -33,6 +33,24 @@ export async function assessmentFetch(query: string, options: RequestInit = {}) 
 
 // The staff member chooses their own password: right after the first sign-in (`first`), or later to
 // change it (then the current password is asked for too).
+// The blue card used by every sign-in screen (same look as the AraOffice lobby on a phone).
+export const authLabel = 'mt-4 block text-[11px] font-bold uppercase tracking-[0.14em] text-white/90 sm:mt-5 sm:text-xs';
+export const authInput = 'mt-2 block h-12 w-full rounded-full border-0 bg-white px-5 text-[15px] sm:h-14 sm:px-6 sm:text-base font-normal normal-case tracking-normal text-slate-900 outline-none placeholder:text-slate-400';
+export const authButton = 'mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#06263a] text-[13px] sm:mt-7 sm:h-14 sm:text-sm font-bold uppercase tracking-[0.12em] text-white active:opacity-80 disabled:opacity-50';
+export function AuthShell({ children, back = true }: { children: ReactNode; back?: boolean }) {
+  return <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-5 pb-8 pt-6 sm:flex sm:items-center sm:justify-center sm:bg-none sm:bg-[#f5f7f9] sm:px-4 sm:py-12">
+    <div className="mx-auto w-full max-w-[420px] sm:max-w-[560px]">
+      {back && <a href="#" className="relative z-10 mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-white active:opacity-80 sm:mb-4 sm:bg-transparent sm:px-1 sm:text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Back to sign in</a>}
+      <div className="relative overflow-hidden px-1 pb-6 pt-6 text-white sm:rounded-[36px] sm:bg-gradient-to-b sm:from-[#0f5478] sm:via-[#0b3d59] sm:to-[#082c42] sm:px-14 sm:pb-12 sm:pt-14 sm:shadow-[0_24px_50px_rgba(11,48,70,0.3)]">
+        <i className="pointer-events-none max-sm:hidden absolute -right-16 -top-16 h-52 w-52 rounded-full bg-white/10" /><i className="pointer-events-none max-sm:hidden absolute -bottom-24 -left-10 h-56 w-56 rounded-full bg-[#1a7aa5]/40" />
+        <div className="relative">{children}</div>
+      </div>
+    </div>
+  </div>;
+}
+export const AuthError = ({ message }: { message: string }) => <p className="mt-4 rounded-2xl bg-rose-500/20 px-4 py-2 text-[13px] leading-5 text-rose-100">{message}</p>;
+const AuthHead = ({ title, intro }: { title: string; intro: string }) => <div className="text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-white/70 sm:h-16 sm:w-16 sm:rounded-2xl"><ClipboardCheck className="h-6 w-6 sm:h-8 sm:w-8" strokeWidth={1.3} /></span><h1 className="mt-5 text-[26px] font-bold tracking-tight sm:text-4xl">{title}</h1><p className="mt-1.5 text-[13px] leading-5 text-white/80 sm:mt-3 sm:text-base sm:leading-7">{intro}</p></div>;
+
 export function SetPassword({ first = false, onDone, onCancel }: { first?: boolean; onDone: () => void; onCancel?: () => void }) {
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
@@ -48,17 +66,29 @@ export function SetPassword({ first = false, onDone, onCancel }: { first?: boole
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save the password.'); }
     finally { setSaving(false); }
   };
-  const input = 'h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4';
-  return <form onSubmit={submit} className="mt-4 rounded-[24px] bg-white p-5 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:mt-6 sm:rounded-[28px] sm:p-9">
-    <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
-    <h1 className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] sm:mt-2 sm:text-3xl">{first ? 'Choose your password' : 'Change password'}</h1>
-    <p className="mt-2 text-sm leading-6 text-slate-500">{first ? 'From now on you sign in with your name, staff code and this password. Your IC digits are no longer used.' : 'Enter your current password and choose a new one.'}</p>
-    {!first && <label className="mt-6 block"><span className="mb-2 block text-xs font-bold text-slate-700">Current password</span><input required type="password" autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)} className={input} /></label>}
-    <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">New password</span><input required type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className={input} /><span className="mt-1.5 block text-[11px] leading-5 text-slate-400">At least 8 characters. Not your staff code or IC digits.</span></label>
-    <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">Type it again</span><input required type="password" autoComplete="new-password" value={again} onChange={(event) => setAgain(event.target.value)} className={input} /></label>
-    {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-    <div className="mt-6 flex gap-3">{onCancel && <button type="button" onClick={onCancel} className="h-12 rounded-xl border border-slate-200 px-5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>}<button disabled={saving} className="flex h-12 flex-1 items-center justify-center rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60">{saving ? 'Saving…' : first ? 'Save and continue' : 'Change password'}</button></div>
-  </form>;
+  return <AuthShell back={false}><form onSubmit={submit}>
+    <AuthHead title={first ? 'Choose your password' : 'Change password'} intro={first ? 'From now on you sign in with your name, staff code and this password. Your IC digits are no longer used.' : 'Enter your current password and choose a new one.'} />
+    {!first && <label className={authLabel}>Current password<input required type="password" autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)} className={authInput} /></label>}
+    <label className={authLabel}>New password<input required type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className={authInput} /><span className="mt-1.5 block text-[11px] font-normal normal-case leading-4 tracking-normal text-[#9cc3d8]">At least 8 characters. Not your staff code or IC digits.</span></label>
+    <label className={authLabel}>Type it again<input required type="password" autoComplete="new-password" value={again} onChange={(event) => setAgain(event.target.value)} className={authInput} /></label>
+    {error && <AuthError message={error} />}
+    <div className="mt-5 flex gap-3">{onCancel && <button type="button" onClick={onCancel} className="mt-0 h-12 rounded-full bg-white/12 px-5 text-[13px] font-bold uppercase tracking-[0.1em] text-white">Cancel</button>}<button disabled={saving} className={`${authButton} mt-0 flex-1`}>{saving ? 'Saving…' : first ? 'Save and continue' : 'Change password'}</button></div>
+  </form></AuthShell>;
+}
+
+// Blue header + content, like the other screens inside Individual Sign In.
+export function PageShell({ eyebrow, title, subtitle, onSignOut, children }: { eyebrow: string; title: string; subtitle?: string; onSignOut: () => void; children: ReactNode }) {
+  return <div className="min-h-screen bg-[#f5f7f9] text-[#14233b]">
+    <header className="relative overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-4 pb-12 pt-4 text-white sm:px-8 sm:pb-16 sm:pt-8"><i className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-white/10" />
+      <div className="relative mx-auto max-w-2xl">
+        <div className="flex items-center justify-between"><a href="#office/individual" className="inline-flex items-center gap-2 text-sm font-semibold text-[#b9cfdd]"><ArrowLeft className="h-4 w-4" />Menu</a><button onClick={onSignOut} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3.5 py-2 text-xs font-semibold text-white hover:bg-white/20"><LogOut className="h-4 w-4" />Sign out</button></div>
+        <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{eyebrow}</p>
+        <h1 className="mt-1.5 text-2xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-[#b9cfdd]">{subtitle}</p>}
+      </div>
+    </header>
+    <div className="relative -mt-7 rounded-t-3xl bg-[#f5f7f9] px-3 pb-10 pt-5 sm:-mt-8 sm:px-8"><div className="mx-auto max-w-2xl">{children}</div></div>
+  </div>;
 }
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -85,28 +115,24 @@ export function SignIn({ onSignedIn, title = 'Assessment Room', intro = 'Periodi
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to sign in.'); }
     finally { setLoading(false); }
   };
-  if (mustSet) return <Shell><SetPassword first onDone={onSignedIn} /></Shell>;
-  return <Shell>
-    <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
-    <form onSubmit={submit} className="mt-4 rounded-[24px] bg-white p-5 shadow-[0_18px_45px_rgba(20,35,59,0.1)] sm:mt-6 sm:rounded-[28px] sm:p-9">
-      <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#0b3d59] text-[#91d7ed] sm:h-14 sm:w-14 sm:rounded-2xl"><ClipboardCheck className="h-5 w-5 sm:h-7 sm:w-7" strokeWidth={1.5} /></span>
-      <p className="mt-4 text-[10px] sm:mt-6 font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE</p>
-      <h1 className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] sm:mt-2 sm:text-3xl">{title}</h1>
-      <p className="mt-1.5 text-[13px] leading-5 text-slate-500 sm:mt-2 sm:text-sm sm:leading-6">{intro}</p>
-      <label className="mt-4 block sm:mt-6"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Name</span><input required autoFocus autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="As registered by your admin" className="h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4" /></label>
-      <label className="mt-3 block sm:mt-4"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Staff code</span><input required autoCapitalize="characters" autoComplete="username" value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ARA0012" className="h-12 w-full rounded-xl border-0 bg-[#f4f6fa] px-4 font-mono tracking-wider outline-none focus:ring-4 focus:ring-[#0b587b]/10" /></label>
-      <label className="mt-3 block sm:mt-4"><span className="mb-1.5 block text-xs font-bold text-slate-700 sm:mb-2">Password</span><input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" className="h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3.5 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10 sm:h-12 sm:px-4" /><span className="mt-1.5 block text-[11px] leading-5 text-slate-400">First time? Use the last 4 digits of your IC, then you will choose your own password.</span></label>
-      {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-      <button disabled={loading} className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white transition hover:bg-[#083a55] disabled:opacity-60 sm:mt-6 sm:h-12">{loading ? 'Signing in…' : button}<ArrowRight size={15} /></button>
-      <p className="mt-4 text-center text-[11px] leading-4 text-slate-400 sm:mt-5 sm:leading-5">Forgot your password? Ask HR to reset it, then sign in with the last 4 digits of your IC again.</p>
+  if (mustSet) return <SetPassword first onDone={onSignedIn} />;
+  return <AuthShell>
+    <form onSubmit={submit}>
+      <AuthHead title={title} intro={intro} />
+      <label className={authLabel}>Name<input required autoFocus autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="As registered by your admin" className={authInput} /></label>
+      <label className={authLabel}>Staff code<input required autoCapitalize="characters" autoComplete="username" value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ARA0012" className={`${authInput} font-mono tracking-wider`} /></label>
+      <label className={authLabel}>Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" className={authInput} /><span className="mt-1.5 block text-[11px] font-normal normal-case leading-4 tracking-normal text-[#9cc3d8]">First time? Use the last 4 digits of your IC, then you will choose your own password.</span></label>
+      {error && <AuthError message={error} />}
+      <button disabled={loading} className={authButton}>{loading ? 'Signing in…' : button}<ArrowRight size={15} /></button>
+      <p className="mt-4 text-center text-[12px] leading-5 text-[#9cc3d8]">Forgot your password? Ask HR to reset it, then sign in with the last 4 digits of your IC again.</p>
     </form>
-  </Shell>;
+  </AuthShell>;
 }
 
 // One question per screen. Staff retake until they score 100%, seeing after each
 // try which questions they got wrong; preview accounts step through with the
 // correct answer marked and cannot submit.
-function TakeQuiz({ quizId, onDone, onBack }: { quizId: string; onDone: () => void; onBack: () => void }) {
+function TakeQuiz({ quizId, onDone, onBack, practice = false }: { quizId: string; onDone: () => void; onBack: () => void; practice?: boolean }) {
   const [quiz, setQuiz] = useState<OpenQuiz | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [step, setStep] = useState(0);
@@ -136,7 +162,8 @@ function TakeQuiz({ quizId, onDone, onBack }: { quizId: string; onDone: () => vo
         {passed ? <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" /> : <XCircle className="mx-auto h-14 w-14 text-rose-500" />}
         <h1 className="mt-5 text-2xl font-semibold">{passed ? 'Well done, you passed!' : 'Not passed yet'}</h1>
         <p className="mt-6 text-5xl font-semibold tracking-tight">{percent(result.score, result.total)}%</p>
-        <p className="mt-2 text-sm text-slate-500">{result.score} of {result.total} correct · attempt {result.attempt} · 100% needed to pass</p>
+        <p className="mt-2 text-sm text-slate-500">{result.score} of {result.total} correct{result.recorded === false ? '' : ` · attempt ${result.attempt}`} · 100% needed to pass</p>
+        {result.recorded === false && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">This was practice only. Your answers were not recorded.</p>}
         {!passed && <p className="mt-4 text-sm leading-6 text-slate-600">Check the {result.wrong.length === 1 ? 'question' : `${result.wrong.length} questions`} you got wrong below, then try again.</p>}
         {passed
           ? <button onClick={onDone} className="mt-8 h-12 w-full rounded-xl bg-[#0b587b] text-sm font-semibold text-white hover:bg-[#083a55]">Back to assessments</button>
@@ -164,6 +191,7 @@ function TakeQuiz({ quizId, onDone, onBack }: { quizId: string; onDone: () => vo
     {quiz && question && <>
       <h1 className="mt-6 text-2xl font-semibold tracking-[-0.03em]">{quiz.title}</h1>
       {quiz.preview && <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"><Eye className="h-3.5 w-3.5" />Preview: correct answers are marked. Nothing is recorded.</p>}
+      {practice && !quiz.preview && <p className="mt-3 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900"><Eye className="mt-0.5 h-4 w-4 shrink-0" />This assessment is designed for clinic assistants and clinical admin only. You may answer it, but your answers will not be recorded.</p>}
       {step === 0 && quiz.description && <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-500">{quiz.description}</p>}
       <div className="mt-5 flex items-center justify-between text-xs font-semibold text-slate-500"><span>Question {step + 1} of {quiz.questions.length}</span>{!quiz.preview && <span>{answered} answered</span>}</div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-[#0b587b] transition-all" style={{ width: `${((step + 1) / quiz.questions.length) * 100}%` }} /></div>
@@ -214,20 +242,15 @@ export default function AssessmentRoom() {
   };
 
   if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} />;
-  if (openQuiz) return <TakeQuiz quizId={openQuiz} onBack={() => setOpenQuiz(null)} onDone={() => { setOpenQuiz(null); load(); }} />;
+  if (openQuiz) return <TakeQuiz practice={me?.staff.canAssess === false} quizId={openQuiz} onBack={() => setOpenQuiz(null)} onDone={() => { setOpenQuiz(null); load(); }} />;
 
   const preview = Boolean(me?.staff.preview);
-  return <Shell>
-    <a href="#office/individual" className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Menu</a>
-    <div className="flex items-start justify-between gap-4">
-      <div><p className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ASSESSMENT ROOM</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{me ? `Hi, ${me.staff.name.split(' ')[0]}` : 'Loading…'}</h1>{me?.staff.branch && <p className="mt-1 text-sm text-slate-500">{me.staff.branch}</p>}</div>
-      <button onClick={signOut} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><LogOut className="h-4 w-4" />Sign out</button>
-    </div>
+  return <PageShell eyebrow="Assessment Room" title={me ? `Hi, ${me.staff.name.split(' ')[0]}` : 'Loading…'} subtitle={me?.staff.branch} onSignOut={signOut}>
     {preview && <p className="mt-6 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800"><Eye className="mt-0.5 h-4 w-4 shrink-0" />Preview account: you can read every assessment, including closed ones, with the correct answers marked. Nothing you do here is recorded.</p>}
-    {!preview && <a href="#office/incentives" className="mt-6 flex items-center justify-between gap-3 rounded-2xl bg-[#0b3d59] px-5 py-4 text-white hover:bg-[#104b6c]"><span><strong className="block text-sm">Incentive Claims</strong><span className="text-xs text-[#b9cfdd]">Record procedures and submit your monthly claim</span></span><ArrowRight className="h-4 w-4 shrink-0" /></a>}
     {error && <div className="mt-6 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+    {me && me.staff.canAssess === false && <p className="mb-4 flex gap-2 rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-900"><Eye className="mt-1 h-4 w-4 shrink-0" />These assessments are designed for clinic assistants and clinical admin only. You may answer them, but your answers will not be recorded.</p>}
     {me && me.quizzes.length === 0 && <p className="mt-8 rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm">{preview ? 'No assessments have been created yet.' : 'No assessments are open right now. Check back when your admin announces the next one.'}</p>}
-    <div className="mt-8 space-y-3">{me?.quizzes.map((quiz) => {
+    <div className="space-y-3">{me?.quizzes.map((quiz) => {
       const mark = quiz.attempt ? percent(quiz.attempt.score, quiz.attempt.total) : 0;
       const passed = Boolean(quiz.attempt && fullMarks(quiz.attempt.score, quiz.attempt.total));
       return <div key={quiz.id} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
@@ -245,5 +268,5 @@ export default function AssessmentRoom() {
               : <button onClick={() => setOpenQuiz(quiz.id)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#083a55]">Start assessment<ArrowRight className="h-4 w-4" /></button>}
       </div>;
     })}</div>
-  </Shell>;
+  </PageShell>;
 }
