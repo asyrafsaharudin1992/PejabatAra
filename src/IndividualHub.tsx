@@ -26,14 +26,14 @@ function Tile({ icon: Icon, label, tone, href, onClick, soon = false, badge = 0 
 
 // Wider than the sign-in pages on a desktop, a single column on a phone.
 function Screen({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
-  return <div className="min-h-screen bg-[#f5f7f9] text-[#14233b]">
-    <header className="relative overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-4 pb-12 pt-4 text-white sm:px-8 sm:pb-16 sm:pt-8"><i className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-white/10" />
-      <div className="relative mx-auto max-w-4xl">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-[#b9cfdd]"><ArrowLeft className="h-4 w-4" />Menu</button>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight sm:mt-4 sm:text-4xl">{title}</h1>
+  return <div className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
+    <header className="border-b border-black/5 bg-white/80 px-5 py-4 sm:px-10 sm:py-5">
+      <div className="mx-auto flex max-w-6xl items-center justify-between">
+        <button onClick={onBack} className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-[#0b587b]"><ArrowLeft className="h-4 w-4" />My workspace</button>
+        <span className="text-sm font-semibold tracking-tight text-slate-400">AraOffice</span>
       </div>
     </header>
-    <div className="relative -mt-7 rounded-t-3xl bg-[#f5f7f9] px-3 pb-10 pt-5 sm:-mt-8 sm:px-8"><div className="mx-auto max-w-4xl">{children}</div></div>
+    <main className="mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-10 sm:pt-9"><h1 className="mb-5 text-[28px] font-semibold tracking-tight sm:mb-7 sm:text-4xl">{title}</h1>{children}</main>
   </div>;
 }
 
@@ -125,34 +125,40 @@ export default function IndividualHub() {
       </main>
     </div>
 
-    {/* Desktop: a profile card on the left, big cards for each part on the right */}
-    <div className="hidden min-h-screen bg-[#f5f7f9] px-8 py-8 text-[#14233b] md:block">
-      <div className="mx-auto max-w-6xl">
-        <a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
-        <div className="mt-6 grid items-start gap-6 md:grid-cols-[280px_1fr] lg:grid-cols-[320px_1fr]">
-          <aside className="overflow-hidden relative rounded-[28px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-7 text-white shadow-[0_18px_45px_rgba(20,35,59,0.18)]">
-            <span className="grid h-20 w-20 place-items-center rounded-full bg-[#d6eef7] text-2xl font-bold text-[#0b3d59]">{me ? initials(name) : '…'}</span>
-            <h1 className="mt-5 text-2xl font-semibold leading-tight tracking-tight">{me ? name : 'Loading…'}</h1>
-            {me && <p className="mt-1.5 text-sm leading-5 text-[#b9cfdd]">{me.staff.code}<br />{company}</p>}
-            {facts.length > 0 && <dl className="mt-6 space-y-3 border-t border-white/15 pt-5 text-sm">{facts.map(([label, value]) => <div key={label}><dt className="text-[11px] uppercase tracking-[0.14em] text-[#8eabba]">{label}</dt><dd className="mt-0.5 font-medium">{value || '—'}</dd></div>)}</dl>}
-            <button onClick={() => void signOut()} className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 py-2.5 text-sm font-semibold hover:bg-white/20"><LogOut className="h-4 w-4" />Sign out</button>
+    {/* Desktop workspace */}
+    <div className="hidden min-h-screen bg-[#f5f5f7] text-[#1d1d1f] md:block">
+      <header className="border-b border-black/5 bg-white/80 px-10 py-5">
+        <div className="mx-auto flex max-w-6xl items-center justify-between">
+          <a href="#" className="inline-flex items-center gap-2 text-sm font-medium text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
+          <span className="text-sm font-semibold tracking-tight text-slate-400">My workspace</span>
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-10 pb-12 pt-10">
+        <div className="mb-9 flex items-end justify-between gap-5">
+          <div><p className="mb-2 text-xs font-medium text-slate-500">Your personal workspace</p><h1 className="text-[38px] font-semibold leading-tight tracking-tight">Hello, {me ? name : '…'}.</h1><p className="mt-2 text-sm text-slate-500">Together, we make a difference every day.</p></div>
+          <span className="pb-1 text-sm text-slate-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+        </div>
+        <div className="grid items-start gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <aside className="relative isolate overflow-hidden rounded-[28px] border border-white/10 bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-6 text-white shadow-[0_16px_40px_rgba(11,48,70,0.18)]">
+            <i aria-hidden="true" className="pointer-events-none absolute -right-16 -top-16 -z-10 h-48 w-48 rounded-full bg-white/[0.06]" />
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-[#d6eef7] text-xl font-semibold text-[#0b3d59] ring-4 ring-white/5">{me ? initials(name) : '…'}</span>
+            <h2 className="mt-4 text-lg font-semibold tracking-tight">{name || 'Loading…'}</h2>
+            <p className="mt-1 text-xs text-[#b9cfdd]">{me?.staff.code}</p>
+            <p className="mt-3 text-xs leading-5 text-[#b9cfdd]">{company}</p>
+            {facts.length > 0 && <dl className="mt-5 space-y-4 border-t border-white/15 pt-5 text-sm">{facts.map(([label, value]) => <div key={label}><dt className="text-[10px] uppercase tracking-[0.12em] text-[#a4c0d0]">{label}</dt><dd className="mt-1 text-xs font-medium leading-5 text-white/95">{value || '—'}</dd></div>)}</dl>}
+            <button onClick={() => void signOut()} className="mt-6 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-3 text-xs font-medium text-white transition hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><LogOut className="h-4 w-4" />Sign out</button>
           </aside>
-          <section>
-            <h2 className="text-2xl font-semibold tracking-tight">What would you like to open?</h2>
-            <p className="mt-1 text-sm text-slate-500">Everything for you in one place.</p>
-            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => {
-              const body = <>
-                <span className="flex items-start justify-between"><span className={`relative grid h-12 w-12 place-items-center rounded-2xl ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.7} />{(item.badge || 0) > 0 && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{item.badge}</span>}</span>{item.soon ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Soon</span> : <ArrowRight className="h-4 w-4 text-slate-300 transition group-hover:translate-x-1 group-hover:text-[#0b587b]" />}</span>
-                <strong className="mt-4 block text-base font-semibold">{item.label}</strong>
-                <span className="mt-1 block text-sm leading-5 text-slate-500">{item.desc}</span>
-              </>;
-              const card = 'group block rounded-[24px] bg-white p-5 text-left shadow-[0_8px_25px_rgba(20,35,59,0.06)] transition';
-              if (item.soon) return <div key={item.label} aria-disabled="true" className={`${card} opacity-60`}>{body}</div>;
-              return item.href ? <a key={item.label} href={item.href} className={`${card} hover:-translate-y-0.5 hover:shadow-[0_14px_36px_rgba(20,35,59,0.12)]`}>{body}</a> : <button key={item.label} type="button" onClick={item.onClick} className={`${card} hover:-translate-y-0.5 hover:shadow-[0_14px_36px_rgba(20,35,59,0.12)]`}>{body}</button>;
+          <section className="min-w-0">
+            <h2 className="mb-3 text-sm font-semibold">Your essentials</h2>
+            <div className="grid auto-rows-fr gap-3 sm:grid-cols-2">{items.map(item => {
+              const body = <><span className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-[14px] ${item.tone}`}><item.icon className="h-5 w-5" strokeWidth={1.6} />{!!item.badge && <span aria-label={`${item.badge} waiting for approval`} className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">{item.badge}</span>}</span><span className="min-w-0 flex-1"><strong className="block text-sm font-semibold">{item.label}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{item.desc}</span></span>{item.soon ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-400">Soon</span> : <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />}</>;
+              const style = 'group flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white p-5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition hover:border-slate-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#0b587b]';
+              if (item.soon) return <div key={item.label} aria-disabled="true" className="flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white/70 p-5 text-left">{body}</div>;
+              return item.href ? <a key={item.label} href={item.href} className={style}>{body}</a> : <button key={item.label} type="button" onClick={item.onClick} className={style}>{body}</button>;
             })}</div>
           </section>
         </div>
-      </div>
+      </main>
     </div>
   </>;
 }

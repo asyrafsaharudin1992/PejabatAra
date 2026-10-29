@@ -21,12 +21,15 @@ const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { 
 
 export async function assessmentFetch(query: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
-  const token = localStorage.getItem(TOKEN_KEY);
+  const demoParams = new URLSearchParams(window.location.search);
+  const demoAccount = import.meta.env.DEV && demoParams.has('leaveDemo') && demoParams.get('account');
+  const demoKey = demoAccount ? `ara_local_leave_demo_${demoAccount}` : '';
+  const token = demoKey ? sessionStorage.getItem(demoKey) : localStorage.getItem(TOKEN_KEY);
   if (token) headers.set('x-assessment-token', token);
   if (options.body) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${API}&${query}`, { ...options, headers });
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401) localStorage.removeItem(TOKEN_KEY);
+  if (response.status === 401) { if (demoKey) sessionStorage.removeItem(demoKey); else localStorage.removeItem(TOKEN_KEY); }
   if (!response.ok) throw Object.assign(new Error(body.error || 'Something went wrong. Please try again.'), { status: response.status });
   return body;
 }

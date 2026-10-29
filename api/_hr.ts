@@ -21,7 +21,7 @@ const decode = (row: any) => ({
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
   joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
   basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
-  workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveApproverId: row.leave_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
+  workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveCalendarCompanies: row.leave_calendar_companies || [], leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
 });
 
 // Turns a profile sent by the page into a database row, checking each field.
@@ -111,7 +111,7 @@ export async function hrHandler(req: any, res: any) {
     // Directory list: only what the cards show, no personal or pay details.
     if (req.method === 'GET' && action === 'employees') {
       // leave_approver_id is new: until its migration is run the list is read without it.
-      let result: any = await db.from('hr_employees').select(`${SUMMARY},leave_approver_id,final_approver_id`).order('company').order('full_name');
+      let result: any = await db.from('hr_employees').select(`${SUMMARY},leave_approver_id,leave_backup_approver_id,final_approver_id`).order('company').order('full_name');
       if (result.error?.code === '42703') result = await db.from('hr_employees').select(SUMMARY).order('company').order('full_name');
       const { data, error } = result;
       if (error) throw error;
@@ -119,7 +119,7 @@ export async function hrHandler(req: any, res: any) {
       const linked = (data || []).map((row: any) => row.assessment_staff_id).filter(Boolean);
       const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,password_hash').in('id', linked) : { data: [] };
       const hasPassword = new Map((logins || []).map((login: any) => [login.id, Boolean(login.password_hash)]));
-      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
+      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
     }
 
     // One full profile, with its recent changes.
@@ -165,10 +165,22 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, group });
     }
 
+    if (req.method === 'POST' && action === 'set_leave_calendar_access') {
+      const id = text(body.id, 60);
+      if (!Array.isArray(body.companies) || body.companies.some((company: unknown) => company !== 'KJ' && company !== 'SK')) throw fail(400, 'Choose department only, KJ, SK, or KJ + SK.');
+      const companies = [...new Set(body.companies)].sort();
+      const { data: before, error: readError } = await db.from('hr_employees').select('leave_calendar_companies').eq('id', id).single();
+      if (readError) throw readError;
+      const { error } = await db.from('hr_employees').update({ leave_calendar_companies: companies, updated_at: now, updated_by: user.id }).eq('id', id);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { leave_calendar_companies: [before.leave_calendar_companies || [], companies] }, changed_by: user.id });
+      return res.status(200).json({ success: true, companies });
+    }
+
     // Who approves each person's leave: the supervisor (first level) or the final approver (second level).
     // An empty approver clears it.
     if (req.method === 'POST' && action === 'assign_leave_approver') {
-      const column = body.level === 'final' ? 'final_approver_id' : 'leave_approver_id';
+      const column = body.level === 'final' ? 'final_approver_id' : body.level === 'backup' ? 'leave_backup_approver_id' : 'leave_approver_id';
       const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map((id: unknown) => text(id, 60)).filter(Boolean).slice(0, 200);
       const approverId = text(body.approverId, 60) || null;
       if (!ids.length) throw fail(400, 'Choose the staff.');
@@ -219,11 +231,15 @@ export async function hrHandler(req: any, res: any) {
       const { data: request, error: readError } = await db.from('hr_leave_requests').select('*').eq('id', text(body.id, 60)).maybeSingle();
       if (readError) throw readError;
       if (!request) throw fail(404, 'This request no longer exists.');
+      const sourceYear = Number(String(request.start_date).slice(0, 4));
+      const { data: closed, error: closureError } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', sourceYear + 1).maybeSingle();
+      if (closureError) throw closureError;
+      if (closed) throw fail(409, `The ${sourceYear} leave year is closed. Its requests can no longer be changed.`);
       const fromInfotech = String(request.decision_note || '').startsWith('Imported from Infotech');
       let restored = 0;
       if (request.status === 'approved' && !fromInfotech) {
         // The balance was taken off the newest year of the leave group at approval: put the days back there.
-        const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).order('year', { ascending: false }).limit(1);
+        const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', Number(String(request.start_date).slice(0, 4))).limit(1);
         if (rows?.length) { restored = Number(request.days); const { error } = await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(rows[0].taken) - restored), balance: Number(rows[0].balance) + restored, updated_at: now }).eq('id', rows[0].id); if (error) throw error; }
       }
       const { error: deleteError } = await db.from('hr_leave_requests').delete().eq('id', request.id);
@@ -270,9 +286,72 @@ export async function hrHandler(req: any, res: any) {
       const id = text(body.id, 60), group = text(body.group, 12).toUpperCase();
       if (!LEAVE_GROUPS.includes(group)) throw fail(400, 'Choose a leave group.');
       const year = Number.isInteger(Number(body.year)) ? Number(body.year) : 0;
+      if (year > 0) {
+        const { data: closed, error: closedError } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', year + 1).maybeSingle();
+        if (closedError) throw closedError;
+        if (closed) throw fail(409, `The ${year} leave year is closed and its balances are locked.`);
+      }
       const num = (value: unknown, label: string) => { const n = Number(value ?? 0); if (!Number.isFinite(n) || n < 0 || n > 366 || Math.round(n * 100) !== n * 100) throw fail(400, `${label} must be a number from 0 to 366.`); return n; };
       const result = await saveLeaveBalance(db, user.id, now, id, group, year, { eligible: num(body.eligible, 'Eligible'), brought_forward: num(body.broughtForward, 'Brought forward'), credit: num(body.credit, 'Credit'), earn: num(body.earn, 'Earned'), forfeit: num(body.forfeit, 'Forfeited') });
       return res.status(200).json({ success: true, ...result });
+    }
+
+    if (req.method === 'GET' && action === 'leave_year_end_preview') {
+      const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+      const [{ data: currentClosure, error: currentClosureError }, { data: latestBalance, error: latestError }] = await Promise.all([
+        db.from('hr_leave_year_closures').select('target_year').eq('target_year', currentYear).maybeSingle(),
+        db.from('hr_leave_balances').select('year').in('leave_group', ['AL', 'ML']).order('year', { ascending: false }).limit(1),
+      ]);
+      if (currentClosureError || latestError) throw currentClosureError || latestError;
+      const month = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(5, 7));
+      const targetYear = currentClosure && month < 10 ? currentYear : Math.max(currentYear + (month >= 10 ? 1 : 0), Number(latestBalance?.[0]?.year || currentYear - 1) + 1);
+      if (/^\d{4}$/.test(String(req.query.year)) && Number(req.query.year) !== targetYear) throw fail(400, 'Year End can only preview the next open leave cycle.');
+      const [{ data: people, error }, { data: balances, error: balanceError }, { data: pending, error: pendingError }, { data: closure, error: closureError }] = await Promise.all([
+        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,leave_policy,status').eq('status', 'Active').order('company').order('full_name').limit(1000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000),
+        db.from('hr_leave_requests').select('id,employee_id,leave_type,start_date,end_date,status').in('status', ['pending', 'supervisor_approved']).lte('start_date', `${targetYear - 1}-12-31`).gte('end_date', `${targetYear - 1}-01-01`).limit(3000),
+        db.from('hr_leave_year_closures').select('target_year,source_year,bf_expiry,staff_count,processed_at').eq('target_year', targetYear).maybeSingle(),
+      ]);
+      if (error || balanceError || pendingError || closureError) throw error || balanceError || pendingError || closureError;
+      const balanceOf = (id: string, group: string) => (balances || []).find((row: any) => row.employee_id === id && row.leave_group === group);
+      const rows = (people || []).map((person: any) => {
+        const oldAL = balanceOf(person.id, 'AL'), oldML = balanceOf(person.id, 'ML');
+        const track = person.leave_policy || (oldAL && Number(oldAL.eligible) >= 15 ? 'admin' : 'clinical');
+        const policy = person.join_date ? policyFor(track, person.join_date, targetYear) : null;
+        return { employeeId: person.id, company: person.company, code: person.employee_code, name: person.full_name, joinDate: person.join_date, track, missingPolicy: !person.leave_policy,
+          annual: { eligible: policy?.al ?? Number(oldAL?.eligible || 0), broughtForward: Math.max(0, Number(oldAL?.balance ?? 0) - (oldAL?.bf_expiry && oldAL.bf_expiry <= `${targetYear - 1}-12-31` ? Number(oldAL?.brought_forward || 0) : 0)), sourceBalance: oldAL ? Number(oldAL.balance) : null },
+          medical: { eligible: policy?.ml ?? Number(oldML?.eligible || 0), broughtForward: Math.max(0, Number(oldML?.balance ?? 0) - (oldML?.bf_expiry && oldML.bf_expiry <= `${targetYear - 1}-12-31` ? Number(oldML?.brought_forward || 0) : 0)), sourceBalance: oldML ? Number(oldML.balance) : null },
+          missingJoinDate: !person.join_date, missingAnnual: !oldAL, missingMedical: !oldML };
+      });
+      return res.status(200).json({ targetYear, sourceYear: targetYear - 1, rows, pending: pending || [], closure: closure || null });
+    }
+
+    if (req.method === 'POST' && action === 'leave_year_end_process') {
+      const targetYear = Number(body.targetYear), expiry = text(body.bfExpiry, 10);
+      if (!Number.isInteger(targetYear) || !isDate(expiry)) throw fail(400, 'Choose the new leave year and BF expiry date.');
+      const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+      if (targetYear !== currentYear) throw fail(409, `Year End for ${targetYear} can only be processed from 1 January ${targetYear}.`);
+      const { data: people, error } = await db.from('hr_employees').select('id,full_name,join_date,leave_policy').eq('status', 'Active').limit(1000);
+      if (error) throw error;
+      if ((people || []).some((person: any) => !person.leave_policy)) throw fail(400, 'Choose and apply a leave category for every active staff member under Leave → Staff leave → Company policy first.');
+      const { data: old, error: oldError } = await db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,bf_expiry,balance').eq('year', targetYear - 1).in('leave_group', ['AL', 'ML']).limit(4000);
+      if (oldError) throw oldError;
+      const balances = (people || []).map((person: any) => {
+        const annual = (old || []).find((row: any) => row.employee_id === person.id && row.leave_group === 'AL');
+        const medical = (old || []).find((row: any) => row.employee_id === person.id && row.leave_group === 'ML');
+        const track = person.leave_policy || (annual && Number(annual.eligible) >= 15 ? 'admin' : 'clinical');
+        const policy = person.join_date ? policyFor(track, person.join_date, targetYear) : null;
+        return { employeeId: person.id, groups: [
+          { group: 'AL', eligible: policy?.al ?? Number(annual?.eligible || 0), broughtForward: Math.max(0, Number(annual?.balance || 0) - (annual?.bf_expiry && annual.bf_expiry <= `${targetYear - 1}-12-31` ? Number(annual?.brought_forward || 0) : 0)) },
+          { group: 'ML', eligible: policy?.ml ?? Number(medical?.eligible || 0), broughtForward: Math.max(0, Number(medical?.balance || 0) - (medical?.bf_expiry && medical.bf_expiry <= `${targetYear - 1}-12-31` ? Number(medical?.brought_forward || 0) : 0)) },
+        ] };
+      });
+      if ((people || []).some((person: any) => !person.join_date)) throw fail(400, 'Add a join date to every active staff profile before processing Year End.');
+      const missingBalance = (people || []).filter((person: any) => !old?.some((row: any) => row.employee_id === person.id && row.leave_group === 'AL') || !old?.some((row: any) => row.employee_id === person.id && row.leave_group === 'ML'));
+      if (missingBalance.length) throw fail(400, `Set up previous-year AL and ML balances for every active staff member before Year End. Missing balance for: ${missingBalance.map((person: any) => person.full_name).join(', ')}.`);
+      const { data, error: processError } = await db.rpc('hr_process_leave_year_end', { p_target_year: targetYear, p_bf_expiry: expiry, p_processed_by: user.id, p_balances: balances });
+      if (processError) throw fail(409, processError.message || 'Unable to process leave year end.');
+      return res.status(200).json(data || { success: true, targetYear });
     }
 
     // Company leave policy: what each active staff member should have by their category and years of service, next to
@@ -296,6 +375,10 @@ export async function hrHandler(req: any, res: any) {
     // policy figure (brought forward, credit, earned so far and forfeited stay as they are). A balance that does not exist
     // yet is created, so this is also how a new staff member gets theirs.
     if (req.method === 'POST' && action === 'leave_policy_apply') {
+      const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+      const { data: currentClosed, error: closureError } = await db.from('hr_leave_year_closures').select('target_year').eq('target_year', currentYear + 1).maybeSingle();
+      if (closureError) throw closureError;
+      if (currentClosed) throw fail(409, `The ${currentYear} leave year is closed; its entitlements cannot be changed.`);
       const items: { id: string; track: string }[] = (Array.isArray(body.items) ? body.items : []).slice(0, 200).map((item: any) => ({ id: text(item?.id, 60), track: text(item?.track, 10) })).filter((item: any) => item.id && ['admin', 'clinical', 'parttime'].includes(item.track));
       if (!items.length) throw fail(400, 'Choose the staff.');
       const { data: people, error } = await db.from('hr_employees').select('id,join_date').in('id', items.map((item) => item.id));
@@ -337,11 +420,11 @@ export async function hrHandler(req: any, res: any) {
       const year = /^\d{4}$/.test(String(req.query.year)) ? String(req.query.year) : String(new Date().getFullYear());
       const { data, error } = await db.from('hr_leave_requests').select('*').gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`).order('start_date', { ascending: false }).limit(1000);
       if (error) throw error;
-      const ids = [...new Set((data || []).flatMap((r: any) => [r.employee_id, r.approver_id, r.final_approver_id, r.decided_by, r.supervisor_decided_by]).filter(Boolean))];
+      const ids = [...new Set((data || []).flatMap((r: any) => [r.employee_id, r.approver_id, r.backup_approver_id, r.final_approver_id, r.decided_by, r.supervisor_decided_by]).filter(Boolean))];
       const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
       const who = new Map((people || []).map((p: any) => [p.id, p]));
       const name = (id: string | null) => (id && who.get(id)?.full_name) || '';
-      return res.status(200).json({ year, requests: (data || []).map((r: any) => ({ id: r.id, company: who.get(r.employee_id)?.company || '', code: who.get(r.employee_id)?.employee_code || '', applicant: name(r.employee_id), type: r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisor: name(r.approver_id), finalApprover: name(r.final_approver_id), supervisorBy: name(r.supervisor_decided_by), supervisorNote: r.supervisor_note || '', decidedBy: name(r.decided_by), note: r.decision_note || '', createdAt: r.created_at, decidedAt: r.decided_at })) });
+      return res.status(200).json({ year, requests: (data || []).map((r: any) => ({ id: r.id, company: who.get(r.employee_id)?.company || '', code: who.get(r.employee_id)?.employee_code || '', applicant: name(r.employee_id), type: r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisor: name(r.approver_id), backupApprover: name(r.backup_approver_id), finalApprover: name(r.final_approver_id), supervisorBy: name(r.supervisor_decided_by), supervisorNote: r.supervisor_note || '', decidedBy: name(r.decided_by), note: r.decision_note || '', createdAt: r.created_at, decidedAt: r.decided_at })) });
     }
 
     // Duty roster: one row per person and date. `roster` reads a month; `roster_import` replaces the dates it

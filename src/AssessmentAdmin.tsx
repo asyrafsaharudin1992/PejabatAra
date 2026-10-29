@@ -6,7 +6,7 @@ import { ASSESSMENT_API as API, card, input, Modal } from './AssessmentStaff';
 // Control Centre page for the Assessment Room: the MCQ assessments and
 // everyone's results. Staff themselves are managed under User Management.
 
-type Staff = { id: string; name: string; code: string; branch: string; active: boolean; preview: boolean };
+type Staff = { id: string; name: string; code: string; branch: string; active: boolean; preview: boolean; assessed?: boolean };
 type Question = { id: string; text: string; options: string[]; answer: number };
 type Quiz = { id: string; title: string; description: string; passMark: number; active: boolean; questions: Question[]; updatedAt: string };
 // Every try is its own row; attemptNo counts a staff member's tries at one assessment.
@@ -48,7 +48,7 @@ async function downloadQuiz(quiz: Quiz, staff: Staff[], attempts: Attempt[]) {
   const staffById = new Map(staff.map((row) => [row.id, row]));
   const results = [
     ['Nama', 'Kod staf', 'Cawangan', 'Markah', 'Peratus', 'Keputusan', 'Cubaan', 'Tarikh hantar'].map((value) => ({ ...head, value })),
-    ...staff.filter((row) => !row.preview && (row.active || byStaff.has(row.id))).sort((a, b) => a.branch.localeCompare(b.branch) || a.name.localeCompare(b.name)).map((row) => {
+    ...staff.filter((row) => !row.preview && (row.assessed || byStaff.has(row.id)) && (row.active || byStaff.has(row.id))).sort((a, b) => a.branch.localeCompare(b.branch) || a.name.localeCompare(b.name)).map((row) => {
       const attempt = byStaff.get(row.id);
       const mark = attempt ? percent(attempt.score, attempt.total) : 0;
       return [cell(row.name), cell(row.code), cell(row.branch || '—'),
@@ -125,7 +125,7 @@ export default function AssessmentAdmin() {
   const results = useMemo(() => {
     if (!data || !selectedQuiz) return [];
     const byStaff = latestByStaff(data.attempts, selectedQuiz.id);
-    return data.staff.filter((staff) => !staff.preview && (staff.active || byStaff.has(staff.id))).map((staff) => ({ staff, attempt: byStaff.get(staff.id) }))
+    return data.staff.filter((staff) => !staff.preview && (staff.assessed || byStaff.has(staff.id)) && (staff.active || byStaff.has(staff.id))).map((staff) => ({ staff, attempt: byStaff.get(staff.id) }))
       .sort((a, b) => Number(Boolean(b.attempt)) - Number(Boolean(a.attempt)) || a.staff.name.localeCompare(b.staff.name));
   }, [data, selectedQuiz]);
   // Staff who have submitted at least once, not the number of tries.

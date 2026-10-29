@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const bin = (name) => path.join(process.cwd(), 'node_modules', '.bin', `${name}${process.platform === 'win32' ? '.cmd' : ''}`);
 
-const api = spawn(bin('tsx'), ['api/local.ts'], { stdio: 'inherit', env: process.env });
+const api = spawn(bin('tsx'), ['watch', 'api/local.ts'], { stdio: 'inherit', env: process.env });
 const web = spawn(bin('vite'), ['--host', '127.0.0.1', '--port', '3000'], { stdio: 'inherit', env: process.env });
 
 let stopping = false;

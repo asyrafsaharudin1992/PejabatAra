@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Tags, Trash2 } from 'lucide-react';
+import { CalendarDays, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
 
 // Office HR: every leave request made from Individual Sign In, with where each one is in the two-level approval
 // (supervisor first, then the final approver). Read only: staff apply and approvers decide in Individual Sign In.
-type Request = { id: string; company: string; code: string; applicant: string; type: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisor: string; finalApprover: string; supervisorBy: string; supervisorNote: string; decidedBy: string; note: string; createdAt: string };
+type Request = { id: string; company: string; code: string; applicant: string; type: string; group: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisor: string; backupApprover: string; finalApprover: string; supervisorBy: string; supervisorNote: string; decidedBy: string; note: string; createdAt: string };
 const LABEL: Record<Request['status'], string> = { pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for final approver', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 const TONE: Record<Request['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
 const imported = (row: Request) => row.note.startsWith('Imported from Infotech');
@@ -29,7 +29,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   }, [year]);
 
   const [removing, setRemoving] = useState('');
-  const [tab, setTab] = useState<'requests' | 'staff'>('requests');
+  const [tab, setTab] = useState<'requests' | 'staff' | 'year_end'>('requests');
   // Deleting is final: approved leave that AraOffice took off the balance goes back on it; the person's HR history records it.
   const remove = async (row: Request) => {
     const note = row.status === 'approved' && !imported(row) ? ` The ${days(row.days)} day(s) go back on ${row.applicant}'s balance.` : imported(row) ? ' This was imported from Infotech, so no balance changes.' : '';
@@ -60,8 +60,8 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
         <button onClick={onTypes} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20"><Tags className="h-4 w-4" />Leave types</button>
       </div>
     </section>
-    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['staff', 'Staff leave']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
-    {tab === 'staff' ? <HRLeaveStaff onError={onError} /> : <>
+    <div role="tablist" className="inline-flex flex-wrap rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['staff', 'Staff leave'], ['year_end', 'Leave year end']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
+    {tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : <>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={card}><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-1 text-3xl font-semibold ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
     {onLeaveToday.length > 0 && <p className="rounded-xl bg-[#f4fafd] p-3 text-sm text-slate-700"><strong className="text-[#0b587b]">On leave today:</strong> {onLeaveToday.map((row) => `${row.applicant} (${row.type})`).join(', ')}</p>}
     <section className={`${card} flex flex-wrap items-center gap-3`}>
@@ -74,7 +74,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
     <section className={`${card} overflow-x-auto`}>
       {!rows ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{rows.length ? 'No request matches these filters.' : `No leave requests in ${year} yet.`}</p> :
         <table className="w-full min-w-[980px] text-left text-sm">
-          <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Leave</th><th className="py-2 pr-4 font-semibold">Dates</th><th className="py-2 pr-4 font-semibold">Days</th><th className="py-2 pr-4 font-semibold">Status</th><th className="py-2 pr-4 font-semibold">Supervisor</th><th className="py-2 pr-4 font-semibold">Final approver</th><th className="py-2 font-semibold"><span className="sr-only">Delete</span></th></tr></thead>
+          <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Leave</th><th className="py-2 pr-4 font-semibold">Dates</th><th className="py-2 pr-4 font-semibold">Days</th><th className="py-2 pr-4 font-semibold">Status</th><th className="py-2 pr-4 font-semibold">Supervisor</th><th className="py-2 pr-4 font-semibold">Backup officer</th><th className="py-2 pr-4 font-semibold">Final approver</th><th className="py-2 font-semibold"><span className="sr-only">Delete</span></th></tr></thead>
           <tbody>{shown.map((row) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3 pr-4"><p className="font-semibold">{row.applicant}</p><p className="text-xs text-slate-400">{row.company} · {row.code}</p></td>
             <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}</td>
@@ -82,11 +82,52 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
             <td className="py-3 pr-4">{days(row.days)}</td>
             <td className="py-3 pr-4"><span className={`inline-block rounded-full px-3 py-1 text-[11px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>{imported(row) && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}</td>
             <td className="py-3 pr-4 text-xs text-slate-600">{row.supervisor || <span className="text-slate-300">Not set</span>}{row.supervisorNote && <p className="mt-0.5 text-slate-400">“{row.supervisorNote}”</p>}</td>
+            <td className="py-3 pr-4 text-xs text-slate-600">{row.backupApprover || <span className="text-slate-300">—</span>}</td>
             <td className="py-3 text-xs text-slate-600">{row.finalApprover || <span className="text-slate-300">{imported(row) ? '—' : 'None (supervisor is final)'}</span>}{row.note && !imported(row) && <p className="mt-0.5 text-slate-400">“{row.note}”</p>}</td>
             <td className="py-3 text-right"><button onClick={() => void remove(row)} disabled={removing === row.id} aria-label={`Delete ${row.applicant}'s leave`} title="Delete this leave request" className="grid h-8 w-8 place-items-center rounded-lg text-slate-300 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button></td>
           </tr>)}</tbody>
         </table>}
     </section>
     </>}
+  </div>;
+}
+
+type YearEndRow = { employeeId: string; company: string; code: string; name: string; joinDate: string | null; track: string; annual: { eligible: number; broughtForward: number; sourceBalance: number | null }; medical: { eligible: number; broughtForward: number; sourceBalance: number | null }; missingJoinDate: boolean; missingAnnual: boolean; missingMedical: boolean; missingPolicy: boolean };
+type YearEndPreview = { targetYear: number; sourceYear: number; rows: YearEndRow[]; pending: { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; status: string }[]; closure: null | { target_year: number; source_year: number; bf_expiry: string; staff_count: number; processed_at: string } };
+async function hrLeaveApi(query: string, body?: unknown) {
+  const response = await officeFetch(`/api/status?resource=hr&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  return response.json();
+}
+function YearEndPanel({ onError }: { onError: (message: string) => void }) {
+  const [preview, setPreview] = useState<YearEndPreview | null>(null);
+  const [expiry, setExpiry] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState('');
+  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const load = () => hrLeaveApi('action=leave_year_end_preview').then((data) => { if (data.error) throw new Error(data.error); setPreview(data); setLoadError(''); setDone(''); }).catch((cause: Error) => { setLoadError(cause.message); onError(cause.message); });
+  useEffect(() => { void load(); }, []);
+  const process = async () => {
+    if (!preview || preview.targetYear > Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4)) || preview.closure || preview.pending.length || preview.rows.some((row) => row.missingJoinDate || row.missingPolicy || row.missingAnnual || row.missingMedical) || !expiry || !backupConfirmed) return;
+    if (!window.confirm(`Process ${preview.sourceYear} → ${preview.targetYear} for ${preview.rows.length} active staff? This creates their new Annual and Medical Leave balances and locks the ${preview.sourceYear} cycle. This cannot be undone.`)) return;
+    setSaving(true);
+    try { const result = await hrLeaveApi('action=leave_year_end_process', { targetYear: preview.targetYear, bfExpiry: expiry }); if (result.error) throw new Error(result.error); setDone(`Year ${result.sourceYear} is closed. Year ${result.targetYear} balances were created for ${result.staffCount} staff.`); await load(); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to process Leave Year End.'); }
+    finally { setSaving(false); }
+  };
+  if (!preview) return <p className={`${card} text-sm ${loadError ? 'text-rose-700' : 'text-slate-500'}`}>{loadError || 'Loading Year End preview…'}</p>;
+  const currentYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
+  const blocked = preview.targetYear > currentYear || preview.pending.length > 0 || preview.rows.some((row) => row.missingJoinDate || row.missingPolicy || row.missingAnnual || row.missingMedical) || preview.closure !== null;
+  return <div className="space-y-5">
+    <section className="ara-hero rounded-[28px] p-6 text-white sm:p-8"><div className="flex items-start gap-4"><CalendarDays className="mt-1 h-6 w-6 shrink-0 text-[#70d8fa]" /><div><h3 className="text-xl font-semibold">Leave Year End · {preview.sourceYear} → {preview.targetYear}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-[#b9cfdd]">Review the projected Annual Leave (AL) and Medical Leave (ML) entitlement and bring-forward figures. Every pending request dated in {preview.sourceYear} must be approved, rejected, or cancelled first. Processing locks the old year.</p></div></div></section>
+    {preview.closure && <p className={`${card} bg-emerald-50 text-sm text-emerald-800`}>Year {preview.sourceYear} was closed on {new Date(preview.closure.processed_at).toLocaleDateString('en-MY')}. BF expires {preview.closure.bf_expiry}.</p>}
+    {preview.pending.length > 0 && <p className={`${card} border border-amber-200 bg-amber-50 text-sm text-amber-800`}>Year End is blocked: {preview.pending.length} leave request(s) from {preview.sourceYear} are still waiting for a decision.</p>}
+    {preview.rows.some((row) => row.missingJoinDate) && <p className={`${card} border border-rose-200 bg-rose-50 text-sm text-rose-800`}>Add a join date to every active staff profile before processing the new year.</p>}
+    {preview.rows.some((row) => row.missingPolicy) && <p className={`${card} border border-amber-200 bg-amber-50 text-sm text-amber-800`}>Set and apply a company leave category for every active staff member under Leave → Staff leave → Company policy. Year End is blocked until each person has an explicit policy.</p>}
+    {preview.targetYear > currentYear && <p className={`${card} border border-sky-100 bg-sky-50 text-sm text-sky-800`}>You can review the {preview.targetYear} cycle now. Processing opens on 1 January {preview.targetYear}, after the {preview.sourceYear} cycle ends.</p>}
+    {preview.rows.some((row) => row.missingAnnual || row.missingMedical) && <p className={`${card} border border-rose-200 bg-rose-50 text-sm text-rose-800`}>Set up both previous-year AL and ML balances for every active staff member under Leave → Staff leave before processing. Year End is blocked while any previous-year balance is missing.</p>}
+    {done && <p className={`${card} bg-emerald-50 text-sm text-emerald-800`}>{done}</p>}
+    {!preview.closure && <section className={`${card} flex flex-wrap items-end gap-4`}><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">BF expiry date for the new cycle</span><input type="date" value={expiry} min={`${preview.targetYear}-01-01`} max={`${preview.targetYear}-12-31`} onChange={(event) => setExpiry(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label><span className="max-w-xl text-xs leading-5 text-slate-500">Set this to the BF expiry date confirmed in Infotech/company policy. HR chooses the date before processing.</span><label className="flex items-start gap-2 text-xs leading-5 text-slate-600"><input type="checkbox" checked={backupConfirmed} onChange={(event) => setBackupConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300" />I have backed up the current leave records.</label><button onClick={() => void load()} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-[#0b587b]">Refresh</button><button onClick={() => void process()} disabled={saving || blocked || !expiry || !backupConfirmed} className="ml-auto h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Processing…' : `Process ${preview.targetYear}`}</button></section>}
+    <section className={`${card} overflow-x-auto`}><table className="w-full min-w-[850px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Annual entitlement</th><th className="py-2 pr-4">Annual BF</th><th className="py-2 pr-4">Medical entitlement</th><th className="py-2">Medical BF</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.employeeId} className="border-b border-slate-50"><td className="py-3 pr-4"><strong>{row.name}</strong><span className="block text-xs text-slate-400">{row.company} · {row.code} · {row.track}{row.missingJoinDate ? ' · join date missing' : ''}</span></td><td className="py-3 pr-4">{days(row.annual.eligible)} days</td><td className="py-3 pr-4">{days(row.annual.broughtForward)} days{row.annual.sourceBalance === null && <span className="ml-1 text-xs text-slate-400">(new)</span>}</td><td className="py-3 pr-4">{days(row.medical.eligible)} days</td><td className="py-3">{days(row.medical.broughtForward)} days{row.medical.sourceBalance === null && <span className="ml-1 text-xs text-slate-400">(new)</span>}</td></tr>)}</tbody></table></section>
   </div>;
 }

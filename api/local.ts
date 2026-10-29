@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { localDemoRoutes } from './_local-leave-demo.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -8,6 +9,7 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
+localDemoRoutes(app);
 
 app.all('/api/:route', async (req, res) => {
   const { route } = req.params;
