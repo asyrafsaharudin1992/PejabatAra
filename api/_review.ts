@@ -11,6 +11,8 @@ import { officeAccess } from './_office-db.js';
 const AREAS: Record<string, number> = { jobKnowledge: 30, qualityOfWork: 25, attendance: 25, behaviour: 20 };
 const CRITERIA = 4; // points rated in each area, as on the paper form
 // The office accounts that can be given reviews to fill in (System Admin always can).
+// The people who do reviews, by job title in HR's record: the CEO / CFO, CHRO, COO, CPO and the Clinical Admin of each branch.
+export const REVIEWER_TITLES = /\b(CEO|CFO|CHRO|COO|CPO)\b|ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i;
 export const REVIEWER_OFFICES = ['ceo', 'coo', 'finance', 'procurement', 'hr', 'clinical'];
 // How each supervisor account is shown to HR: CEO and CFO (separate entries), CHRO, COO, CPO and
 // the Clinical Admin of each branch, plus System Admin so reviews can be tested. Note the
@@ -48,9 +50,43 @@ async function personNames(db: any) {
   };
 }
 
-const SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at';
-const row = (r: any) => ({ id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
-const full = (r: any) => ({ ...row(r), ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
+export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at';
+export const reviewRow = (r: any) => ({ id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
+export const reviewFull = (r: any) => ({ ...reviewRow(r), ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
+
+// Submits a review (the supervisor's digital signature). `allow` says whether the review is this person's to fill in.
+export async function submitReview(db: any, body: any, allow: (assigned: any) => boolean, myName: string) {
+    const id = text(body.id, 60);
+    const { data: assigned, error: readError } = await db.from('hr_reviews').select('id,status,assessor_id,assessor_employee_id,assessor_name').eq('id', id).maybeSingle();
+    if (readError) throw readError;
+    if (!assigned) throw fail(404, 'This review was not found. It may have been cancelled by HR.');
+    if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
+    if (!allow(assigned)) throw fail(403, 'This review is not assigned to you.');
+    // Submitting is the supervisor's digital signature, so they must confirm it.
+    if (body.signed !== true) throw fail(400, 'Confirm the review and sign it before submitting.');
+    // Every criterion (four in each area) is rated 1 to 4. An area scores the average of its
+    // criteria and the total weighs the areas by the form's percentages.
+    const ratings: Record<string, number[]> = {};
+    let score = 0;
+    for (const [key, weight] of Object.entries(AREAS)) {
+      const levels = Array.isArray(body.ratings?.[key]) ? body.ratings[key].map(Number) : [];
+      if (levels.length !== CRITERIA || levels.some((level: number) => ![1, 2, 3, 4].includes(level))) throw fail(400, 'Rate every point in all four areas before submitting.');
+      ratings[key] = levels;
+      score += (weight / 100) * (levels.reduce((sum: number, level: number) => sum + level, 0) / CRITERIA);
+    }
+    score = Math.round(score * 100) / 100;
+    const pip = body.pip === 'required' ? 'required' : 'not_required';
+    const now = new Date().toISOString();
+    const { data, error } = await db.from('hr_reviews').update({
+      status: 'submitted', submitted_at: now, updated_at: now, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
+      ratings, total_score: score, overall: overall(score),
+      improvement: text(body.improvement, 3000), training: text(body.training, 3000), employee_comments: text(body.employeeComments, 3000),
+      pip, pip_remarks: pip === 'required' ? text(body.pipRemarks, 3000) : '', pip_start: pip === 'required' && isDate(body.pipStart) ? body.pipStart : null, hod_name: text(body.hodName, 160),
+    }).eq('id', id).eq('status', 'pending').select('*').single();
+    if (error) throw error;
+    return reviewFull(data);
+}
+
 
 export async function reviewHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -67,49 +103,22 @@ export async function reviewHandler(req: any, res: any) {
 
       // Reviews HR has assigned to this account (System Admin sees every waiting review).
       if (req.method === 'GET' && action === 'todo') {
-        let query = db.from('hr_reviews').select(SUMMARY).eq('status', 'pending').order('created_at', { ascending: false }).limit(200);
+        let query = db.from('hr_reviews').select(REVIEW_SUMMARY).eq('status', 'pending').order('created_at', { ascending: false }).limit(200);
         if (!isAdmin) query = query.eq('assessor_id', user.id);
         const { data, error } = await query;
         if (error) throw error;
-        return res.status(200).json({ reviews: (data || []).map(row), assessor: myName });
+        return res.status(200).json({ reviews: (data || []).map(reviewRow), assessor: myName });
       }
       if (req.method === 'GET' && action === 'mine') {
-        let query = db.from('hr_reviews').select(SUMMARY).eq('status', 'submitted').order('submitted_at', { ascending: false }).limit(200);
+        let query = db.from('hr_reviews').select(REVIEW_SUMMARY).eq('status', 'submitted').order('submitted_at', { ascending: false }).limit(200);
         if (!isAdmin) query = query.eq('assessor_id', user.id);
         const { data, error } = await query;
         if (error) throw error;
-        return res.status(200).json({ reviews: (data || []).map(row), assessor: myName });
+        return res.status(200).json({ reviews: (data || []).map(reviewRow), assessor: myName });
       }
       if (req.method === 'POST' && action === 'submit') {
-        const id = text(body.id, 60);
-        const { data: assigned, error: readError } = await db.from('hr_reviews').select('id,status,assessor_id,assessor_name').eq('id', id).maybeSingle();
-        if (readError) throw readError;
-        if (!assigned) throw fail(404, 'This review was not found. It may have been cancelled by HR.');
-        if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
-        if (!isAdmin && assigned.assessor_id !== user.id) throw fail(403, 'This review is not assigned to you.');
-        // Submitting is the supervisor's digital signature, so they must confirm it.
-        if (body.signed !== true) throw fail(400, 'Confirm the review and sign it before submitting.');
-        // Every criterion (four in each area) is rated 1 to 4. An area scores the average of its
-        // criteria and the total weighs the areas by the form's percentages.
-        const ratings: Record<string, number[]> = {};
-        let score = 0;
-        for (const [key, weight] of Object.entries(AREAS)) {
-          const levels = Array.isArray(body.ratings?.[key]) ? body.ratings[key].map(Number) : [];
-          if (levels.length !== CRITERIA || levels.some((level: number) => ![1, 2, 3, 4].includes(level))) throw fail(400, 'Rate every point in all four areas before submitting.');
-          ratings[key] = levels;
-          score += (weight / 100) * (levels.reduce((sum: number, level: number) => sum + level, 0) / CRITERIA);
-        }
-        score = Math.round(score * 100) / 100;
-        const pip = body.pip === 'required' ? 'required' : 'not_required';
-        const now = new Date().toISOString();
-        const { data, error } = await db.from('hr_reviews').update({
-          status: 'submitted', submitted_at: now, updated_at: now, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
-          ratings, total_score: score, overall: overall(score),
-          improvement: text(body.improvement, 3000), training: text(body.training, 3000), employee_comments: text(body.employeeComments, 3000),
-          pip, pip_remarks: pip === 'required' ? text(body.pipRemarks, 3000) : '', pip_start: pip === 'required' && isDate(body.pipStart) ? body.pipStart : null, hod_name: text(body.hodName, 160),
-        }).eq('id', id).eq('status', 'pending').select('*').single();
-        if (error) throw error;
-        return res.status(200).json({ review: full(data) });
+        const review = await submitReview(db, body, (assigned) => isAdmin || assigned.assessor_id === user.id, myName);
+        return res.status(200).json({ review });
       }
       throw fail(405, 'Method not allowed.');
     }
@@ -119,29 +128,25 @@ export async function reviewHandler(req: any, res: any) {
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_list') {
-      const { data, error } = await db.from('hr_reviews').select(SUMMARY).order('created_at', { ascending: false }).limit(500);
+      const { data, error } = await db.from('hr_reviews').select(REVIEW_SUMMARY).order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
-      return res.status(200).json({ reviews: (data || []).map(row) });
+      return res.status(200).json({ reviews: (data || []).map(reviewRow) });
     }
     if (req.method === 'GET' && action === 'hr_get') {
       const { data, error } = await db.from('hr_reviews').select('*').eq('id', text(req.query.id, 60)).maybeSingle();
       if (error) throw error;
       if (!data) throw fail(404, 'Review not found.');
-      return res.status(200).json({ review: full(data) });
+      return res.status(200).json({ review: reviewFull(data) });
     }
-    // The office accounts HR can give a review to.
+    // The people HR can give a review to: the reviewers by job title, each signing in with their own Individual Sign In.
     if (req.method === 'GET' && action === 'hr_supervisors') {
-      const { data: users, error } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const { data: people, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation').eq('status', 'Active').limit(500);
       if (error) throw error;
-      const eligible = (users?.users || []).filter((account: any) => (account.app_metadata?.office_access || []).some((office: string) => REVIEWER_OFFICES.includes(office)));
-      const ids = eligible.map((account: any) => account.id);
-      const personFor = await personNames(db);
-      const { data: profiles, error: profileError } = ids.length ? await db.from('profiles').select('id,full_name,status,role,department').in('id', ids) : { data: [], error: null };
-      if (profileError) throw profileError;
-      // Of the System Admin accounts only the one named "System Admin" is listed.
-      const people = new Map((profiles || []).filter((p: any) => p.status === 'active' && (p.role !== 'super_admin' || /^system admin$/i.test(String(p.full_name || '').trim()))).map((p: any) => [p.id, p]));
-      const order = ['CEO', 'CFO', 'CHRO', 'COO', 'CPO', 'Admin Klinikal KJ', 'Admin Klinikal SK'];
-      return res.status(200).json({ supervisors: eligible.filter((account: any) => people.has(account.id)).map((account: any) => { const p: any = people.get(account.id); return { id: account.id, person: personFor(p.department || '', p.full_name || ''), name: p.role === 'super_admin' ? (/admin/i.test(p.full_name || '') ? p.full_name : `${p.full_name || account.email} (System Admin)`) : roleLabel(p.department || '', p.full_name || ''), account: p.full_name || account.email, email: account.email }; }).sort((a: any, b: any) => (order.indexOf(a.name) + 1 || 99) - (order.indexOf(b.name) + 1 || 99)) });
+      const label = (person: any) => { const title = String(person.designation || ''); if (/ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(title)) return `Admin Klinikal ${person.company}`; if (/CEO/i.test(title)) return /CFO/i.test(title) ? 'CEO / CFO' : 'CEO'; if (/CFO/i.test(title)) return 'CFO'; return ['CHRO', 'COO', 'CPO'].find((role) => new RegExp(`\\b${role}\\b`, 'i').test(title)) || title; };
+      const order = ['CEO / CFO', 'CEO', 'CFO', 'CHRO', 'COO', 'CPO', 'Admin Klinikal KJ', 'Admin Klinikal SK'];
+      const named = (person: any) => `${/DR RESIDENT|DOCTOR/i.test(person.designation || '') ? 'DR ' : ''}${person.full_name}`;
+      const supervisors = (people || []).filter((person: any) => REVIEWER_TITLES.test(String(person.designation || ''))).map((person: any) => ({ id: person.id, name: label(person), person: named(person) })).sort((a: any, b: any) => (order.indexOf(a.name) < 0 ? 99 : order.indexOf(a.name)) - (order.indexOf(b.name) < 0 ? 99 : order.indexOf(b.name)) || a.name.localeCompare(b.name));
+      return res.status(200).json({ supervisors });
     }
     // Gives one review to a supervisor for one staff member and period. The staff details are
     // copied from HR's record so the review keeps them even if the record changes later.
@@ -150,19 +155,19 @@ export async function reviewHandler(req: any, res: any) {
       if (!isId(body.assessorId)) throw fail(400, 'Choose the supervisor who will do the review.');
       const [{ data: member, error: memberError }, { data: assessor, error: assessorError }] = await Promise.all([
         db.from('hr_employees').select('id,full_name,employee_code,designation,department,status').eq('id', body.employeeId).maybeSingle(),
-        db.from('profiles').select('id,full_name,status,department').eq('id', body.assessorId).maybeSingle(),
+        db.from('hr_employees').select('id,full_name,designation,status').eq('id', body.assessorId).maybeSingle(),
       ]);
       if (memberError || assessorError) throw memberError || assessorError;
       if (!member) throw fail(404, 'Staff member not found.');
-      if (!assessor || assessor.status !== 'active') throw fail(404, 'That supervisor account is not active.');
+      if (!assessor || assessor.status !== 'Active' || !REVIEWER_TITLES.test(String(assessor.designation || ''))) throw fail(404, 'That supervisor is not active or is not one of the reviewers.');
       const { data, error } = await db.from('hr_reviews').insert({
         status: 'pending', employee_id: member.id, staff_name: member.full_name, employee_code: member.employee_code, position: member.designation || '', department: member.department || '',
-        assessor_id: assessor.id, assessor_name: (await personNames(db))(assessor.department || '', assessor.full_name || '') || assessor.full_name || '', assigned_by: user.id,
+        assessor_employee_id: assessor.id, assessor_name: `${/DR RESIDENT|DOCTOR/i.test(assessor.designation || '') ? 'DR ' : ''}${assessor.full_name}`, assigned_by: user.id,
         period_label: text(body.periodLabel, 40), period_start: isDate(body.periodStart) ? body.periodStart : null, period_end: isDate(body.periodEnd) ? body.periodEnd : null,
         assign_remarks: text(body.remarks, 2000),
       }).select('*').single();
       if (error) throw error;
-      return res.status(200).json({ review: full(data) });
+      return res.status(200).json({ review: reviewFull(data) });
     }
     // Deletes a review. One still waiting for the supervisor can always be cancelled; a submitted
     // one only on the day it was submitted (Malaysian time), so a mistake can be undone but the
@@ -182,7 +187,7 @@ export async function reviewHandler(req: any, res: any) {
     if (req.method === 'POST' && action === 'hr_receive') {
       const { data, error } = await db.from('hr_reviews').update({ hr_received_on: isDate(body.receivedOn) ? body.receivedOn : null, hr_received_by: text(body.receivedBy, 120), hr_remarks: text(body.remarks, 2000), updated_at: new Date().toISOString() }).eq('id', text(body.id, 60)).eq('status', 'submitted').select('*').single();
       if (error) throw error;
-      return res.status(200).json({ review: full(data) });
+      return res.status(200).json({ review: reviewFull(data) });
     }
     throw fail(405, 'Method not allowed.');
   } catch (error: any) {

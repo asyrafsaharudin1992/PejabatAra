@@ -22,11 +22,19 @@ async function stateBranch(db: any) {
   return data.id;
 }
 
-// Staff who must read announcements: the active Assessment Room staff list, minus preview and test accounts.
+// Staff who must read announcements: the clinic assistants and the Clinical Admin of each branch (a Clinical Admin is
+// "Admin Clinical" at SK and "Clinic Assistant Officer" at KJ). Doctors, other admin and management are not listed.
+// Their job title comes from HR's record; preview and test accounts are left out.
+const ANNOUNCEMENT_TITLES = /^(CLINIC ASSISTANT|CLINIC ASSISTANT OFFICER|ADMIN CLINICAL)$/i;
 async function announcementStaff(db: any) {
-  const { data, error } = await db.from('assessment_staff').select('id,name,branch').eq('active', true).eq('can_preview', false).neq('branch', 'Test').order('branch').order('name');
+  const [{ data, error }, { data: employees, error: employeeError }] = await Promise.all([
+    db.from('assessment_staff').select('id,name,branch').eq('active', true).eq('can_preview', false).neq('branch', 'Test').order('branch').order('name'),
+    db.from('hr_employees').select('assessment_staff_id,designation').eq('status', 'Active'),
+  ]);
   if (error) throw error;
-  return (data || []).map((item: any) => ({ id: item.id, name: item.name, branch: item.branch }));
+  if (employeeError) throw employeeError;
+  const listed = new Set((employees || []).filter((row: any) => row.assessment_staff_id && ANNOUNCEMENT_TITLES.test(String(row.designation || '').trim())).map((row: any) => row.assessment_staff_id));
+  return (data || []).filter((item: any) => listed.has(item.id)).map((item: any) => ({ id: item.id, name: item.name, branch: item.branch }));
 }
 
 // Any CA account may mark a staff member as having read an announcement; reads live beside the workspace.

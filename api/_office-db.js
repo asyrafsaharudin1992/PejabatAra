@@ -11,10 +11,10 @@ export function serviceDb() {
 }
 
 // Any signed-in account with an active profile, before office or device checks.
-export async function activeAccount(req) {
+export async function activeAccount(req, sharedDb) {
   const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
   if (!token) throw Object.assign(new Error('Sign in required.'), { status: 401 });
-  const db = serviceDb();
+  const db = sharedDb || serviceDb();
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
   const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();
@@ -27,17 +27,23 @@ export async function activeAccount(req) {
  * @param {boolean} [skipDeviceLock] for offices opened from the sign-in page without a registered device
  */
 export async function officeAccess(req, adminOnly = false, requiredOffice = 'quality', skipDeviceLock = false) {
-  const { db, user, profile } = await activeAccount(req);
+  // The device checks do not depend on who the account is, so they run at the same time as the sign-in check
+  // instead of one after another (the database is far from the server, so each step costs time).
+  const db = serviceDb();
+  const deviceCheck = skipDeviceLock ? null : Promise.all([deviceLockEnabled(db), currentDevice(db, req)]).catch((error) => ({ error }));
+  const { user, profile } = await activeAccount(req, db);
   const officeAccess = user.app_metadata?.office_access;
   // requiredOffice may list several offices; access to any one of them is enough.
   const offices = [].concat(requiredOffice);
   if (profile.role !== 'super_admin' && (adminOnly || !Array.isArray(officeAccess) || !offices.some((office) => officeAccess.includes(office)))) {
     throw Object.assign(new Error('Access restricted.'), { status: 403 });
   }
-  if (!skipDeviceLock && profile.role !== 'super_admin' && await deviceLockEnabled(db)) {
-    const device = await currentDevice(db, req);
-    if (!device) throw Object.assign(new Error(DEVICE_REQUIRED), { status: 403 });
-  }
+  if (deviceCheck && profile.role !== 'super_admin') {
+    const result = await deviceCheck;
+    if (result && !Array.isArray(result) && result.error) throw result.error;
+    const [lockOn, device] = result;
+    if (lockOn && !device) throw Object.assign(new Error(DEVICE_REQUIRED), { status: 403 });
+  } else if (deviceCheck) await deviceCheck.catch(() => undefined);
   return { db, user, profile };
 }
 

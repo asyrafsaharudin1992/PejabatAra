@@ -7,6 +7,7 @@ import { homeQuote } from './PortalApp';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
 import { HRReviews } from './HRReviews';
+import { HRAttendance } from './HRAttendance';
 import { HRRoster } from './HRRoster';
 import { HRLeave } from './HRLeave';
 import { HRIncentives } from './HRIncentives';
@@ -25,7 +26,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'staff', label: 'Staff Directory', note: 'Assessment staff list', icon: Users, tone: 'text-[#70d8fa]' },
   { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
   { id: 'incentives', label: 'Incentive', note: 'Sent by Clinical Admin', icon: Wallet, tone: 'text-[#ffb000]' },
-  { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]', soon: true },
+  { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]' },
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'reports', label: 'Reports', note: 'Leave & attendance', icon: FileBarChart, tone: 'text-[#4ade80]', soon: true },
 ];
@@ -177,7 +178,8 @@ export default function OfficeHR() {
         {view === 'staff' && <StaffDirectory staff={staff} />}
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
-        {(view === 'attendance' || view === 'reports') && <ComingSoon view={view} />}
+        {view === 'attendance' && <HRAttendance onError={setError} />}
+        {view === 'reports' && <ComingSoon view={view} />}
       </main>
     </div>
   </div>;

@@ -1,4 +1,6 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
+import { attendanceStaffAction } from './_attendance.js';
+import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
@@ -195,6 +197,26 @@ const requestRow = (r: any, extra: Record<string, unknown> = {}) => ({ id: r.id,
 
 // Which decision is waiting on this person for the request, if any.
 const stageFor = (r: any, personId: string) => r.status === 'pending' && (r.approver_id === personId || r.backup_approver_id === personId) ? (r.approver_id === personId ? 'supervisor' : 'backup') : r.status === 'supervisor_approved' && r.final_approver_id === personId ? 'final' : '';
+
+// Performance Review for the supervisors (CEO / CFO, CHRO, COO, CPO and each Clinical Admin), inside their own Individual Sign In.
+// HR assigns a review to a person; only that person sees and fills it in.
+async function reviewAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
+  const { data: me, error } = await db.from('hr_employees').select('id,full_name,designation').eq('assessment_staff_id', staff.id).maybeSingle();
+  if (error) throw error;
+  if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
+  const myName = `${/DR RESIDENT|DOCTOR/i.test(me.designation || '') ? 'DR ' : ''}${me.full_name}`;
+  if (req.method === 'GET' && (action === 'review_todo' || action === 'review_mine')) {
+    const waiting = action === 'review_todo';
+    const { data, error: listError } = await db.from('hr_reviews').select(REVIEW_SUMMARY).eq('status', waiting ? 'pending' : 'submitted').eq('assessor_employee_id', me.id).order(waiting ? 'created_at' : 'submitted_at', { ascending: false }).limit(200);
+    if (listError) throw listError;
+    return res.status(200).json({ reviews: (data || []).map(reviewRow), assessor: myName });
+  }
+  if (req.method === 'POST' && action === 'review_submit') {
+    const review = await submitReview(db, body, (assigned) => assigned.assessor_employee_id === me.id, myName);
+    return res.status(200).json({ review });
+  }
+  throw fail(404, 'Unknown review action.');
+}
 
 async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date').eq('assessment_staff_id', staff.id).maybeSingle();
@@ -452,11 +474,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
     return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
   }
+  if (action.startsWith('attendance_')) return await attendanceStaffAction(req, res, db, staff, action, body);
+  if (action.startsWith('review_')) return await reviewAction(req, res, db, staff, action, body);
   if (action.startsWith('leave_')) return await leaveAction(req, res, db, staff, action, body);
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
-    let isApprover = false, leaveWaiting = 0, designation = '';
+    let isApprover = false, leaveWaiting = 0, designation = '', reviewWaiting = 0;
     try {
       const { data: self } = await db.from('hr_employees').select('id,designation').eq('assessment_staff_id', staff.id).maybeSingle();
       if (self) {
@@ -468,6 +492,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
           db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('final_approver_id', self.id).eq('status', 'supervisor_approved'),
         ]);
         leaveWaiting = (first || 0) + (last || 0);
+        // Performance reviews HR has given this person to fill in: shown as a number on the Performance Review icon.
+        const { count: reviews } = await db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('assessor_employee_id', self.id).eq('status', 'pending'); reviewWaiting = reviews || 0;
       }
     } catch { /* leave tables not set up yet */ }
     // Preview accounts see every assessment, including closed ones.
@@ -482,7 +508,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

@@ -1,14 +1,16 @@
 import { ReactNode, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CalendarClock, CalendarDays, ClipboardCheck, Coins, KeyRound, LogOut, PiggyBank, ReceiptText, ScanFace, Settings, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarClock, CalendarDays, ClipboardCheck, Coins, KeyRound, LogOut, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound } from 'lucide-react';
 import { assessmentFetch, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
+import MyAttendance from './MyAttendance';
+import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
 
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number } };
-type View = 'home' | 'leave' | 'roster' | 'profile' | 'settings' | 'password';
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number } };
+type View = 'home' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
 
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN. BHD.' };
@@ -78,12 +80,14 @@ export default function IndividualHub() {
     setSignedIn(false);
   };
 
-  if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} title="Individual Sign In" intro="Sign in with your name, staff code and password to open your leave, assessments and incentive claims. First time? Use the last 4 digits of your IC." button="Sign in" />;
+  if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} title="Individual Sign In" intro="Sign in with your name, staff code and password to open your leave, attendance, assessments and incentive claims (and Performance Review for supervisors). First time? Use the last 4 digits of your IC." button="Sign in" />;
   // Signed in with the IC digits but no password chosen yet: choose one first.
   if (me && me.staff.hasPassword === false) return <Shell><SetPassword first onDone={() => setMe({ staff: { ...me.staff, hasPassword: true } })} /></Shell>;
 
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'leave') return <Screen title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
+  if (view === 'review') return <Screen title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
+  if (view === 'attendance') return <Screen title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
   if (view === 'roster') return <Screen title="My roster" onBack={() => setView('home')}><MyRoster /></Screen>;
   if (view === 'profile') return <Screen title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
   if (view === 'settings') return <Screen title="Settings" onBack={() => setView('home')}>
@@ -97,9 +101,10 @@ export default function IndividualHub() {
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
   const items: Item[] = [
-    { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', soon: true },
+    { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
+    ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
     { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', soon: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },

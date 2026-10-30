@@ -63,7 +63,8 @@ function ReviewSignIn({ onSignedIn }: { onSignedIn: () => void }) {
   </AuthShell>;
 }
 
-function ReviewRoom({ onSignedOut }: { onSignedOut: () => void }) {
+// Used inside Individual Sign In too (embedded): the same form, with that sign-in's own way of calling the API.
+export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: { onSignedOut: () => void; api?: (query: string, body?: unknown) => Promise<any>; embedded?: boolean }) {
   const [view, setView] = useState<'todo' | 'done'>('todo');
   const [todo, setTodo] = useState<ReviewSummary[] | null>(null);
   const [done, setDone] = useState<ReviewSummary[] | null>(null);
@@ -76,7 +77,7 @@ function ReviewRoom({ onSignedOut }: { onSignedOut: () => void }) {
   const failed = (cause: unknown, fallback: string) => { if ((cause as { status?: number }).status === 401) onSignedOut(); else setError(cause instanceof Error ? cause.message : fallback); };
   const load = async () => {
     try {
-      const [waiting, finished] = await Promise.all([reviewApi('action=todo'), reviewApi('action=mine')]);
+      const [waiting, finished] = await Promise.all([api('action=todo'), api('action=mine')]);
       setTodo(waiting.reviews); setDone(finished.reviews);
       setForm((current) => current.assessorName ? current : { ...current, assessorName: waiting.assessor || '' });
     } catch (cause) { setTodo([]); setDone([]); failed(cause, 'Unable to load your reviews.'); }
@@ -96,16 +97,16 @@ function ReviewRoom({ onSignedOut }: { onSignedOut: () => void }) {
     if (!signed) { setError('Tick the box to confirm and sign the review digitally.'); return; }
     setSaving(true);
     try {
-      const result = await reviewApi('action=submit', { ...form, id: open.id, signed: true });
+      const result = await api('action=submit', { ...form, id: open.id, signed: true });
       setThanks(result.review); setOpen(null);
       void load();
     } catch (cause) { failed(cause, 'Unable to submit the review.'); }
     setSaving(false);
   };
 
-  return <div className="min-h-screen bg-[#f7f8fb] px-4 py-8 text-[#14233b] sm:px-8 lg:px-14">
+  return <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] px-4 py-8 text-[#14233b] sm:px-8 lg:px-14'}>
     <div className="mx-auto max-w-[1100px] space-y-6">
-      <div className="flex items-center justify-between"><a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a><button onClick={() => { void signOutSupabase().finally(onSignedOut); }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-white"><LogOut className="h-4 w-4" />Sign out</button></div>
+      {!embedded && <div className="flex items-center justify-between"><a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a><button onClick={() => { void signOutSupabase().finally(onSignedOut); }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-white"><LogOut className="h-4 w-4" />Sign out</button></div>}
       <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Performance Review · Klinik ARA 24 Jam</p><h1 className="mt-3 text-3xl font-semibold tracking-tight">Staff performance review</h1><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews Office HR has asked you to do. Rate the four areas of the monthly review form; the result goes straight back to HR.</p></div>

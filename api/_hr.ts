@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
+import { attendanceHrAction } from './_attendance.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
@@ -198,6 +199,8 @@ export async function hrHandler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
+
+    if (action.startsWith('attendance_')) return await attendanceHrAction(req, res, db, action, body, text((user as any)?.email, 120));
 
     if (req.method === 'GET' && action === 'staff') {
       // The Assessment Room staff list; preview and test accounts are not real staff.
