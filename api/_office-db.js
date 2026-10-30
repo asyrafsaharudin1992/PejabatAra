@@ -16,9 +16,11 @@ export async function activeAccount(req, sharedDb) {
   if (!token) throw Object.assign(new Error('Sign in required.'), { status: 401 });
   const db = sharedDb || serviceDb();
   const { data, error } = await db.auth.getUser(token);
+  if (error && (!error.status || error.status >= 500)) throw Object.assign(new Error('Unable to verify account access. Please try again.'), { status: 503 });
   if (error || !data.user) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
-  const { data: profile, error: profileError } = await db.from('profiles').select('role,status,department').eq('id', data.user.id).single();
-  if (profileError || profile?.status !== 'active') throw Object.assign(new Error('Access restricted.'), { status: 403 });
+  const { data: profile, error: profileError } = await db.from('profiles').select('id,email,full_name,role,status,department').eq('id', data.user.id).maybeSingle();
+  if (profileError) throw Object.assign(new Error('Unable to verify account access. Please try again.'), { status: 503 });
+  if (!profile || profile.status !== 'active') throw Object.assign(new Error('Access restricted.'), { status: 403 });
   return { db, user: data.user, profile };
 }
 

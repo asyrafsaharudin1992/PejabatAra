@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { PortalUser, UserRole } from "../portalData";
 import { withDeviceHeader } from "./device";
+import { fetchOfficeIdentity, OfficeIdentityError } from './officeIdentity';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -22,20 +23,21 @@ const roleMap: Record<string, UserRole> = {
   staff: "Staff",
 };
 
+export async function getOfficeIdentity() {
+  if (!supabase) throw new OfficeIdentityError('Supabase is not configured.', 503);
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) throw new OfficeIdentityError('Please sign in again.', 401);
+  return fetchOfficeIdentity(data.session.access_token);
+}
+
 export async function signInWithSupabase(email: string, password: string): Promise<PortalUser> {
   if (!supabase) throw new Error("Supabase belum dikonfigurasi");
 
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
   if (authError || !authData.user) throw authError || new Error("Log masuk gagal");
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, department, status")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-  // Authentication is still valid when a newly invited user has not received
-  // a profile row yet. Keep the user in the portal with safe staff defaults.
-  if (profileError) console.warn("Profile lookup skipped:", profileError.message);
+  if (!authData.session) throw new OfficeIdentityError('Please sign in again.', 401);
+  const identity = await fetchOfficeIdentity(authData.session.access_token);
 
   const { data: membership } = await supabase
     .from("staff_branches")
@@ -48,11 +50,11 @@ export async function signInWithSupabase(email: string, password: string): Promi
   return {
     id: authData.user.id,
     email: authData.user.email || email,
-    fullName: profile?.full_name || authData.user.user_metadata?.full_name || email.split("@")[0],
-    role: roleMap[profile?.role || "staff"] || "Staff",
-    department: profile?.department || "Department not assigned",
+    fullName: identity.fullName || authData.user.user_metadata?.full_name || email.split("@")[0],
+    role: roleMap[identity.role] || "Staff",
+    department: identity.department || "Department not assigned",
     branch: branchRecord?.name || "Cawangan belum ditetapkan",
-    status: profile?.status || "active",
+    status: identity.status,
     lastActive: "Sekarang",
     officeAccess: Array.isArray(authData.user.app_metadata?.office_access) ? authData.user.app_metadata.office_access : [],
   };

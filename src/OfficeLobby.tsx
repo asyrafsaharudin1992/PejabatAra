@@ -1,7 +1,8 @@
 import { FormEvent, lazy, Suspense, useEffect, useState, ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, ArrowRightLeft, Building2, ClipboardCheck, IdCard, Laptop, ShieldCheck } from 'lucide-react';
-import { isSupabaseConfigured, signInWithSupabase, supabase } from './lib/supabase';
+import { getOfficeIdentity, isSupabaseConfigured, signInWithSupabase, supabase } from './lib/supabase';
 import { DEVICE_REQUIRED_EVENT } from './lib/device';
+import { OfficeIdentityError } from './lib/officeIdentity';
 import { setHomeOffice } from './lib/officeVisit';
 import { DeviceGate, loadDeviceStatus } from './DeviceAccess';
 
@@ -40,50 +41,46 @@ const currentOffice = () => {
   } catch { /* The sign-in page can recover from invalid local storage. */ }
  const id = window.location.hash.replace('#office/', ''); return id === 'users' || id === 'devices' || id === 'assessment' || id === 'assessment-admin' || id === 'incentives' || id === 'individual' || id === 'performance-review' || offices.some((room) => room.id === id) ? id : 'lobby'; };
 
+type AccessFailure = 'denied' | 'signin' | 'error';
+const accessFailure = (error: unknown): AccessFailure => error instanceof OfficeIdentityError ? error.status === 401 ? 'signin' : error.status === 403 ? 'denied' : 'error' : 'error';
+function AccessMessage({ state, admin = false, onRetry }: { state: AccessFailure; admin?: boolean; onRetry: () => void }) {
+  return <div className="mx-auto max-w-lg p-8 text-sm text-slate-600" role="alert"><p>{state === 'signin' ? 'Your sign-in session is missing or has expired. Please sign in again.' : state === 'error' ? 'We could not verify your account access. Please check your connection and try again.' : admin ? 'System Admin access is required.' : 'This account does not have access to this office.'}</p>{state === 'error' && <button onClick={onRetry} className="mt-4 mr-4 rounded-xl bg-[#0b587b] px-4 py-2.5 font-semibold text-white">Try again</button>}<a href="#" className="mt-4 inline-block font-semibold text-[#0b587b] underline">Return to sign in</a></div>;
+}
 function AdminOnly({ children }: { children: ReactNode }) {
-  const [access, setAccess] = useState<'loading' | 'allowed' | 'denied'>('loading');
+  const [access, setAccess] = useState<'loading' | 'allowed' | AccessFailure>('loading');
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        if (!supabase) throw new Error('Not configured');
-        const { data, error } = await supabase.auth.getUser();
-        if (error || !data.user) throw new Error('Sign in required');
-        const { data: profile } = await supabase.from('profiles').select('role,status').eq('id', data.user.id).single();
-        if (live) setAccess(profile?.role === 'super_admin' && profile?.status === 'active' ? 'allowed' : 'denied');
-      } catch { if (live) setAccess('denied'); }
-    })();
+    let live = true; setAccess('loading');
+    getOfficeIdentity().then(identity => { if (live) setAccess(identity.role === 'super_admin' ? 'allowed' : 'denied'); }).catch(error => { if (live) setAccess(accessFailure(error)); });
     return () => { live = false; };
-  }, []);
+  }, [attempt]);
   if (access === 'loading') return <p className="p-10">Checking access…</p>;
-  if (access === 'denied') return <div className="p-10"><p>System Admin access is required.</p><a href="#">Return to sign in</a></div>;
+  if (access !== 'allowed') return <AccessMessage state={access} admin onRetry={() => setAttempt(value => value + 1)} />;
   return <>{children}</>;
 }
 
 function OfficeOnly({ officeId, children }: { officeId: string; children: ReactNode }) {
-  const [access, setAccess] = useState<'loading' | 'allowed' | 'denied' | 'device'>('loading');
+  const [access, setAccess] = useState<'loading' | 'allowed' | 'device' | AccessFailure>('loading');
+  const [attempt, setAttempt] = useState(0);
   // The server reports an unregistered or expired device mid-session (e.g. day 31).
   useEffect(() => { const onRequired = () => setAccess('device'); window.addEventListener(DEVICE_REQUIRED_EVENT, onRequired); return () => window.removeEventListener(DEVICE_REQUIRED_EVENT, onRequired); }, []);
   useEffect(() => {
-    let live = true;
+    let live = true; setAccess('loading');
     (async () => {
       try {
-        if (!supabase) throw new Error('Not configured');
-        const { data, error } = await supabase.auth.getUser();
-        if (error || !data.user) throw new Error('Sign in required');
-        const { data: profile } = await supabase.from('profiles').select('role,status').eq('id', data.user.id).single();
-        const allowed = profile?.status === 'active' && (profile?.role === 'super_admin' || data.user.app_metadata?.office_access?.includes(officeId));
+        const identity = await getOfficeIdentity();
+        const allowed = identity.role === 'super_admin' || identity.officeAccess.includes(officeId);
         if (!allowed) { if (live) setAccess('denied'); return; }
         // Staff need a registered device once the device lock is on; System Admins are exempt.
         // If the status check itself fails, let the office load: the server still enforces the lock.
-        const device = profile?.role === 'super_admin' ? null : await loadDeviceStatus().catch(() => null);
+        const device = identity.role === 'super_admin' ? null : await loadDeviceStatus().catch(() => null);
         if (live) setAccess(device && device.lockEnabled && !device.exempt && !device.device ? 'device' : 'allowed');
-      } catch { if (live) setAccess('denied'); }
+      } catch (error) { if (live) setAccess(accessFailure(error)); }
     })();
     return () => { live = false; };
-  }, [officeId]);
+  }, [officeId, attempt]);
   if (access === 'loading') return <p className="p-10">Checking access…</p>;
-  if (access === 'denied') return <div className="p-10"><p>This account does not have access to this office.</p><a href="#">Return to sign in</a></div>;
+  if (access === 'denied' || access === 'signin' || access === 'error') return <AccessMessage state={access} onRetry={() => setAttempt(value => value + 1)} />;
   if (access === 'device') return <DeviceGate onRegistered={() => window.location.reload()} />;
   return <>{children}</>;
 }
@@ -130,7 +127,16 @@ export default function OfficeLobby() {
   const [office, setOffice] = useState(currentOffice);
   const [systemAdmin, setSystemAdmin] = useState(false);
   const [officeAccess, setOfficeAccess] = useState<string[]>([]);
-  useEffect(() => { let live = true; setSystemAdmin(false); if (supabase) supabase.auth.getUser().then(async ({ data }) => { if (!data.user) return; const { data: profile } = await supabase.from('profiles').select('role,status').eq('id', data.user.id).single(); const access: string[] = Array.isArray(data.user.app_metadata?.office_access) ? data.user.app_metadata.office_access : []; const home = data.user.app_metadata?.home_office; if (live) { const admin = profile?.role === 'super_admin' && profile?.status === 'active'; setSystemAdmin(admin); setOfficeAccess(profile?.status === 'active' ? access : []); setHomeOffice(admin ? 'admin' : access.includes(home) ? home : access[0] || ''); } }); return () => { live = false; }; }, [office]);
+  useEffect(() => {
+    let live = true; setSystemAdmin(false); setOfficeAccess([]);
+    if (supabase) getOfficeIdentity().then(identity => {
+      if (!live) return;
+      const admin = identity.role === 'super_admin';
+      setSystemAdmin(admin); setOfficeAccess(identity.officeAccess);
+      setHomeOffice(admin ? 'admin' : identity.officeAccess.includes(identity.homeOffice) ? identity.homeOffice : identity.officeAccess[0] || '');
+    }).catch(() => { /* The access guard shows the actionable error. */ });
+    return () => { live = false; };
+  }, [office]);
   // Other finished offices this account may enter, shown as shortcuts beside the return button.
   const otherOffices = offices.filter((room) => room.ready && room.id !== 'admin' && room.id !== office && (systemAdmin || officeAccess.includes(room.id)));
   const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 639px)').matches);
@@ -143,7 +149,7 @@ export default function OfficeLobby() {
   useEffect(() => { const onHash = () => { const nextOffice = currentOffice(); if (nextOffice === 'lobby') localStorage.removeItem('ara_view_mode'); setOffice(nextOffice); requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' })); }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
   useEffect(() => { requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' })); }, [office]);
   useEffect(() => { document.title = office === 'lobby' ? 'AraOffice · Sign in' : `${offices.find((room) => room.id === office)?.title || ({ users: 'User Management', devices: 'Registered Devices', assessment: 'Assessment Room', 'assessment-admin': 'Assessment Room', incentives: 'Incentive Claims' } as Record<string, string>)[office]} · AraOffice`; }, [office]);
-  const submit = async (event: FormEvent) => { event.preventDefault(); setError(''); setLoading(true); try { let role = 'Staff'; if (isSupabaseConfigured) { const account = await signInWithSupabase(email, password); role = account.role; const allowed = role === 'Superadmin' || account.officeAccess?.includes(selected); if (selected === 'admin' && role !== 'Superadmin') throw new Error('System Admin access is restricted.'); if (selected !== 'admin' && !allowed) throw new Error('Office access is restricted.'); localStorage.setItem('ara_portal_session', JSON.stringify(account)); localStorage.setItem('araoffice_user', JSON.stringify({ email: account.email, fullName: account.fullName, role: account.role === 'Superadmin' ? 'Superadmin' : 'Staff', status: account.status || 'Active', location: account.branch, profilePic: '' })); if (role === 'Superadmin' && selected !== 'admin') localStorage.setItem('ara_view_mode', 'admin'); else if (role !== 'Superadmin') localStorage.removeItem('ara_view_mode'); } else { throw new Error('Supabase is not configured for this deployment.'); } if (selected === 'admin' && role !== 'Superadmin') throw new Error('System Admin access is restricted.'); window.location.hash = `office/${selected}`; } catch (caught) { const message = caught instanceof Error ? caught.message : ''; setError(message.includes('System Admin') ? 'System Admin access is restricted to Superadmin accounts.' : message.includes('Office access') ? 'This account is not permitted to enter the selected office.' : message.includes('configured') ? message : 'Unable to sign in with these details. Check your email and password.'); } finally { setLoading(false); } };
+  const submit = async (event: FormEvent) => { event.preventDefault(); setError(''); setLoading(true); try { let role = 'Staff'; if (isSupabaseConfigured) { const account = await signInWithSupabase(email, password); role = account.role; const allowed = role === 'Superadmin' || account.officeAccess?.includes(selected); if (selected === 'admin' && role !== 'Superadmin') throw new Error('System Admin access is restricted.'); if (selected !== 'admin' && !allowed) throw new Error('Office access is restricted.'); localStorage.setItem('ara_portal_session', JSON.stringify(account)); localStorage.setItem('araoffice_user', JSON.stringify({ email: account.email, fullName: account.fullName, role: account.role === 'Superadmin' ? 'Superadmin' : 'Staff', status: account.status || 'Active', location: account.branch, profilePic: '' })); if (role === 'Superadmin' && selected !== 'admin') localStorage.setItem('ara_view_mode', 'admin'); else if (role !== 'Superadmin') localStorage.removeItem('ara_view_mode'); } else { throw new Error('Supabase is not configured for this deployment.'); } if (selected === 'admin' && role !== 'Superadmin') throw new Error('System Admin access is restricted.'); window.location.hash = `office/${selected}`; } catch (caught) { const message = caught instanceof Error ? caught.message : ''; setError(caught instanceof OfficeIdentityError ? caught.message : message.includes('System Admin') ? 'System Admin access is restricted to Superadmin accounts.' : message.includes('Office access') ? 'This account is not permitted to enter the selected office.' : message.includes('configured') ? message : 'Unable to sign in with these details. Check your email and password.'); } finally { setLoading(false); } };
   if (office === 'individual') return <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Opening your sign-in…</div>}><IndividualHub /></Suspense>;
   if (office === 'incentives') return <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Opening Incentive Claims…</div>}><IncentiveClaims /></Suspense>;
   if (office === 'performance-review') return <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Opening your sign-in…</div>}><IndividualHub /></Suspense>;

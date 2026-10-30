@@ -4,7 +4,9 @@ import { assessmentHandler } from './_assessment.js';
 import { clinicalHandler } from './_clinical.js';
 import { hrHandler } from './_hr.js';
 import { reviewHandler } from './_review.js';
+import { accountHandler } from './_account.js';
 export default async function handler(req: any, res: any) {
+  if (req.query?.resource === 'account') return accountHandler(req, res);
   if (req.query?.resource === 'devices') return devicesHandler(req, res);
   if (req.query?.resource === 'assessment') return assessmentHandler(req, res);
   if (req.query?.resource === 'clinical') return clinicalHandler(req, res);
