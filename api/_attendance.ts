@@ -171,7 +171,7 @@ async function decideRequest(db: any, id: string, decision: string, note: string
 
 // ---- Staff side (Individual Sign In) ----
 export async function attendanceStaffAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
-  const [{ data: me, error }, rules] = await Promise.all([db.from('hr_employees').select(`${PERSON},status,clock_mode,clock_place_ids,clock_device_hash,leave_approver_id,final_approver_id`).eq('assessment_staff_id', staff.id).maybeSingle(), loadRules(db)]);
+  const [{ data: me, error }, rules] = await Promise.all([db.from('hr_employees').select(`${PERSON},status,clock_mode,clock_place_ids,leave_approver_id,final_approver_id`).eq('assessment_staff_id', staff.id).maybeSingle(), loadRules(db)]);
   if (error) throw error;
   if (!me) throw fail(400, 'Your sign-in is not linked to your staff record yet. Ask HR.');
 
@@ -186,7 +186,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const last = (recent || [])[0];
     const nextKind = last && last.kind === 'in' && Date.now() - Date.parse(last.clock_at) < 20 * HOUR ? 'out' : 'in';
     const mine = days.get(me.id) || [];
-    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), deviceRegistered: !!me.clock_device_hash, required: me.clock_required || 'full' };
+    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full' };
   };
 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
@@ -201,9 +201,9 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
   if (req.method === 'POST' && action === 'attendance_clock') {
     if (me.status !== 'Active') throw fail(403, 'Your staff record is not active. Ask HR.');
     const deviceId = text(body.deviceId, 80);
-    if (deviceId.length < 16) throw fail(400, 'This phone could not be identified. Reload the page and try again.');
+    if (deviceId.length < 16) throw fail(400, 'This browser could not identify the clock attempt. Reload the page and try again.');
     const hash = sha(deviceId);
-    if (me.clock_device_hash && me.clock_device_hash !== hash) throw fail(403, 'You can only clock in on the phone you first used. Ask HR to reset it if you changed phones.');
+    // Browser IDs are retained only as clock audit metadata, never as an access restriction.
     const lat = Number(body.lat), lng = Number(body.lng), accuracy = Number(body.accuracy);
     const hasLocation = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && body.lat !== null && body.lat !== '';
     let place: any = null, distance: number | null = null, within: boolean | null = null;
@@ -224,7 +224,6 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const kind = prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in';
     const { error: insertError } = await db.from('hr_attendance_clocks').insert({ employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: hash.slice(0, 12) });
     if (insertError) throw insertError;
-    if (!me.clock_device_hash) await db.from('hr_employees').update({ clock_device_hash: hash, clock_device_at: new Date().toISOString() }).eq('id', me.id);
     return res.status(200).json({ success: true, kind, ...(await state()) });
   }
 
@@ -437,9 +436,9 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   }
 
   if (req.method === 'GET' && action === 'attendance_people') {
-    const { data, error } = await db.from('hr_employees').select(`${PERSON},clock_mode,clock_place_ids,clock_device_hash,clock_device_at`).eq('status', 'Active').order('full_name').limit(500);
+    const { data, error } = await db.from('hr_employees').select(`${PERSON},clock_mode,clock_place_ids`).eq('status', 'Active').order('full_name').limit(500);
     if (error) throw error;
-    return res.status(200).json({ people: (data || []).map((row: any) => ({ ...person(row), mode: row.clock_mode, placeIds: row.clock_place_ids || [], clockRequired: row.clock_required || 'full', defaultShift: row.default_shift || '', deviceRegistered: !!row.clock_device_hash, deviceAt: row.clock_device_at })) });
+    return res.status(200).json({ people: (data || []).map((row: any) => ({ ...person(row), mode: row.clock_mode, placeIds: row.clock_place_ids || [], clockRequired: row.clock_required || 'full', defaultShift: row.default_shift || '' })) });
   }
   if (req.method === 'POST' && action === 'attendance_person_save') {
     const id = text(body.id, 60), mode = body.mode === 'anywhere' ? 'anywhere' : 'places';
@@ -452,14 +451,6 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { clock_mode: mode, clock_place_ids: placeIds, clock_required: required, default_shift: defaultShift, by: userLabel } });
     return res.status(200).json({ success: true });
   }
-  if (req.method === 'POST' && action === 'attendance_device_reset') {
-    const id = text(body.id, 60);
-    const { error } = await db.from('hr_employees').update({ clock_device_hash: null, clock_device_at: null }).eq('id', id);
-    if (error) throw error;
-    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { clock_device: 'reset', by: userLabel } });
-    return res.status(200).json({ success: true });
-  }
-
   if (req.method === 'GET' && action === 'attendance_rules') {
     const rules = await loadRules(db);
     return res.status(200).json({ lateGrace: rules.lateGrace, earlyGrace: rules.earlyGrace, otMin: rules.otMin, times: [...rules.times.entries()].map(([key, value]) => ({ kind: key.split('|')[0], code: key.split('|')[1], start: value.start, end: value.end })).sort((a, b) => a.kind.localeCompare(b.kind) || a.start.localeCompare(b.start) || a.code.localeCompare(b.code)) });

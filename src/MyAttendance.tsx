@@ -3,15 +3,15 @@ import { ChevronLeft, ChevronRight, Clock3, LogIn, LogOut, MapPin } from 'lucide
 import { assessmentFetch } from './AssessmentRoom';
 import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 
-// My attendance inside Individual Sign In: one button to clock in or out (checked against the clinic location and
-// this person's own phone), today's shift, the month so far, and a request to correct a forgotten clock. A supervisor
+// My attendance inside Individual Sign In: one button to clock in or out at a permitted workplace,
+// today's shift, the month so far, and a request to correct a forgotten clock. A supervisor
 // sees the requests waiting for them here.
 type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; leave: string };
-type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; shift: Day; yesterday: Day; deviceRegistered: boolean; required: 'full' | 'in_only' | 'none' };
+type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
 type Req = { id: string; name: string; date: string; inTime: string; outTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; note: string };
 
 const DEVICE_KEY = 'ara_clock_device';
-// One random id per phone (browser); HR resets it if the person changes phones.
+// Anonymous browser identifier recorded with each clock for audit only; changing browsers is allowed.
 const deviceId = () => { try { let id = localStorage.getItem(DEVICE_KEY); if (!id) { id = crypto.randomUUID(); localStorage.setItem(DEVICE_KEY, id); } return id; } catch { return 'no-storage-' + Math.random().toString(36).slice(2) + Date.now(); } };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' });
 const monthOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -162,6 +162,6 @@ export default function MyAttendance() {
         {!days.some((day) => !['off', 'upcoming'].includes(day.status)) && <li className="py-3 text-sm text-slate-500">Nothing recorded for {monthName(month)} yet.</li>}
       </ul>}
     </section>
-    <p className="px-1 text-xs leading-5 text-slate-400">Clock in and out on your own phone, at your clinic. If you change phones, ask HR to reset it. Arriving within the grace period is not late. If you forget to clock, send a request above.</p>
+    <p className="px-1 text-xs leading-5 text-slate-400">Clock in and out using any browser, at your assigned workplace. Keep your sign-in details private. Arriving within the grace period is not late. If you forget to clock, send a request above.</p>
   </div>;
 }
