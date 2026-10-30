@@ -1,7 +1,8 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { ImportRow, readInfotechReport } from './lib/infotechReport';
 
 // Office HR > Attendance: who clocked in today, the month in numbers, OT to approve, corrections staff asked for, the late
 // pattern, the places clocking is allowed, where each person may clock, and the rules (grace and shift times).
@@ -12,12 +13,12 @@ async function api(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
 }
-type Tab = 'today' | 'month' | 'ot' | 'requests' | 'late' | 'places' | 'staff' | 'rules';
+type Tab = 'today' | 'month' | 'ot' | 'requests' | 'late' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; leave: string };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
 type Place = { id: string; name: string; company: string; latitude: number; longitude: number; radius: number; active: boolean };
 type Person = { id: string; company: string; code: string; name: string; doctor: boolean; mode: 'places' | 'anywhere'; placeIds: string[]; clockRequired: 'full' | 'in_only' | 'none'; defaultShift: string; deviceRegistered: boolean; deviceAt: string | null };
-type Clock = { kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string };
+type Clock = { id: string; source: 'phone' | 'infotech' | 'hr' | 'request'; kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string };
 type TimeRow = { kind: 'staff' | 'doctor'; code: string; start: string; end: string };
 type OtRow = { id: string; company: string; code: string; name: string; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; dayOff: boolean; captured: number; status: '' | 'approved' | 'rejected'; approved: number; rate: number; note: string };
 type Req = { id: string; name: string; date: string; inTime: string; outTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; decidedBy: string; note: string };
@@ -54,8 +55,13 @@ function Today({ onError }: { onError: (message: string) => void }) {
   const [company, setCompany] = useState('');
   const [open, setOpen] = useState('');
   const [clocks, setClocks] = useState<Clock[] | null>(null);
-  useEffect(() => { setRows(null); setOpen(''); api(`action=attendance_daily&date=${date}`).then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); }, [date]);
-  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setClocks(null); try { const result = await api(`action=attendance_clocks&id=${id}&date=${date}`); setClocks(result.clocks); } catch (cause) { setClocks([]); onError(cause instanceof Error ? cause.message : 'Unable to load the clocks.'); } };
+  const load = () => { setRows(null); api(`action=attendance_daily&date=${date}`).then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); };
+  useEffect(() => { setOpen(''); load(); }, [date]);
+  const loadClocks = async (id: string) => { setClocks(null); try { const result = await api(`action=attendance_clocks&id=${id}&date=${date}`); setClocks(result.clocks); } catch (cause) { setClocks([]); onError(cause instanceof Error ? cause.message : 'Unable to load the clocks.'); } };
+  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setAdd({ kind: 'in', time: '', nextDay: false, note: '' }); await loadClocks(id); };
+  const [add, setAdd] = useState({ kind: 'in' as 'in' | 'out', time: '', nextDay: false, note: '' });
+  const change = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadClocks(id); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
+  const SOURCE = { phone: 'phone', infotech: 'from Infotech', hr: 'added by HR', request: 'from an approved request' } as const;
   const shown = (rows || []).filter((row) => !company || row.company === company);
   const expected = shown.filter((row) => !['off', 'extra', 'no-times'].includes(row.status));
   const count = (...statuses: string[]) => expected.filter((row) => statuses.includes(row.status)).length;
@@ -81,7 +87,16 @@ function Today({ onError }: { onError: (message: string) => void }) {
             <td className="pr-3">{badge(row.status)}</td>
             <td className="text-right"><button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button></td>
           </tr>
-          {open === row.id && <tr key={`${row.id}-details`}><td colSpan={7} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">{!clocks ? 'Loading…' : !clocks.length ? 'No clocks around this date.' : <ul className="space-y-1">{clocks.map((clock) => <li key={clock.at}>{clock.date} {clock.time} · {clock.kind === 'in' ? 'In' : 'Out'} · {clock.fromRequest ? 'added from an approved request' : clock.anywhere ? 'anywhere (not checked)' : `${clock.place}, ${clock.distance} m away`}{clock.accuracy !== null && ` · GPS ±${clock.accuracy} m`}{!clock.fromRequest && ` · phone ${clock.device}`}</li>)}</ul>}</td></tr>}
+          {open === row.id && <tr key={`${row.id}-details`}><td colSpan={7} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">
+            {!clocks ? 'Loading…' : <>
+              {!clocks.length ? <p>No clocks around this date.</p> : <ul className="space-y-1">{clocks.map((clock) => <li key={clock.id} className="flex flex-wrap items-center gap-x-2">{clock.date} {clock.time} · {clock.kind === 'in' ? 'In' : 'Out'} · {clock.source === 'phone' ? (clock.anywhere ? 'phone, anywhere (not checked)' : `${clock.place}, ${clock.distance} m away${clock.accuracy !== null ? ` · GPS ±${clock.accuracy} m` : ''}`) : SOURCE[clock.source]}<button onClick={() => { if (window.confirm('Delete this clock? It is written to the audit trail.')) void change(() => api('action=attendance_clock_delete', { clockId: clock.id }), row.id); }} className="font-semibold text-rose-600 hover:underline">Delete</button></li>)}</ul>}
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3"><span className="font-semibold">Add a clock for {dayName(date)}</span>
+                <select value={add.kind} onChange={(event) => setAdd({ ...add, kind: event.target.value as 'in' | 'out' })} aria-label="Clock in or out" className={field}><option value="in">In</option><option value="out">Out</option></select>
+                <input type="time" value={add.time} onChange={(event) => setAdd({ ...add, time: event.target.value })} aria-label="Time" className={field} />
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={add.nextDay} onChange={(event) => setAdd({ ...add, nextDay: event.target.checked })} />next day (night shift)</label>
+                <input value={add.note} onChange={(event) => setAdd({ ...add, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
+                <button onClick={() => void change(() => api('action=attendance_clock_add', { id: row.id, date, kind: add.kind, time: add.time, nextDay: add.nextDay, note: add.note }), row.id)} disabled={!add.time} className={button}>Add</button></div>
+            </>}</td></tr>}
         </>)}</tbody>
       </table>}
       {rows && !shown.filter((row) => row.status !== 'off').length && <p className="py-4 text-sm text-slate-500">Nobody is expected on this date.</p>}
@@ -183,6 +198,33 @@ function Late({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
+function Import({ onError }: { onError: (message: string) => void }) {
+  const [file, setFile] = useState('');
+  const [rows, setRows] = useState<ImportRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ from: string; to: string; days: number; people: number; added: number; replaced: number; rosterAdded: number; unknown: string[] } | null>(null);
+  const choose = async (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = event.target.files?.[0]; event.target.value = '';
+    if (!picked) return;
+    setResult(null); setRows(null); setFile(picked.name);
+    try { const read = readInfotechReport(await picked.text()); if (!read.length) throw new Error('No attendance rows were found in that file.'); setRows(read); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to read that file.'); }
+  };
+  const run = async () => {
+    if (!rows) return;
+    setBusy(true);
+    try { const response = await api('action=attendance_import', { rows }); if (response.error) throw new Error(response.error); setResult(response); setRows(null); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import.'); } finally { setBusy(false); }
+  };
+  const days: string[] = rows ? [...new Set<string>(rows.map((row) => row.date))].sort() : [];
+  return <section className={`${card} space-y-4`}>
+    <div><h3 className="font-semibold">Import from Infotech</h3><p className="text-sm text-slate-500">When something changes in Infotech (a clock, a correction, a new day), bring it in here. In Infotech open <em>Reports &gt; Individual Attendance</em>, choose the dates and all staff, and press <em>Export CSV</em> (one company at a time). Then choose the file below.</p></div>
+    <label className={`${ghost} cursor-pointer`}><Download className="h-4 w-4 rotate-180" />Choose the CSV file<input type="file" accept=".csv,text/csv" onChange={(event) => void choose(event)} className="hidden" /></label>
+    {rows && <div className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm"><p><strong>{file}</strong>: {rows.length} person-days for {new Set(rows.map((row) => row.code)).size} staff ({[...new Set(rows.map((row) => row.company))].join(' and ')}), {dayName(days[0])} to {dayName(days[days.length - 1])}.</p><p className="text-xs text-slate-500">Importing replaces what an earlier import said for these people and days with what Infotech says now. Clocks made on the phones and clocks HR added are not touched.</p><button onClick={() => void run()} disabled={busy} className={button}>{busy ? 'Importing…' : 'Import'}</button></div>}
+    {result && <div className="space-y-1 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800"><p className="font-semibold">Imported {dayName(result.from)} to {dayName(result.to)}.</p><p>{result.added} clocks added for {result.people} staff over {result.days} days{result.replaced ? `; ${result.replaced} earlier Infotech clocks replaced` : ''}{result.rosterAdded ? `; ${result.rosterAdded} roster days filled in` : ''}.</p>{result.unknown.length > 0 && <p className="text-amber-800">Not in HR, so skipped: {result.unknown.join(', ')}.</p>}</div>}
+  </section>;
+}
+
 function Places({ onError }: { onError: (message: string) => void }) {
   const [places, setPlaces] = useState<Place[] | null>(null);
   const blank = { id: '', name: '', company: 'KJ', latitude: '', longitude: '', radius: '150' };
@@ -277,7 +319,7 @@ function Rules({ onError }: { onError: (message: string) => void }) {
 
 export function HRAttendance({ onError }: { onError: (message: string) => void }) {
   const [tab, setTab] = useState<Tab>('today');
-  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['requests', 'Requests'], ['late', 'Late'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
+  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['requests', 'Requests'], ['late', 'Late'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{tabs.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>
     {tab === 'today' && <Today onError={onError} />}
@@ -285,6 +327,7 @@ export function HRAttendance({ onError }: { onError: (message: string) => void }
     {tab === 'ot' && <Ot onError={onError} />}
     {tab === 'requests' && <Requests onError={onError} />}
     {tab === 'late' && <Late onError={onError} />}
+    {tab === 'import' && <Import onError={onError} />}
     {tab === 'places' && <Places onError={onError} />}
     {tab === 'staff' && <Staff onError={onError} />}
     {tab === 'rules' && <Rules onError={onError} />}

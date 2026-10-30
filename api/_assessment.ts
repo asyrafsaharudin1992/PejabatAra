@@ -481,29 +481,32 @@ async function staffAction(req: any, res: any, action: string, body: any) {
 
   if (req.method === 'GET' && action === 'me') {
     let isApprover = false, leaveWaiting = 0, designation = '', reviewWaiting = 0;
-    try {
-      const { data: self } = await db.from('hr_employees').select('id,designation').eq('assessment_staff_id', staff.id).maybeSingle();
-      if (self) {
-        designation = String(self.designation || '');
-        const { count } = await db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},leave_backup_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'); isApprover = (count || 0) > 0;
-        // Requests waiting for this person's decision: shown as a number on the Leave icon.
-        const [{ count: first }, { count: last }] = await Promise.all([
-          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).or(`approver_id.eq.${self.id},backup_approver_id.eq.${self.id}`).eq('status', 'pending'),
-          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('final_approver_id', self.id).eq('status', 'supervisor_approved'),
-        ]);
-        leaveWaiting = (first || 0) + (last || 0);
-        // Performance reviews HR has given this person to fill in: shown as a number on the Performance Review icon.
-        const { count: reviews } = await db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('assessor_employee_id', self.id).eq('status', 'pending'); reviewWaiting = reviews || 0;
-      }
-    } catch { /* leave tables not set up yet */ }
-    // Preview accounts see every assessment, including closed ones.
+    // Everything is asked at once (the database is far from the server, so steps in turn add up): first the staff
+    // record and the assessments, then the numbers that depend on the staff record.
     let quizQuery = db.from('assessment_quizzes').select('id,title,description,pass_mark,active,questions').order('created_at', { ascending: false });
+    // Preview accounts see every assessment, including closed ones.
     if (!staff.can_preview) quizQuery = quizQuery.eq('active', true);
-    const [{ data: quizzes, error: quizError }, { data: attempts, error: attemptError }] = await Promise.all([
+    const [selfResult, { data: quizzes, error: quizError }, { data: attempts, error: attemptError }] = await Promise.all([
+      db.from('hr_employees').select('id,designation').eq('assessment_staff_id', staff.id).maybeSingle().then((result: any) => result, () => ({ data: null })),
       quizQuery,
       db.from('assessment_attempts').select('quiz_id,score,total,attempt_no,submitted_at').eq('staff_id', staff.id),
     ]);
     if (quizError || attemptError) throw quizError || attemptError;
+    const self = selfResult?.data;
+    if (self) {
+      designation = String(self.designation || '');
+      try {
+        const [{ count: approverCount }, { count: first }, { count: last }, { count: reviews }] = await Promise.all([
+          db.from('hr_employees').select('id', { count: 'exact', head: true }).or(`leave_approver_id.eq.${self.id},leave_backup_approver_id.eq.${self.id},final_approver_id.eq.${self.id}`).eq('status', 'Active'),
+          // Requests waiting for this person's decision: shown as a number on the Leave icon.
+          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).or(`approver_id.eq.${self.id},backup_approver_id.eq.${self.id}`).eq('status', 'pending'),
+          db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('final_approver_id', self.id).eq('status', 'supervisor_approved'),
+          // Performance reviews HR has given this person to fill in: shown as a number on the Performance Review icon.
+          db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('assessor_employee_id', self.id).eq('status', 'pending'),
+        ]);
+        isApprover = (approverCount || 0) > 0; leaveWaiting = (first || 0) + (last || 0); reviewWaiting = reviews || 0;
+      } catch { /* leave or review tables not set up yet */ }
+    }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);

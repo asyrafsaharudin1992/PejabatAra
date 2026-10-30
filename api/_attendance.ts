@@ -346,9 +346,72 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
 
   if (req.method === 'GET' && action === 'attendance_clocks') {
     const id = text(req.query.id, 60), date = isDate(req.query.date) ? String(req.query.date) : today();
-    const { data, error } = await db.from('hr_attendance_clocks').select('kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)').eq('employee_id', id).gte('clock_at', `${addDay(date, -1)}T12:00:00+08:00`).lte('clock_at', `${addDay(date, 1)}T12:00:00+08:00`).order('clock_at');
+    const { data, error } = await db.from('hr_attendance_clocks').select('id,kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)').eq('employee_id', id).gte('clock_at', `${addDay(date, -1)}T12:00:00+08:00`).lte('clock_at', `${addDay(date, 1)}T12:00:00+08:00`).order('clock_at');
     if (error) throw error;
-    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && row.device !== 'request', fromRequest: row.device === 'request', device: row.device })) });
+    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: row.device === 'request' ? 'request' : row.device === 'hr' ? 'hr' : String(row.device).startsWith('infotech') ? 'infotech' : 'phone', kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && !['request', 'hr'].includes(row.device) && !String(row.device).startsWith('infotech'), fromRequest: row.device === 'request', device: row.device })) });
+  }
+
+  // HR adds or removes a clock directly (for example a clock the person could not make). Each change is written to the audit trail.
+  if (req.method === 'POST' && action === 'attendance_clock_add') {
+    const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : '', kind = body.kind === 'out' ? 'out' : 'in';
+    if (!id || !date) throw fail(400, 'Choose a person and a date.');
+    if (!isTime(body.time)) throw fail(400, 'Enter the time as hh:mm.');
+    let clockAt = at(date, String(body.time)); if (body.nextDay === true) clockAt += 24 * HOUR;
+    if (clockAt > Date.now() + 5 * MIN) throw fail(400, 'A clock cannot be in the future.');
+    const { error } = await db.from('hr_attendance_clocks').insert({ employee_id: id, kind, clock_at: new Date(clockAt).toISOString(), within_place: null, device: 'hr' });
+    if (error) throw error;
+    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { clock_added: `${kind} ${date} ${body.time}${body.nextDay === true ? ' (next day)' : ''}`, note: text(body.note, 200), by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
+  if (req.method === 'POST' && action === 'attendance_clock_delete') {
+    const clockId = text(body.clockId, 60);
+    const { data: one } = await db.from('hr_attendance_clocks').select('employee_id,kind,clock_at').eq('id', clockId).maybeSingle();
+    if (!one) throw fail(404, 'That clock was not found.');
+    const { error } = await db.from('hr_attendance_clocks').delete().eq('id', clockId);
+    if (error) throw error;
+    await db.from('hr_audit').insert({ employee_id: one.employee_id, action: 'update', changes: { clock_deleted: `${one.kind} ${hhmm(Date.parse(one.clock_at))} on ${new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10)}`, note: text(body.note, 200), by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
+
+  // Import of an Infotech Individual Attendance report (its Export CSV). Every clock imported is tagged with the shift date it
+  // belongs to, so importing again replaces those days with what Infotech now says (for example after a correction there)
+  // and leaves everything else, including clocks made on the phones, alone. Days with a clock and no roster row get one from the report.
+  if (req.method === 'POST' && action === 'attendance_import') {
+    const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 20000) : [];
+    if (!rows.length) throw fail(400, 'No attendance rows were found in that file.');
+    const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,employee_code');
+    if (peopleError) throw peopleError;
+    const idOf = new Map<string, string>((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p.id]));
+    const unknown = new Set<string>(); const clocks: any[] = []; const touched = new Map<string, Set<string>>(); const rosterWant: any[] = []; const dates = new Set<string>();
+    const hm = (value: number) => { const h = Math.trunc(value), m = Math.round((value - h) * 100); return h >= 0 && h < 24 && m >= 0 && m < 60 ? [h, m] : null; };
+    for (const row of rows) {
+      const date = isDate(row.date) ? String(row.date) : '';
+      const code = `${text(row.company, 4).toUpperCase()}|${text(row.code, 30).toUpperCase()}`;
+      if (!date) continue;
+      const id = idOf.get(code);
+      if (!id) { unknown.add(code.replace('|', ' ')); continue; }
+      dates.add(date); if (!touched.has(date)) touched.set(date, new Set()); touched.get(date)!.add(id);
+      const shift = text(row.shift, 20).toUpperCase(), tin = Number(row.in), tout = Number(row.out);
+      const a = tin > 0 ? hm(tin) : null, b = tout > 0 ? hm(tout) : null;
+      if (a) {
+        const stamp = (h: number, m: number) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        clocks.push({ employee_id: id, kind: 'in', clock_at: new Date(at(date, stamp(a[0], a[1]))).toISOString(), within_place: null, device: `infotech:${date}` });
+        if (b) clocks.push({ employee_id: id, kind: 'out', clock_at: new Date(at(date, stamp(b[0], b[1])) + (b[0] * 60 + b[1] <= a[0] * 60 + a[1] ? 24 * HOUR : 0)).toISOString(), within_place: null, device: `infotech:${date}` });
+      }
+      if (shift === 'RD' || shift === 'OD') rosterWant.push({ employee_id: id, work_date: date, shift, works: false, note: '' });
+      else if (a && shift && shift !== 'DOCRSD') rosterWant.push({ employee_id: id, work_date: date, shift: shift === 'DR96' ? 'OH' : shift, works: true, note: '' });
+    }
+    if (!dates.size) throw fail(400, unknown.size ? `None of the staff in this file are in HR: ${[...unknown].slice(0, 6).join(', ')}.` : 'No dates were found. Use the Export CSV of the Individual Attendance report.');
+    // replace what an earlier import said for these people and days, then add what the report says now
+    let removed = 0;
+    for (const [date, set] of touched) { const { count } = await db.from('hr_attendance_clocks').delete({ count: 'exact' }).in('employee_id', [...set]).eq('device', `infotech:${date}`); removed += count || 0; }
+    for (let i = 0; i < clocks.length; i += 300) { const { error } = await db.from('hr_attendance_clocks').insert(clocks.slice(i, i + 300)); if (error) throw error; }
+    const sorted = [...dates].sort();
+    const { data: have } = await db.from('hr_roster').select('employee_id,work_date').gte('work_date', sorted[0]).lte('work_date', sorted[sorted.length - 1]).limit(20000);
+    const haveSet = new Set((have || []).map((r: any) => `${r.employee_id}|${r.work_date}`)); const seen = new Set<string>();
+    const rosterAdd = rosterWant.filter((r) => { const key = `${r.employee_id}|${r.work_date}`; if (haveSet.has(key) || seen.has(key)) return false; seen.add(key); return true; });
+    for (let i = 0; i < rosterAdd.length; i += 300) { const { error } = await db.from('hr_roster').insert(rosterAdd.slice(i, i + 300)); if (error) throw error; }
+    return res.status(200).json({ success: true, from: sorted[0], to: sorted[sorted.length - 1], days: dates.size, people: new Set([...touched.values()].flatMap((set) => [...set])).size, added: clocks.length, replaced: removed, rosterAdded: rosterAdd.length, unknown: [...unknown] });
   }
 
   if (req.method === 'GET' && action === 'attendance_places') {
