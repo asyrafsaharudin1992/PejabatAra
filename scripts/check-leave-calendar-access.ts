@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { calendarAccessFor, calendarPersonVisible } from '../api/_leave-calendar-access.js';
-import { demoCalendar } from '../api/_local-leave-demo.js';
 
 const staff = { id: 'me', company: 'KJ', department: 'OPERATION' };
 const ordinary = calendarAccessFor(staff);
@@ -16,9 +15,10 @@ const unassigned = calendarAccessFor({ ...staff, department: null });
 assert.equal(unassigned.scope, 'self');
 assert(!calendarPersonVisible(unassigned, { ...staff, id: 'peer', department: null }));
 assert(calendarPersonVisible(unassigned, { ...staff, department: null }));
-for (const [id, expected] of [['staff-kj', 2], ['admin-kj', 5], ['admin-sk', 2], ['admin-both', 7]] as const) {
-  assert.equal(demoCalendar(id, '2026-10').items.length, expected);
-}
-assert(demoCalendar('admin-kj', '2026-10').items.every(person => person.company === 'KJ'));
-assert(demoCalendar('admin-sk', '2026-10').items.every(person => person.company === 'SK'));
-console.log('Calendar access checks passed: department, company, cross-company, invalid permissions, missing department and four demo accounts.');
+const both = calendarAccessFor({ ...staff, leave_calendar_companies: ['KJ', 'SK'] });
+assert(calendarPersonVisible(both, { ...staff, company: 'SK', department: 'OFFICE' }));
+assert(!calendarPersonVisible(both, { ...staff, company: 'OTHER' }));
+const sk = calendarAccessFor({ ...staff, leave_calendar_companies: ['SK'] });
+assert(calendarPersonVisible(sk, { ...staff, company: 'SK', department: 'OFFICE' }));
+assert(!calendarPersonVisible(sk, staff));
+console.log('Calendar access checks passed: department, company, cross-company, invalid permissions and missing department.');

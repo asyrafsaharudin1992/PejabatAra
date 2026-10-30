@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "AraOffice",
+  "short_name": "AraOffice",
+  "description": "TeamARA's staff workspace",
+  "lang": "en",
+  "start_url": "/#office/individual",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#073a56",
+  "background_color": "#1e2c58",
+  "icons": [
+    { "src": "/icons/araoffice-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/araoffice-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

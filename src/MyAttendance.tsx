@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clock3, LogIn, LogOut, MapPin } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
+import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 
 // My attendance inside Individual Sign In: one button to clock in or out (checked against the clinic location and
 // this person's own phone), today's shift, the month so far, and a request to correct a forgotten clock. A supervisor
@@ -25,11 +26,27 @@ const card = 'rounded-[22px] border border-black/[0.045] bg-white p-4 shadow-[0_
 const field = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 const reqStatus = (request: Req) => request.status === 'pending' ? 'bg-amber-50 text-amber-700' : request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500';
 
-function position(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition((result) => resolve({ lat: result.coords.latitude, lng: result.coords.longitude, accuracy: result.coords.accuracy }), (failure) => failure.code === 1 ? reject(new Error('Location is turned off for this page. Allow location in your phone settings, then try again.')) : resolve(null), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-  });
+// What to do on this person's phone when the page has been refused location (shown as a pop up).
+const phoneKind = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'ios' : /Android/i.test(navigator.userAgent) ? 'android' : 'other';
+const homeScreenApp = () => (navigator as Navigator & { standalone?: boolean }).standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+export function LocationHelp({ onClose, onRetry, kind = phoneKind(), app = homeScreenApp() }: { onClose: () => void; onRetry: () => void; kind?: 'ios' | 'android' | 'other'; app?: boolean }) {
+  const pill = (text: string) => <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-700">{text}</span>;
+  const steps = kind === 'ios' ? (app
+    ? [<>Open the <strong>Settings</strong> app on your iPhone.</>, <>Go to {pill('Privacy & Security')} &gt; {pill('Location Services')} and make sure it is <strong>on</strong>.</>, <>Scroll down to {pill('Safari Websites')} (or {pill('AraOffice')}) and choose {pill('While Using the App')}.</>, <>If it still does not ask, open the AraOffice link in <strong>Safari</strong> instead of the home screen icon.</>]
+    : [<>Tap the {pill('Page Menu / aA')} button on the left of the web address (the address bar at the top or bottom of Safari).</>, <>Tap {pill('Website Settings')}.</>, <>Tap {pill('Location')} and choose {pill('Allow')}.</>, <>If it is still off: {pill('Settings')} &gt; {pill('Privacy & Security')} &gt; {pill('Location Services')} (on) &gt; {pill('Safari Websites')} &gt; {pill('While Using the App')}.</>])
+    : kind === 'android' ? (app
+    ? [<>Press and hold the <strong>AraOffice</strong> icon, then tap {pill('App info')}.</>, <>Tap {pill('Permissions')} &gt; {pill('Location')} and choose {pill('Allow only while using the app')}.</>, <>Make sure <strong>Location</strong> is on in the phone's quick settings.</>]
+    : [<>Tap the {pill('lock')} (or settings) icon beside the web address.</>, <>Tap {pill('Permissions')} &gt; {pill('Location')} and choose {pill('Allow')}.</>, <>Make sure <strong>Location</strong> is on in the phone's quick settings.</>])
+    : [<>Click the {pill('lock')} icon on the left of the address bar.</>, <>Open {pill('Site settings')} &gt; {pill('Location')} and choose {pill('Allow')}.</>];
+  return <div role="dialog" aria-modal="true" aria-labelledby="location-help-title" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/55 p-0 backdrop-blur-sm sm:place-items-center sm:p-6">
+    <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[28px] bg-white p-6 shadow-2xl sm:rounded-[28px]">
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-600"><MapPin className="h-6 w-6" /></span>
+      <h2 id="location-help-title" className="mt-4 text-xl font-semibold tracking-tight text-[#0b2a4a]">Turn on your location</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">To clock in or out, AraOffice needs to confirm you are at your assigned workplace. Your browser or phone is blocking location access. Allow location for the AraOffice website, then tap Try again.</p>
+      <ol className="mt-4 space-y-3 text-sm leading-6 text-slate-700">{steps.map((step, index) => <li key={index} className="flex gap-3"><span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#e8f1fd] text-xs font-bold text-[#1f6feb]">{index + 1}</span><span>{step}</span></li>)}</ol>
+      <div className="mt-6 flex gap-3"><button onClick={onRetry} className="h-12 flex-1 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Try again</button><button onClick={onClose} className="h-12 rounded-2xl border border-slate-200 px-5 text-sm font-semibold text-slate-600">Close</button></div>
+    </div>
+  </div>;
 }
 
 export default function MyAttendance() {
@@ -42,6 +59,12 @@ export default function MyAttendance() {
   const [mine, setMine] = useState<Req[]>([]);
   const [waiting, setWaiting] = useState<Req[]>([]);
   const [form, setForm] = useState<{ date: string; inTime: string; outTime: string; reason: string } | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [tip, setTip] = useState(false);
+  const locationCheck = useRef<AbortController | null>(null);
+  const [locating, setLocating] = useState(false);
+  useEffect(() => () => locationCheck.current?.abort(), []);
   const loadState = () => assessmentFetch('action=attendance_today').then((result: State) => setState(result)).catch((cause: Error) => setError(cause.message));
   const loadDays = () => { setDays(null); assessmentFetch(`action=attendance_history&month=${month}`).then((result: { days: Day[] }) => setDays(result.days)).catch(() => setDays([])); };
   const loadRequests = () => { assessmentFetch('action=attendance_requests').then((result: { requests: Req[] }) => setMine(result.requests)).catch(() => setMine([])); assessmentFetch('action=attendance_request_approvals').then((result: { requests: Req[] }) => setWaiting(result.requests)).catch(() => setWaiting([])); };
@@ -49,15 +72,27 @@ export default function MyAttendance() {
   useEffect(loadDays, [month]);
 
   const clock = async () => {
-    if (!state) return;
-    setBusy(true); setError(''); setMessage('');
+    if (!state || busy) return;
+    setBusy(true); setError(''); setMessage(''); setHelpOpen(false);
+    const controller = new AbortController();
+    locationCheck.current = controller; setLocating(true);
     try {
-      const place = await position();
+      const place = await requestClockLocation(state.mode === 'places', navigator.geolocation, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setLocating(false);
+      setBlocked(false);
       const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null }) });
       setState(result);
       setMessage(`Clocked ${result.kind === 'in' ? 'in' : 'out'} at ${timeOf(new Date().toISOString())}.`);
+      // On an iPhone the phone asks each time unless the website setting is Allow: say so once.
+      try { if (phoneKind() === 'ios' && !homeScreenApp() && !localStorage.getItem('ara_location_tip')) setTip(true); } catch { /* storage not available */ }
       loadDays();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to clock.'); } finally { setBusy(false); }
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      const text = cause instanceof Error ? cause.message : 'Unable to clock.';
+      if (cause instanceof ClockLocationError && cause.reason === 'denied') { setBlocked(true); setHelpOpen(true); }
+      setError(text);
+    } finally { if (locationCheck.current === controller) locationCheck.current = null; setLocating(false); setBusy(false); }
   };
   const send = async () => {
     if (!form) return;
@@ -81,10 +116,12 @@ export default function MyAttendance() {
       <p className="relative text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Today · {dayName(state.today)}</p>
       <p className="relative mt-2 text-xl font-semibold tracking-tight">{hasShift ? `${shift.code} · ${shift.startTime} – ${shift.endTime}` : shift.leave ? `On leave (${shift.leave})` : 'No shift today'}</p>
       {state.recent.length > 0 && <p className="relative mt-1 text-sm text-white/75">Last clock: {state.recent[0].kind === 'in' ? 'in' : 'out'} at {timeOf(state.recent[0].at)}</p>}
-      {state.required === 'none' ? <p className="relative mt-5 rounded-2xl bg-white/10 p-4 text-sm leading-6 text-white/85">You do not need to clock. Your working days count automatically.</p> : <button onClick={() => void clock()} disabled={busy} className={`relative mt-5 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? 'Please wait…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>}
+      {state.required === 'none' ? <p className="relative mt-5 rounded-2xl bg-white/10 p-4 text-sm leading-6 text-white/85">You do not need to clock. Your working days count automatically.</p> : <button onClick={() => void clock()} disabled={busy} className={`relative mt-5 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>}
       <p className="relative mt-3 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{state.mode === 'anywhere' ? 'You can clock from anywhere. Your location is still recorded.' : state.places.length ? `You can clock at: ${state.places.map((place) => place.name).join(', ')}.` : 'No clock place is set for you yet. Ask HR.'}</p>
     </section>
+    {helpOpen && blocked && state.mode === 'places' && state.required !== 'none' && <LocationHelp onClose={() => setHelpOpen(false)} onRetry={() => { setHelpOpen(false); void clock(); }} />}
     {message && <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{message}</p>}
+    {tip && <section className="rounded-2xl bg-[#eef5ff] p-4 text-sm leading-6 text-[#0b2a4a]"><p className="font-semibold">So your iPhone does not ask every time</p><p className="mt-1">Tap <strong>aA</strong> on the left of the web address, then <strong>Website Settings</strong>, <strong>Location</strong> and choose <strong>Allow</strong>. You only need to do this once.</p><button onClick={() => { try { localStorage.setItem('ara_location_tip', '1'); } catch { /* storage not available */ } setTip(false); }} className="mt-2 text-sm font-semibold text-[#1f6feb]">Got it</button></section>}
     {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
     {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send a request below so it can be corrected.</p>}
 

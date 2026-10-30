@@ -22,7 +22,7 @@ function PhoneFrame({ frameRef, reload }: { frameRef: RefObject<HTMLIFrameElemen
   const outerW = PHONE.width + PHONE.border * 2, outerH = PHONE.height + PHONE.border * 2;
   return <div style={{ width: outerW * scale, height: outerH * scale }}>
     <div style={{ width: outerW, height: outerH, transform: `scale(${scale})`, transformOrigin: 'top left', borderWidth: PHONE.border }} className="overflow-hidden rounded-[48px] border-slate-950 bg-white shadow-2xl">
-      <iframe key={reload} ref={frameRef} title="Phone view" src={window.location.href} style={{ width: PHONE.width, height: PHONE.height }} className="block border-0" />
+      <iframe key={reload} ref={frameRef} title="Phone view" allow="geolocation" src={window.location.href} style={{ width: PHONE.width, height: PHONE.height }} className="block border-0" />
     </div>
   </div>;
 }
@@ -42,7 +42,7 @@ function DesktopFrame({ frameRef, reload }: { frameRef: RefObject<HTMLIFrameElem
   }, []);
   const scale = Math.min(1, size.width / DESKTOP_WIDTH);
   return <div ref={box} className="relative h-full min-w-0 flex-1 overflow-hidden bg-white">
-    <iframe key={reload} ref={frameRef} title="Desktop view" src={window.location.href} style={{ width: DESKTOP_WIDTH, height: size.height / scale, transform: `scale(${scale})`, transformOrigin: 'top left' }} className="absolute left-0 top-0 block border-0 bg-white" />
+    <iframe key={reload} ref={frameRef} title="Desktop view" allow="geolocation" src={window.location.href} style={{ width: DESKTOP_WIDTH, height: size.height / scale, transform: `scale(${scale})`, transformOrigin: 'top left' }} className="absolute left-0 top-0 block border-0 bg-white" />
   </div>;
 }
 

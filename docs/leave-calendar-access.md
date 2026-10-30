@@ -48,15 +48,8 @@ Semakan Infotech kini lengkap bagi 10 akaun staf pentadbiran/approver yang disen
 
 Pilih tarikh pada grid. Senarai bawah menunjukkan jabatan, nama penuh staf, jenis cuti, AM/PM jika berkenaan, dan status Approved. Tarikh yang ada cuti ditandakan; tarikh hari ini dan tarikh pilihan dibezakan.
 
-## Demo localhost
+## Demo localhost telah dibuang — 30 Oktober 2026
 
-Buka http://localhost:3000/?leaveDemo=compare untuk empat akaun rekaan yang menggunakan komponen kalendar sebenar dan peraturan akses pelayan yang sama. Log masuk automatik menggunakan kata laluan demo `AraDemo2026!`.
+Empat akaun demo kalendar dan laluan log masuk demo localhost telah dibuang atas permintaan pengguna. Akaun ini dahulu hanya berada dalam memori server, bukan Supabase. Ujian peraturan akses kalendar kekal dalam `scripts/check-leave-calendar-access.ts` tanpa menyediakan akaun log masuk.
 
-| Akaun | Skop | Bilangan staf rekaan bercuti |
-|---|---|---|
-| Staf Demo KJ | KJ OPERATION sahaja | 2 |
-| Admin Demo KJ | Semua jabatan KJ | 5 |
-| Admin Demo SK | Semua jabatan SK | 2 |
-| Admin Demo KJ SK | Semua jabatan KJ dan SK | 7 |
-
-Akaun dan cuti rekaan hanya berada dalam memori server localhost; tiada rekod dummy dimasukkan ke Supabase. Demo hanya membenarkan bacaan data rekaan, dan kod paparan demo dikecualikan daripada build production. HR boleh menetapkan akses pada kad Calendar Access dalam profil staf. Hak kalendar ini tidak menambah hak meluluskan cuti atau mengurus HR.
+HR boleh menetapkan akses pada kad Calendar Access dalam profil staf. Hak kalendar tidak menambah hak meluluskan cuti atau mengurus HR.

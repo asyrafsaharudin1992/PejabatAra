@@ -12,7 +12,9 @@ import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry } from 
 // Staff sign in with name + staff code + last 4 IC digits (no shared account, no device lock) and
 // send the session token as x-assessment-token. Management actions need a
 // System Admin Supabase session instead.
-const SESSION_HOURS = 12;
+// A staff sign-in lasts 30 days from the last time it was used, so staff sign in once on their own phone. HR ending a person's access, or the
+// person changing their password, still signs the other phones out.
+const SESSION_HOURS = 24 * 30;
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 15;
 // Every assessment is passed only with full marks; anything less must be retaken.
@@ -47,6 +49,10 @@ async function staffSession(db: any, req: any) {
     .eq('token_hash', hashSecret(token)).gt('expires_at', new Date().toISOString()).maybeSingle();
   if (error) throw error;
   if (!data?.assessment_staff?.active) throw fail(401, 'Your session has ended. Please sign in again.');
+  // Using the app keeps the sign-in going: renewed at most once a day (not on every request).
+  if (Date.parse(data.expires_at) - Date.now() < (SESSION_HOURS - 24) * 3600000) {
+    await db.from('assessment_sessions').update({ expires_at: new Date(Date.now() + SESSION_HOURS * 3600000).toISOString() }).eq('token_hash', hashSecret(token));
+  }
   return data.assessment_staff as { id: string; name: string; branch: string; can_preview: boolean; staff_code: string; password_hash: string | null };
 }
 

@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, House, KeyRound, LogOut, MoreHorizontal, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound } from 'lucide-react';
-import { assessmentFetch, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
+import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
 import { ReviewRoom } from './OfficeReview';
@@ -35,7 +35,7 @@ function rememberMe(me: Me) { try { localStorage.setItem(ME_KEY, JSON.stringify(
 function forgetMe() { try { localStorage.removeItem(ME_KEY); } catch { /* storage not available */ } }
 
 // Phone home: a photo of the clinic, a greeting, one line picked at random each visit, and the icons in a white card, with a bar at the bottom.
-const HERO = '/hero-sk.webp';
+const HERO = HERO_PHOTO;
 const QUOTES = ['Every shift matters, every patient counts.', 'Care for your team the way you care for patients.', 'Small acts of kindness every day create a big difference.', 'Together, we make a difference every day.'];
 type PhoneItem = { label: string; short: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
 
@@ -58,16 +58,18 @@ function PhoneNav({ view, onGo }: { view: string; onGo: (next: View) => void }) 
   </nav>;
 }
 
-// Wider than the sign-in pages on a desktop, a single column on a phone.
+// Inner screens: the blue photo header at the very top (back button and the title), then the content.
 function Screen({ title, onBack, children, nav }: { title: string; onBack: () => void; children: ReactNode; nav?: ReactNode }) {
   return <div className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
-    <header className="border-b border-black/5 bg-white/80 px-5 py-4 sm:px-10 sm:py-5">
-      <div className="mx-auto flex max-w-6xl items-center justify-between">
-        <button onClick={onBack} className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-[#0b587b]"><ArrowLeft className="h-4 w-4" />My workspace</button>
-        <span className="text-sm font-semibold tracking-tight text-slate-400">AraOffice</span>
+    <header className="relative overflow-hidden rounded-b-[28px] bg-[#0b3d59] text-white shadow-[0_14px_36px_rgba(11,48,70,0.2)] md:rounded-b-[36px]">
+      <div className="absolute inset-0 bg-cover bg-[center_62%]" style={{ backgroundImage: `url(${HERO})` }} />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#082c42] via-[#0b3d59]/80 to-[#0b3d59]/10" />
+      <div className="relative mx-auto max-w-6xl px-5 pb-6 pt-[max(env(safe-area-inset-top),16px)] sm:px-10 sm:pb-9">
+        <div className="flex items-center justify-between"><button onClick={onBack} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-white/15 px-3.5 text-sm font-medium backdrop-blur"><ArrowLeft className="h-4 w-4" />My workspace</button><span className="text-lg font-extrabold tracking-tight"><span>Ara</span><span className="text-[#7cc4ff]">Office</span></span></div>
+        <h1 className="mt-6 text-[30px] font-semibold tracking-tight sm:mt-8 sm:text-4xl">{title}</h1>
       </div>
     </header>
-    <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-10 sm:pt-9 md:pb-10"><h1 className="mb-5 text-[28px] font-semibold tracking-tight sm:mb-7 sm:text-4xl">{title}</h1>{children}</main>
+    <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-10 sm:pt-9 md:pb-10">{children}</main>
     {nav}
   </div>;
 }
@@ -174,17 +176,23 @@ export default function IndividualHub() {
 
     {/* Desktop workspace */}
     <div className="hidden min-h-screen bg-[#f5f5f7] text-[#1d1d1f] md:block">
-      <header className="border-b border-black/5 bg-white/80 px-10 py-5">
-        <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <a href="#" className="inline-flex items-center gap-2 text-sm font-medium text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a>
-          <span className="text-sm font-semibold tracking-tight text-slate-400">My workspace</span>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-10 pb-12 pt-10">
-        <div className="mb-9 flex items-end justify-between gap-5">
-          <div><p className="mb-2 text-xs font-medium text-slate-500">Your personal workspace</p><h1 className="text-[38px] font-semibold leading-tight tracking-tight">Hello, {me ? name : '…'}.</h1><p className="mt-2 text-sm text-slate-500">Together, we make a difference every day.</p></div>
-          <span className="pb-1 text-sm text-slate-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
-        </div>
+        {/* The same clinic photo as the phone, under a deep blue wash */}
+        <section className="relative overflow-hidden rounded-b-[36px] bg-[#0b3d59] shadow-[0_18px_44px_rgba(11,48,70,0.22)]">
+          <div className="absolute inset-0 bg-cover bg-[center_62%]" style={{ backgroundImage: `url(${HERO})` }} />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#082c42] via-[#0b3d59]/75 to-[#0b3d59]/5" />
+          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#082c42]/45 to-transparent" />
+          <div className="relative mx-auto flex min-h-[280px] max-w-6xl flex-col justify-between gap-6 px-10 pb-10 pt-6 text-white"><div className="flex items-center justify-between"><a href="#" className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3.5 py-2 text-sm font-medium backdrop-blur"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a><span className="text-sm font-medium text-white/80">My workspace</span></div><div className="flex items-end justify-between gap-8">
+            <div className="min-w-0">
+              <p className="text-[34px] font-extrabold leading-none tracking-tight"><span>Ara</span><span className="text-[#7cc4ff]">Office</span></p>
+              <p className="mt-1.5 text-[11px] font-medium tracking-[0.34em] text-white/80">KLINIK ARA 24 JAM</p>
+              <h1 className="mt-9 truncate text-[40px] font-semibold leading-tight tracking-tight">Hello, {me ? name.split(' ')[0] : '…'}.</h1>
+              <p className="mt-2 max-w-xl text-[15px] text-white/80">{quote}</p><i className="mt-3 block h-1 w-12 rounded-full bg-[#7cc4ff]" />
+            </div>
+            <div className="shrink-0 text-right"><p className="text-[44px] font-semibold leading-none tabular-nums tracking-tight">{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p><p className="mt-2 text-sm text-white/80">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kuala_Lumpur' })}</p></div>
+            </div>
+          </div>
+        </section>
+      <main className="mx-auto max-w-6xl px-10 pb-12 pt-9">
         <div className="grid items-start gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
           <aside className="relative isolate overflow-hidden rounded-[28px] border border-white/10 bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-6 text-white shadow-[0_16px_40px_rgba(11,48,70,0.18)]">
             <i aria-hidden="true" className="pointer-events-none absolute -right-16 -top-16 -z-10 h-48 w-48 rounded-full bg-white/[0.06]" />

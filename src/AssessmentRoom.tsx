@@ -21,15 +21,12 @@ const formatDate = (value: string) => new Date(value).toLocaleString('en-GB', { 
 
 export async function assessmentFetch(query: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
-  const demoParams = new URLSearchParams(window.location.search);
-  const demoAccount = import.meta.env.DEV && demoParams.has('leaveDemo') && demoParams.get('account');
-  const demoKey = demoAccount ? `ara_local_leave_demo_${demoAccount}` : '';
-  const token = demoKey ? sessionStorage.getItem(demoKey) : localStorage.getItem(TOKEN_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
   if (token) headers.set('x-assessment-token', token);
   if (options.body) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${API}&${query}`, { ...options, headers });
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401) { if (demoKey) sessionStorage.removeItem(demoKey); else localStorage.removeItem(TOKEN_KEY); }
+  if (response.status === 401) localStorage.removeItem(TOKEN_KEY);
   if (!response.ok) throw Object.assign(new Error(body.error || 'Something went wrong. Please try again.'), { status: response.status });
   return body;
 }
@@ -79,18 +76,22 @@ export function SetPassword({ first = false, onDone, onCancel }: { first?: boole
   </form></AuthShell>;
 }
 
-// Blue header + content, like the other screens inside Individual Sign In.
+// The clinic photo under a deep blue wash: the header of every screen inside Individual Sign In.
+export const HERO_PHOTO = '/hero-sk.webp';
+// Blue photo header + content, like the other screens inside Individual Sign In.
 export function PageShell({ eyebrow, title, subtitle, onSignOut, children }: { eyebrow: string; title: string; subtitle?: string; onSignOut: () => void; children: ReactNode }) {
   return <div className="min-h-screen bg-[#f5f7f9] text-[#14233b]">
-    <header className="relative overflow-hidden bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] px-4 pb-12 pt-4 text-white sm:px-8 sm:pb-16 sm:pt-8"><i className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-white/10" />
+    <header className="relative overflow-hidden rounded-b-[28px] bg-[#0b3d59] px-4 pb-8 pt-[max(env(safe-area-inset-top),16px)] text-white shadow-[0_14px_36px_rgba(11,48,70,0.2)] sm:rounded-b-[36px] sm:px-8 sm:pb-10 sm:pt-8">
+      <div className="absolute inset-0 bg-cover bg-[center_62%]" style={{ backgroundImage: `url(${HERO_PHOTO})` }} />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#082c42] via-[#0b3d59]/80 to-[#0b3d59]/10" />
       <div className="relative mx-auto max-w-2xl">
-        <div className="flex items-center justify-between"><a href="#office/individual" className="inline-flex items-center gap-2 text-sm font-semibold text-[#b9cfdd]"><ArrowLeft className="h-4 w-4" />Menu</a><button onClick={onSignOut} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3.5 py-2 text-xs font-semibold text-white hover:bg-white/20"><LogOut className="h-4 w-4" />Sign out</button></div>
-        <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{eyebrow}</p>
+        <div className="flex items-center justify-between"><a href="#office/individual" className="inline-flex min-h-10 items-center gap-2 rounded-full bg-white/15 px-3.5 text-sm font-medium backdrop-blur"><ArrowLeft className="h-4 w-4" />My workspace</a><button onClick={onSignOut} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-white/15 px-3.5 text-xs font-semibold text-white backdrop-blur hover:bg-white/25"><LogOut className="h-4 w-4" />Sign out</button></div>
+        <p className="mt-5 text-[11px] font-bold uppercase tracking-[0.22em] text-[#7cc4ff]">{eyebrow}</p>
         <h1 className="mt-1.5 text-2xl font-bold tracking-tight sm:text-4xl">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-[#b9cfdd]">{subtitle}</p>}
+        {subtitle && <p className="mt-1 text-sm text-white/80">{subtitle}</p>}
       </div>
     </header>
-    <div className="relative -mt-7 rounded-t-3xl bg-[#f5f7f9] px-3 pb-10 pt-5 sm:-mt-8 sm:px-8"><div className="mx-auto max-w-2xl">{children}</div></div>
+    <div className="px-3 pb-10 pt-6 sm:px-8"><div className="mx-auto max-w-2xl">{children}</div></div>
   </div>;
 }
 
