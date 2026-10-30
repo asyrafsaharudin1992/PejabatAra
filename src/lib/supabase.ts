@@ -2,19 +2,28 @@ import { createClient } from "@supabase/supabase-js";
 import type { PortalUser, UserRole } from "../portalData";
 import { withDeviceHeader } from "./device";
 import { fetchOfficeIdentity, OfficeIdentityError } from './officeIdentity';
+import { createAuthStorage } from './authStorage';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+const authStorage = createAuthStorage(() => window.localStorage, () => window.sessionStorage);
+const authStorageKey = supabaseUrl ? `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token` : '';
 
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
-      auth: { persistSession: true, autoRefreshToken: true },
+      auth: { persistSession: true, autoRefreshToken: true, storage: authStorage },
       // Database policies check the registered-device token on direct reads.
       global: { fetch: (input, init) => fetch(input, withDeviceHeader(init)) },
     })
   : null;
+
+// Supabase broadcasts sign-out to other tabs. Clear their fallback copies too,
+// so opening another office cannot restore a session after an explicit logout.
+supabase?.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') authStorage.removeItem(authStorageKey);
+});
 
 const roleMap: Record<string, UserRole> = {
   super_admin: "Superadmin",
@@ -33,6 +42,7 @@ export async function getOfficeIdentity() {
 export async function signInWithSupabase(email: string, password: string): Promise<PortalUser> {
   if (!supabase) throw new Error("Supabase belum dikonfigurasi");
 
+  await supabase.auth.initialize();
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
   if (authError || !authData.user) throw authError || new Error("Log masuk gagal");
 
