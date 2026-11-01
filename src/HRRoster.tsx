@@ -85,7 +85,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
       if (!rows.length) throw new Error('No roster rows found. Use the columns: company, code, date, shift.');
       const result = await api('action=roster_import', { rows });
       if (result.error) throw new Error(result.error);
-      setNotice(`Saved ${result.saved} roster days.`); load();
+      setNotice(result.saved ? `Roster uploaded: ${result.added} new day${result.added === 1 ? '' : 's'}, ${result.changed} changed, ${result.same} already the same.${result.changed ? ' The changed days are in the change log below.' : ''}` : `Nothing to change: all ${result.same} days in the file are already the same.`); load();
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
   };
 

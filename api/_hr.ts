@@ -2,6 +2,7 @@ import { randomBytes, scryptSync } from 'node:crypto';
 import { officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
+import { newCode } from '../src/lib/shiftCodes.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
@@ -813,9 +814,31 @@ export async function hrHandler(req: any, res: any) {
       }
       if (unknown.size) throw fail(400, `These staff codes are not in HR: ${[...unknown].join(', ')}.`);
       if (!out.length) throw fail(400, 'There are no valid roster rows.');
-      const { error } = await db.from('hr_roster').upsert(out, { onConflict: 'employee_id,work_date' });
-      if (error) throw error;
-      return res.status(200).json({ success: true, saved: out.length });
+      // Compare with what is already saved: a new day is added, a different code replaces the old one (and is written to the
+      // change log), and a day that already means the same (ASCL3 and PM, say) is left as it is.
+      const staffIds = [...new Set(out.map((row) => row.employee_id))], dates = out.map((row) => row.work_date).sort();
+      const { data: existing, error: existingError } = await db.from('hr_roster').select('employee_id,work_date,shift').in('employee_id', staffIds).gte('work_date', dates[0]).lte('work_date', dates[dates.length - 1]).limit(10000);
+      if (existingError) throw existingError;
+      const was = new Map((existing || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, String(row.shift)]));
+      const toSave: any[] = []; const changed: any[] = []; let same = 0;
+      for (const row of out) {
+        const before = was.get(`${row.employee_id}|${row.work_date}`);
+        if (before === undefined) toSave.push(row);
+        else if (newCode(before) === newCode(row.shift)) same++;
+        else { toSave.push(row); changed.push({ employee_id: row.employee_id, date: row.work_date, from: before, to: row.shift }); }
+      }
+      if (toSave.length) {
+        const { error } = await db.from('hr_roster').upsert(toSave, { onConflict: 'employee_id,work_date' });
+        if (error) throw error;
+      }
+      // One log entry per person, listing each day that changed.
+      const perPerson = new Map<string, Record<string, unknown>>();
+      for (const item of changed) perPerson.set(item.employee_id, { ...(perPerson.get(item.employee_id) || {}), [`roster_${item.date}`]: [item.from, item.to] });
+      if (perPerson.size) {
+        const { error: auditError } = await db.from('hr_audit').insert([...perPerson].map(([employee_id, days]) => ({ employee_id, action: 'roster', changes: { ...days, roster_reason: ['', 'CSV upload'] }, changed_by: user.id })));
+        if (auditError) throw auditError;
+      }
+      return res.status(200).json({ success: true, saved: toSave.length, added: toSave.length - changed.length, changed: changed.length, same });
     }
 
     // One day changed on screen by HR. It is saved and written to the audit log (who, when, before, after, and an optional
@@ -857,7 +880,8 @@ export async function hrHandler(req: any, res: any) {
         userIds.length ? db.from('profiles').select('id,full_name').in('id', userIds) : { data: [] },
       ]);
       const who = new Map((people || []).map((p: any) => [p.id, p])), by = new Map((users || []).map((u: any) => [u.id, u.full_name]));
-      return res.status(200).json({ log: rows.map((row: any) => { const key = Object.keys(row.changes).find((k) => k.startsWith('roster_2')) || ''; const [from, to] = row.changes[key] || ['', '']; const p: any = who.get(row.employee_id); return { at: row.changed_at, by: by.get(row.changed_by) || '', name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', date: key.slice(7), from, to, reason: row.changes.roster_reason?.[1] || '' }; }) });
+      const log = rows.flatMap((row: any) => Object.keys(row.changes).filter((key) => key.startsWith(`roster_${month}`)).map((key) => { const [from, to] = row.changes[key] || ['', '']; const p: any = who.get(row.employee_id); return { at: row.changed_at, by: by.get(row.changed_by) || '', name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', date: key.slice(7), from, to, reason: row.changes.roster_reason?.[1] || '' }; }));
+      return res.status(200).json({ log: log.sort((a: any, b: any) => String(b.at).localeCompare(String(a.at)) || a.date.localeCompare(b.date)).slice(0, 300) });
     }
 
     // Creates the staff member's individual sign-in from their HR profile and links it: they sign in with the short name given here, their
