@@ -22,6 +22,8 @@ const decode = (row: any) => ({
   icNo: row.ic_no, passportNo: row.passport_no, nationality: row.nationality, gender: row.gender, dateOfBirth: row.date_of_birth, religion: row.religion,
   maritalStatus: row.marital_status, spouseWorking: row.spouse_working, children: row.children || [], phone: row.phone, email: row.email, address: row.address,
   emergencyName: row.emergency_name, emergencyRelation: row.emergency_relation, emergencyPhone: row.emergency_phone,
+  race: row.race || '', foreignIdNo: row.foreign_id_no || '', addressLine1: row.address_line1 || '', addressLine2: row.address_line2 || '', postcode: row.postcode || '', city: row.city || '', state: row.state || '',
+  spouseName: row.spouse_name || '', spouseIc: row.spouse_ic || '', spouseEmployer: row.spouse_employer || '', spousePhone: row.spouse_phone || '', education: row.education || [],
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
   joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
   basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
@@ -38,13 +40,19 @@ function encode(body: any) {
   if (!Number.isFinite(salary) || salary < 0) throw fail(400, 'Basic salary must be a positive amount.');
   const children = (Array.isArray(body.children) ? body.children : []).slice(0, 20).map((child: any) => ({ name: text(child?.name, 120), dateOfBirth: isDate(child?.dateOfBirth) ? child.dateOfBirth : null, studying: Boolean(child?.studying), disabled: Boolean(child?.disabled) })).filter((child: any) => child.name);
   const fixedAllowances = (Array.isArray(body.fixedAllowances) ? body.fixedAllowances : []).slice(0, 20).map((item: any) => ({ name: text(item?.name, 80), amount: Math.round(Number(item?.amount || 0) * 100) / 100 })).filter((item: any) => item.name && Number.isFinite(item.amount));
+  const education = (Array.isArray(body.education) ? body.education : []).slice(0, 12).map((item: any) => ({ level: text(item?.level, 60), institution: text(item?.institution, 120), course: text(item?.course, 120), year: text(item?.year, 4) })).filter((item: any) => item.level || item.institution || item.course);
+  const address = { address_line1: text(body.addressLine1, 160), address_line2: text(body.addressLine2, 160), postcode: text(body.postcode, 10), city: text(body.city, 60), state: text(body.state, 60) };
   return {
     company: pick(body.company, ['KJ', 'SK'], ''), employee_code: employeeCode, full_name: fullName,
     assessment_staff_id: text(body.assessmentStaffId, 60) || null,
     ic_no: text(body.icNo, 20), passport_no: text(body.passportNo, 30), nationality: text(body.nationality, 40) || 'Malaysian',
     gender: pick(body.gender, ['', 'Male', 'Female'], ''), date_of_birth: isDate(body.dateOfBirth) ? body.dateOfBirth : null, religion: text(body.religion, 40),
     marital_status: pick(body.maritalStatus, ['', 'Single', 'Married', 'Divorced', 'Widowed'], ''), spouse_working: typeof body.spouseWorking === 'boolean' ? body.spouseWorking : null,
-    children, phone: text(body.phone, 30), email: text(body.email, 120), address: text(body.address, 500),
+    children, phone: text(body.phone, 30), email: text(body.email, 120),
+    // The one-line address is kept in step with the parts, for anything that still reads it.
+    ...address, address: [address.address_line1, address.address_line2, [address.postcode, address.city].filter(Boolean).join(' '), address.state].filter(Boolean).join(', '),
+    race: text(body.race, 40), foreign_id_no: text(body.foreignIdNo, 30),
+    spouse_name: text(body.spouseName, 120), spouse_ic: text(body.spouseIc, 20), spouse_employer: text(body.spouseEmployer, 120), spouse_phone: text(body.spousePhone, 30), education,
     emergency_name: text(body.emergencyName, 120), emergency_relation: text(body.emergencyRelation, 40), emergency_phone: text(body.emergencyPhone, 30),
     branch: text(body.branch, 60), department: text(body.department, 60), designation: text(body.designation, 80),
     employment_type: pick(body.employmentType, ['Permanent', 'Contract', 'Part-time', 'Locum', 'Intern'], 'Permanent'),
@@ -839,6 +847,70 @@ export async function hrHandler(req: any, res: any) {
         if (auditError) throw auditError;
       }
       return res.status(200).json({ success: true, saved: toSave.length, added: toSave.length - changed.length, changed: changed.length, same });
+    }
+
+    // Fills blank profile details from the staff records read off Infotech (a file per company: { company, staff: [...] }).
+    // Nothing that is already filled is overwritten. With dryRun (the default) nothing is saved and the answer says what would be filled.
+    if (req.method === 'POST' && action === 'profile_import') {
+      const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 300) : [];
+      const dryRun = body.dryRun !== false;
+      if (!rows.length) throw fail(400, 'There are no staff in the file.');
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('*');
+      if (peopleError) throw peopleError;
+      const byKey = new Map((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p]));
+      const title = (value: string) => value.toLowerCase().replace(/(^|[\s/-])(\p{L})/gu, (_m, a, b) => a + b.toUpperCase());
+      const date = (value: unknown) => { const m = String(value || '').match(/^(\d{2})-(\d{2})-(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
+      // Local format with a dash after the network code: 0123456789 becomes 012-3456789. Anything that is not a plain number is kept as typed.
+      const phone = (value: unknown) => { const raw = String(value || '').replace(/^['"\s]+/, '').trim(); if (!raw || /mobile number/i.test(raw)) return ''; let d = raw.replace(/\D/g, ''); if (d.startsWith('60')) d = d.slice(2); if (d.length < 8 || d.length > 11) return raw; if (!d.startsWith('0')) d = `0${d}`; return `${d.slice(0, 3)}-${d.slice(3)}`; };
+      const looksLikePhone = (value: unknown) => /^[\d\s\-+()'"]{7,}$/.test(String(value || '').trim());
+      const filled = (value: any) => !(value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length));
+      const MARITAL: Record<string, string> = { SINGLE: 'Single', MARRIED: 'Married', DIVORCED: 'Divorced', WIDOWED: 'Widowed' };
+      const unknown: string[] = []; const counts: Record<string, number> = {}; const results: { code: string; name: string; fields: string[] }[] = [];
+      for (const row of rows) {
+        const company = text(row.company, 4).toUpperCase(), code = text(row.code, 30).toUpperCase();
+        const person: any = byKey.get(`${company}|${code}`);
+        if (!person) { unknown.push(`${company} ${code}`); continue; }
+        const religion = text(row.religion, 40).toUpperCase() === 'MUSLIM' ? 'Islam' : title(text(row.religion, 40));
+        let emergencyName = text(row.emergencyName, 120), emergencyPhone = phone(row.emergencyPhone);
+        if (emergencyName && looksLikePhone(emergencyName)) { if (!emergencyPhone) emergencyPhone = phone(emergencyName); emergencyName = ''; }   // Infotech users sometimes typed the number in the name box
+        const nationality = title(text(row.nationality, 40));
+        const wanted: Record<string, any> = {
+          date_of_birth: date(row.dob), religion, race: title(text(row.race, 40)), foreign_id_no: text(row.foreignId, 30), passport_no: text(row.passport, 30),
+          phone: phone(row.mobile) || phone(row.homePhone),
+          address_line1: text(row.addr1, 160), address_line2: [text(row.addr2, 160), text(row.addr3, 160)].filter(Boolean).join(', '), city: title(text(row.city, 60)), state: title(text(row.state, 60)), postcode: text(row.postcode, 10),
+          marital_status: MARITAL[text(row.marital, 20).toUpperCase()] || '',
+          spouse_name: text(row.spouseName, 120), spouse_ic: text(row.spouseIc, 20), spouse_employer: title(text(row.spouseOccupation, 120)), spouse_phone: phone(row.spousePhone),
+          emergency_name: emergencyName, emergency_relation: title(text(row.emergencyRelation, 40)), emergency_phone: emergencyPhone,
+          children: (Array.isArray(row.children) ? row.children : []).slice(0, 20).map((child: any) => ({ name: text(child?.name, 120), dateOfBirth: date(child?.dob) || null, studying: false, disabled: false })).filter((child: any) => child.name),
+          education: (Array.isArray(row.education) ? row.education : []).slice(0, 12).map((item: any) => ({ level: text(item?.level, 60), institution: text(item?.institution, 120), course: text(item?.course, 120), year: text(item?.year, 4) })).filter((item: any) => item.institution || item.course),
+        };
+        // Pay and statutory details (the second file read off Infotech). One bank is kept; AraOffice has a single account.
+        const account = String((Array.isArray(row.banks) ? row.banks[0]?.acc : '') || '').replace(/[^\dA-Za-z-]/g, '');
+        // Infotech's total salary is the basic salary plus any increment, so it is the pay as it stands now.
+        const salary = Number(String(row.totalSalary || row.basicSalary || '').replace(/,/g, ''));
+        Object.assign(wanted, {
+          basic_salary: Number.isFinite(salary) && salary > 0 ? Math.round(salary * 100) / 100 : '',
+          bank_name: text(Array.isArray(row.banks) ? row.banks[0]?.bank : '', 60), bank_account: text(account, 40),
+          epf_no: text(row.epfNo, 30), socso_no: text(row.socsoNo, 30), tax_no: text(row.pcbNo, 30),
+        });
+        if (nationality && nationality !== 'Malaysian' && (person.nationality || 'Malaysian') === 'Malaysian') wanted.nationality = nationality;
+        const patch: Record<string, any> = {}; const changes: Record<string, unknown> = {};
+        for (const [column, value] of Object.entries(wanted)) { if (filled(value) && !(column === 'basic_salary' ? Number(person[column]) > 0 : filled(person[column]))) { patch[column] = value; changes[column] = [column === 'children' || column === 'education' ? [] : '', value]; } }
+        if (!Object.keys(patch).length) continue;
+        if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
+          const merged = { ...person, ...patch };
+          patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
+        }
+        for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
+        results.push({ code: `${company} ${code}`, name: person.full_name, fields: Object.keys(changes) });
+        if (!dryRun) {
+          const { error } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', person.id);
+          if (error) throw error;
+          const { error: auditError } = await db.from('hr_audit').insert({ employee_id: person.id, action: 'import', changes: { ...changes, source: ['', 'Infotech'] }, changed_by: user.id });
+          if (auditError) throw auditError;
+        }
+      }
+      return res.status(200).json({ dryRun, staff: rows.length, updated: results.length, unknown, counts, results });
     }
 
     // One day changed on screen by HR. It is saved and written to the audit log (who, when, before, after, and an optional
