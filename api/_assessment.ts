@@ -1,5 +1,6 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { attendanceStaffAction } from './_attendance.js';
+import { announcementsFor, recordRead } from './_announcements.js';
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -480,13 +481,21 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
     return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
   }
+  // Everyone can read the announcements; the clinic assistants and Clinical Admin on the reading list record their own read.
+  if (req.method === 'GET' && action === 'announcements') return res.status(200).json(await announcementsFor(db, staff.id));
+  if (req.method === 'POST' && action === 'announcement_read') {
+    const { listed } = await announcementsFor(db, staff.id);
+    if (!listed) throw fail(403, 'Announcements are not set up for your sign-in.');
+    if (!await recordRead(db, staff.id, text(body.announcementId, 80))) throw fail(404, 'That announcement no longer exists.');
+    return res.status(200).json(await announcementsFor(db, staff.id));
+  }
   if (action.startsWith('attendance_')) return await attendanceStaffAction(req, res, db, staff, action, body);
   if (action.startsWith('review_')) return await reviewAction(req, res, db, staff, action, body);
   if (action.startsWith('leave_')) return await leaveAction(req, res, db, staff, action, body);
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
-    let isApprover = false, leaveWaiting = 0, designation = '', reviewWaiting = 0;
+    let isApprover = false, leaveWaiting = 0, designation = '', reviewWaiting = 0, announcementsListed = false, announcementsUnread = 0;
     // Everything is asked at once (the database is far from the server, so steps in turn add up): first the staff
     // record and the assessments, then the numbers that depend on the staff record.
     let quizQuery = db.from('assessment_quizzes').select('id,title,description,pass_mark,active,questions').order('created_at', { ascending: false });
@@ -513,11 +522,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
         isApprover = (approverCount || 0) > 0; leaveWaiting = (first || 0) + (last || 0); reviewWaiting = reviews || 0;
       } catch { /* leave or review tables not set up yet */ }
     }
+    // The red number on the Announcements icon (only for the staff who must read them).
+    try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

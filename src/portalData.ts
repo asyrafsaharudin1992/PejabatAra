@@ -51,6 +51,8 @@ export interface Announcement {
   date: string;
   audience: string;
   priority: "Penting" | "Biasa";
+  // Memos (Reference Hub ids) this announcement refers to; staff open them from the announcement.
+  memoIds?: string[];
 }
 
 // Populate this from the CMS or shared-reference sync when change metadata is available.

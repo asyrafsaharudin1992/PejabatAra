@@ -64,6 +64,7 @@ import ClinicalProcedures from "./ClinicalProcedures";
 import { useProcedures } from "./lib/useProcedures";
 import PrintForms from "./PrintForms";
 import { printFormUrl, usePrintForms } from "./lib/usePrintForms";
+import { matchMemo } from './lib/memoLinks';
 import { useAnnouncementReads } from './lib/useAnnouncementReads';
 import { useVisitingFrom } from "./lib/officeVisit";
 import CaVideo from "./CaVideo";
@@ -360,7 +361,7 @@ export default function PortalApp() {
           {view === "procedures" && <ClinicalProcedures key={openProcedure} startId={openProcedure} state={procedures} canEdit={user.role === "Superadmin"} />}
           {view === "forms" && <PrintForms state={printForms} canEdit={user.role === "Superadmin"} />}
           {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
-          {view === "announcements" && <AnnouncementsView announcements={content.announcements} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} currentUserId={user.id} />}
+          {view === "announcements" && <AnnouncementsView announcements={content.announcements} resources={content.resources} onOpenResource={setSelectedResource} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} />}
           {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
           {view === "video" && <CaVideo canEdit={user.role === "Superadmin"} />}
           {view === "admin" && user.role === "Superadmin" && (
@@ -895,20 +896,23 @@ function formatToday() {
   return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function AnnouncementsView({ announcements, canEdit, onSave, readState, currentUserId }: { announcements: Announcement[]; canEdit: boolean; onSave: (next: Announcement[], message: string) => Promise<boolean>; readState: ReturnType<typeof useAnnouncementReads>; currentUserId?: string }) {
+function AnnouncementsView({ announcements, resources, onOpenResource, canEdit, onSave, readState }: { announcements: Announcement[]; resources: KnowledgeResource[]; onOpenResource: (resource: KnowledgeResource) => void; canEdit: boolean; onSave: (next: Announcement[], message: string) => Promise<boolean>; readState: ReturnType<typeof useAnnouncementReads> }) {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState("");
-  const [draft, setDraft] = useState({ title: "", body: "", audience: "Semua staf", priority: "Biasa" as Announcement["priority"] });
+  const [draft, setDraft] = useState({ title: "", body: "", audience: "Semua staf", priority: "Biasa" as Announcement["priority"], memoIds: [] as string[] });
+  const memoById = (id: string) => resources.find((resource) => resource.id === id);
+  // Memos that open from Google Drive; a memo named in the message links to its file.
+  const linkableMemos = resources.filter((resource) => /^https:\/\/(drive|docs)\.google\.com\//.test(resource.sourceUrl || "")).map((resource) => ({ title: resource.title, url: resource.sourceUrl as string }));
 
-  const close = () => { setAdding(false); setEditingId(""); setDraft({ title: "", body: "", audience: "Semua staf", priority: "Biasa" }); };
-  const startEdit = (item: Announcement) => { setEditingId(item.id); setDraft({ title: item.title, body: item.body, audience: item.audience, priority: item.priority }); setAdding(true); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const close = () => { setAdding(false); setEditingId(""); setDraft({ title: "", body: "", audience: "Semua staf", priority: "Biasa", memoIds: [] }); };
+  const startEdit = (item: Announcement) => { setEditingId(item.id); setDraft({ title: item.title, body: item.body, audience: item.audience, priority: item.priority, memoIds: item.memoIds || [] }); setAdding(true); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft.title.trim() || !draft.body.trim()) return;
     setSaving(true);
-    const fields = { title: draft.title.trim(), body: draft.body.trim(), audience: draft.audience.trim() || "Semua staf", priority: draft.priority };
+    const fields = { title: draft.title.trim(), body: draft.body.trim(), audience: draft.audience.trim() || "Semua staf", priority: draft.priority, memoIds: draft.memoIds };
     // Editing keeps the id (and so who has read it) and the original date.
     const saved = editingId
       ? await onSave(announcements.map((entry) => entry.id === editingId ? { ...entry, ...fields } : entry), "Announcement updated")
@@ -934,30 +938,24 @@ function AnnouncementsView({ announcements, canEdit, onSave, readState, currentU
         <label className="block text-sm font-semibold text-slate-600">Audience<input value={draft.audience} onChange={(event) => setDraft({ ...draft, audience: event.target.value })} className={cn(fieldClass, "mt-1.5")} /></label>
         <label className="block text-sm font-semibold text-slate-600">Priority<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Announcement["priority"] })} className={cn(fieldClass, "mt-1.5")}><option value="Biasa">Normal</option><option value="Penting">Important</option></select></label>
       </div>
+      <div className="block text-sm font-semibold text-slate-600">Related memos<p className="mt-0.5 text-xs font-normal text-slate-400">Staff open these straight from the announcement.</p>
+        {draft.memoIds.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{draft.memoIds.map((id) => <span key={id} className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-sky-50 py-1 pl-3 pr-1.5 text-xs font-semibold text-[#0b587b]"><span className="min-w-0 truncate">{memoById(id)?.title || "Memo no longer in the Reference Hub"}</span><button type="button" onClick={() => setDraft({ ...draft, memoIds: draft.memoIds.filter((entry) => entry !== id) })} className="grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-sky-100" aria-label="Remove memo"><X className="h-3 w-3" /></button></span>)}</div>}
+        <select value="" onChange={(event) => event.target.value && setDraft({ ...draft, memoIds: [...draft.memoIds, event.target.value] })} className={cn(fieldClass, "mt-2")}><option value="">Add a memo…</option>{resources.filter((resource) => !draft.memoIds.includes(resource.id) && resource.status !== "TERBATAL").map((resource) => <option key={resource.id} value={resource.id}>{resource.title}</option>)}</select></div>
       <div className="flex justify-end gap-3"><button type="button" onClick={close} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button disabled={saving} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50">{saving ? (editingId ? "Saving…" : "Publishing…") : editingId ? "Save changes" : "Publish"}</button></div>
     </form>}
     {announcements.length === 0 && <p className="rounded-[24px] border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No announcements yet.</p>}
-    {announcements.map((item) => { const done = readState.allRead(item.id); return <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", done ? "border-[#dce4ed]" : "border-rose-300")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", done ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>{done ? <Check className="h-5 w-5" /> : <Bell className="h-5 w-5" />}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><p className="mt-2 whitespace-pre-line leading-7 text-slate-600">{item.body}</p></div></div><div className="flex shrink-0 items-start gap-3 text-sm text-slate-400 sm:text-right"><div><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div>{canEdit && <button onClick={() => startEdit(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-sky-50 hover:text-sky-600 disabled:opacity-50" aria-label={`Edit ${item.title}`} title="Edit"><Pencil className="h-4 w-4" /></button>}{canEdit && <button onClick={() => void remove(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Remove ${item.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div></div><AnnouncementReadBar announcementId={item.id} readState={readState} currentUserId={currentUserId} canEdit={canEdit} /></article>; })}
+    {announcements.map((item) => { const done = readState.allRead(item.id); return <article key={item.id} className={cn("rounded-[24px] border bg-white p-6 sm:p-7", done ? "border-[#dce4ed]" : "border-rose-300")}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-4"><div className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-2xl", done ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600")}>{done ? <Check className="h-5 w-5" /> : <Bell className="h-5 w-5" />}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-semibold">{item.title}</p>{item.priority === "Penting" && <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-rose-700">Important</span>}</div><div className="mt-2 leading-7 text-slate-600">{item.body.split("\n").map((line, index) => { const memo = matchMemo(line, linkableMemos); return memo ? <a key={index} href={memo.url} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5 font-semibold text-[#0b587b] underline decoration-[#0b587b]/40 underline-offset-2 hover:text-[#08435e]"><ExternalLink className="mt-2 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{line.replace(/^\s*[-*•]\s*/, "")}</span></a> : <p key={index} className="min-h-[1.75rem] whitespace-pre-line">{line}</p>; })}</div>{(item.memoIds || []).map(memoById).filter((memo): memo is KnowledgeResource => Boolean(memo)).length > 0 && <div className="mt-3 flex flex-wrap gap-2">{(item.memoIds || []).map(memoById).filter((memo): memo is KnowledgeResource => Boolean(memo)).map((memo) => { const chip = "inline-flex max-w-full items-center gap-1.5 rounded-xl bg-[#e9f6fb] px-3 py-1.5 text-sm font-semibold text-[#0b587b] transition hover:bg-[#d8eff8]"; const body = <><ExternalLink className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 truncate">{memo.title}</span></>; return /^https:\/\/(drive|docs)\.google\.com\//.test(memo.sourceUrl || "") ? <a key={memo.id} href={memo.sourceUrl} target="_blank" rel="noopener noreferrer" className={chip}>{body}</a> : <button key={memo.id} type="button" onClick={() => onOpenResource(memo)} className={chip}>{body}</button>; })}</div>}</div></div><div className="flex shrink-0 items-start gap-3 text-sm text-slate-400 sm:text-right"><div><p className="font-bold text-slate-600">{item.date}</p><p className="mt-1 text-xs">{item.audience}</p></div>{canEdit && <button onClick={() => startEdit(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-sky-50 hover:text-sky-600 disabled:opacity-50" aria-label={`Edit ${item.title}`} title="Edit"><Pencil className="h-4 w-4" /></button>}{canEdit && <button onClick={() => void remove(item)} disabled={saving} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Remove ${item.title}`} title="Remove"><Trash2 className="h-4 w-4" /></button>}</div></div><AnnouncementReadBar announcementId={item.id} readState={readState} canEdit={canEdit} /></article>; })}
   </div>;
 }
 
-// Staff pick their own name and tick Done; the announcement stays red until everyone has.
-function AnnouncementReadBar({ announcementId, readState, currentUserId, canEdit }: { announcementId: string; readState: ReturnType<typeof useAnnouncementReads>; currentUserId?: string; canEdit: boolean }) {
+// Who has read an announcement. Staff record their own read in Individual Sign In; System Admin can untick a name.
+function AnnouncementReadBar({ announcementId, readState, canEdit }: { announcementId: string; readState: ReturnType<typeof useAnnouncementReads>; canEdit: boolean }) {
   const { staff, reads, loaded, markRead } = readState;
   const read = reads[announcementId] || {};
   const unread = staff.filter((item) => !read[item.id]);
-  const [choice, setChoice] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const picked = unread.some((item) => item.id === choice) ? choice : unread.find((item) => item.id === currentUserId)?.id || "";
   if (!loaded || !staff.length) return null;
-  const tick = async () => {
-    if (!picked) return;
-    setSaving(true); setMessage("");
-    const problem = await markRead(announcementId, picked);
-    setSaving(false); setChoice("");
-    setMessage(problem || `✓ Thank you, ${staff.find((item) => item.id === picked)?.name}.`);
-  };
   const untick = async (item: { id: string; name: string }) => {
     setSaving(true); setMessage("");
     const problem = await markRead(announcementId, item.id, true);
@@ -966,7 +964,7 @@ function AnnouncementReadBar({ announcementId, readState, currentUserId, canEdit
   };
   return <div className="mt-5 border-t border-slate-100 pt-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className={cn("text-sm font-semibold", unread.length ? "text-rose-600" : "text-emerald-600")}>{unread.length ? `Read by ${staff.length - unread.length} of ${staff.length} staff` : `✓ All ${staff.length} staff have read this`}</p>
-    {unread.length > 0 && <div className="flex flex-wrap items-center gap-2"><select value={picked} onChange={(event) => setChoice(event.target.value)} className="rounded-xl border border-[#dce4ed] bg-white px-3 py-2 text-sm"><option value="">Choose your name…</option>{unread.map((item) => <option key={item.id} value={item.id}>{item.name}{item.branch ? ` (${item.branch})` : ""}</option>)}</select><button onClick={() => void tick()} disabled={!picked || saving} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />{saving ? "Saving…" : "Done, I've read it"}</button></div>}</div>
+    {unread.length > 0 && <p className="text-xs text-slate-400">If you've read this, please tick this on your individual sign in.</p>}</div>
     {message && <p className={cn("mt-2 text-xs", message.startsWith("✓") ? "text-emerald-600" : "text-amber-600")}>{message}</p>}
     <div className="mt-3 flex flex-wrap gap-1.5">{staff.map((item) => <span key={item.id} title={read[item.id] ? `Read ${new Date(read[item.id]).toLocaleString()}` : "Not read yet"} className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium", read[item.id] ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400")}>{read[item.id] ? "✓ " : ""}{item.name}{canEdit && read[item.id] && <button type="button" onClick={() => void untick(item)} disabled={saving} className="-mr-1 grid h-4 w-4 place-items-center rounded-full text-emerald-700 hover:bg-rose-500 hover:text-white disabled:opacity-50" aria-label={`Untick ${item.name}`} title={`Untick ${item.name}`}><X className="h-3 w-3" /></button>}</span>)}</div>
   </div>;

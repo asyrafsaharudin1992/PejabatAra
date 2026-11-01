@@ -5,12 +5,13 @@ import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
 import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
+import MyAnnouncements from './MyAnnouncements';
 
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number } };
-type View = 'home' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type View = 'home' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
 
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN. BHD.' };
@@ -37,16 +38,16 @@ function forgetMe() { try { localStorage.removeItem(ME_KEY); } catch { /* storag
 // Phone home: a photo of the clinic, a greeting, one line picked at random each visit, and the icons in a white card, with a bar at the bottom.
 const HERO = HERO_PHOTO;
 const QUOTES = ['Every shift matters, every patient counts.', 'Care for your team the way you care for patients.', 'Small acts of kindness every day create a big difference.', 'Together, we make a difference every day.'];
-type PhoneItem = { label: string; short: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
+type PhoneItem = { label: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
 
 function PhoneTile({ item }: { key?: string; item: PhoneItem }) {
   const body = <>
-    <span className={`relative grid h-[52px] w-[52px] place-items-center rounded-[16px] ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.5} />
-      {item.soon && <span className="absolute -right-4 -top-2 rounded-full bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}
-      {!!item.badge && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white shadow">{item.badge}</span>}</span>
-    <span className="mt-2 block w-full min-w-0"><strong className="block text-[14px] font-bold leading-tight text-[#0b2a4a]">{item.label}</strong><span className="mt-0.5 block text-[11.5px] leading-[1.3] text-slate-500">{item.short}</span></span>
+    <span className={`relative grid h-[50px] w-[50px] place-items-center rounded-[16px] ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.5} />
+      {item.soon && <span className="absolute -right-3 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}
+      {!!item.badge && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow">{item.badge}</span>}</span>
+    <strong className="mt-1.5 block w-full min-w-0 text-[12px] font-semibold leading-tight text-[#0b2a4a]">{item.label}</strong>
   </>;
-  const base = 'flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition active:bg-slate-50';
+  const base = 'flex min-w-0 flex-col items-center rounded-2xl px-0.5 py-2 text-center transition active:bg-slate-50';
   if (item.soon) return <div aria-disabled="true" className={`${base} opacity-80`}>{body}</div>;
   return item.href ? <a href={item.href} className={base}>{body}</a> : <button type="button" onClick={item.onClick} className={base}>{body}</button>;
 }
@@ -86,9 +87,30 @@ function MyProfile() {
   return <><dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium">{value || '—'}</dd></div>)}</dl><p className="mt-4 text-xs leading-5 text-slate-400">These come from your HR record. If something is wrong, ask HR to correct it.</p></>;
 }
 
+// Development only (`npm run dev`, never in the live build): "View as" switches which icons the signed-in person sees, so
+// the staff, doctor, supervisor and admin layouts can be compared on one account. Only which icons show changes (no fake red numbers); nothing is
+// written anywhere, and screens still show the real account's data.
+const AS_KEY = 'ara_dev_view_as';
+const VIEW_AS: Record<string, Partial<Me['staff']>> = {
+  Staff: { preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Doctor: { preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Supervisor: { preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Admin: { preview: true, isApprover: true, canReview: true, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+};
+const readViewAs = () => { try { const value = localStorage.getItem(AS_KEY) || ''; return value in VIEW_AS ? value : ''; } catch { return ''; } };
+
 export default function IndividualHub() {
   const [signedIn, setSignedIn] = useState(() => Boolean(localStorage.getItem(TOKEN_KEY)));
-  const [me, setMe] = useState<Me | null>(() => readRememberedMe());
+  const [realMe, setMe] = useState<Me | null>(() => readRememberedMe());
+  const [viewAs, setViewAs] = useState(() => import.meta.env.DEV ? readViewAs() : '');
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const sync = () => setViewAs(readViewAs());
+    window.addEventListener('storage', sync); // the desktop and phone frames share this choice
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+  const chooseViewAs = (next: string) => { try { if (next) localStorage.setItem(AS_KEY, next); else localStorage.removeItem(AS_KEY); } catch { /* ignore */ } setViewAs(next); };
+  const me = viewAs && realMe ? { staff: { ...realMe.staff, ...VIEW_AS[viewAs] } } : realMe;
   const [view, setView] = useState<View>('home');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
@@ -123,6 +145,7 @@ export default function IndividualHub() {
 
   const phoneNav = <PhoneNav view={view} onGo={setView} />;
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
+  if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
@@ -140,6 +163,7 @@ export default function IndividualHub() {
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
   const items: Item[] = [
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
+    ...([{ label: 'Announcements', desc: me?.staff.announcementsUnread ? `${me.staff.announcementsUnread} to read` : 'Team updates and memos', icon: Bell, tone: 'bg-[#ffe4e8] text-[#e0314f]', onClick: () => setView('announcements'), badge: me?.staff.announcementsUnread || 0 } as Item]),
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
@@ -150,11 +174,13 @@ export default function IndividualHub() {
     ...(me?.staff.preview ? [] : [{ label: 'Incentive Claims', desc: 'Record your procedures and claim your incentive', icon: Coins, tone: 'bg-[#ffd36b]/50 text-[#3b2a00]', href: '#office/incentives' } as Item]),
     { label: 'Settings', desc: 'Change your password, sign out', icon: Settings, tone: 'bg-slate-100 text-slate-600', onClick: () => setView('settings') },
   ];
-  const short: Record<string, string> = { Attendance: 'Check in/out and view records', Leave: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for you` : 'Apply and track your leave', 'My Roster': 'View your schedule', 'Performance Review': me?.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews given to you', Payslip: 'View your payslips', 'Income Tax': 'Access your tax documents', 'My Profile': 'View your profile', 'Assessment Room': 'Take your assessments', 'Incentive Claims': 'View your claims and status', Settings: 'Manage your preferences' };
-  const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, short: short[item.label] || item.desc, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge }));
+  const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge }));
   const facts: [string, string][] = profile ? [['Position', profile.position], ['Department', profile.department], ['Joined', dmy(profile.joinDate)]] : [];
 
   return <>
+    {import.meta.env.DEV && <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-1 bg-slate-900/90 px-2 py-1.5 text-[11px] font-semibold text-white" aria-label="Development: view as">
+      <span className="mr-1 text-slate-400">View as</span>{['', ...Object.keys(VIEW_AS)].map((name) => <button key={name || 'real'} type="button" onClick={() => chooseViewAs(name)} className={`rounded-full px-2.5 py-1 ${viewAs === name ? 'bg-white text-slate-900' : 'bg-white/10'}`}>{name || 'Me'}</button>)}
+    </div>}
     {/* Phone: the photo of the clinic, a greeting and the icons in a white card */}
     <div className="min-h-[100svh] bg-[#f3f6fb] pb-[84px] text-[#14233b] md:hidden">
       <header className="relative h-[clamp(300px,38svh,380px)] overflow-hidden bg-[#cfe3f4]">
@@ -163,13 +189,13 @@ export default function IndividualHub() {
         <div className="absolute inset-x-0 bottom-0 h-[58%] bg-gradient-to-t from-[#082c42]/90 via-[#0b3d59]/55 to-transparent" />
         <div className="relative flex items-start justify-between px-5 pt-[max(env(safe-area-inset-top),20px)]">
           <div><p className="text-[34px] font-extrabold leading-none tracking-tight"><span className="text-[#0b2a4a]">Ara</span><span className="text-[#1f6feb]">Office</span></p><p className="mt-1.5 text-[11px] font-medium tracking-[0.34em] text-[#0b2a4a]">KLINIK ARA 24 JAM</p></div>
-          <button onClick={() => { if (me?.staff.leaveWaiting) setView('leave'); else if (me?.staff.reviewWaiting) setView('review'); }} aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full bg-white/70 text-[#0b2a4a] backdrop-blur"><Bell className="h-6 w-6" strokeWidth={1.7} />{((me?.staff.leaveWaiting || 0) + (me?.staff.reviewWaiting || 0)) > 0 && <i className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full border-2 border-white bg-rose-500" />}</button>
+          <button onClick={() => { if (me?.staff.announcementsUnread) setView('announcements'); else if (me?.staff.leaveWaiting) setView('leave'); else if (me?.staff.reviewWaiting) setView('review'); }} aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full bg-white/70 text-[#0b2a4a] backdrop-blur"><Bell className="h-6 w-6" strokeWidth={1.7} />{((me?.staff.leaveWaiting || 0) + (me?.staff.reviewWaiting || 0) + (me?.staff.announcementsUnread || 0)) > 0 && <i className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full border-2 border-white bg-rose-500" />}</button>
         </div>
         <div className="relative mt-4 flex items-center gap-3.5 px-5"><span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full bg-[#cfe3f9] text-xl font-bold text-[#1f6feb]">{me ? initials(name) : '…'}</span><div className="min-w-0"><h1 className="truncate text-[23px] font-bold leading-tight tracking-tight text-[#0b2a4a]">Hi, {me ? name.split(' ')[0] : '…'}</h1><p className="text-[14px] text-slate-600">Have a good day ahead!</p><p className="mt-0.5 text-[12.5px] font-semibold text-[#1f6feb]">{now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' })} · {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p></div></div>
         <div className="absolute inset-x-0 bottom-9 px-5"><p className="max-w-[290px] text-[21px] font-semibold leading-snug tracking-tight text-white [text-shadow:0_1px_8px_rgba(8,44,66,0.55)]">{quote}</p><i className="mt-2 block h-1 w-12 rounded-full bg-[#7cc4ff]" /></div>
       </header>
       <main className="relative z-10 -mt-6 mx-3 rounded-[26px] bg-white px-1.5 pb-4 pt-4 shadow-[0_10px_34px_rgba(11,42,74,0.1)]">
-        <div className="grid grid-cols-3 gap-x-0.5 gap-y-2">{phoneItems.map((item) => <PhoneTile key={item.label} item={item} />)}</div>
+        <div className="grid grid-cols-4 gap-x-0 gap-y-1">{phoneItems.map((item) => <PhoneTile key={item.label} item={item} />)}</div>
       </main>
       {phoneNav}
     </div>

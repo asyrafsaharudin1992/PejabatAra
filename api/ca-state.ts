@@ -1,4 +1,5 @@
 import { officeAccess } from './_office-db.js';
+import { announcementStaff } from './_announcements.js';
 
 const BRANCH_NAME = 'AraSpace Clinical Assistants';
 const WORKSPACE_KEY = 'ca_workspace';
@@ -22,22 +23,8 @@ async function stateBranch(db: any) {
   return data.id;
 }
 
-// Staff who must read announcements: the clinic assistants and the Clinical Admin of each branch (a Clinical Admin is
-// "Admin Clinical" at SK and "Clinic Assistant Officer" at KJ). Doctors, other admin and management are not listed.
-// Their job title comes from HR's record; preview and test accounts are left out.
-const ANNOUNCEMENT_TITLES = /^(CLINIC ASSISTANT|CLINIC ASSISTANT OFFICER|ADMIN CLINICAL)$/i;
-async function announcementStaff(db: any) {
-  const [{ data, error }, { data: employees, error: employeeError }] = await Promise.all([
-    db.from('assessment_staff').select('id,name,branch').eq('active', true).eq('can_preview', false).neq('branch', 'Test').order('branch').order('name'),
-    db.from('hr_employees').select('assessment_staff_id,designation').eq('status', 'Active'),
-  ]);
-  if (error) throw error;
-  if (employeeError) throw employeeError;
-  const listed = new Set((employees || []).filter((row: any) => row.assessment_staff_id && ANNOUNCEMENT_TITLES.test(String(row.designation || '').trim())).map((row: any) => row.assessment_staff_id));
-  return (data || []).filter((item: any) => listed.has(item.id)).map((item: any) => ({ id: item.id, name: item.name, branch: item.branch }));
-}
-
-// Any CA account may mark a staff member as having read an announcement; reads live beside the workspace.
+// Who has read each announcement lives beside the workspace. Staff record their own read in Individual Sign In;
+// here System Admin can only untick a name.
 async function announcementReads(req: any, res: any, db: any, branchId: string, userId: string, isAdmin: boolean) {
   const load = async (key: string) => { const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', branchId).eq('state_key', key).maybeSingle(); if (error) throw error; return data?.payload || null; };
   const [staff, stored] = await Promise.all([announcementStaff(db), load(READS_KEY)]);
@@ -48,11 +35,12 @@ async function announcementReads(req: any, res: any, db: any, branchId: string, 
   const announcements: any[] = (await load(WORKSPACE_KEY))?.announcements || [];
   if (!announcements.some((item) => item.id === body.announcementId)) return res.status(404).json({ error: 'That announcement no longer exists.' });
   if (!staff.some((item: any) => item.id === body.staffId)) return res.status(400).json({ error: 'Please choose a staff name.' });
-  if (body.unread && !isAdmin) return res.status(403).json({ error: 'Only System Admin can untick a name.' });
+  if (!body.unread) return res.status(400).json({ error: 'Staff record that they have read an announcement in their Individual Sign In.' });
+  if (!isAdmin) return res.status(403).json({ error: 'Only System Admin can untick a name.' });
   // Drop reads for deleted announcements while saving.
   const next = Object.fromEntries(Object.entries(reads).filter(([id]) => announcements.some((item) => item.id === id)));
-  next[body.announcementId] = { ...(next[body.announcementId] || {}), [body.staffId]: new Date().toISOString() };
-  if (body.unread) delete next[body.announcementId][body.staffId];
+  next[body.announcementId] = { ...(next[body.announcementId] || {}) };
+  delete next[body.announcementId][body.staffId];
   const { error } = await db.from('portal_state').upsert({ branch_id: branchId, state_key: READS_KEY, payload: { reads: next }, updated_by: userId }, { onConflict: 'branch_id,state_key' });
   if (error) throw error;
   return res.status(200).json({ staff, reads: next });
