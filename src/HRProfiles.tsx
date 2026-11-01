@@ -19,7 +19,7 @@ export type Employee = {
   branch: string; department: string; designation: string; employmentType: string; joinDate: string | null; confirmDate: string | null; resignDate: string | null;
   status: string; workDays?: number[]; holidayGroup?: string; leaveCalendarCompanies?: string[]; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; updatedAt?: string;
 };
-type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'> & { signIn?: 'none' | 'not_set' | 'set'; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null };
+type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'> & { shortName?: string; signIn?: 'none' | 'not_set' | 'set'; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null };
 type Audit = { action: string; changes: Record<string, [unknown, unknown]>; at: string; by: string };
 
 const blank = (): Employee => ({ company: '', employeeCode: '', fullName: '', icNo: '', passportNo: '', nationality: 'Malaysian', gender: '', dateOfBirth: null, religion: '', maritalStatus: '', spouseWorking: null, children: [], phone: '', email: '', address: '', emergencyName: '', emergencyRelation: '', emergencyPhone: '', branch: '', department: '', designation: '', employmentType: 'Permanent', joinDate: null, confirmDate: null, resignDate: null, status: 'Active', leaveGroup: 'AL', basicSalary: 0, fixedAllowances: [], bankName: '', bankAccount: '', epfNo: '', socsoNo: '', taxNo: '', remarks: '' });
@@ -118,7 +118,7 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
     {employees && !employees.length && !notSetUp && <p className={`${card} text-sm text-slate-500`}>No staff profiles yet. Press Add staff, or import them from Infotech.</p>}
     {employees && employees.length > 0 && !notSetUp && <section className="overflow-hidden rounded-[24px] bg-white shadow-[0_12px_35px_rgba(20,35,59,0.08)]">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1550px] text-left text-sm">
+        <table className="w-full min-w-[1550px] text-left text-xs">
           <thead className="bg-[#f7fafc]"><tr className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             <th className="w-12 px-4 py-3.5">No</th>
             {columns.map((column) => <th key={column.key} className={`px-4 py-3.5 ${column.className || ''}`}><button type="button" onClick={() => setSort((current) => ({ key: column.key, dir: current.key === column.key ? (current.dir === 1 ? -1 : 1) : 1 }))} className="inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-[#0b587b]">{column.label}<span className={sort.key === column.key ? 'text-[#0b587b]' : 'opacity-0'}>{sort.dir === 1 ? '▲' : '▼'}</span></button></th>)}
@@ -127,7 +127,7 @@ export function HRProfiles({ onError }: { onError: (message: string) => void }) 
             {sorted.map((row, index) => <tr key={row.id} onClick={() => setOpenId(row.id || '')} className={`cursor-pointer transition hover:bg-[#f4fafd] ${row.status !== 'Active' ? 'text-slate-400' : ''}`}>
               <td className="px-4 py-3 text-xs text-slate-400">{index + 1}</td>
               <td className="px-4 py-3 font-mono text-xs">{row.employeeCode}</td>
-              <td className="px-4 py-3"><span className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e9f6fb] text-[11px] font-bold text-[#0b587b]">{row.fullName.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}</span><span className="font-semibold text-[#14233b]">{row.fullName}</span></span></td>
+              <td className="px-4 py-3"><span className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e9f6fb] text-[11px] font-bold text-[#0b587b]">{row.fullName.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}</span><span className="min-w-0"><span className="font-semibold text-[#14233b]">{row.fullName}</span>{row.shortName && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500" title="Name used to sign in">{row.shortName}</span>}</span></span></td>
               <td className="px-4 py-3">{row.designation || '—'}</td>
               <td className="px-4 py-3">{row.department || '—'}</td>
               <td className="px-4 py-3"><span className="mr-2 rounded-md bg-[#eaf6fb] px-1.5 py-0.5 text-[10px] font-bold text-[#0b587b]">{row.company}</span>{row.branch || '—'}</td>

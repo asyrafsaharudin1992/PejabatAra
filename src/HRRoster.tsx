@@ -8,7 +8,7 @@ import { newCode } from './lib/shiftCodes';
 // or as a calendar. Leave is counted on the days marked as working here; a date with no roster falls back to the
 // person's usual working weekdays.
 const API = '/api/status?resource=hr';
-type Person = { id: string; company: string; code: string; name: string; designation: string };
+type Person = { id: string; company: string; code: string; name: string; short?: string; designation: string };
 type Day = { id: string; date: string; shift: string; works: boolean; note: string };
 
 async function api(query: string, body?: unknown) {
@@ -21,7 +21,7 @@ const monthName = (month: string) => new Date(`${month}-01T00:00:00`).toLocaleDa
 const WEEKDAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const isDoctor = (person: Person) => /\b(DR|DOCTOR)\b/i.test(person.designation);
 // "AHMAD SYAFIQ BIN SO'IB" becomes "Syafiq": the first name that is not a common first word.
-const shortName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
+const guessName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
 const isLeave = (day: Day) => !day.works && ['AL', 'UPL', 'MC', 'ML', 'EL'].includes(day.shift);
 const isOffice = (shift: string) => ['OH', 'AM-6', 'AM-5'].includes(shift);
 // Colour by what the day is: a day shift, a night shift, office hours, a rest day, leave, a public holiday, or not yet scheduled.
@@ -67,8 +67,13 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
   const shown = (shift: string) => codes === 'new' ? newCode(shift) : shift;
   const [data, setData] = useState<{ people: Person[]; days: Day[] } | null>(null);
   const [notice, setNotice] = useState('');
+  type Change = { at: string; by: string; name: string; company: string; code: string; date: string; from: string; to: string; reason: string };
+  const [log, setLog] = useState<Change[]>([]);
+  // The day being changed on screen, with the new code and the optional reason.
+  const [edit, setEdit] = useState<{ person: Person; date: string; day?: Day; shift: string; reason: string; saving: boolean } | null>(null);
   const load = () => { setData(null); api(`action=roster&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => { setData({ people: [], days: [] }); onError(cause.message); }); };
   useEffect(load, [month]);
+  useEffect(() => { if (!data) return; api(`action=roster_log&month=${month}`).then((result) => setLog(result.log || [])).catch(() => setLog([])); }, [month, data]);
   useEffect(() => { setPersonId(''); setPicked(''); }, [group, company, month]);
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -82,6 +87,18 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
       if (result.error) throw new Error(result.error);
       setNotice(`Saved ${result.saved} roster days.`); load();
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
+  };
+
+  const startEdit = (person: Person, date: string, day?: Day) => setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
+  const saveEdit = async () => {
+    if (!edit) return;
+    setEdit({ ...edit, saving: true });
+    try {
+      const result = await api('action=roster_set', { employeeId: edit.person.id, date: edit.date, shift: edit.shift, reason: edit.reason });
+      if (result.error) throw new Error(result.error);
+      setNotice(`${edit.person.name}, ${edit.date}: ${edit.day ? newCode(edit.day.shift) : 'no schedule'} → ${edit.shift || 'no schedule'}. Recorded in the change log.`);
+      setEdit(null); load();
+    } catch (cause) { setEdit((current) => current && { ...current, saving: false }); onError(cause instanceof Error ? cause.message : 'Unable to change the roster.'); }
   };
 
   const count = Number(month.slice(5)), year = Number(month.slice(0, 4));
@@ -103,7 +120,8 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
     const rank = (shift: string) => SHIFT_ORDER.includes(shift) ? SHIFT_ORDER.indexOf(shift) : 99;
     return { shifts: [...shifts.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])), leave };
   };
-  const few = people.length <= 8;
+  // The name each person signs in with; a guess from the full name only if they have no sign-in yet.
+  const shortName = (person: Person) => person.short || guessName(person.name);
   const lead = (new Date(`${month}-01T00:00:00`).getDay() + 6) % 7;
   const detail = picked ? onDate(picked) : null;
   const today = new Date().toLocaleDateString('en-CA');
@@ -137,7 +155,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
           <thead><tr><th className="sticky left-0 z-10 min-w-[210px] bg-white px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
             <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800">{person.name}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
-            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><div title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 place-items-center rounded-md px-0.5 text-[11px] font-bold ${cellTone(day && { ...day, shift: shown(day.shift) })}`}>{day ? shown(day.shift) : '·'}</div></td>; })}
+            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><button type="button" onClick={() => startEdit(person, date, day)} title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 w-full cursor-pointer place-items-center rounded-md px-0.5 text-[11px] font-bold transition hover:ring-2 hover:ring-[#0b587b]/40 ${cellTone(day && { ...day, shift: shown(day.shift) })}`}>{day ? shown(day.shift) : '·'}</button></td>; })}
           </tr>)}</tbody>
         </table> :
         <div className="min-w-[760px]">
@@ -146,11 +164,11 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
             {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} />)}
             {dates.map((date) => {
               const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined; const weekend = [0, 6].includes(new Date(`${date}T00:00:00`).getDay());
-              return <button key={date} onClick={() => setPicked(picked === date ? '' : date)} className={`min-h-[124px] rounded-2xl border p-2 text-left align-top transition ${picked === date ? 'border-[#0b587b] ring-2 ring-[#0b587b]/20' : date === today ? 'border-[#0b587b]/50' : 'border-slate-200'} ${weekend ? 'bg-slate-50' : 'bg-white'} hover:border-[#0b587b]/40`}>
+              return <button key={date} onClick={() => setPicked(picked === date ? '' : date)} className={`min-h-[124px] break-words rounded-2xl border p-2 text-left align-top transition ${picked === date ? 'border-[#0b587b] ring-2 ring-[#0b587b]/20' : date === today ? 'border-[#0b587b]/50' : 'border-slate-200'} ${weekend ? 'bg-slate-50' : 'bg-white'} hover:border-[#0b587b]/40`}>
                 <span className={`inline-grid h-6 min-w-6 place-items-center rounded-full px-1 text-xs font-bold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{Number(date.slice(8))}</span>
                 {selected ? <p className={`mt-3 grid h-10 place-items-center rounded-lg text-sm font-bold ${cellTone(own && { ...own, shift: shown(own.shift) })}`}>{own ? shown(own.shift) : '·'}</p> : <div className="mt-1.5 space-y-1">
-                  {here.shifts.map(([shift, who]) => <p key={shift} className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {few ? who.map((person) => shortName(person.name)).join(', ') : `× ${who.length}`}</p>)}
-                  {here.leave.length > 0 && <p className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold leading-tight text-rose-800"><span className="font-bold">Leave</span> {few ? here.leave.map((person) => shortName(person.name)).join(', ') : `× ${here.leave.length}`}</p>}
+                  {here.shifts.map(([shift, who]) => <p key={shift} className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {who.map((person) => shortName(person)).join(', ')}</p>)}
+                  {here.leave.length > 0 && <p className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold leading-tight text-rose-800"><span className="font-bold">Leave</span> {here.leave.map((person) => shortName(person)).join(', ')}</p>}
                 </div>}
               </button>;
             })}
@@ -163,6 +181,25 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
             </ul>}
           </div>}
         </div>}
+    </section>
+    {edit && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onClick={() => !edit.saving && setEdit(null)}>
+      <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-[22px] bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b9aca]">Change roster</p>
+        <h3 className="mt-1 text-lg font-semibold">{edit.person.name}</h3>
+        <p className="text-sm text-slate-500">{new Date(`${edit.date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · now {edit.day ? `${newCode(edit.day.shift)}${newCode(edit.day.shift) !== edit.day.shift ? ` (Infotech ${edit.day.shift})` : ''}` : 'no schedule'}</p>
+        <label className="mt-4 block text-sm font-semibold text-slate-600">New code<select value={edit.shift} onChange={(event) => setEdit({ ...edit, shift: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
+          <option value="">No schedule (usual working weekdays)</option>
+          {[...(group === 'doctors' ? DOCTOR_CODES : STAFF_CODES), ...OTHER_CODES.filter(([code]) => !['AL'].includes(code) || group !== 'doctors')].filter(([code], index, all) => all.findIndex(([other]) => other === code) === index).map(([code, meaning]) => <option key={code} value={code}>{code} — {meaning}</option>)}
+        </select></label>
+        <label className="mt-3 block text-sm font-semibold text-slate-600">Reason (optional)<input value={edit.reason} maxLength={200} onChange={(event) => setEdit({ ...edit, reason: event.target.value })} placeholder="e.g. swapped with Amy, asked by supervisor" className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal" /></label>
+        <p className="mt-3 text-xs text-slate-500">Every change is recorded with who made it, when, and the code before and after.</p>
+        <div className="mt-5 flex justify-end gap-3"><button type="button" disabled={edit.saving} onClick={() => setEdit(null)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button type="button" disabled={edit.saving || (edit.shift === (edit.day ? newCode(edit.day.shift) : ''))} onClick={() => void saveEdit()} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{edit.saving ? 'Saving…' : 'Save change'}</button></div>
+      </div>
+    </div>}
+    <section className={`${card} space-y-3`}>
+      <h3 className="font-semibold">Changes made on screen · {monthName(month)}</h3>
+      {!log.length ? <p className="text-sm text-slate-500">No changes yet. Click a day in the table to change it; each change is recorded here.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">When</th><th className="pr-3">Changed by</th><th className="pr-3">Staff</th><th className="pr-3">Date</th><th className="pr-3">Change</th><th>Reason</th></tr></thead>
+        <tbody>{log.map((item, index) => <tr key={index} className="border-t border-slate-100"><td className="py-2 pr-3 whitespace-nowrap text-slate-500">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td className="pr-3">{item.by || 'Someone'}</td><td className="pr-3"><span className="font-semibold text-slate-800">{item.name}</span> <span className="text-slate-400">{item.company} · {item.code}</span></td><td className="pr-3 whitespace-nowrap">{item.date}</td><td className="pr-3 whitespace-nowrap font-mono font-bold text-[#0b587b]">{item.from ? newCode(item.from) : 'none'} → {item.to || 'none'}</td><td className="text-slate-600">{item.reason || '—'}</td></tr>)}</tbody></table></div>}
     </section>
     <section className={`${card} space-y-4`}>
       <h3 className="font-semibold">What the codes mean</h3>

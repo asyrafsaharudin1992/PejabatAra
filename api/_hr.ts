@@ -218,9 +218,10 @@ export async function hrHandler(req: any, res: any) {
       if (error) throw error;
       // Whether each person's individual sign-in has a password yet: none (no sign-in), not_set, or set.
       const linked = (data || []).map((row: any) => row.assessment_staff_id).filter(Boolean);
-      const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,password_hash').in('id', linked) : { data: [] };
+      const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name,password_hash').in('id', linked) : { data: [] };
       const hasPassword = new Map((logins || []).map((login: any) => [login.id, Boolean(login.password_hash)]));
-      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
+      const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
+      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, shortName: shortNames.get(row.assessment_staff_id) || '', branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
     }
 
     // One full profile, with its recent changes.
@@ -782,8 +783,11 @@ export async function hrHandler(req: any, res: any) {
       const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
       if (error) throw error;
       const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
-      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] };
-      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '' })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').in('id', ids) : { data: [] };
+      const linked = (people || []).map((p: any) => p.assessment_staff_id).filter(Boolean);
+      const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name').in('id', linked) : { data: [] };
+      const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
+      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
@@ -812,6 +816,48 @@ export async function hrHandler(req: any, res: any) {
       const { error } = await db.from('hr_roster').upsert(out, { onConflict: 'employee_id,work_date' });
       if (error) throw error;
       return res.status(200).json({ success: true, saved: out.length });
+    }
+
+    // One day changed on screen by HR. It is saved and written to the audit log (who, when, before, after, and an optional
+    // reason). An empty code clears the day, so the person's usual working weekdays apply again.
+    if (req.method === 'POST' && action === 'roster_set') {
+      const ROSTER_CODES = new Set(['AM-9', 'AM-12', 'AM-6', 'AM-5', 'PM', 'OFF', 'REST', 'AM', 'OH', 'PH', 'NA', 'RESIGN', 'AL', 'UPL', 'MC']);
+      const employeeId = text(body.employeeId, 60), date = text(body.date, 10), reason = text(body.reason, 200);
+      const shift = text(body.shift, 30).toUpperCase();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fail(400, 'Choose a valid date.');
+      if (shift && !ROSTER_CODES.has(shift)) throw fail(400, 'Choose a roster code from the list.');
+      const { data: person, error: personError } = await db.from('hr_employees').select('id').eq('id', employeeId).maybeSingle();
+      if (personError) throw personError;
+      if (!person) throw fail(404, 'Profile not found.');
+      const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
+      if (beforeError) throw beforeError;
+      if ((before?.shift || '') === shift) throw fail(400, 'That is already the code for this day.');
+      if (shift) {
+        const works = !['OFF', 'REST', 'PH', 'NA', 'RESIGN', 'AL', 'UPL', 'MC'].includes(shift);
+        const { error } = await db.from('hr_roster').upsert({ employee_id: employeeId, work_date: date, shift, works, note: ['AL', 'UPL', 'MC'].includes(shift) ? shift : '' }, { onConflict: 'employee_id,work_date' });
+        if (error) throw error;
+      } else {
+        const { error } = await db.from('hr_roster').delete().eq('employee_id', employeeId).eq('work_date', date);
+        if (error) throw error;
+      }
+      const { error: auditError } = await db.from('hr_audit').insert({ employee_id: employeeId, action: 'roster', changes: { [`roster_${date}`]: [before?.shift || '', shift], ...(reason ? { roster_reason: ['', reason] } : {}) }, changed_by: user.id });
+      if (auditError) throw auditError;
+      return res.status(200).json({ success: true });
+    }
+    // The changes made on screen for a month, newest first.
+    if (req.method === 'GET' && action === 'roster_log') {
+      const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';
+      if (!month) throw fail(400, 'Choose a month.');
+      const { data, error } = await db.from('hr_audit').select('employee_id,changes,changed_by,changed_at').eq('action', 'roster').order('changed_at', { ascending: false }).limit(400);
+      if (error) throw error;
+      const rows = (data || []).filter((row: any) => Object.keys(row.changes || {}).some((key) => key.startsWith(`roster_${month}`)));
+      const peopleIds = [...new Set(rows.map((row: any) => row.employee_id).filter(Boolean))], userIds = [...new Set(rows.map((row: any) => row.changed_by).filter(Boolean))];
+      const [{ data: people }, { data: users }] = await Promise.all([
+        peopleIds.length ? db.from('hr_employees').select('id,company,employee_code,full_name').in('id', peopleIds) : { data: [] },
+        userIds.length ? db.from('profiles').select('id,full_name').in('id', userIds) : { data: [] },
+      ]);
+      const who = new Map((people || []).map((p: any) => [p.id, p])), by = new Map((users || []).map((u: any) => [u.id, u.full_name]));
+      return res.status(200).json({ log: rows.map((row: any) => { const key = Object.keys(row.changes).find((k) => k.startsWith('roster_2')) || ''; const [from, to] = row.changes[key] || ['', '']; const p: any = who.get(row.employee_id); return { at: row.changed_at, by: by.get(row.changed_by) || '', name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', date: key.slice(7), from, to, reason: row.changes.roster_reason?.[1] || '' }; }) });
     }
 
     // Creates the staff member's individual sign-in from their HR profile and links it: they sign in with the short name given here, their
