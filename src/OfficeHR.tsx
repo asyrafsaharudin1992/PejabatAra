@@ -1,12 +1,11 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ClipboardCheck, IdCard, Inbox, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { homeQuote } from './PortalApp';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
-import { HRProfileRequests } from './HRProfileRequests';
 import { HRReviews } from './HRReviews';
 import { HRAttendance } from './HRAttendance';
 import { HRRoster } from './HRRoster';
@@ -18,12 +17,11 @@ import { HRIncentives } from './HRIncentives';
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'requests' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'reports';
+type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'reports';
 type Staff = { id: string; name: string; code: string; branch: string; active: boolean };
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
-  { id: 'requests', label: 'Profile Requests', note: 'Staff change requests', icon: Inbox, tone: 'text-[#f9a8d4]' },
   { id: 'reviews', label: 'Performance Reviews', note: 'Reviews from supervisors', icon: ClipboardCheck, tone: 'text-[#4ade80]' },
   { id: 'staff', label: 'Staff Directory', note: 'Assessment staff list', icon: Users, tone: 'text-[#70d8fa]' },
   { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
@@ -32,7 +30,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'reports', label: 'Reports', note: 'Leave & attendance', icon: FileBarChart, tone: 'text-[#4ade80]', soon: true },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', requests: 'Profile Requests', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
+const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -149,7 +147,7 @@ export default function OfficeHR() {
   const [staff, setStaff] = useState<Staff[] | null>(null);
   const [error, setError] = useState('');
   const [pendingRequests, setPendingRequests] = useState(0);
-  // The number on the Profile Requests menu item.
+  // The number on Staff Profiles: staff change requests waiting for HR.
   useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
   // The staff list is read once when the office opens.
@@ -166,7 +164,7 @@ export default function OfficeHR() {
   };
 
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar badges={{ requests: pendingRequests }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
+    <Sidebar badges={{ profiles: pendingRequests }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
     <div className="min-h-screen lg:pl-[300px]">
       <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
@@ -177,8 +175,7 @@ export default function OfficeHR() {
       <main className="p-4 sm:p-6 lg:p-[38px]">
         {error && <p className="mx-auto mb-4 max-w-[1500px] rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
         {view === 'home' && <HomeView staff={staff} onNavigate={navigate} />}
-        {view === 'profiles' && <HRProfiles onError={setError} />}
-        {view === 'requests' && <HRProfileRequests onError={setError} onChanged={setPendingRequests} />}
+        {view === 'profiles' && <HRProfiles onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
         {view === 'reviews' && <HRReviews onError={setError} />}
         {view === 'roster' && <HRRoster onError={setError} />}
         {view === 'incentives' && <HRIncentives onError={setError} />}
