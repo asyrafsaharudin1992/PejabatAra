@@ -282,7 +282,7 @@ const PAY_KINDS = /increment|salary|hourly|bonus/i;
 function ProfileCareer({ employeeId, reveal, onError, onLoaded }: { employeeId: string; reveal: boolean; onError: (message: string) => void; onLoaded?: (entries: CareerEntry[]) => void }) {
   const [entries, setEntries] = useState<CareerEntry[] | null>(null);
   const [notSetUp, setNotSetUp] = useState(false);
-  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setEntries(result.entries || []); onLoaded?.(result.entries || []); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onLoaded?.([]); onError(cause.message); }); }, [employeeId]);
+  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); const list = ((result.entries || []) as CareerEntry[]).map((entry) => entry.date && entry.date < '1950' ? { ...entry, date: null } : entry); setEntries(list); onLoaded?.(list); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onLoaded?.([]); onError(cause.message); }); }, [employeeId]);
   const paged = usePaged<CareerEntry>(entries || [], 10, employeeId);
   const pay = (entry: CareerEntry) => PAY_KINDS.test(entry.kind) || PAY_KINDS.test(entry.detail);
   const shown = (entry: CareerEntry, value: string) => value && pay(entry) && !reveal ? '••••' : value;
