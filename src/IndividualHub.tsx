@@ -82,18 +82,41 @@ function Screen({ title, onBack, children, nav }: { title: string; onBack: () =>
 }
 
 // My Profile: the staff member's own details in sections, like the staff app they know (work, personal, address, contact, spouse,
-// children, education). They only see their own record, and never IC, bank or pay details.
+// children, education). They only see their own record, and never IC, bank or pay details. A staff member can ask HR to change
+// the personal sections; nothing changes until HR approves.
+type Req = { id: string; status: 'pending' | 'approved' | 'rejected'; fields: string[]; requestedAt: string; decidedAt: string | null; note: string };
+const FIELD_NAME: Record<string, string> = { date_of_birth: 'date of birth', religion: 'religion', race: 'race', nationality: 'nationality', marital_status: 'marital status', address_line1: 'address', address_line2: 'address', postcode: 'address', city: 'address', state: 'address', phone: 'mobile', email: 'email', emergency_name: 'emergency contact', emergency_relation: 'emergency contact', emergency_phone: 'emergency contact', spouse_name: 'spouse', spouse_employer: 'spouse', spouse_phone: 'spouse', children: 'children', education: 'education' };
+const SECTION_FIELDS: Record<string, { column: string; label: string; type?: string; options?: string[] }[]> = {
+  personal: [{ column: 'date_of_birth', label: 'Date of birth', type: 'date' }, { column: 'nationality', label: 'Nationality' }, { column: 'religion', label: 'Religion' }, { column: 'race', label: 'Race' }, { column: 'marital_status', label: 'Marital status', options: ['', 'Single', 'Married', 'Divorced', 'Widowed'] }],
+  address: [{ column: 'address_line1', label: 'Address line 1' }, { column: 'address_line2', label: 'Address line 2' }, { column: 'postcode', label: 'Postcode' }, { column: 'city', label: 'City' }, { column: 'state', label: 'State' }],
+  contact: [{ column: 'phone', label: 'Mobile', type: 'tel' }, { column: 'email', label: 'Email', type: 'email' }, { column: 'emergency_name', label: 'Emergency contact' }, { column: 'emergency_relation', label: 'Relationship' }, { column: 'emergency_phone', label: 'Emergency phone', type: 'tel' }],
+  spouse: [{ column: 'spouse_name', label: 'Name' }, { column: 'spouse_employer', label: 'Occupation' }, { column: 'spouse_phone', label: 'Phone', type: 'tel' }],
+};
+const fieldBox = 'mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-[#14233b]';
+const shortDate = (value: string | null) => value ? new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' }) : '';
+
 function MyProfile() {
   const [state, setState] = useState<{ linked: boolean; profile?: Profile } | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('work');
-  useEffect(() => { assessmentFetch('action=my_profile').then((result) => setState(result)).catch((cause: Error) => setError(cause.message)); }, []);
+  const [requests, setRequests] = useState<Req[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<string, any>>({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const loadRequests = () => assessmentFetch('action=profile_requests').then((result) => setRequests(result.requests || [])).catch(() => setRequests([]));
+  useEffect(() => { assessmentFetch('action=my_profile').then((result) => setState(result)).catch((cause: Error) => setError(cause.message)); void loadRequests(); }, []);
   if (error) return <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
   if (!state) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!state.linked || !state.profile) return <p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">Your sign-in is not linked to your staff record yet. Ask HR to link it.</p>;
   const p = state.profile;
   const dash = (value: string | null | undefined) => (value && String(value).trim()) || '—';
   const address = p.address ? [p.address.line1, p.address.line2, [p.address.postcode, p.address.city].filter(Boolean).join(' '), p.address.state].map((part) => part.replace(/[,\s]+$/, '')).filter(Boolean).join(', ') : '';
+  // The details as columns, so a form can start from what HR holds now.
+  const current: Record<string, any> = { date_of_birth: p.personal?.dateOfBirth || '', nationality: p.personal?.nationality || '', religion: p.personal?.religion || '', race: p.personal?.race || '', marital_status: p.personal?.maritalStatus || '',
+    address_line1: p.address?.line1 || '', address_line2: p.address?.line2 || '', postcode: p.address?.postcode || '', city: p.address?.city || '', state: p.address?.state || '',
+    phone: p.phone || '', email: p.email || '', emergency_name: p.emergency?.name || '', emergency_relation: p.emergency?.relation || '', emergency_phone: p.emergency?.phone || '',
+    spouse_name: p.spouse?.name || '', spouse_employer: p.spouse?.occupation || '', spouse_phone: p.spouse?.phone || '', children: p.children || [], education: p.education || [] };
   const sections: { key: string; label: string; icon: typeof Settings; rows?: [string, string][]; list?: { title: string; sub: string }[]; empty?: string }[] = [
     { key: 'work', label: 'Work', icon: UserRound, rows: [['Name', p.fullName], ['Employee code', p.code], ['Company', COMPANY[p.company] || p.company], ['Branch', p.branch], ['Department', p.department], ['Position', p.position], ['Employment type', p.employmentType], ['Joined', dmy(p.joinDate)], ['Confirmed', dmy(p.confirmDate)]] },
     { key: 'personal', label: 'Personal', icon: ScanFace, rows: [['Gender', dash(p.personal?.gender)], ['Date of birth', dmy(p.personal?.dateOfBirth)], ['Nationality', dash(p.personal?.nationality)], ['Religion', dash(p.personal?.religion)], ['Race', dash(p.personal?.race)], ['Marital status', dash(p.personal?.maritalStatus)]] },
@@ -101,14 +124,46 @@ function MyProfile() {
     { key: 'contact', label: 'Contact', icon: Phone, rows: [['Mobile', dash(p.phone)], ['Email', dash(p.email)], ['Emergency contact', dash(p.emergency?.name)], ['Relationship', dash(p.emergency?.relation)], ['Emergency phone', dash(p.emergency?.phone)]] },
     { key: 'spouse', label: 'Spouse', icon: Users, rows: [['Name', dash(p.spouse?.name)], ['Occupation', dash(p.spouse?.occupation)], ['Phone', dash(p.spouse?.phone)]] },
     { key: 'children', label: 'Children', icon: Baby, list: (p.children || []).map((child) => ({ title: child.name, sub: child.dateOfBirth ? `Born ${dmy(child.dateOfBirth)}` : '' })), empty: 'No children recorded.' },
-    { key: 'education', label: 'Education', icon: GraduationCap, list: (p.education || []).map((item) => ({ title: [item.level, item.course].filter(Boolean).join(' · ') || item.institution, sub: [item.institution, item.year].filter(Boolean).join(' · ') })), empty: 'No education recorded.' },
+    { key: 'education', label: 'Studies', icon: GraduationCap, list: (p.education || []).map((item) => ({ title: [item.level, item.course].filter(Boolean).join(' · ') || item.institution, sub: [item.institution, item.year].filter(Boolean).join(' · ') })), empty: 'No education recorded.' },
   ];
-  const current = sections.find((section) => section.key === tab) || sections[0];
+  const current_ = sections.find((section) => section.key === tab) || sections[0];
+  const waiting = requests.find((request) => request.status === 'pending');
+  const lastDecided = requests.find((request) => request.status !== 'pending');
+  const startEdit = () => { setMessage(''); setDraft(tab === 'children' || tab === 'education' ? { [tab]: JSON.parse(JSON.stringify(current[tab])) } : Object.fromEntries(SECTION_FIELDS[tab].map(({ column }) => [column, current[column]]))); setEditing(true); };
+  const send = async () => {
+    setSaving(true); setMessage('');
+    try {
+      const result = await assessmentFetch('action=profile_request', { method: 'POST', body: JSON.stringify({ changes: draft }) });
+      setEditing(false); setMessage(result.fields?.length ? 'Sent to HR. Your details change once HR approves.' : 'Nothing was changed.'); await loadRequests();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Unable to send. Please try again.'); }
+    setSaving(false);
+  };
+  const editable = tab !== 'work';
+  const list = (column: 'children' | 'education') => Array.isArray(draft[column]) ? draft[column] as any[] : [];
+  const setItem = (column: 'children' | 'education', index: number, patch: Record<string, string>) => setDraft({ ...draft, [column]: list(column).map((item, i) => i === index ? { ...item, ...patch } : item) });
   return <div className="space-y-4">
-    <div role="tablist" aria-label="Profile sections" className="grid grid-cols-7 gap-0.5">{sections.map((section) => <button key={section.key} role="tab" aria-selected={tab === section.key} onClick={() => setTab(section.key)} className="flex min-w-0 flex-col items-center gap-1"><span className={`grid h-9 w-9 place-items-center rounded-full transition ${tab === section.key ? 'bg-[#0b587b] text-white shadow-md' : 'bg-white text-[#0b587b] shadow-sm'}`}><section.icon className="h-4 w-4" strokeWidth={1.7} /></span><span className={`w-full truncate text-center text-[10px] font-semibold ${tab === section.key ? 'text-[#0b587b]' : 'text-slate-500'}`}>{section.label}</span></button>)}</div>
-    {current.rows && <dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current.rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium text-[#14233b]">{value}</dd></div>)}</dl>}
-    {current.list && (current.list.length ? <ul className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current.list.map((item, index) => <li key={index} className="py-3 text-sm"><p className="font-medium text-[#14233b]">{item.title}</p>{item.sub && <p className="mt-0.5 text-xs text-slate-500">{item.sub}</p>}</li>)}</ul> : <p className="rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">{current.empty}</p>)}
-    <p className="px-1 text-xs text-slate-400">Something not right? Tell HR so it can be corrected. Your IC, bank and pay details are not shown here.</p>
+    {waiting && <p className="rounded-2xl bg-amber-50 p-3.5 text-sm text-amber-800">Waiting for HR to approve your change to {[...new Set(waiting.fields.map((field) => FIELD_NAME[field] || field))].join(', ')}.</p>}
+    {!waiting && lastDecided && Date.now() - Date.parse(lastDecided.decidedAt || lastDecided.requestedAt) < 7 * 86400000 && <p className={`rounded-2xl p-3.5 text-sm ${lastDecided.status === 'approved' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>HR {lastDecided.status === 'approved' ? 'approved' : 'did not approve'} your change on {shortDate(lastDecided.decidedAt)}.{lastDecided.note ? ` “${lastDecided.note}”` : ''}</p>}
+    <div role="tablist" aria-label="Profile sections" className="grid grid-cols-7 gap-0.5">{sections.map((section) => <button key={section.key} role="tab" aria-selected={tab === section.key} onClick={() => { setTab(section.key); setEditing(false); setMessage(''); }} className="flex min-w-0 flex-col items-center gap-1"><span className={`grid h-9 w-9 place-items-center rounded-full transition ${tab === section.key ? 'bg-[#0b587b] text-white shadow-md' : 'bg-white text-[#0b587b] shadow-sm'}`}><section.icon className="h-4 w-4" strokeWidth={1.7} /></span><span className={`w-full truncate text-center text-[10px] font-semibold ${tab === section.key ? 'text-[#0b587b]' : 'text-slate-500'}`}>{section.label}</span></button>)}</div>
+    {message && <p className={`rounded-xl p-3 text-sm ${message.startsWith('Sent') ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-700'}`}>{message}</p>}
+    {editing ? <div className="space-y-3 rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
+      {(tab === 'children' || tab === 'education') ? <>
+        {list(tab as 'children' | 'education').map((item, index) => <div key={index} className="space-y-2 rounded-xl bg-slate-50 p-3">
+          {tab === 'children' ? <><label className="block text-xs font-semibold text-slate-500">Name<input value={item.name} onChange={(event) => setItem('children', index, { name: event.target.value })} className={fieldBox} /></label><label className="block text-xs font-semibold text-slate-500">Date of birth<input type="date" value={item.dateOfBirth || ''} onChange={(event) => setItem('children', index, { dateOfBirth: event.target.value })} className={fieldBox} /></label></>
+            : <><label className="block text-xs font-semibold text-slate-500">Level (for example Diploma)<input value={item.level} onChange={(event) => setItem('education', index, { level: event.target.value })} className={fieldBox} /></label><label className="block text-xs font-semibold text-slate-500">Institution<input value={item.institution} onChange={(event) => setItem('education', index, { institution: event.target.value })} className={fieldBox} /></label><label className="block text-xs font-semibold text-slate-500">Course<input value={item.course} onChange={(event) => setItem('education', index, { course: event.target.value })} className={fieldBox} /></label><label className="block text-xs font-semibold text-slate-500">Year<input inputMode="numeric" maxLength={4} value={item.year} onChange={(event) => setItem('education', index, { year: event.target.value.replace(/\D/g, '') })} className={fieldBox} /></label></>}
+          <button type="button" onClick={() => setDraft({ ...draft, [tab]: list(tab as 'children' | 'education').filter((_, i) => i !== index) })} className="text-xs font-semibold text-rose-600">Remove</button>
+        </div>)}
+        <button type="button" onClick={() => setDraft({ ...draft, [tab]: [...list(tab as 'children' | 'education'), tab === 'children' ? { name: '', dateOfBirth: '' } : { level: '', institution: '', course: '', year: '' }] })} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-[#0b587b]">+ Add {tab === 'children' ? 'child' : 'education'}</button>
+      </> : SECTION_FIELDS[tab].map((field) => <label key={field.column} className="block text-xs font-semibold text-slate-500">{field.label}
+        {field.options ? <select value={draft[field.column] || ''} onChange={(event) => setDraft({ ...draft, [field.column]: event.target.value })} className={fieldBox}>{field.options.map((option) => <option key={option} value={option}>{option || 'Choose…'}</option>)}</select> : <input type={field.type || 'text'} value={draft[field.column] || ''} onChange={(event) => setDraft({ ...draft, [field.column]: event.target.value })} className={fieldBox} />}</label>)}
+      <p className="text-xs text-slate-400">HR checks your change before it is saved.</p>
+      <div className="flex gap-2"><button type="button" disabled={saving} onClick={() => void send()} className="h-11 flex-1 rounded-xl bg-[#0b587b] text-sm font-bold text-white disabled:opacity-50">{saving ? 'Sending…' : 'Send to HR'}</button><button type="button" disabled={saving} onClick={() => setEditing(false)} className="h-11 rounded-xl px-4 text-sm font-semibold text-slate-500">Cancel</button></div>
+    </div> : <>
+      {current_.rows && <dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current_.rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium text-[#14233b]">{value}</dd></div>)}</dl>}
+      {current_.list && (current_.list.length ? <ul className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current_.list.map((item, index) => <li key={index} className="py-3 text-sm"><p className="font-medium text-[#14233b]">{item.title}</p>{item.sub && <p className="mt-0.5 text-xs text-slate-500">{item.sub}</p>}</li>)}</ul> : <p className="rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">{current_.empty}</p>)}
+      {editable && <button type="button" onClick={startEdit} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#0b587b]/30 bg-white text-sm font-bold text-[#0b587b] shadow-sm hover:bg-[#f3f9fc]">Ask HR to change this</button>}
+      <p className="px-1 text-xs text-slate-400">{editable ? 'Your change goes to HR to approve. ' : 'Work details are kept by HR. '}Your IC, bank and pay details are not shown here.</p>
+    </>}
   </div>;
 }
 

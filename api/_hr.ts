@@ -3,6 +3,7 @@ import { officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { newCode } from '../src/lib/shiftCodes.js';
+import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
@@ -911,6 +912,39 @@ export async function hrHandler(req: any, res: any) {
         }
       }
       return res.status(200).json({ dryRun, staff: rows.length, updated: results.length, unknown, counts, results });
+    }
+
+    // Staff asking HR to change their own details (from Individual Sign In). `profile_requests` lists what waits and what was decided;
+    // `profile_request_decide` approves (the details change, and it is written to the profile's recent changes) or rejects.
+    if (req.method === 'GET' && action === 'profile_requests') {
+      const { data, error } = await db.from('hr_profile_requests').select('id,employee_id,changes,status,requested_at,decided_at,decision_note').order('requested_at', { ascending: false }).limit(120);
+      if (error) { if (error.code === '42P01') return res.status(200).json({ pending: 0, requests: [], notSetUp: true }); throw error; }
+      const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] };
+      const who = new Map((people || []).map((p: any) => [p.id, p]));
+      const requests = (data || []).map((row: any) => { const p: any = who.get(row.employee_id); return { id: row.id, name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', status: row.status, changes: row.changes || {}, requestedAt: row.requested_at, decidedAt: row.decided_at, note: row.decision_note || '' }; });
+      return res.status(200).json({ pending: requests.filter((r: any) => r.status === 'pending').length, requests });
+    }
+    if (req.method === 'POST' && action === 'profile_request_decide') {
+      const id = text(body.id, 60), approve = body.approve === true, note = text(body.note, 300);
+      const { data: request, error } = await db.from('hr_profile_requests').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!request) throw fail(404, 'Request not found.');
+      if (request.status !== 'pending') throw fail(409, 'This request has already been decided.');
+      if (approve) {
+        const { data: person, error: personError }: { data: any; error: any } = await (db as any).from('hr_employees').select(REQUEST_SELECT).eq('id', request.employee_id).maybeSingle();
+        if (personError) throw personError;
+        if (!person) throw fail(404, 'The staff profile no longer exists.');
+        const patch = patchFrom(person, request.changes || {});
+        const { error: updateError } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', request.employee_id);
+        if (updateError) throw updateError;
+        const changes: Record<string, unknown> = {}; for (const [column, change] of Object.entries(request.changes || {}) as [string, any][]) changes[column] = [change.from, change.to];
+        const { error: auditError } = await db.from('hr_audit').insert({ employee_id: request.employee_id, action: 'update', changes: { ...changes, source: ['', 'Staff request'] }, changed_by: user.id });
+        if (auditError) throw auditError;
+      }
+      const { error: decideError } = await db.from('hr_profile_requests').update({ status: approve ? 'approved' : 'rejected', decided_by: user.id, decided_at: now, decision_note: note }).eq('id', id);
+      if (decideError) throw decideError;
+      return res.status(200).json({ success: true });
     }
 
     // One day changed on screen by HR. It is saved and written to the audit log (who, when, before, after, and an optional

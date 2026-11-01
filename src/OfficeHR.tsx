@@ -1,11 +1,12 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, IdCard, Inbox, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { homeQuote } from './PortalApp';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
+import { HRProfileRequests } from './HRProfileRequests';
 import { HRReviews } from './HRReviews';
 import { HRAttendance } from './HRAttendance';
 import { HRRoster } from './HRRoster';
@@ -17,11 +18,12 @@ import { HRIncentives } from './HRIncentives';
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'reports';
+type View = 'home' | 'profiles' | 'requests' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'reports';
 type Staff = { id: string; name: string; code: string; branch: string; active: boolean };
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
+  { id: 'requests', label: 'Profile Requests', note: 'Staff change requests', icon: Inbox, tone: 'text-[#f9a8d4]' },
   { id: 'reviews', label: 'Performance Reviews', note: 'Reviews from supervisors', icon: ClipboardCheck, tone: 'text-[#4ade80]' },
   { id: 'staff', label: 'Staff Directory', note: 'Assessment staff list', icon: Users, tone: 'text-[#70d8fa]' },
   { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
@@ -30,7 +32,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'reports', label: 'Reports', note: 'Leave & attendance', icon: FileBarChart, tone: 'text-[#4ade80]', soon: true },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
+const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', requests: 'Profile Requests', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -48,7 +50,7 @@ function Hero({ title, text, action }: { title: string; text: string; action?: R
   </section>;
 }
 
-function Sidebar({ view, open, onClose, onNavigate, onLogout }: { view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
+function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { badges?: Partial<Record<View, number>>; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
   const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]', soon: false }, ...TABS];
   return <>
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
@@ -60,6 +62,7 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout }: { view: View; op
       <div className="mx-1 mt-5 h-px bg-white/10" />
       <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id || (item.id === 'leave' && view === 'leaveTypes') ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
         <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.tone}`} strokeWidth={1.8} />{item.label}
+        {!!badges[item.id] && <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{badges[item.id]}</span>}
         {item.soon ? <span className={`ml-auto rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${view === item.id ? 'bg-slate-100 text-slate-500' : 'bg-white/10 text-[#9bb5c7]'}`}>Soon</span> : <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
       </button>)}</nav>
       <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
@@ -145,6 +148,9 @@ export default function OfficeHR() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [staff, setStaff] = useState<Staff[] | null>(null);
   const [error, setError] = useState('');
+  const [pendingRequests, setPendingRequests] = useState(0);
+  // The number on the Profile Requests menu item.
+  useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
   // The staff list is read once when the office opens.
   useEffect(() => {
@@ -160,7 +166,7 @@ export default function OfficeHR() {
   };
 
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
+    <Sidebar badges={{ requests: pendingRequests }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
     <div className="min-h-screen lg:pl-[300px]">
       <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
@@ -172,6 +178,7 @@ export default function OfficeHR() {
         {error && <p className="mx-auto mb-4 max-w-[1500px] rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
         {view === 'home' && <HomeView staff={staff} onNavigate={navigate} />}
         {view === 'profiles' && <HRProfiles onError={setError} />}
+        {view === 'requests' && <HRProfileRequests onError={setError} onChanged={setPendingRequests} />}
         {view === 'reviews' && <HRReviews onError={setError} />}
         {view === 'roster' && <HRRoster onError={setError} />}
         {view === 'incentives' && <HRIncentives onError={setError} />}

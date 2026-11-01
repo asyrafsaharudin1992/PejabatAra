@@ -1,6 +1,7 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
+import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -484,6 +485,31 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // Any other device signed in as this person is signed out; this one stays.
     await db.from('assessment_sessions').delete().eq('staff_id', staff.id).neq('token_hash', hashSecret(token));
     return res.status(200).json({ success: true });
+  }
+  // Asking HR to change their own personal details. HR approves before anything in the record changes.
+  if (action === 'profile_requests' || action === 'profile_request') {
+    const { data: person, error: personError }: { data: any; error: any } = await (db as any).from('hr_employees').select(REQUEST_SELECT).eq('assessment_staff_id', staff.id).maybeSingle();
+    if (personError) throw personError;
+    if (!person) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
+    if (req.method === 'GET' && action === 'profile_requests') {
+      const { data, error } = await db.from('hr_profile_requests').select('id,changes,status,requested_at,decided_at,decision_note').eq('employee_id', person.id).order('requested_at', { ascending: false }).limit(6);
+      if (error) throw error.code === '42P01' ? fail(503, 'Update requests are not set up yet. Ask HR.') : error;
+      return res.status(200).json({ requests: (data || []).map((r: any) => ({ id: r.id, status: r.status, fields: Object.keys(r.changes || {}), requestedAt: r.requested_at, decidedAt: r.decided_at, note: r.decision_note || '' })) });
+    }
+    if (req.method === 'POST' && action === 'profile_request') {
+      const changes = changesFrom(person, body.changes && typeof body.changes === 'object' ? body.changes : {});
+      if (!Object.keys(changes).length) throw fail(400, 'Nothing was changed.');
+      // One open request at a time: a new one replaces what is still waiting.
+      const { data: open, error: openError } = await db.from('hr_profile_requests').select('id,changes').eq('employee_id', person.id).eq('status', 'pending').maybeSingle();
+      if (openError) throw openError.code === '42P01' ? fail(503, 'Update requests are not set up yet. Ask HR.') : openError;
+      const merged = { ...(open?.changes || {}), ...changes };
+      // A field put back to what it was is no longer a change.
+      for (const [column, change] of Object.entries(merged) as [string, any][]) if (JSON.stringify(change.from) === JSON.stringify(change.to)) delete merged[column];
+      if (!Object.keys(merged).length) { if (open) await db.from('hr_profile_requests').delete().eq('id', open.id); return res.status(200).json({ ok: true, fields: [] }); }
+      const { error } = open ? await db.from('hr_profile_requests').update({ changes: merged, requested_at: new Date().toISOString() }).eq('id', open.id) : await db.from('hr_profile_requests').insert({ employee_id: person.id, changes: merged });
+      if (error) throw error;
+      return res.status(200).json({ ok: true, fields: Object.keys(merged) });
+    }
   }
   // The staff member's own HR record and leave balance. No IC, bank or pay details are sent.
   if (req.method === 'GET' && (action === 'my_profile' || action === 'my_leave')) {
