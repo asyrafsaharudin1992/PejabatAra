@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { newCode } from './lib/shiftCodes';
+import { Pager, usePaged } from './Pager';
 
 // Office HR: the duty roster by month, for staff and for doctors, as a table (one row per person and one column per day)
 // or as a calendar. Leave is counted on the days marked as working here; a date with no roster falls back to the
@@ -69,6 +70,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
   const [notice, setNotice] = useState('');
   type Change = { at: string; by: string; name: string; company: string; code: string; date: string; from: string; to: string; reason: string };
   const [log, setLog] = useState<Change[]>([]);
+  const logPage = usePaged<Change>(log, 10, month);
   // The day being changed on screen, with the new code and the optional reason.
   const [edit, setEdit] = useState<{ person: Person; date: string; day?: Day; shift: string; reason: string; saving: boolean } | null>(null);
   const load = () => { setData(null); api(`action=roster&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => { setData({ people: [], days: [] }); onError(cause.message); }); };
@@ -199,7 +201,8 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
     <section className={`${card} space-y-3`}>
       <h3 className="font-semibold">Changes made on screen · {monthName(month)}</h3>
       {!log.length ? <p className="text-sm text-slate-500">No changes yet. Click a day in the table to change it; each change is recorded here.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">When</th><th className="pr-3">Changed by</th><th className="pr-3">Staff</th><th className="pr-3">Date</th><th className="pr-3">Change</th><th>Reason</th></tr></thead>
-        <tbody>{log.map((item, index) => <tr key={index} className="border-t border-slate-100"><td className="py-2 pr-3 whitespace-nowrap text-slate-500">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td className="pr-3">{item.by || 'Someone'}</td><td className="pr-3"><span className="font-semibold text-slate-800">{item.name}</span> <span className="text-slate-400">{item.company} · {item.code}</span></td><td className="pr-3 whitespace-nowrap">{item.date}</td><td className="pr-3 whitespace-nowrap font-mono font-bold text-[#0b587b]">{item.from ? newCode(item.from) : 'none'} → {item.to || 'none'}</td><td className="text-slate-600">{item.reason || '—'}</td></tr>)}</tbody></table></div>}
+        <tbody>{logPage.rows.map((item, index) => <tr key={index} className="border-t border-slate-100"><td className="py-2 pr-3 whitespace-nowrap text-slate-500">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td className="pr-3">{item.by || 'Someone'}</td><td className="pr-3"><span className="font-semibold text-slate-800">{item.name}</span> <span className="text-slate-400">{item.company} · {item.code}</span></td><td className="pr-3 whitespace-nowrap">{item.date}</td><td className="pr-3 whitespace-nowrap font-mono font-bold text-[#0b587b]">{item.from ? newCode(item.from) : 'none'} → {item.to || 'none'}</td><td className="text-slate-600">{item.reason || '—'}</td></tr>)}</tbody></table></div>}
+      <Pager page={logPage.page} pages={logPage.pages} total={logPage.total} onPage={logPage.setPage} />
     </section>
     <section className={`${card} space-y-4`}>
       <h3 className="font-semibold">What the codes mean</h3>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { Pager, usePaged } from './Pager';
 
 // Staff ask HR to change their own details from Individual Sign In. HR sees what changes (before and after), then approves
 // (the details change in the profile and it is written to its recent changes) or rejects with an optional note.
@@ -36,8 +37,10 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the decision.'); }
     setBusy('');
   };
+  const decided = (data?.requests || []).filter((request) => request.status !== 'pending');
+  const decidedPage = usePaged<Request>(decided, 10);
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
-  const pending = data.requests.filter((request) => request.status === 'pending'), decided = data.requests.filter((request) => request.status !== 'pending').slice(0, 30);
+  const pending = data.requests.filter((request) => request.status === 'pending');
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <p className="px-1 text-sm text-slate-500">Staff ask to change their own details from Individual Sign In. Nothing changes in their profile until you approve it. IC, bank and pay details cannot be requested.</p>
     {data.notSetUp && <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">Update requests are not set up yet: the database migration 202611010002 has not been run.</p>}
@@ -51,6 +54,6 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
         <button type="button" disabled={busy === request.id} onClick={() => void decide(request, false)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 px-4 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"><X className="h-4 w-4" />Reject</button></div>
     </section>)}
     {decided.length > 0 && <section className={card}><h3 className="font-semibold">Decided</h3>
-      <ul className="mt-3 divide-y divide-slate-100 text-sm">{decided.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"><span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{request.status === 'approved' ? 'Approved' : 'Rejected'}</span><span className="font-semibold">{request.name}</span><span className="text-slate-500">{Object.keys(request.changes).map((column) => LABEL[column] || column).join(', ')}</span><span className="ml-auto text-xs text-slate-400">{when(request.decidedAt)}</span>{request.note && <span className="w-full text-xs text-slate-500">Note: {request.note}</span>}</li>)}</ul></section>}
+      <ul className="mt-3 divide-y divide-slate-100 text-sm">{decidedPage.rows.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"><span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{request.status === 'approved' ? 'Approved' : 'Rejected'}</span><span className="font-semibold">{request.name}</span><span className="text-slate-500">{Object.keys(request.changes).map((column) => LABEL[column] || column).join(', ')}</span><span className="ml-auto text-xs text-slate-400">{when(request.decidedAt)}</span>{request.note && <span className="w-full text-xs text-slate-500">Note: {request.note}</span>}</li>)}</ul><Pager page={decidedPage.page} pages={decidedPage.pages} total={decidedPage.total} onPage={decidedPage.setPage} /></section>}
   </div>;
 }

@@ -4,6 +4,7 @@ import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { HRProfileRequests } from './HRProfileRequests';
 import { DocumentsPanel, type Doc } from './DocumentsPanel';
+import { Pager, usePaged } from './Pager';
 import { LEAVE_GROUPS } from './lib/leaveTypes';
 
 // Office HR staff profiles: the employee master for leave, attendance and payroll.
@@ -279,6 +280,7 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
   const [reveal, setReveal] = useState(false);
   const load = async () => { try { setData(await api(`action=employee&id=${encodeURIComponent(id)}`)); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load profile.'); } };
   useEffect(() => { void load(); }, [id]);
+  const history = usePaged<Audit>(data?.audit || [], 10, id);
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
   const e = data.employee;
   if (editing) return <ProfileEditor employee={e} onCancel={() => setEditing(false)} onSaved={async () => { setEditing(false); await load(); }} onError={onError} />;
@@ -310,7 +312,8 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
     </div>
     {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
       <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
-      {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{data.audit.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}
+      {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{history.rows.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}
+      <Pager page={history.page} pages={history.pages} total={history.total} onPage={history.setPage} />
     </section>
   </div>;
 }

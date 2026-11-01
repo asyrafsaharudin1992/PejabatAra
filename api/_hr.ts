@@ -15,6 +15,8 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+// Compares values as the database holds them: the order of an object's keys does not count (the database may reorder them).
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item as object).sort(([a], [b]) => a.localeCompare(b))) : item);
 const pick = (value: unknown, allowed: string[], fallback: string) => allowed.includes(String(value)) ? String(value) : fallback;
 
 const SUMMARY = 'id,company,employee_code,full_name,branch,department,designation,employment_type,status,join_date,assessment_staff_id';
@@ -240,7 +242,7 @@ export async function hrHandler(req: any, res: any) {
       const id = text(req.query.id, 60);
       const [{ data, error }, { data: audit, error: auditError }] = await Promise.all([
         db.from('hr_employees').select('*').eq('id', id).maybeSingle(),
-        db.from('hr_audit').select('action,changes,changed_at,changed_by').eq('employee_id', id).order('changed_at', { ascending: false }).limit(20),
+        db.from('hr_audit').select('action,changes,changed_at,changed_by').eq('employee_id', id).order('changed_at', { ascending: false }).limit(200),
       ]);
       if (error || auditError) throw error || auditError;
       if (!data) throw fail(404, 'Profile not found.');
@@ -1065,7 +1067,7 @@ export async function hrHandler(req: any, res: any) {
         if (readError) throw readError;
         if (!before) throw fail(404, 'Profile not found.');
         // Only fields that really changed go in the audit log (salary comes back from the database as text).
-        const same = (key: string, value: unknown) => key === 'basic_salary' ? Number((before as any)[key]) === value : JSON.stringify((before as any)[key] ?? null) === JSON.stringify(value ?? null);
+        const same = (key: string, value: unknown) => key === 'basic_salary' ? Number((before as any)[key]) === value : canonical((before as any)[key] ?? null) === canonical(value ?? null);
         const changes = Object.fromEntries(Object.entries(row).filter(([key, value]) => !same(key, value)).map(([key, value]) => [key, [(before as any)[key] ?? null, value]]));
         const { data, error } = await db.from('hr_employees').update({ ...row, updated_at: now, updated_by: user.id }).eq('id', id).select('*').single();
         if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
