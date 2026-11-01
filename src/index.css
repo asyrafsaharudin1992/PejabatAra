@@ -247,3 +247,10 @@
 /* The Consolidate Report prints on a landscape page. */
 .consolidate-print { page: landscape-report; }
 @page landscape-report { size: A4 landscape; margin: 10mm; }
+
+/* Keep the private-details control discreet on devices with a mouse.
+   Opacity preserves its hover area, layout, and keyboard access. */
+@media (hover: hover) and (pointer: fine) {
+  .profile-private-toggle { opacity: 0; }
+  .profile-private-toggle:hover, .profile-private-toggle:focus-visible { opacity: 1; }
+}

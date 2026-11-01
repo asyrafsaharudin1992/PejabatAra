@@ -14,6 +14,7 @@ type Person = { id: string; fullName: string; employeeCode: string; designation:
 const blankAssign = () => ({ employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
 
 export function HRReviews({ onError }: { onError: (message: string) => void }) {
+  const [tab, setTab] = useState<'assign' | 'reports'>('assign');
   const [staff, setStaff] = useState<Person[]>([]);
   const [supervisors, setSupervisors] = useState<{ id: string; name: string; person?: string }[]>([]);
   const [assign, setAssign] = useState(blankAssign);
@@ -79,7 +80,8 @@ export function HRReviews({ onError }: { onError: (message: string) => void }) {
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>
-    <section className={card}>
+    <div role="tablist" aria-label="Performance reviews" className="inline-flex rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>
+    {tab === 'assign' && <section id="review-panel-assign" role="tabpanel" aria-labelledby="review-tab-assign" className={card}>
       <h3 className="text-lg font-semibold">Assign a review</h3>
       <p className="text-sm text-slate-500">Choose who is reviewed, who does the review and for which period. It appears in that supervisor's Performance Review to fill in.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -92,8 +94,8 @@ export function HRReviews({ onError }: { onError: (message: string) => void }) {
         <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Remarks for the supervisor (optional)<textarea rows={2} value={assign.remarks} onChange={(event) => setAssign({ ...assign, remarks: event.target.value })} placeholder="e.g. Please also comment on attendance since confirmation." className={`${field} mt-1.5`} /></label>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-end gap-3">{notice && <span className="mr-auto text-sm font-semibold text-emerald-700">{notice}</span>}<button onClick={() => void giveReview()} disabled={assigning || !assign.employeeId || !assign.assessorId} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50"><Send className="h-4 w-4" />{assigning ? 'Assigning…' : 'Assign review'}</button></div>
-    </section>
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_480px]">
+    </section>}
+    {tab === 'reports' && <div id="review-panel-reports" role="tabpanel" aria-labelledby="review-tab-reports" className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_480px]">
       <section className={card}>
         <label className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 text-[#60758c]"><Search className="h-4 w-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff, ID, department or assessor" className="h-11 w-full bg-transparent text-sm outline-none" /></label>
         {list === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : rows.length === 0 ? <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{list.length ? 'No review matches this search.' : 'No reviews have been submitted yet.'}</p> : <ul className="mt-3 divide-y divide-slate-100">{rows.map((item) => <li key={item.id}><button onClick={() => setSelected(item.id)} className={`flex w-full flex-wrap items-center gap-3 rounded-xl px-3 py-3.5 text-left transition hover:bg-[#f4fafd] ${selected === item.id ? 'bg-[#eaf6fb]' : ''}`}>
@@ -128,6 +130,6 @@ export function HRReviews({ onError }: { onError: (message: string) => void }) {
           </div>
         </div>}
       </section>
-    </div>
+    </div>}
   </div>;
 }
