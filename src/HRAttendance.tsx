@@ -331,3 +331,6 @@ export function HRAttendance({ onError }: { onError: (message: string) => void }
     {tab === 'rules' && <Rules onError={onError} />}
   </div>;
 }
+
+// Reuse the same report views in the central HR Reports page.
+export { Today as AttendanceDailyReport, Month as AttendanceMonthlyReport, Late as AttendanceLateReport };

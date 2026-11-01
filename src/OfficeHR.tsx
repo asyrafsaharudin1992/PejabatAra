@@ -3,7 +3,6 @@ import { ArrowRight, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, Chevro
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
-import { homeQuote } from './PortalApp';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
 import { HRReviews } from './HRReviews';
@@ -11,6 +10,7 @@ import { HRAttendance } from './HRAttendance';
 import { HRRoster } from './HRRoster';
 import { HRLeave } from './HRLeave';
 import { HRIncentives } from './HRIncentives';
+import { HRReports } from './HRReports';
 
 // Office HR, laid out like the CA and Clinical Admin offices. Built a piece at a time: the
 // staff directory and the leave types (the same codes as Infotech) come first; leave
@@ -28,7 +28,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'incentives', label: 'Incentive', note: 'Sent by Clinical Admin', icon: Wallet, tone: 'text-[#ffb000]' },
   { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]' },
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
-  { id: 'reports', label: 'Reports', note: 'Leave & attendance', icon: FileBarChart, tone: 'text-[#4ade80]', soon: true },
+  { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
 const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', reports: 'Reports' };
 // What each upcoming tab will do, shown until it is built.
@@ -36,7 +36,6 @@ const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
   attendance: ['Clock in / out on the phone, checked against the clinic location', 'Late, early out and working hours each day', 'Ask to correct a time or claim OT (1.0 / 1.5 / 2.0 / 3.0), with approval'],
   roster: ['Weekly shifts by branch', 'Staff see their own shifts', 'Linked to the Clinical Admin daily checklist "Today\'s shifts"'],
-  reports: ['Leave summary and history', 'Daily attendance and exceptions', 'Export for Infotech payroll (CSV / Excel)'],
 };
 
 function Hero({ title, text, action }: { title: string; text: string; action?: ReactNode }) {
@@ -79,7 +78,7 @@ function HomeView({ staff, onNavigate }: { staff: Staff[] | null; onNavigate: (v
     <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
       <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
         <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Human Resources</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome to Office HR</h2><p className="mt-3 text-base text-[#bed2df]">{staff ? `${active.length} active staff across ${branches.length} ${branches.length === 1 ? 'branch' : 'branches'}.` : 'Loading staff…'}</p></div>
-        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
+        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“Train people well enough so they can leave, treat them well enough so they don’t want to.”</p></div>
       </div>
     </section>
     <section>
@@ -183,7 +182,7 @@ export default function OfficeHR() {
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && <HRAttendance onError={setError} />}
-        {view === 'reports' && <ComingSoon view={view} />}
+        {view === 'reports' && <HRReports onError={setError} />}
       </main>
     </div>
   </div>;

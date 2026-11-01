@@ -15,7 +15,7 @@ const shiftMonth = (month: string, by: number) => { const index = Number(month.s
 const RECEIVER_KEY = 'ara_incentive_hr_receiver';
 const claimMonths = () => { const months: string[] = []; for (let month = thisMonth(); month >= '2026-10'; month = shiftMonth(month, -1)) months.push(month); return months.length ? months : ['2026-10']; };
 
-export function HRIncentives({ onError }: { onError: (message: string) => void }) {
+export function HRIncentives({ onError, embedded = false }: { onError: (message: string) => void; embedded?: boolean }) {
   const [month, setMonth] = useState(() => { const start = new Date().getDate() <= 10 ? shiftMonth(thisMonth(), -1) : thisMonth(); return start < '2026-10' ? '2026-10' : start; });
   const [branch, setBranch] = useState('');
   const [name, setName] = useState('');
@@ -59,7 +59,7 @@ export function HRIncentives({ onError }: { onError: (message: string) => void }
   const sent = (claim: Claim) => claim.hrSubmittedAt ? new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB') : '';
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff incentives</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Incentive claims that Clinical Admin has checked, approved and sent to HR. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>
+    {!embedded && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff incentives</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Incentive claims that Clinical Admin has checked, approved and sent to HR. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>}
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} min-w-[200px] flex-1`} />
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{claimMonths().map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select>

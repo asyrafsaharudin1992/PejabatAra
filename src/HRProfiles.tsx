@@ -41,7 +41,7 @@ function service(joinDate: string | null) {
   return `${Math.floor(months / 12)}y ${months % 12}m`;
 }
 const STATUS_TONE: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
-const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances' };
+const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', career_history: 'Employment history entries', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances' };
 // IC, bank and salary changes are shown without their values in the history.
 const SECRET = new Set(['ic_no', 'passport_no', 'bank_account', 'basic_salary', 'fixed_allowances', 'epf_no', 'socso_no', 'tax_no']);
 
@@ -274,6 +274,28 @@ function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError
     canRemove={() => true} /></section>;
 }
 
+// Employment history (joining, job title and department changes, increments, salary adjustments), from Infotech. HR only: staff never
+// see it. Pay figures stay hidden until "Show private details" is pressed, like the rest of the profile.
+type CareerEntry = { id: string; date: string | null; kind: string; detail: string; from: string; to: string; amount: number | null };
+const PAY_KINDS = /increment|salary|hourly|bonus/i;
+function ProfileCareer({ employeeId, reveal, onError }: { employeeId: string; reveal: boolean; onError: (message: string) => void }) {
+  const [entries, setEntries] = useState<CareerEntry[] | null>(null);
+  const [notSetUp, setNotSetUp] = useState(false);
+  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setEntries(result.entries || []); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onError(cause.message); }); }, [employeeId]);
+  const paged = usePaged<CareerEntry>(entries || [], 10, employeeId);
+  const pay = (entry: CareerEntry) => PAY_KINDS.test(entry.kind) || PAY_KINDS.test(entry.detail);
+  const shown = (entry: CareerEntry, value: string) => value && pay(entry) && !reveal ? '••••' : value;
+  const change = (entry: CareerEntry) => entry.from && entry.to && entry.to !== '0.00' ? `${shown(entry, entry.from)} → ${shown(entry, entry.to)}` : shown(entry, entry.to || entry.from);
+  return <section className={card}>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-semibold">Employment history</h3><span className="text-xs text-slate-400">HR only · staff cannot see this</span></div>
+    {entries === null ? <p className="mt-2 text-sm text-slate-500">Loading…</p> : notSetUp ? <p className="mt-2 text-sm text-amber-700">Not set up yet: the database migration 202611010004 has not been run.</p> : !entries.length ? <p className="mt-2 text-sm text-slate-500">No history recorded.</p> : <>
+      <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Date</th><th className="pr-4">Event</th><th className="pr-4">Change</th><th>Amount</th></tr></thead>
+        <tbody>{paged.rows.map((entry) => <tr key={entry.id} className="border-t border-slate-100"><td className="py-2 pr-4 whitespace-nowrap text-slate-500">{entry.date ? dmy(entry.date) : '—'}</td><td className="pr-4"><span className="font-semibold text-[#14233b]">{entry.kind}</span>{entry.detail && entry.detail.toUpperCase() !== entry.kind.toUpperCase() && <span className="ml-2 text-xs text-slate-400">{entry.detail.toLowerCase()}</span>}</td><td className="pr-4 text-slate-600">{change(entry) || '—'}</td><td className="whitespace-nowrap text-slate-600">{entry.amount ? (reveal ? money(entry.amount) : '••••') : ''}</td></tr>)}</tbody></table></div>
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
+    </>}
+  </section>;
+}
+
 function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
   const [data, setData] = useState<{ employee: Employee; audit: Audit[]; signIn?: { linked: boolean; hasPassword: boolean | null } } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -296,6 +318,7 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
     <HolidayGroupCard employeeId={id} group={e.holidayGroup || ''} onSaved={load} onError={onError} />
     <CalendarAccessCard employeeId={id} companies={e.leaveCalendarCompanies || []} onSaved={load} onError={onError} />
     <ProfileDocuments employeeId={id} onError={onError} />
+    <ProfileCareer employeeId={id} reveal={reveal} onError={onError} />
     <div className="grid gap-5 lg:grid-cols-2">
       <section className={card}><h3 className="font-semibold">Personal</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="IC no.">{secret(e.icNo)}</Row>{e.passportNo && <Row label="Passport no.">{secret(e.passportNo)}</Row>}<Row label="Nationality">{e.nationality}</Row><Row label="Gender">{e.gender}</Row><Row label="Date of birth">{dmy(e.dateOfBirth)}</Row><Row label="Religion">{e.religion}</Row><Row label="Race">{e.race}</Row>{e.foreignIdNo && <Row label="Foreign ID no.">{secret(e.foreignIdNo)}</Row>}<Row label="Phone">{hiddenPhone(e.phone)}</Row><Row label="Email">{hiddenEmail(e.email)}</Row><Row label="Address"><span className="whitespace-pre-line">{String(e.address || '').replace(/(,\s*)+,/g, ',')}</span></Row>

@@ -869,6 +869,13 @@ export async function hrHandler(req: any, res: any) {
       const looksLikePhone = (value: unknown) => /^[\d\s\-+()'"]{7,}$/.test(String(value || '').trim());
       const filled = (value: any) => !(value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length));
       const MARITAL: Record<string, string> = { SINGLE: 'Single', MARRIED: 'Married', DIVORCED: 'Divorced', WIDOWED: 'Widowed' };
+      // Employment history read off Infotech: only entries that are not already saved are added (so a second upload adds nothing).
+      const historyKey = (r: any) => [r.employee_id, r.event_date || '', r.kind, r.detail, r.from_value, r.to_value].join('|');
+      const knownHistory = new Set<string>();
+      const historyRead = await db.from('hr_career_history').select('employee_id,event_date,kind,detail,from_value,to_value').limit(20000);
+      const historyReady = !historyRead.error;   // the table is not set up yet: history is skipped
+      for (const r of historyRead.data || []) knownHistory.add(historyKey(r));
+      const slashDate = (value: unknown) => { const m = String(value || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
       const unknown: string[] = []; const counts: Record<string, number> = {}; const results: { code: string; name: string; fields: string[] }[] = [];
       for (const row of rows) {
         const company = text(row.company, 4).toUpperCase(), code = text(row.code, 30).toUpperCase();
@@ -902,21 +909,45 @@ export async function hrHandler(req: any, res: any) {
         if (nationality && nationality !== 'Malaysian' && (person.nationality || 'Malaysian') === 'Malaysian') wanted.nationality = nationality;
         const patch: Record<string, any> = {}; const changes: Record<string, unknown> = {};
         for (const [column, value] of Object.entries(wanted)) { if (filled(value) && !(column === 'basic_salary' ? Number(person[column]) > 0 : filled(person[column]))) { patch[column] = value; changes[column] = [column === 'children' || column === 'education' ? [] : '', value]; } }
-        if (!Object.keys(patch).length) continue;
+        const newHistory: any[] = [];
+        if (historyReady) for (const item of (Array.isArray(row.history) ? row.history : []).slice(0, 200)) {
+          const money = Number(String(item?.increment || item?.bonus || '').replace(/,/g, ''));
+          const entry = { employee_id: person.id, event_date: slashDate(item?.date), kind: title(text(item?.kind, 60)) || 'Other', detail: text(item?.detail, 80), from_value: text(item?.from, 80), to_value: text(item?.to, 80), amount: Number.isFinite(money) && money > 0 ? Math.round(money * 100) / 100 : null, source: 'Infotech' };
+          const key = historyKey(entry);
+          if (knownHistory.has(key)) continue;
+          knownHistory.add(key); newHistory.push(entry);
+        }
+        if (!Object.keys(patch).length && !newHistory.length) continue;
         if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
           const merged = { ...person, ...patch };
           patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
         }
         for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
+        if (newHistory.length) { counts.career_history = (counts.career_history || 0) + newHistory.length; changes.career_history = ['', `${newHistory.length} entries`]; }
         results.push({ code: `${company} ${code}`, name: person.full_name, fields: Object.keys(changes) });
         if (!dryRun) {
-          const { error } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', person.id);
-          if (error) throw error;
+          if (Object.keys(patch).length) {
+            const { error } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', person.id);
+            if (error) throw error;
+          }
+          if (newHistory.length) {
+            const { error: historyError } = await db.from('hr_career_history').insert(newHistory);
+            if (historyError) throw historyError;
+          }
           const { error: auditError } = await db.from('hr_audit').insert({ employee_id: person.id, action: 'import', changes: { ...changes, source: ['', 'Infotech'] }, changed_by: user.id });
           if (auditError) throw auditError;
         }
       }
       return res.status(200).json({ dryRun, staff: rows.length, updated: results.length, unknown, counts, results });
+    }
+
+    // A staff member's employment history (HR only; the staff API never reads this table).
+    if (req.method === 'GET' && action === 'career') {
+      const employeeId = text(req.query.employeeId, 60);
+      if (!employeeId) throw fail(400, 'Choose a staff member.');
+      const { data, error } = await db.from('hr_career_history').select('id,event_date,kind,detail,from_value,to_value,amount,source').eq('employee_id', employeeId).order('event_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }).limit(300);
+      if (error) { if (error.code === '42P01') return res.status(200).json({ entries: [], notSetUp: true }); throw error; }
+      return res.status(200).json({ entries: (data || []).map((row: any) => ({ id: row.id, date: row.event_date, kind: row.kind, detail: row.detail, from: row.from_value, to: row.to_value, amount: row.amount === null ? null : Number(row.amount), source: row.source })) });
     }
 
     // Documents on a staff profile: HR sees every one, and can add or remove any.

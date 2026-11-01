@@ -29,7 +29,7 @@ function perDay(rows: Row[]): Row[] {
   });
 }
 
-function LeaveHistory({ onError }: { onError: (message: string) => void }) {
+export function LeaveHistory({ onError }: { onError: (message: string) => void }) {
   const year = new Date().getFullYear();
   const [from, setFrom] = useState(`${year}-01-01`);
   const [to, setTo] = useState(`${year}-12-31`);
