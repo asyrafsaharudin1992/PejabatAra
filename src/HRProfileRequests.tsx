@@ -39,7 +39,7 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
   const pending = data.requests.filter((request) => request.status === 'pending'), decided = data.requests.filter((request) => request.status !== 'pending').slice(0, 30);
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <section className="ara-hero rounded-[28px] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-2 text-2xl font-semibold">Profile requests</h2><p className="mt-2 max-w-2xl text-[#b9cfdd]">Staff ask to change their own details from Individual Sign In. Nothing changes in their profile until you approve it. IC, bank and pay details cannot be requested.</p></section>
+    <p className="px-1 text-sm text-slate-500">Staff ask to change their own details from Individual Sign In. Nothing changes in their profile until you approve it. IC, bank and pay details cannot be requested.</p>
     {data.notSetUp && <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">Update requests are not set up yet: the database migration 202611010002 has not been run.</p>}
     {!data.notSetUp && !pending.length && <p className="rounded-2xl border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No requests waiting.</p>}
     {pending.map((request) => <section key={request.id} className={`${card} space-y-4`}>
