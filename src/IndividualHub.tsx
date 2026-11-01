@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, House, KeyRound, LogOut, MoreHorizontal, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Baby, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
@@ -12,7 +12,13 @@ import MyAnnouncements from './MyAnnouncements';
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
 type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
 type View = 'home' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
-type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string };
+type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
+  personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
+  address?: { line1: string; line2: string; postcode: string; city: string; state: string };
+  emergency?: { name: string; relation: string; phone: string };
+  spouse?: { name: string; occupation: string; phone: string };
+  children?: { name: string; dateOfBirth: string | null }[];
+  education?: { level: string; institution: string; course: string; year: string }[] };
 
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN. BHD.' };
 const dmy = (date: string | null | undefined) => date ? date.split('-').reverse().join('/') : '—';
@@ -75,16 +81,35 @@ function Screen({ title, onBack, children, nav }: { title: string; onBack: () =>
   </div>;
 }
 
+// My Profile: the staff member's own details in sections, like the staff app they know (work, personal, address, contact, spouse,
+// children, education). They only see their own record, and never IC, bank or pay details.
 function MyProfile() {
   const [state, setState] = useState<{ linked: boolean; profile?: Profile } | null>(null);
   const [error, setError] = useState('');
+  const [tab, setTab] = useState('work');
   useEffect(() => { assessmentFetch('action=my_profile').then((result) => setState(result)).catch((cause: Error) => setError(cause.message)); }, []);
   if (error) return <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
   if (!state) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!state.linked || !state.profile) return <p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">Your sign-in is not linked to your staff record yet. Ask HR to link it.</p>;
   const p = state.profile;
-  const rows: [string, string][] = [['Name', p.fullName], ['Employee code', p.code], ['Company', COMPANY[p.company] || p.company], ['Branch', p.branch], ['Department', p.department], ['Position', p.position], ['Employment type', p.employmentType], ['Joined', dmy(p.joinDate)], ['Confirmed', dmy(p.confirmDate)], ['Email', p.email]];
-  return <><dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium">{value || '—'}</dd></div>)}</dl><p className="mt-4 text-xs leading-5 text-slate-400">These come from your HR record. If something is wrong, ask HR to correct it.</p></>;
+  const dash = (value: string | null | undefined) => (value && String(value).trim()) || '—';
+  const address = p.address ? [p.address.line1, p.address.line2, [p.address.postcode, p.address.city].filter(Boolean).join(' '), p.address.state].map((part) => part.replace(/[,\s]+$/, '')).filter(Boolean).join(', ') : '';
+  const sections: { key: string; label: string; icon: typeof Settings; rows?: [string, string][]; list?: { title: string; sub: string }[]; empty?: string }[] = [
+    { key: 'work', label: 'Work', icon: UserRound, rows: [['Name', p.fullName], ['Employee code', p.code], ['Company', COMPANY[p.company] || p.company], ['Branch', p.branch], ['Department', p.department], ['Position', p.position], ['Employment type', p.employmentType], ['Joined', dmy(p.joinDate)], ['Confirmed', dmy(p.confirmDate)]] },
+    { key: 'personal', label: 'Personal', icon: ScanFace, rows: [['Gender', dash(p.personal?.gender)], ['Date of birth', dmy(p.personal?.dateOfBirth)], ['Nationality', dash(p.personal?.nationality)], ['Religion', dash(p.personal?.religion)], ['Race', dash(p.personal?.race)], ['Marital status', dash(p.personal?.maritalStatus)]] },
+    { key: 'address', label: 'Address', icon: House, rows: [['Address', dash(address)]] },
+    { key: 'contact', label: 'Contact', icon: Phone, rows: [['Mobile', dash(p.phone)], ['Email', dash(p.email)], ['Emergency contact', dash(p.emergency?.name)], ['Relationship', dash(p.emergency?.relation)], ['Emergency phone', dash(p.emergency?.phone)]] },
+    { key: 'spouse', label: 'Spouse', icon: Users, rows: [['Name', dash(p.spouse?.name)], ['Occupation', dash(p.spouse?.occupation)], ['Phone', dash(p.spouse?.phone)]] },
+    { key: 'children', label: 'Children', icon: Baby, list: (p.children || []).map((child) => ({ title: child.name, sub: child.dateOfBirth ? `Born ${dmy(child.dateOfBirth)}` : '' })), empty: 'No children recorded.' },
+    { key: 'education', label: 'Education', icon: GraduationCap, list: (p.education || []).map((item) => ({ title: [item.level, item.course].filter(Boolean).join(' · ') || item.institution, sub: [item.institution, item.year].filter(Boolean).join(' · ') })), empty: 'No education recorded.' },
+  ];
+  const current = sections.find((section) => section.key === tab) || sections[0];
+  return <div className="space-y-4">
+    <div role="tablist" aria-label="Profile sections" className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">{sections.map((section) => <button key={section.key} role="tab" aria-selected={tab === section.key} onClick={() => setTab(section.key)} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5"><span className={`grid h-12 w-12 place-items-center rounded-full transition ${tab === section.key ? 'bg-[#0b587b] text-white shadow-md' : 'bg-white text-[#0b587b] shadow-sm'}`}><section.icon className="h-5 w-5" strokeWidth={1.7} /></span><span className={`text-[11px] font-semibold ${tab === section.key ? 'text-[#0b587b]' : 'text-slate-500'}`}>{section.label}</span></button>)}</div>
+    {current.rows && <dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current.rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium text-[#14233b]">{value}</dd></div>)}</dl>}
+    {current.list && (current.list.length ? <ul className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current.list.map((item, index) => <li key={index} className="py-3 text-sm"><p className="font-medium text-[#14233b]">{item.title}</p>{item.sub && <p className="mt-0.5 text-xs text-slate-500">{item.sub}</p>}</li>)}</ul> : <p className="rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">{current.empty}</p>)}
+    <p className="px-1 text-xs text-slate-400">Something not right? Tell HR so it can be corrected. Your IC, bank and pay details are not shown here.</p>
+  </div>;
 }
 
 // Development only (`npm run dev`, never in the live build): "View as" switches which icons the signed-in person sees, so

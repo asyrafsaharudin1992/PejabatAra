@@ -50,7 +50,7 @@ function encode(body: any) {
     marital_status: pick(body.maritalStatus, ['', 'Single', 'Married', 'Divorced', 'Widowed'], ''), spouse_working: typeof body.spouseWorking === 'boolean' ? body.spouseWorking : null,
     children, phone: text(body.phone, 30), email: text(body.email, 120),
     // The one-line address is kept in step with the parts, for anything that still reads it.
-    ...address, address: [address.address_line1, address.address_line2, [address.postcode, address.city].filter(Boolean).join(' '), address.state].filter(Boolean).join(', '),
+    ...address, address: [address.address_line1, address.address_line2, [address.postcode, address.city].filter(Boolean).join(' '), address.state].map((part) => part.replace(/[,\s]+$/, '')).filter(Boolean).join(', '),
     race: text(body.race, 40), foreign_id_no: text(body.foreignIdNo, 30),
     spouse_name: text(body.spouseName, 120), spouse_ic: text(body.spouseIc, 20), spouse_employer: text(body.spouseEmployer, 120), spouse_phone: text(body.spousePhone, 30), education,
     emergency_name: text(body.emergencyName, 120), emergency_relation: text(body.emergencyRelation, 40), emergency_phone: text(body.emergencyPhone, 30),

@@ -487,10 +487,17 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
   // The staff member's own HR record and leave balance. No IC, bank or pay details are sent.
   if (req.method === 'GET' && (action === 'my_profile' || action === 'my_leave')) {
-    const { data: person, error: personError } = await db.from('hr_employees').select('id,company,employee_code,full_name,branch,department,designation,employment_type,join_date,confirm_date,email,phone,status').eq('assessment_staff_id', staff.id).maybeSingle();
+    const { data: person, error: personError } = await db.from('hr_employees').select('id,company,employee_code,full_name,branch,department,designation,employment_type,join_date,confirm_date,email,phone,status,gender,date_of_birth,nationality,religion,race,marital_status,address_line1,address_line2,postcode,city,state,emergency_name,emergency_relation,emergency_phone,spouse_name,spouse_employer,spouse_phone,children,education').eq('assessment_staff_id', staff.id).maybeSingle();
     if (personError) throw personError;
     if (!person) return res.status(200).json({ linked: false });
-    if (action === 'my_profile') return res.status(200).json({ linked: true, profile: { fullName: person.full_name, code: person.employee_code, company: person.company, branch: person.branch, department: person.department, position: person.designation, employmentType: person.employment_type, joinDate: person.join_date, confirmDate: person.confirm_date, email: person.email, phone: person.phone } });
+    if (action === 'my_profile') return res.status(200).json({ linked: true, profile: { fullName: person.full_name, code: person.employee_code, company: person.company, branch: person.branch, department: person.department, position: person.designation, employmentType: person.employment_type, joinDate: person.join_date, confirmDate: person.confirm_date, email: person.email, phone: person.phone,
+      // Personal details the staff member can see about themselves. Never sent: IC, passport, bank, pay, KWSP, PERKESO, tax, or the spouse's IC.
+      personal: { gender: person.gender || '', dateOfBirth: person.date_of_birth, nationality: person.nationality || '', religion: person.religion || '', race: person.race || '', maritalStatus: person.marital_status || '' },
+      address: { line1: person.address_line1 || '', line2: person.address_line2 || '', postcode: person.postcode || '', city: person.city || '', state: person.state || '' },
+      emergency: { name: person.emergency_name || '', relation: person.emergency_relation || '', phone: person.emergency_phone || '' },
+      spouse: { name: person.spouse_name || '', occupation: person.spouse_employer || '', phone: person.spouse_phone || '' },
+      children: (Array.isArray(person.children) ? person.children : []).map((child: any) => ({ name: child?.name || '', dateOfBirth: child?.dateOfBirth || null })),
+      education: Array.isArray(person.education) ? person.education : [] } });
     const { data: balances, error } = await db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,total,taken,balance,bf_expiry,as_of').eq('employee_id', person.id);
     if (error) throw error;
     const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
