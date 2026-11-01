@@ -226,7 +226,7 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
 }
 
 async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
-  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date').eq('assessment_staff_id', staff.id).maybeSingle();
+  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date,designation').eq('assessment_staff_id', staff.id).maybeSingle();
   if (meError) throw meError;
   const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : [1, 2, 3, 4, 5, 6];
   if (!me) throw fail(400, 'Your sign-in is not linked to your staff record yet. Ask HR.');
@@ -269,7 +269,22 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     ]);
     if (error) throw error;
     if (leaveError) throw leaveError;
-    return res.status(200).json({ month, today, workDays, days: (days || []).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works })), leave: (leave || []).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
+    // Admin Office and Admin Klinikal have no duty roster: a month with no roster rows at all is Monday to Friday, off on
+    // public holidays. Admin Klinikal (Admin Clinical at SK, Clinic Assistant Officer at KJ) work AM-5 (8AM - 5PM), the rest AM-6 (9AM - 6PM).
+    const rows = (days || []).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
+    const hasRoster = rows.length > 0;
+    const given = new Set(rows.map((row: any) => row.date));
+    const calendar = await rosterFor(db, me.id, start, end, me.holiday_group || '');
+    const usual = /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(me.designation || '') ? 'AM-5' : 'AM-6';
+    for (let day = 1; !hasRoster && day <= Number(end.slice(8)); day++) {
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      if (given.has(date) || date < String(me.join_date || '')) continue;
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (calendar[date] === false) rows.push({ date, shift: 'PH', works: false });
+      else if (weekday >= 1 && weekday <= 5) rows.push({ date, shift: usual, works: true });
+      else rows.push({ date, shift: 'OFF', works: false });
+    }
+    return res.status(200).json({ month, today, workDays, days: rows, leave: (leave || []).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
   }
 
   if (req.method === 'POST' && action === 'leave_apply') {

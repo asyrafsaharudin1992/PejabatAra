@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { NEW_CODE } from '../src/lib/shiftCodes.js';
 
 // Attendance. Staff clock in and out on their own phone (Individual Sign In); HR sets where clocking is allowed and sees
 // the day and the month. Rules follow Infotech and HR's answers:
@@ -21,7 +22,7 @@ const hhmm = (ms: number) => new Date(ms + 8 * HOUR).toISOString().slice(11, 16)
 const monthEnd = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
 const isDoctor = (designation: string) => /\b(DR|DOCTOR)\b/i.test(designation || '');
 // Roster codes used before the KJ names, and the shift a person without a roster is expected on (office hours).
-const OLD_CODES: Record<string, string> = { ASCL1: 'AM-9', ASCL2: 'AM-12', ASCL3: 'PM', ASCL4: 'AM-6' };
+const OLD_CODES = NEW_CODE;
 const OFFICE_CODE = 'AM-5';
 const HOLIDAY_OFF_GROUPS = new Set(['SG-MNG', 'MLHL']);
 const OT_RATES = [1, 1.5, 2, 3];

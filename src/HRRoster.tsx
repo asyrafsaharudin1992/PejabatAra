@@ -2,6 +2,7 @@ import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { newCode } from './lib/shiftCodes';
 
 // Office HR: the duty roster by month, for staff and for doctors, as a table (one row per person and one column per day)
 // or as a calendar. Leave is counted on the days marked as working here; a date with no roster falls back to the
@@ -45,7 +46,7 @@ function parseCsv(text: string) {
 const STAFF_CODES: [string, string][] = [['AM-9', '9AM – 9PM'], ['AM-12', '12PM – 9PM'], ['PM', '9PM – 9AM (night)'], ['AM-6', '9AM – 6PM'], ['AM-5', 'Office hours, 8AM – 5PM'], ['OFF', 'Off day'], ['REST', 'Rest day']];
 const DOCTOR_CODES: [string, string][] = [['AM', 'Day shift'], ['PM', 'Night shift'], ['OH', 'Office hours, 9AM – 6PM'], ['OFF', 'Off day'], ['AL', 'Annual leave']];
 const OTHER_CODES: [string, string][] = [['PH', 'Public holiday (admin staff)'], ['NA', 'Not working yet / not applicable'], ['RESIGN', 'Resigned (no schedule after)'], ['AL', 'Annual leave already taken'], ['UPL', 'Unpaid leave already taken'], ['MC', 'Medical leave already taken']];
-const OLD_CODES: [string, string][] = [['ASCL1', 'AM-9 (9AM – 9PM)'], ['ASCL2', 'AM-12 (12PM – 9PM)'], ['ASCL3', 'PM (9PM – 9AM, night)'], ['ASCL4', 'AM-6 (9AM – 6PM)'], ['OD', 'OFF (off day)'], ['RD', 'REST (rest day)']];
+const OLD_CODES: [string, string][] = [['ASCL1', 'AM-9 (9AM – 9PM)'], ['ASCL2', 'AM-12 (12PM – 9PM)'], ['ASCL3', 'PM (9PM – 9AM, night)'], ['ASCL4', 'AM-6 (9AM – 6PM)'], ['MNG1', 'AM-5 (Pembantu Tadbir, 8AM – 5PM)'], ['MNG2', 'AM-6 (Pembantu Tadbir, 9AM – 6PM)'], ['KJADMN', 'AM-5 (Admin Klinikal KJ, 8AM – 5PM)'], ['OD', 'OFF (off day)'], ['RD', 'REST (rest day)'], ['DOCRSD', 'AM (doctor day shift)'], ['DOCRS2', 'PM (doctor night shift)'], ['DR96', 'OH (doctor office hours)']];
 
 const MONDAY_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -61,6 +62,9 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
   const [view, setView] = useState<'table' | 'calendar'>('table');
   const [personId, setPersonId] = useState('');
   const [picked, setPicked] = useState('');
+  // The grid shows AraOffice's codes; HR can switch to the codes as they were imported from Infotech.
+  const [codes, setCodes] = useState<'new' | 'original'>('new');
+  const shown = (shift: string) => codes === 'new' ? newCode(shift) : shift;
   const [data, setData] = useState<{ people: Person[]; days: Day[] } | null>(null);
   const [notice, setNotice] = useState('');
   const load = () => { setData(null); api(`action=roster&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => { setData({ people: [], days: [] }); onError(cause.message); }); };
@@ -94,7 +98,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
     for (const person of people) {
       const day = byPerson.get(person.id)?.get(date);
       if (!day) continue;
-      if (day.works) shifts.set(day.shift, [...(shifts.get(day.shift) || []), person]); else if (isLeave(day)) leave.push(person);
+      if (day.works) shifts.set(shown(day.shift), [...(shifts.get(shown(day.shift)) || []), person]); else if (isLeave(day)) leave.push(person);
     }
     const rank = (shift: string) => SHIFT_ORDER.includes(shift) ? SHIFT_ORDER.indexOf(shift) : 99;
     return { shifts: [...shifts.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])), leave };
@@ -120,6 +124,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-slate-100 pt-4">
         <Choice label="Who" value={group} onChange={setGroup} options={[['staff', 'Staff'], ['doctors', 'Doctors']]} />
         <Choice label="Clinic" value={company} onChange={setCompany} options={[...(view === 'table' ? [['', 'KJ and SK'] as [string, string]] : []), ['KJ', 'KJ'], ['SK', 'SK']]} />
+        <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />
         <Choice label="View" value={view} onChange={(next) => { setView(next); if (next === 'calendar' && !company) setCompany('KJ'); }} options={[['table', 'Table'], ['calendar', 'Calendar']]} />
         {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={field}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>}
       </div>
@@ -132,7 +137,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
           <thead><tr><th className="sticky left-0 z-10 min-w-[210px] bg-white px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
             <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800">{person.name}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
-            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><div title={day ? `${person.name} · ${date} · ${day.shift}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 place-items-center rounded-md px-0.5 text-[11px] font-bold ${cellTone(day)}`}>{day ? day.shift : '·'}</div></td>; })}
+            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><div title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 place-items-center rounded-md px-0.5 text-[11px] font-bold ${cellTone(day && { ...day, shift: shown(day.shift) })}`}>{day ? shown(day.shift) : '·'}</div></td>; })}
           </tr>)}</tbody>
         </table> :
         <div className="min-w-[760px]">
@@ -143,7 +148,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
               const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined; const weekend = [0, 6].includes(new Date(`${date}T00:00:00`).getDay());
               return <button key={date} onClick={() => setPicked(picked === date ? '' : date)} className={`min-h-[124px] rounded-2xl border p-2 text-left align-top transition ${picked === date ? 'border-[#0b587b] ring-2 ring-[#0b587b]/20' : date === today ? 'border-[#0b587b]/50' : 'border-slate-200'} ${weekend ? 'bg-slate-50' : 'bg-white'} hover:border-[#0b587b]/40`}>
                 <span className={`inline-grid h-6 min-w-6 place-items-center rounded-full px-1 text-xs font-bold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{Number(date.slice(8))}</span>
-                {selected ? <p className={`mt-3 grid h-10 place-items-center rounded-lg text-sm font-bold ${cellTone(own)}`}>{own ? own.shift : '·'}</p> : <div className="mt-1.5 space-y-1">
+                {selected ? <p className={`mt-3 grid h-10 place-items-center rounded-lg text-sm font-bold ${cellTone(own && { ...own, shift: shown(own.shift) })}`}>{own ? shown(own.shift) : '·'}</p> : <div className="mt-1.5 space-y-1">
                   {here.shifts.map(([shift, who]) => <p key={shift} className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {few ? who.map((person) => shortName(person.name)).join(', ') : `× ${who.length}`}</p>)}
                   {here.leave.length > 0 && <p className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold leading-tight text-rose-800"><span className="font-bold">Leave</span> {few ? here.leave.map((person) => shortName(person.name)).join(', ') : `× ${here.leave.length}`}</p>}
                 </div>}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
+import { newCode } from './lib/shiftCodes';
 
 // My roster inside Individual Sign In: the signed-in person's own duty roster for a month, as a calendar and a list,
 // with their approved leave on top. Other people's rosters are not shown here.
@@ -9,7 +10,7 @@ type Leave = { type: string; start: string; end: string; half: string | null };
 type Data = { month: string; today: string; workDays: number[]; days: Day[]; leave: Leave[] };
 
 const MEANING: Record<string, string> = {
-  'AM-9': 'Day shift, 9AM – 9PM', 'AM-12': 'Day shift, 12PM – 9PM', 'PM': 'Night shift, 9PM – 9AM', 'AM-6': 'Day shift, 9AM – 6PM', 'AM-5': 'Office hours, 8AM – 5PM',
+  'AM-9': 'Day shift, 9AM – 9PM', 'AM-12': 'Day shift, 12PM – 9PM', 'PM': 'Night shift, 9PM – 9AM', 'AM-6': 'Day shift, 9AM – 6PM (Admin Office)', 'AM-5': 'Office hours, 8AM – 5PM (Admin Klinikal)',
   'AM': 'Day shift', 'OH': 'Office hours', 'OFF': 'Off day', 'REST': 'Rest day', 'PH': 'Public holiday', 'NA': 'Not working yet', 'RESIGN': 'Resigned',
   'ASCL1': 'Day shift, 9AM – 9PM', 'ASCL2': 'Day shift, 12PM – 9PM', 'ASCL3': 'Night shift, 9PM – 9AM', 'ASCL4': 'Day shift, 9AM – 6PM', 'OD': 'Off day', 'RD': 'Rest day',
 };
@@ -32,7 +33,7 @@ export default function MyRoster() {
   const count = Number(month.slice(5)), year = Number(month.slice(0, 4));
   const dates = Array.from({ length: new Date(year, count, 0).getDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
   const lead = (new Date(`${month}-01T00:00:00`).getDay() + 6) % 7;
-  const rostered = new Map<string, Day>((data?.days || []).map((day): [string, Day] => [day.date, day]));
+  const rostered = new Map<string, Day>((data?.days || []).map((day): [string, Day] => [day.date, { ...day, shift: newCode(day.shift) }]));
   const leaveOn = (date: string) => data?.leave.find((item) => item.start <= date && item.end >= date);
   // What the person sees for a date: approved leave first, then the roster.
   const entry = (date: string): { label: string; kind: Kind; note: string } | null => {
