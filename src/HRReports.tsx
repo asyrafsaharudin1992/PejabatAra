@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Search, Wallet } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Search, Wallet, CalendarDays, IdCard } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { HRLeaveConsolidate } from './HRLeaveConsolidate';
 import { HRLeaveCredit } from './HRLeaveCredit';
@@ -8,8 +8,12 @@ import { LeaveHistory } from './HRLeaveReport';
 import { AttendanceDailyReport, AttendanceMonthlyReport, AttendanceLateReport } from './HRAttendance';
 import { HRReviews } from './HRReviews';
 import { HRIncentives } from './HRIncentives';
+import { HRRoster } from './HRRoster';
+import { StaffProfileReport } from './StaffProfileReport';
 
 const REPORTS = [
+  { id: 'roster', category: 'Roster', title: 'Monthly Roster', description: 'Monthly duty roster by clinic for staff or doctors, with shift codes.', format: 'Print / PDF', icon: CalendarDays },
+  { id: 'staff-profile', category: 'Staff Profiles', title: 'Staff Profile', description: 'Individual personal, employment, pay, family and education details.', format: 'Print / PDF', icon: IdCard },
   { id: 'leave-consolidate', category: 'Leave', title: 'Leave Consolidate', description: 'Annual and medical leave entitlement, taken days and balances per staff member.', format: 'Excel · Print / PDF', icon: CalendarCheck },
   { id: 'leave-credit', category: 'Leave', title: 'Credit Annual Leave', description: 'Additional annual leave credits by staff member, reason and period.', format: 'Print / PDF', icon: CalendarCheck },
   { id: 'leave-gcr', category: 'Leave', title: 'GCR', description: 'Leave eligible for payment, forfeited days and balances to carry forward.', format: 'Excel · Print / PDF', icon: CalendarCheck },
@@ -21,7 +25,7 @@ const REPORTS = [
   { id: 'incentives', category: 'Incentive', title: 'Incentive Claims', description: 'Claims sent to HR, approved amounts, monthly summaries and individual forms.', format: 'Print / PDF', icon: Wallet },
 ] as const;
 type ReportId = typeof REPORTS[number]['id'];
-const CATEGORIES = ['All', 'Leave', 'Attendance', 'Performance Reviews', 'Incentive'] as const;
+const CATEGORIES = ['All', 'Leave', 'Attendance', 'Performance Reviews', 'Incentive', 'Roster', 'Staff Profiles'] as const;
 
 export function HRReports({ onError }: { onError: (message: string) => void }) {
   const [selected, setSelected] = useState<ReportId | null>(null);
@@ -36,13 +40,15 @@ export function HRReports({ onError }: { onError: (message: string) => void }) {
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9 print:hidden">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p>
       <h2 className="mt-3 text-3xl font-semibold tracking-tight">Reports</h2>
-      <p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Leave, attendance, performance reviews and incentive reports, together in one place. Choose a report to view, print or download.</p>
+      <p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Staff profiles, rosters, leave, attendance, performance reviews and incentive reports, together in one place. Choose a report to view, print or download.</p>
     </section>
     {report ? <>
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <button type="button" onClick={() => open(null)} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All reports</button>
         <div className="text-right"><h3 className="font-semibold">{report.title}</h3><p className="text-xs text-slate-500">{report.category} · {report.format}</p></div>
       </div>
+      {selected === 'roster' && <HRRoster onError={onError} />}
+      {selected === 'staff-profile' && <StaffProfileReport onError={onError} />}
       {selected === 'leave-consolidate' && <HRLeaveConsolidate onError={onError} />}
       {selected === 'leave-credit' && <HRLeaveCredit onError={onError} />}
       {selected === 'leave-gcr' && <HRLeaveGcr onError={onError} />}

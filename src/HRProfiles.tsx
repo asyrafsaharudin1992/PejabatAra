@@ -1,11 +1,12 @@
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, History, Pencil, Plus, Search, Trash2, Upload, UserPlus } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, History, Pencil, Printer, Plus, Search, Trash2, Upload, UserPlus } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { HRProfileRequests } from './HRProfileRequests';
 import { DocumentsPanel, type Doc } from './DocumentsPanel';
 import { Pager, usePaged } from './Pager';
 import { LEAVE_GROUPS } from './lib/leaveTypes';
+import { StaffProfilePrint, useStaffProfilePrint } from './StaffProfilePrint';
 
 // Office HR staff profiles: the employee master for leave, attendance and payroll.
 // The directory shows only names and jobs; a full profile (IC, address, bank, statutory
@@ -215,9 +216,9 @@ function WorkDaysCard({ employeeId, days, onSaved, onError }: { employeeId: stri
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the working days.'); }
     setSaving(false);
   };
-  return <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Working days</h3><p className="mt-1 text-sm text-slate-600">Leave is counted only on the days this person works.</p></div>
-    <div className="flex flex-wrap items-center gap-2">{WEEK.map(([label, value]) => { const on = picked.includes(value); return <button key={label} type="button" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((day) => day !== value) : [...picked, value])} className={`h-10 w-12 rounded-xl border text-xs font-semibold transition ${on ? 'border-[#0b587b] bg-[#0b587b] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{label}</button>; })}
-      <button type="button" onClick={() => void save()} disabled={!changed || saving || !picked.length} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div></div></section>;
+  return <section className={`${card} !p-4`}><div className="flex flex-col gap-3"><div><h3 className="font-semibold">Working days</h3><p className="mt-0.5 text-xs text-slate-500">Leave counts only on these days.</p></div>
+    <div className="flex flex-wrap items-center gap-1.5">{WEEK.map(([label, value]) => { const on = picked.includes(value); return <button key={label} type="button" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((day) => day !== value) : [...picked, value])} className={`h-8 w-9 rounded-lg border text-[11px] font-semibold transition ${on ? 'border-[#0b587b] bg-[#0b587b] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{label}</button>; })}
+      <button type="button" onClick={() => void save()} disabled={!changed || saving || !picked.length} className="h-8 rounded-lg bg-[#0b587b] px-3 text-xs font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div></div></section>;
 }
 
 // Which public holidays are left out of this person's leave days (the groups are the ones set up in Infotech).
@@ -230,7 +231,7 @@ function HolidayGroupCard({ employeeId, group, onSaved, onError }: { employeeId:
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the holiday group.'); }
     setSaving(false);
   };
-  return <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Public holiday group</h3><p className="mt-1 text-sm text-slate-600">Management and admin groups (SG-MNG, MLHL) do not use leave on public holidays. Operations staff (SG-OPS) work through them, so their duty roster decides each day.</p></div>
+  return <section className={`${card} !p-4`}><div className="flex flex-col gap-3"><div><h3 className="font-semibold">Public holiday group</h3><p className="mt-0.5 text-xs text-slate-500">Which public holidays are not leave days.</p></div>
     <select value={group} disabled={saving} onChange={(event) => void change(event.target.value)} aria-label="Public holiday group" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-50">{HOLIDAY_GROUPS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></section>;
 }
 
@@ -243,7 +244,7 @@ function CalendarAccessCard({ employeeId, companies, onSaved, onError }: { emplo
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save calendar access.'); }
     finally { setSaving(false); }
   };
-  return <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Leave calendar access</h3><p className="mt-1 text-sm text-slate-600">Match the staff member's Infotech access. Company access includes every department in the selected company.</p></div><select aria-label="Leave calendar access" value={value} disabled={saving} onChange={event => void change(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-50"><option value="">Own company and department</option><option value="KJ">All KJ departments</option><option value="SK">All SK departments</option><option value="KJ,SK">All KJ and SK departments</option></select></div></section>;
+  return <section className={`${card} !p-4`}><div className="flex flex-col gap-3"><div><h3 className="font-semibold">Leave calendar access</h3><p className="mt-0.5 text-xs text-slate-500">Matches their Infotech access.</p></div><select aria-label="Leave calendar access" value={value} disabled={saving} onChange={event => void change(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-50"><option value="">Own company and department</option><option value="KJ">All KJ departments</option><option value="SK">All SK departments</option><option value="KJ,SK">All KJ and SK departments</option></select></div></section>;
 }
 
 // A staff member with no individual sign-in yet: HR types the short name they will sign in with (as the other staff do, for example "Ali").
@@ -267,7 +268,7 @@ function CreateSignIn({ employeeId, fullName, hasIc, onDone, onError }: { employ
 function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError: (message: string) => void }) {
   const [docs, setDocs] = useState<Doc[] | null>(null);
   useEffect(() => { setDocs(null); api(`action=documents&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setDocs(result.documents || []); }).catch((cause: Error) => { setDocs([]); onError(cause.message); }); }, [employeeId]);
-  return <section className={card}><DocumentsPanel tone="plain" docs={docs} onError={onError}
+  return <section className={`${card} !p-4`}><DocumentsPanel tone="plain" docs={docs} onError={onError}
     onUpload={async (kind, name, data) => { const result = await api('action=document_upload', { employeeId, kind, name, data }); if (result.error) throw new Error(result.error); setDocs((current) => [result.document, ...(current || [])]); }}
     getUrl={async (id, download) => { const result = await api(`action=document_open&employeeId=${employeeId}&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`); if (result.error) throw new Error(result.error); return result.url; }}
     onRemove={async (doc) => { const result = await api('action=document_delete', { employeeId, id: doc.id }); if (result.error) throw new Error(result.error); setDocs((current) => (current || []).filter((item) => item.id !== doc.id)); }}
@@ -276,12 +277,12 @@ function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError
 
 // Employment history (joining, job title and department changes, increments, salary adjustments), from Infotech. HR only: staff never
 // see it. Pay figures stay hidden until "Show private details" is pressed, like the rest of the profile.
-type CareerEntry = { id: string; date: string | null; kind: string; detail: string; from: string; to: string; amount: number | null };
+export type CareerEntry = { id: string; date: string | null; kind: string; detail: string; from: string; to: string; amount: number | null };
 const PAY_KINDS = /increment|salary|hourly|bonus/i;
-function ProfileCareer({ employeeId, reveal, onError }: { employeeId: string; reveal: boolean; onError: (message: string) => void }) {
+function ProfileCareer({ employeeId, reveal, onError, onLoaded }: { employeeId: string; reveal: boolean; onError: (message: string) => void; onLoaded?: (entries: CareerEntry[]) => void }) {
   const [entries, setEntries] = useState<CareerEntry[] | null>(null);
   const [notSetUp, setNotSetUp] = useState(false);
-  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setEntries(result.entries || []); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onError(cause.message); }); }, [employeeId]);
+  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setEntries(result.entries || []); onLoaded?.(result.entries || []); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onLoaded?.([]); onError(cause.message); }); }, [employeeId]);
   const paged = usePaged<CareerEntry>(entries || [], 10, employeeId);
   const pay = (entry: CareerEntry) => PAY_KINDS.test(entry.kind) || PAY_KINDS.test(entry.detail);
   const shown = (entry: CareerEntry, value: string) => value && pay(entry) && !reveal ? '••••' : value;
@@ -296,10 +297,13 @@ function ProfileCareer({ employeeId, reveal, onError }: { employeeId: string; re
   </section>;
 }
 
-function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
+export function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
   const [data, setData] = useState<{ employee: Employee; audit: Audit[]; signIn?: { linked: boolean; hasPassword: boolean | null } } | null>(null);
   const [editing, setEditing] = useState(false);
   const [reveal, setReveal] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [career, setCareer] = useState<CareerEntry[] | null>(null);
+  useStaffProfilePrint(printing, `Staff Profile - ${data?.employee.fullName || ''}`, () => setPrinting(false));
   const load = async () => { try { setData(await api(`action=employee&id=${encodeURIComponent(id)}`)); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load profile.'); } };
   useEffect(() => { void load(); }, [id]);
   const history = usePaged<Audit>(data?.audit || [], 10, id);
@@ -311,14 +315,15 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
   const hiddenEmail = (value: string) => reveal || !value ? value : `${value.slice(0, 1)}•••@${value.split('@')[1] || '•••'}`;
   const hiddenPhone = (value: string) => reveal || !value ? value : masked(value);
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button><span className="flex gap-2"><button type="button" aria-pressed={reveal} onClick={() => setReveal(!reveal)} className="profile-private-toggle inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide private details' : 'Show private details'}</button><button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#083a55]"><Pencil className="h-4 w-4" />Edit</button></span></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button><span className="flex flex-wrap gap-2"><button type="button" disabled={career === null} onClick={() => setPrinting(true)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]"><Printer className="h-4 w-4" />Print / PDF</button><button type="button" aria-pressed={reveal} onClick={() => setReveal(!reveal)} className="profile-private-toggle inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide private details' : 'Show private details'}</button><button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#083a55]"><Pencil className="h-4 w-4" />Edit</button></span></div>
     <section className="ara-hero rounded-[28px] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{e.company} · {e.employeeCode}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{e.fullName}</h2><p className="mt-2 text-[#b9cfdd]"><span className={`mr-2 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[e.status]}`}>{e.status}</span>{[e.designation, e.department, e.branch].filter(Boolean).join(' · ')}{e.joinDate ? ` · joined ${dmy(e.joinDate)} (${service(e.joinDate)})` : ''}</p></section>
-    <section className={card}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Individual sign-in</h3><p className="mt-1 text-sm text-slate-600">{!data.signIn?.linked ? 'No individual sign-in yet (Assessment Room, Incentive Claims).' : data.signIn.hasPassword === null ? 'Sign-in password status is not available yet.' : data.signIn.hasPassword ? 'Has chosen their own password.' : 'Has not chosen a password yet: signs in with the last 4 digits of their IC and is asked to choose one.'}</p></div>{!data.signIn?.linked ? <CreateSignIn employeeId={id} fullName={data.employee.fullName} hasIc={Boolean(data.employee.icNo)} onDone={load} onError={onError} /> : null}<button disabled={!data.signIn?.linked || !data.signIn.hasPassword} title={data.signIn?.hasPassword ? '' : 'There is no password to reset yet'} onClick={async () => { if (!window.confirm(`Reset the sign-in password of ${data.employee.fullName}? They will sign in with the last 4 digits of their IC and choose a new one.`)) return; try { const result = await api('action=reset_sign_in', { id }); if (result.error) throw new Error(result.error); await load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to reset.'); } }} className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Reset password</button></div></section>
+    <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <section className={`${card} !p-4`}><div className="flex flex-col items-start gap-3"><div><h3 className="font-semibold">Individual sign-in</h3><p className="mt-0.5 text-xs text-slate-500">{!data.signIn?.linked ? 'No sign-in yet.' : data.signIn.hasPassword === null ? 'Status not available yet.' : data.signIn.hasPassword ? 'Password set.' : 'Password not set yet (first sign-in uses the last 4 IC digits).'}</p></div>{!data.signIn?.linked ? <CreateSignIn employeeId={id} fullName={data.employee.fullName} hasIc={Boolean(data.employee.icNo)} onDone={load} onError={onError} /> : null}<button disabled={!data.signIn?.linked || !data.signIn.hasPassword} title={data.signIn?.hasPassword ? '' : 'There is no password to reset yet'} onClick={async () => { if (!window.confirm(`Reset the sign-in password of ${data.employee.fullName}? They will sign in with the last 4 digits of their IC and choose a new one.`)) return; try { const result = await api('action=reset_sign_in', { id }); if (result.error) throw new Error(result.error); await load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to reset.'); } }} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Reset password</button></div></section>
     <WorkDaysCard employeeId={id} days={e.workDays || [1, 2, 3, 4, 5, 6]} onSaved={load} onError={onError} />
     <HolidayGroupCard employeeId={id} group={e.holidayGroup || ''} onSaved={load} onError={onError} />
     <CalendarAccessCard employeeId={id} companies={e.leaveCalendarCompanies || []} onSaved={load} onError={onError} />
-    <ProfileDocuments employeeId={id} onError={onError} />
-    <ProfileCareer employeeId={id} reveal={reveal} onError={onError} />
+    </div>
+    {printing && <StaffProfilePrint employee={e} reveal={reveal} career={career || []} />}
     <div className="grid gap-5 lg:grid-cols-2">
       <section className={card}><h3 className="font-semibold">Personal</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="IC no.">{secret(e.icNo)}</Row>{e.passportNo && <Row label="Passport no.">{secret(e.passportNo)}</Row>}<Row label="Nationality">{e.nationality}</Row><Row label="Gender">{e.gender}</Row><Row label="Date of birth">{dmy(e.dateOfBirth)}</Row><Row label="Religion">{e.religion}</Row><Row label="Race">{e.race}</Row>{e.foreignIdNo && <Row label="Foreign ID no.">{secret(e.foreignIdNo)}</Row>}<Row label="Phone">{hiddenPhone(e.phone)}</Row><Row label="Email">{hiddenEmail(e.email)}</Row><Row label="Address"><span className="whitespace-pre-line">{String(e.address || '').replace(/(,\s*)+,/g, ',')}</span></Row>
@@ -333,6 +338,8 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
         <Row label="Marital status">{e.maritalStatus}</Row>{(e.maritalStatus === 'Married' || e.spouseName) && <><Row label="Spouse">{[e.spouseName, e.spouseEmployer, hiddenPhone(e.spousePhone)].filter(Boolean).join(' · ')}</Row>{e.spouseIc && <Row label="Spouse IC no.">{secret(e.spouseIc)}</Row>}</>}{e.maritalStatus === 'Married' && <Row label="Spouse working">{e.spouseWorking === null ? '' : e.spouseWorking ? 'Yes' : 'No'}</Row>}<Row label="Children">{e.children.length ? e.children.map((child) => `${child.name}${child.dateOfBirth ? ` (${dmy(child.dateOfBirth)})` : ''}${child.studying ? ', studying' : ''}${child.disabled ? ', OKU' : ''}`).join('; ') : 'None'}</Row><Row label="Emergency contact">{[e.emergencyName, e.emergencyRelation, hiddenPhone(e.emergencyPhone)].filter(Boolean).join(' · ')}</Row><Row label="Education"><span className="whitespace-pre-line">{e.education.length ? e.education.map((item) => [[item.level, item.course].filter(Boolean).join(' · '), [item.institution, item.year].filter(Boolean).join(' ')].filter(Boolean).join(', ')).join('\n') : ''}</span></Row>
       </dl></section>
     </div>
+    <ProfileDocuments employeeId={id} onError={onError} />
+    <ProfileCareer employeeId={id} reveal={reveal} onError={onError} onLoaded={setCareer} />
     {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
       <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
       {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{history.rows.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}

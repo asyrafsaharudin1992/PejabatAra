@@ -254,3 +254,31 @@
   .profile-private-toggle { opacity: 0; }
   .profile-private-toggle:hover, .profile-private-toggle:focus-visible { opacity: 1; }
 }
+
+/* Staff profile: a portrait document with no office controls or navigation. */
+.staff-profile-print { display: none; font: 10pt/1.4 Arial, Helvetica, sans-serif; color: #14233b; }
+.staff-profile-print header { border-bottom: 2px solid #0b3d59; padding-bottom: 4mm; margin-bottom: 4mm; }
+.staff-profile-print h1 { font-size: 20pt; font-weight: bold; margin: 2mm 0; }
+.staff-profile-print h2 { font-size: 14pt; font-weight: bold; }
+.staff-profile-print small { font-size: 8pt; color: #526477; }
+.sp-section { margin-top: 4mm; }
+.sp-section h3 { font-size: 11pt; font-weight: bold; padding: 1.5mm 2mm; background: #edf3f7; break-after: avoid; }
+.sp-row { display: grid; grid-template-columns: 43mm 1fr; gap: 3mm; border-bottom: 1px solid #dce4ed; padding: 1.3mm 2mm; break-inside: avoid; }
+.sp-row dt { font-weight: bold; }
+.sp-row dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+.roster-print { font: 8pt/1.3 Arial, Helvetica, sans-serif; color: #14233b; }
+.roster-print header { margin-bottom: 4mm; }
+.roster-print h1 { font-size: 17pt; font-weight: bold; margin: 1mm 0; }
+.roster-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.roster-print th, .roster-print td { border: 1px solid #b7c5d3; padding: 1.8mm 0.3mm; text-align: center; font-size: 6.5pt; overflow-wrap: anywhere; }
+.roster-print th:first-child { text-align: left; padding-left: 1.5mm; font-size: 7.5pt; }
+.roster-print small { display: block; font-size: 6.5pt; font-weight: normal; color: #526477; }
+.roster-print footer { display: flex; flex-wrap: wrap; gap: 1mm 4mm; font-size: 6.5pt; margin-top: 3mm; }
+@page staff-profile { size: A4 portrait; margin: 14mm; }
+@media print {
+  html:has(body.staff-profile-printing) { zoom: 1 !important; }
+  body.staff-profile-printing { background: white !important; margin: 0 !important; }
+  body.staff-profile-printing > *:not(.staff-profile-print):not(style) { display: none !important; }
+  body.staff-profile-printing .staff-profile-print { display: block; page: staff-profile; }
+  .staff-profile-print *, .roster-print * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
