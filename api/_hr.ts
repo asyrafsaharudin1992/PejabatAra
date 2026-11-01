@@ -892,7 +892,7 @@ export async function hrHandler(req: any, res: any) {
           marital_status: MARITAL[text(row.marital, 20).toUpperCase()] || '',
           spouse_name: text(row.spouseName, 120), spouse_ic: text(row.spouseIc, 20), spouse_employer: title(text(row.spouseOccupation, 120)), spouse_phone: phone(row.spousePhone),
           emergency_name: emergencyName, emergency_relation: title(text(row.emergencyRelation, 40)), emergency_phone: emergencyPhone,
-          children: (Array.isArray(row.children) ? row.children : []).slice(0, 20).map((child: any) => ({ name: text(child?.name, 120), dateOfBirth: date(child?.dob) || null, studying: false, disabled: false })).filter((child: any) => child.name),
+          children: (Array.isArray(row.children) ? row.children : []).slice(0, 20).map((child: any) => ({ name: text(child?.name, 120), dateOfBirth: date(child?.dob) || null, studying: child?.studying === true, disabled: child?.disabled === true })).filter((child: any) => child.name),
           education: (Array.isArray(row.education) ? row.education : []).slice(0, 12).map((item: any) => ({ level: text(item?.level, 60), institution: text(item?.institution, 120), course: text(item?.course, 120), year: text(item?.year, 4) })).filter((item: any) => item.institution || item.course),
         };
         // Pay and statutory details (the second file read off Infotech). One bank is kept; AraOffice has a single account.
@@ -906,9 +906,25 @@ export async function hrHandler(req: any, res: any) {
           // Monthly allowances (Infotech's payable allowances), for example a director fee.
           fixed_allowances: (Array.isArray(row.allowances) ? row.allowances : []).slice(0, 20).map((item: any) => ({ name: title(text(item?.name, 80)), amount: Math.round(Number(String(item?.amount ?? '').replace(/,/g, '')) * 100) / 100 })).filter((item: any) => item.name && Number.isFinite(item.amount) && item.amount > 0),
         });
+        // Whether the spouse works (PCB) and which children count as studying or disabled, read from Infotech's tax details and child list.
+        const spouseWorking = row.spouseWorking === true || row.spouseWorking === false ? row.spouseWorking : null;
+        if (spouseWorking !== null) wanted.spouse_working = spouseWorking;
         if (nationality && nationality !== 'Malaysian' && (person.nationality || 'Malaysian') === 'Malaysian') wanted.nationality = nationality;
         const patch: Record<string, any> = {}; const changes: Record<string, unknown> = {};
         for (const [column, value] of Object.entries(wanted)) { if (filled(value) && !(column === 'basic_salary' ? Number(person[column]) > 0 : filled(person[column]))) { patch[column] = value; changes[column] = [column === 'children' || column === 'education' ? [] : '', value]; } }
+        // A child already saved only moves from not studying / not disabled to studying / disabled, never the other way.
+        const flagged = (Array.isArray(row.children) ? row.children : []).filter((child: any) => child?.studying === true || child?.disabled === true);
+        if (flagged.length && Array.isArray(person.children) && person.children.length) {
+          let changed = false;
+          const nextChildren = person.children.map((child: any) => {
+            const match = flagged.find((item: any) => text(item?.name, 120).toUpperCase() === String(child?.name || '').toUpperCase());
+            if (!match) return child;
+            const studying = child.studying || match.studying === true, disabled = child.disabled || match.disabled === true;
+            if (studying === child.studying && disabled === child.disabled) return child;
+            changed = true; return { ...child, studying, disabled };
+          });
+          if (changed) { patch.children = nextChildren; changes.children = [person.children, nextChildren]; }
+        }
         const newHistory: any[] = [];
         if (historyReady) for (const item of (Array.isArray(row.history) ? row.history : []).slice(0, 200)) {
           const money = Number(String(item?.increment || item?.bonus || '').replace(/,/g, ''));
