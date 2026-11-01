@@ -4,6 +4,7 @@ import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_as
 import { attendanceHrAction } from './_attendance.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
+import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
@@ -912,6 +913,25 @@ export async function hrHandler(req: any, res: any) {
         }
       }
       return res.status(200).json({ dryRun, staff: rows.length, updated: results.length, unknown, counts, results });
+    }
+
+    // Documents on a staff profile: HR sees every one, and can add or remove any.
+    if (action === 'documents' || action.startsWith('document_')) {
+      const employeeId = text(req.query.employeeId || body.employeeId, 60);
+      if (!employeeId) throw fail(400, 'Choose a staff member.');
+      if (req.method === 'GET' && action === 'documents') return res.status(200).json({ documents: await listDocuments(db, employeeId) });
+      if (req.method === 'POST' && action === 'document_upload') {
+        const doc = await addDocument(db, { employeeId, kind: body.kind, fileName: body.name, base64: body.data, uploadedBy: 'hr' });
+        await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { documents: ['', `added ${doc.name}`] }, changed_by: user.id });
+        return res.status(200).json({ document: doc });
+      }
+      if (req.method === 'GET' && action === 'document_open') return res.status(200).json({ url: await documentLink(db, await ownedDocument(db, employeeId, req.query.id), req.query.download === '1') });
+      if (req.method === 'POST' && action === 'document_delete') {
+        const row = await ownedDocument(db, employeeId, body.id);
+        await removeDocument(db, row);
+        await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { documents: [`removed ${row.file_name}`, ''] }, changed_by: user.id });
+        return res.status(200).json({ ok: true });
+      }
     }
 
     // Staff asking HR to change their own details (from Individual Sign In). `profile_requests` lists what waits and what was decided;

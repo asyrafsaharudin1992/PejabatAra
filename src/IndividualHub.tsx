@@ -6,6 +6,7 @@ import MyAttendance from './MyAttendance';
 import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
 import MyAnnouncements from './MyAnnouncements';
+import { DocumentsPanel, type Doc } from './DocumentsPanel';
 
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
@@ -107,6 +108,10 @@ function MyProfile() {
   // A decision stays until the staff member closes it (remembered on this phone) or a week passes.
   const [seen, setSeen] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('ara_profile_decisions_seen') || '[]'); } catch { return []; } });
   const dismiss = (id: string) => { const next = [...seen, id].slice(-20); setSeen(next); try { localStorage.setItem('ara_profile_decisions_seen', JSON.stringify(next)); } catch { /* storage not available */ } };
+  const [docs, setDocs] = useState<Doc[] | null>(null);
+  const [docError, setDocError] = useState('');
+  const loadDocs = () => assessmentFetch('action=my_documents').then((result) => setDocs(result.documents || [])).catch((cause: Error) => { setDocs([]); setDocError(cause.message); });
+  useEffect(() => { if (tab === 'personal' && docs === null) void loadDocs(); }, [tab]);
   const loadRequests = () => assessmentFetch('action=profile_requests').then((result) => setRequests(result.requests || [])).catch(() => setRequests([]));
   useEffect(() => { assessmentFetch('action=my_profile').then((result) => setState(result)).catch((cause: Error) => setError(cause.message)); void loadRequests(); }, []);
   if (error) return <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
@@ -164,6 +169,14 @@ function MyProfile() {
     </div> : <>
       {current_.rows && <dl className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current_.rows.map(([label, value]) => <div key={label} className="flex gap-3 py-3 text-sm"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words font-medium text-[#14233b]">{value}</dd></div>)}</dl>}
       {current_.list && (current_.list.length ? <ul className="divide-y divide-slate-100 rounded-2xl bg-white px-5 py-2 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">{current_.list.map((item, index) => <li key={index} className="py-3 text-sm"><p className="font-medium text-[#14233b]">{item.title}</p>{item.sub && <p className="mt-0.5 text-xs text-slate-500">{item.sub}</p>}</li>)}</ul> : <p className="rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">{current_.empty}</p>)}
+      {tab === 'personal' && <>
+        {docError && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{docError}</p>}
+        <DocumentsPanel docs={docs} onError={setDocError}
+          onUpload={async (kind, name, data) => { setDocError(''); const result = await assessmentFetch('action=my_document_upload', { method: 'POST', body: JSON.stringify({ kind, name, data }) }); setDocs((current) => [result.document, ...(current || [])]); }}
+          getUrl={async (id, download) => (await assessmentFetch(`action=my_document_open&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`)).url}
+          onRemove={async (doc) => { await assessmentFetch('action=my_document_delete', { method: 'POST', body: JSON.stringify({ id: doc.id }) }); setDocs((current) => (current || []).filter((item) => item.id !== doc.id)); }}
+          canRemove={(doc) => doc.by === 'staff'} />
+      </>}
       {editable && <button type="button" onClick={startEdit} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#0b587b]/30 bg-white text-sm font-bold text-[#0b587b] shadow-sm hover:bg-[#f3f9fc]">Ask HR to change this</button>}
       <p className="px-1 text-xs text-slate-400">{editable ? 'Your change goes to HR to approve. ' : 'Work details are kept by HR. '}Your IC, bank and pay details are not shown here.</p>
     </>}

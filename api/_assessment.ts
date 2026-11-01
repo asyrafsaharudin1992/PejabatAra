@@ -2,6 +2,7 @@ import { calendarAccessFor } from './_leave-calendar-access.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
+import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -485,6 +486,26 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // Any other device signed in as this person is signed out; this one stays.
     await db.from('assessment_sessions').delete().eq('staff_id', staff.id).neq('token_hash', hashSecret(token));
     return res.status(200).json({ success: true });
+  }
+  // The staff member's own documents (a copy of the IC, a certificate...). They can add, open and remove what they added; HR sees them all.
+  if (action.startsWith('my_document')) {
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name').eq('assessment_staff_id', staff.id).maybeSingle();
+    if (meError) throw meError;
+    if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
+    if (req.method === 'GET' && action === 'my_documents') return res.status(200).json({ documents: await listDocuments(db, me.id) });
+    if (req.method === 'POST' && action === 'my_document_upload') {
+      const doc = await addDocument(db, { employeeId: me.id, kind: body.kind, fileName: body.name, base64: body.data, uploadedBy: 'staff' });
+      await db.from('hr_audit').insert({ employee_id: me.id, action: 'update', changes: { documents: ['', `added ${doc.name}`], source: ['', 'Staff'] }, changed_by: null });
+      return res.status(200).json({ document: doc });
+    }
+    if (req.method === 'GET' && action === 'my_document_open') return res.status(200).json({ url: await documentLink(db, await ownedDocument(db, me.id, req.query.id), req.query.download === '1') });
+    if (req.method === 'POST' && action === 'my_document_delete') {
+      const row = await ownedDocument(db, me.id, body.id);
+      if (row.uploaded_by !== 'staff') throw fail(403, 'HR added this document. Ask HR to remove it.');
+      await removeDocument(db, row);
+      await db.from('hr_audit').insert({ employee_id: me.id, action: 'update', changes: { documents: [`removed ${row.file_name}`, ''], source: ['', 'Staff'] }, changed_by: null });
+      return res.status(200).json({ ok: true });
+    }
   }
   // Asking HR to change their own personal details. HR approves before anything in the record changes.
   if (action === 'profile_requests' || action === 'profile_request') {

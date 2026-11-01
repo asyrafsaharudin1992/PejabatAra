@@ -3,6 +3,7 @@ import { ArrowLeft, Eye, EyeOff, History, Pencil, Plus, Search, Trash2, Upload, 
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
 import { HRProfileRequests } from './HRProfileRequests';
+import { DocumentsPanel, type Doc } from './DocumentsPanel';
 import { LEAVE_GROUPS } from './lib/leaveTypes';
 
 // Office HR staff profiles: the employee master for leave, attendance and payroll.
@@ -261,6 +262,17 @@ function CreateSignIn({ employeeId, fullName, hasIc, onDone, onError }: { employ
   </div>;
 }
 
+// The documents on one staff profile: HR sees everything staff added, and can add or remove any.
+function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError: (message: string) => void }) {
+  const [docs, setDocs] = useState<Doc[] | null>(null);
+  useEffect(() => { setDocs(null); api(`action=documents&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setDocs(result.documents || []); }).catch((cause: Error) => { setDocs([]); onError(cause.message); }); }, [employeeId]);
+  return <section className={card}><DocumentsPanel tone="plain" docs={docs} onError={onError}
+    onUpload={async (kind, name, data) => { const result = await api('action=document_upload', { employeeId, kind, name, data }); if (result.error) throw new Error(result.error); setDocs((current) => [result.document, ...(current || [])]); }}
+    getUrl={async (id, download) => { const result = await api(`action=document_open&employeeId=${employeeId}&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`); if (result.error) throw new Error(result.error); return result.url; }}
+    onRemove={async (doc) => { const result = await api('action=document_delete', { employeeId, id: doc.id }); if (result.error) throw new Error(result.error); setDocs((current) => (current || []).filter((item) => item.id !== doc.id)); }}
+    canRemove={() => true} /></section>;
+}
+
 function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
   const [data, setData] = useState<{ employee: Employee; audit: Audit[]; signIn?: { linked: boolean; hasPassword: boolean | null } } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -281,6 +293,7 @@ function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; 
     <WorkDaysCard employeeId={id} days={e.workDays || [1, 2, 3, 4, 5, 6]} onSaved={load} onError={onError} />
     <HolidayGroupCard employeeId={id} group={e.holidayGroup || ''} onSaved={load} onError={onError} />
     <CalendarAccessCard employeeId={id} companies={e.leaveCalendarCompanies || []} onSaved={load} onError={onError} />
+    <ProfileDocuments employeeId={id} onError={onError} />
     <div className="grid gap-5 lg:grid-cols-2">
       <section className={card}><h3 className="font-semibold">Personal</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="IC no.">{secret(e.icNo)}</Row>{e.passportNo && <Row label="Passport no.">{secret(e.passportNo)}</Row>}<Row label="Nationality">{e.nationality}</Row><Row label="Gender">{e.gender}</Row><Row label="Date of birth">{dmy(e.dateOfBirth)}</Row><Row label="Religion">{e.religion}</Row><Row label="Phone">{hiddenPhone(e.phone)}</Row><Row label="Email">{hiddenEmail(e.email)}</Row><Row label="Address"><span className="whitespace-pre-line">{e.address}</span></Row>
