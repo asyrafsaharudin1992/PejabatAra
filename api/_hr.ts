@@ -894,6 +894,8 @@ export async function hrHandler(req: any, res: any) {
           basic_salary: Number.isFinite(salary) && salary > 0 ? Math.round(salary * 100) / 100 : '',
           bank_name: text(Array.isArray(row.banks) ? row.banks[0]?.bank : '', 60), bank_account: text(account, 40),
           epf_no: text(row.epfNo, 30), socso_no: text(row.socsoNo, 30), tax_no: text(row.pcbNo, 30),
+          // Monthly allowances (Infotech's payable allowances), for example a director fee.
+          fixed_allowances: (Array.isArray(row.allowances) ? row.allowances : []).slice(0, 20).map((item: any) => ({ name: title(text(item?.name, 80)), amount: Math.round(Number(String(item?.amount ?? '').replace(/,/g, '')) * 100) / 100 })).filter((item: any) => item.name && Number.isFinite(item.amount) && item.amount > 0),
         });
         if (nationality && nationality !== 'Malaysian' && (person.nationality || 'Malaysian') === 'Malaysian') wanted.nationality = nationality;
         const patch: Record<string, any> = {}; const changes: Record<string, unknown> = {};
