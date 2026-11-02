@@ -179,9 +179,9 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
   const load = () => api('action=leave_policy').then((result) => { if (result.error) throw new Error(result.error); setRows(result.staff); setTracks({}); setPicked(new Set()); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
 
-  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track) || !row.trackSet); return { row, track, want, differ }; }), [rows, tracks]);
+  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track) || !row.trackSet); const figures = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp))); return { row, track, want, differ, figures }; }), [rows, tracks]);
   const shown = view.filter((item) => !onlyDiffer || item.differ);
-  const differing = view.filter((item) => item.differ).length;
+  const differing = view.filter((item) => item.differ).length, figuresDiffer = view.filter((item) => item.figures).length;
   const toggle = (id: string) => setPicked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const apply = async () => {
     const items = view.filter((item) => picked.has(item.row.id)).map((item) => ({ id: item.row.id, track: item.track }));
@@ -206,7 +206,7 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
     </section>
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyDiffer} onChange={(event) => setOnlyDiffer(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Only staff who need attention <span className="text-slate-400">(leave differs from the policy, or category not saved yet)</span></label>
-      <span className="text-sm text-slate-400">{rows ? `${differing} of ${view.length} need attention` : 'Loading…'}</span>
+      <span className="text-sm text-slate-400">{rows ? `${differing} of ${view.length} need attention · ${figuresDiffer} with different figures, ${differing - figuresDiffer} only need the category confirmed` : 'Loading…'}</span>
       <button onClick={() => setPicked(new Set(shown.map((item) => item.row.id)))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50">Select all shown</button>
       <button onClick={() => void apply()} disabled={!picked.size || saving} className="ml-auto h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Applying…' : `Apply to ${picked.size} selected`}</button>
     </section>
@@ -215,9 +215,9 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
       {rows && !shown.length ? <p className="text-sm text-slate-500">{view.length ? 'Everyone matches the company policy.' : 'No staff found.'}</p> :
         <table className="w-full min-w-[900px] text-left text-sm">
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="w-8 py-2" /><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Service</th><th className="py-2 pr-4 font-semibold">Category</th><th className="py-2 pr-4 font-semibold">Annual</th><th className="py-2 pr-4 font-semibold">Sick</th><th className="py-2 font-semibold">Hospital</th></tr></thead>
-          <tbody>{shown.map(({ row, track, want, differ }) => <tr key={row.id} className="border-b border-slate-50 align-top">
+          <tbody>{shown.map(({ row, track, want, differ, figures }) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3"><input type="checkbox" checked={picked.has(row.id)} onChange={() => toggle(row.id)} aria-label={`Select ${row.name}`} className="h-4 w-4 rounded border-slate-300" /></td>
-            <td className="py-3 pr-4"><p className="font-semibold">{row.name}</p><p className="text-xs text-slate-400">{row.company} · {row.code}{row.designation ? ` · ${row.designation}` : ''}</p></td>
+            <td className="py-3 pr-4"><p className="font-semibold">{row.name}</p><p className="text-xs text-slate-400">{row.company} · {row.code}{row.designation ? ` · ${row.designation}` : ''}</p>{differ && <p className="mt-1 text-[10px] font-semibold text-amber-700">{figures ? 'Leave figures differ from the policy' : 'Figures match; category not confirmed yet'}</p>}</td>
             <td className="py-3 pr-4 whitespace-nowrap">{row.years === null ? <span className="text-slate-300">no join date</span> : <><strong>{(Math.round(row.years * 10) / 10).toFixed(1)}</strong> yrs<p className="text-xs text-slate-400">{TIER[tierOf(row.years)]}</p></>}</td>
             <td className="py-3 pr-4"><select value={track} onChange={(event) => setTracks({ ...tracks, [row.id]: event.target.value })} aria-label={`Category for ${row.name}`} className="h-9 w-full min-w-[190px] rounded-lg border border-slate-200 bg-white px-2 text-xs">{TRACKS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{!row.trackSet && !tracks[row.id] && <p className="mt-1 text-[10px] text-slate-400">Guessed from the current entitlement: check it</p>}</td>
             <td className="py-3 pr-4">{cell(row.al, want?.al)}</td><td className="py-3 pr-4">{cell(row.ml, want?.ml)}</td><td className="py-3">{cell(row.hosp, want?.hosp)}</td>
