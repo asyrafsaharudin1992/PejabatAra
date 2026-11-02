@@ -1219,8 +1219,14 @@ export async function hrHandler(req: any, res: any) {
       // Infotech's "Employee EPF Name" (for example BT for BINTI) goes in the KWSP, PERKESO and ePCB files when it differs from the full name.
       const epfName = (person: any) => String(person.payroll_settings?.epfName || '').toUpperCase() || name(person);
       const rows = (people || []).map((person: any) => ({ person, r: slipOf.get(person.id) as any })).filter((item: any) => item.r && item.r.gross > 0);
-      // Months brought over from Infotech keep the totals but not the KWSP and PERKESO wages, so their files cannot be made here (they were filed from Infotech).
-      if (kind !== 'epcb' && rows.some((item: any) => item.r && (typeof item.r.kwspWage !== 'number' || typeof item.r.socsoWage !== 'number'))) throw fail(400, 'This month was brought over from Infotech and was filed from there, so its KWSP and PERKESO file cannot be made here.');
+      // Months brought over from Infotech keep the totals but not the KWSP and PERKESO wages, so they are worked out from the slip the way the pay run
+      // does: KWSP counts basic, rest/PH, shift and Care Coordinator pay; PERKESO counts everything except Director Fee, ECC, leave payment, advance, incentives and notice pay.
+      const sumOf = (r: any, names: string[]) => (r.allowances || []).filter((a: any) => names.includes(a.name)).reduce((sum: number, a: any) => sum + Number(a.amount || 0), 0);
+      for (const item of rows as any[]) {
+        const r = item.r; if (!r) continue;
+        if (typeof r.kwspWage !== 'number') r.kwspWage = Math.round((Number(r.basic || 0) + Number(r.restPh || 0) + sumOf(r, ['Shift allowance', 'Allowance Care Coordinator'])) * 100) / 100;
+        if (typeof r.socsoWage !== 'number') r.socsoWage = Math.round((Number(r.gross || 0) - sumOf(r, ['Director Fee', 'Allowance Care Coordinator', 'Annual Leave Payment', 'Advance', 'Incentives', 'Tuntutan Ganti Notis'])) * 100) / 100;
+      }
       if (!rows.length) throw fail(400, `No payslips saved for ${company} in this month.`);
       const now = new Date(Date.now() + 8 * 3600 * 1000);
       const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
