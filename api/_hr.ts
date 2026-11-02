@@ -218,14 +218,22 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 async function payrollContext(db: any, year: number, month: number) {
   // Staff who left during or after this pay period are still paid their last month.
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
-  const [{ data: staffRows, error }, ytdRead, payslipRead] = await Promise.all([
+  const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
     db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
     db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid,prev_as_of,prev_wages,prev_kwsp_relief,prev_pcb_paid').eq('year', year),
     db.from('hr_payslips').select('employee_id,month,status,inputs,result').eq('year', year),
+    db.from('hr_career_history').select('employee_id,event_date,from_value,to_value').in('kind', ['Increment', 'Salary Adjustment']).gte('event_date', periodFrom).limit(2000),
   ]);
   if (error) throw error;
   if (ytdRead.error) throw fail(400, 'The year-to-date totals are not set up yet.');
   if (payslipRead.error) throw fail(400, 'Payslips are not set up yet (migration 202611020005).');
+  // Raises dated inside or after this pay period: the salary before each one is needed to pay the days before it (the profile holds the latest salary).
+  const raises = new Map<string, { date: string; from: number }[]>();
+  for (const row of raiseRead.error ? [] : raiseRead.data || []) {
+    const before = Number(String(row.from_value || '').replace(/,/g, '')), after = Number(String(row.to_value || '').replace(/,/g, ''));
+    if (!row.event_date || !(before > 0) || !(after > 0)) continue;
+    raises.set(row.employee_id, [...(raises.get(row.employee_id) || []), { date: row.event_date, from: before }]);
+  }
   const base = new Map<string, any>((ytdRead.data || []).map((row: any) => [row.employee_id, row]));
   const baseMonth = Math.max(0, ...(ytdRead.data || []).map((row: any) => MONTHS.indexOf(String(row.as_of || '').slice(0, 3).toLowerCase()) + 1));
   if (!baseMonth) throw fail(400, 'No year-to-date totals for this year.');
@@ -248,7 +256,7 @@ async function payrollContext(db: any, year: number, month: number) {
     }
     const slip = own.find((item: any) => item.month === month);
     return {
-      id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [],
+      id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [], salaryChanges: raises.get(row.id) || [],
       maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
       settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };

@@ -14,6 +14,7 @@ export type PayStaff = {
   settings: Record<string, string | number | boolean>;
   joinDate?: string | null;     // YYYY-MM-DD; the first month is paid for the days from here
   resignDate?: string | null;   // YYYY-MM-DD; the last month is paid up to here
+  salaryChanges?: { date: string; from: number }[];   // a raise from this date (YYYY-MM-DD); `from` is the salary before it, basicSalary is the latest
 };
 export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakatPaid: number };
 // What HR enters for the month. OT is entered as hours at each rate (the rate HR chose when approving it in Attendance), rest days and public
@@ -29,13 +30,26 @@ export const dailyRate = (salary: number) => salary / 26;
 export const unpaidDayRate = (salary: number) => money(salary / 30);
 
 // A joiner or leaver is paid for the days employed inside the pay period out of all its days (Infotech: RM1,700 for 25 of 31 days is RM1,370.97).
-export function proratedSalary(salary: number, year: number, month: number, joinDate?: string | null, resignDate?: string | null) {
+// A raise in the middle of the period is paid by the day: the old salary up to the day before it, the new one from that day (Infotech: RM2,000 to RM2,160.72
+// on 12/10 over the 30 days to 19/10 is RM2,042.86).
+export function proratedSalary(salary: number, year: number, month: number, joinDate?: string | null, resignDate?: string | null, changes: { date: string; from: number }[] = []) {
   const period = payPeriod(year, month);
   const day = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10))) / 86400000;
   const total = day(period.to) - day(period.from) + 1;
   const start = joinDate && joinDate > period.from ? joinDate : period.from;
   const end = resignDate && resignDate < period.to ? resignDate : period.to;
   const worked = Math.max(0, day(end) - day(start) + 1);
+  const later = [...changes].sort((a, b) => b.date.localeCompare(a.date)).filter((item) => item.date > period.from);
+  if (later.length && worked > 0) {
+    let sum = 0;
+    for (let d = day(start); d <= day(end); d++) {
+      const iso = new Date(d * 86400000).toISOString().slice(0, 10);
+      let pay = salary;
+      for (const change of later) if (iso < change.date) pay = change.from;
+      sum += pay;
+    }
+    return { amount: money(sum / total), worked, total };
+  }
   return { amount: worked >= total ? salary : money((salary * worked) / total), worked, total };
 }
 export const hourlyRate = (salary: number) => money(dailyRate(salary) / 8);
@@ -54,7 +68,7 @@ export function childrenForRelief(children: PayChild[], year: number) {
 export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd, year: number, month: number) {
   const s = staff.settings;
   const unpaid = money(inputs.unpaidLeave + unpaidDayRate(staff.basicSalary) * (inputs.unpaidDays || 0));
-  const earned = proratedSalary(staff.basicSalary, year, month, staff.joinDate, staff.resignDate).amount;
+  const earned = proratedSalary(staff.basicSalary, year, month, staff.joinDate, staff.resignDate, staff.salaryChanges).amount;
   const basic = Math.max(0, earned - unpaid);
   const allowances = staff.fixedAllowances.map((item) => ({ ...item, type: allowanceType(item.name) }));
   const allowanceTotal = allowances.reduce((sum, item) => sum + item.amount, 0);
