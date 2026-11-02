@@ -238,7 +238,8 @@ async function payrollContext(db: any, year: number, month: number) {
   const baseMonth = Math.max(0, ...(ytdRead.data || []).map((row: any) => MONTHS.indexOf(String(row.as_of || '').slice(0, 3).toLowerCase()) + 1));
   if (!baseMonth) throw fail(400, 'No year-to-date totals for this year.');
   // The last month in the totals can be run again for comparison with Infotech, from the totals as they stood the month before.
-  const comparison = month === baseMonth && (ytdRead.data || []).some((row: any) => row.prev_as_of);
+  // Once the month's slips were brought over from Infotech as locked slips there is nothing left to compare.
+  const comparison = month === baseMonth && (ytdRead.data || []).some((row: any) => row.prev_as_of) && !(payslipRead.data || []).some((row: any) => row.month === month && row.status === 'locked');
   if (month < baseMonth || (month === baseMonth && !comparison)) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
   const payslips = payslipRead.data || [];
   const staff = (staffRows || []).map((row: any) => {
