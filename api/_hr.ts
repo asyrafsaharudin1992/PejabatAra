@@ -220,7 +220,7 @@ async function payrollContext(db: any, year: number, month: number) {
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const [{ data: staffRows, error }, ytdRead, payslipRead] = await Promise.all([
     db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
-    db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid').eq('year', year),
+    db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid,prev_as_of,prev_wages,prev_kwsp_relief,prev_pcb_paid').eq('year', year),
     db.from('hr_payslips').select('employee_id,month,status,inputs,result').eq('year', year),
   ]);
   if (error) throw error;
@@ -229,15 +229,17 @@ async function payrollContext(db: any, year: number, month: number) {
   const base = new Map<string, any>((ytdRead.data || []).map((row: any) => [row.employee_id, row]));
   const baseMonth = Math.max(0, ...(ytdRead.data || []).map((row: any) => MONTHS.indexOf(String(row.as_of || '').slice(0, 3).toLowerCase()) + 1));
   if (!baseMonth) throw fail(400, 'No year-to-date totals for this year.');
-  if (month <= baseMonth) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
+  // The last month in the totals can be run again for comparison with Infotech, from the totals as they stood the month before.
+  const comparison = month === baseMonth && (ytdRead.data || []).some((row: any) => row.prev_as_of);
+  if (month < baseMonth || (month === baseMonth && !comparison)) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
   const payslips = payslipRead.data || [];
   const staff = (staffRows || []).map((row: any) => {
     const own = payslips.filter((item: any) => item.employee_id === row.id);
     const earlier = own.filter((item: any) => item.month > baseMonth && item.month < month);
     const start = base.get(row.id);
-    const ytd = { wages: Number(start?.wages || 0), kwspRelief: Number(start?.kwsp_relief || 0), pcbPaid: Number(start?.pcb_paid || 0), zakatPaid: Number(start?.zakat_paid || 0) };
+    const ytd = comparison ? { wages: Number(start?.prev_wages || 0), kwspRelief: Number(start?.prev_kwsp_relief || 0), pcbPaid: Number(start?.prev_pcb_paid || 0), zakatPaid: Number(start?.zakat_paid || 0) } : { wages: Number(start?.wages || 0), kwspRelief: Number(start?.kwsp_relief || 0), pcbPaid: Number(start?.pcb_paid || 0), zakatPaid: Number(start?.zakat_paid || 0) };
     let earlierLocked = true;
-    for (let m = baseMonth + 1; m < month; m++) {
+    for (let m = baseMonth + 1; m < month && !comparison; m++) {
       const slip = earlier.find((item: any) => item.month === m);
       if (!slip || slip.status !== 'locked') { earlierLocked = false; continue; }
       ytd.wages = Math.round((ytd.wages + Number(slip.result?.gross || 0)) * 100) / 100;
@@ -251,7 +253,7 @@ async function payrollContext(db: any, year: number, month: number) {
       settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
   });
-  return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, staff };
+  return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, comparison, staff };
 }
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -955,9 +957,12 @@ export async function hrHandler(req: any, res: any) {
       const knownHistory = new Set<string>();
       const historyRead = await db.from('hr_career_history').select('employee_id,event_date,kind,detail,from_value,to_value').limit(20000);
       const historyReady = !historyRead.error;
-      const ytdRead = await db.from('hr_payroll_ytd').select('employee_id,year').limit(5000);
+      const ytdRead = await db.from('hr_payroll_ytd').select('employee_id,year,prev_as_of').limit(5000);
       const ytdReady = !ytdRead.error;   // the table is not set up yet: year-to-date totals are skipped
+      const slipRead = await db.from('hr_payslips').select('employee_id,year,month').limit(5000);
+      const knownSlips = new Set<string>((slipRead.data || []).map((r: any) => `${r.employee_id}|${r.year}|${r.month}`));
       const knownYtd = new Set<string>((ytdRead.data || []).map((r: any) => `${r.employee_id}|${r.year}`));
+      const knownPrevYtd = new Set<string>((ytdRead.data || []).filter((r: any) => r.prev_as_of).map((r: any) => `${r.employee_id}|${r.year}`));
       const newYtd: any[] = [];   // the table is not set up yet: history is skipped
       for (const r of historyRead.data || []) knownHistory.add(historyKey(r));
       const slashDate = (value: unknown) => { const m = String(value || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
@@ -1018,13 +1023,25 @@ export async function hrHandler(req: any, res: any) {
           const merged = { ...incoming, ...existing };
           if (Object.keys(incoming).some((key) => !(key in existing))) { patch.payroll_settings = merged; changes.payroll_settings = [existing, merged]; }
         }
-        let ytdEntry: any = null;
+        let ytdEntry: any = null; let ytdPrev: any = null; let inputsEntry: any = null;
         // Year-to-date totals (wages, KWSP relief, PCB paid) for the first pay run; a year already saved for this person is left alone.
         if (ytdReady && row.ytd && typeof row.ytd === 'object') {
           const year = Math.round(Number(row.ytd.year)), money = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
+          const prevWanted = row.ytd.prevAsOf && Number.isFinite(Number(row.ytd.prevWages));
+          if (year >= 2020 && year <= 2100 && knownYtd.has(`${person.id}|${year}`) && prevWanted && !knownPrevYtd.has(`${person.id}|${year}`)) ytdPrev = { year, prev_as_of: text(row.ytd.prevAsOf, 20), prev_wages: money(row.ytd.prevWages), prev_kwsp_relief: money(row.ytd.prevKwspRelief), prev_pcb_paid: money(row.ytd.prevPcbPaid) };
           if (year >= 2020 && year <= 2100 && !knownYtd.has(`${person.id}|${year}`)) {
             knownYtd.add(`${person.id}|${year}`);
             ytdEntry = ({ employee_id: person.id, year, as_of: text(row.ytd.asOf, 20), wages: money(row.ytd.wages), kwsp_relief: money(row.ytd.kwspRelief), pcb_paid: money(row.ytd.pcbPaid), zakat_paid: money(row.ytd.zakatPaid), source: 'Infotech', updated_at: new Date().toISOString() });
+          }
+        }
+        // What was entered for a month in Infotech (OT, rest days, unpaid leave and so on), so that month can be shown in the pay run for comparison.
+        if (!slipRead.error && row.payslipInputs && typeof row.payslipInputs === 'object') {
+          const slipYear = Math.round(Number(row.payslipInputs.year)), slipMonth = Math.round(Number(row.payslipInputs.month));
+          const amount = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
+          const given = row.payslipInputs.inputs || {};
+          if (slipYear >= 2020 && slipYear <= 2100 && slipMonth >= 1 && slipMonth <= 12 && !knownSlips.has(`${person.id}|${slipYear}|${slipMonth}`)) {
+            knownSlips.add(`${person.id}|${slipYear}|${slipMonth}`);
+            inputsEntry = { employee_id: person.id, year: slipYear, month: slipMonth, status: 'draft', inputs: { ot: amount(given.ot), restPh: amount(given.restPh), shiftAllowance: amount(given.shiftAllowance), unpaidLeave: amount(given.unpaidLeave), otherAllowance: amount(given.otherAllowance), otherDeduction: amount(given.otherDeduction), annualLeaveDeduction: amount(given.annualLeaveDeduction) } };
           }
         }
         const newHistory: any[] = [];
@@ -1035,12 +1052,14 @@ export async function hrHandler(req: any, res: any) {
           if (knownHistory.has(key)) continue;
           knownHistory.add(key); newHistory.push(entry);
         }
-        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry) continue;
+        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry && !ytdPrev && !inputsEntry) continue;
         if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
           const merged = { ...person, ...patch };
           patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
         }
         for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
+        if (ytdPrev) { counts.payroll_ytd_previous = (counts.payroll_ytd_previous || 0) + 1; changes.payroll_ytd_previous = ['', ytdPrev.prev_as_of]; }
+        if (inputsEntry) { counts.payslip_inputs = (counts.payslip_inputs || 0) + 1; changes.payslip_inputs = ['', `${inputsEntry.year}-${inputsEntry.month}`]; }
         if (ytdEntry) { counts.payroll_ytd = (counts.payroll_ytd || 0) + 1; changes.payroll_ytd = ['', `${ytdEntry.year} to ${ytdEntry.as_of}`]; }
         if (newHistory.length) { counts.career_history = (counts.career_history || 0) + newHistory.length; changes.career_history = ['', `${newHistory.length} entries`]; }
         results.push({ code: `${company} ${code}`, name: person.full_name, fields: Object.keys(changes) });
@@ -1048,6 +1067,15 @@ export async function hrHandler(req: any, res: any) {
           if (Object.keys(patch).length) {
             const { error } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', person.id);
             if (error) throw error;
+          }
+          if (ytdPrev) {
+            const { year: prevYear, ...prevFields } = ytdPrev;
+            const { error: prevError } = await db.from('hr_payroll_ytd').update({ ...prevFields, updated_at: now }).eq('employee_id', person.id).eq('year', prevYear);
+            if (prevError) throw prevError;
+          }
+          if (inputsEntry) {
+            const { error: inputsError } = await db.from('hr_payslips').insert(inputsEntry);
+            if (inputsError) throw inputsError;
           }
           if (ytdEntry) {
             const { error: ytdError } = await db.from('hr_payroll_ytd').insert(ytdEntry);
@@ -1071,9 +1099,10 @@ export async function hrHandler(req: any, res: any) {
       const year = Math.round(Number(req.query.year ?? body.year)), month = Math.round(Number(req.query.month ?? body.month));
       if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
       const context = await payrollContext(db, year, month);
-      if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, staff: context.staff });
+      if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, comparison: context.comparison, staff: context.staff });
       if (req.method !== 'POST') throw fail(405, 'Method not allowed');
       const lock = body.lock === true;
+      if (lock && context.comparison) throw fail(400, 'This month is only for comparison with Infotech and cannot be locked.');
       const items: { employeeId: string; inputs: any }[] = Array.isArray(body.items) ? body.items : [];
       const byId = new Map(context.staff.map((member: any) => [member.id, member]));
       const now = new Date().toISOString();

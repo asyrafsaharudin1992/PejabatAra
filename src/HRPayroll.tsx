@@ -37,7 +37,7 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
 type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
 const API = '/api/status?resource=hr';
-const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
+const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct'], ['ot', 'OT RM'], ['restPh', 'Rest/PH RM']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -46,6 +46,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   const [month, setMonth] = useState(11);
   const [staff, setStaff] = useState<RunStaff[] | null>(null);
   const [asOf, setAsOf] = useState('');
+  const [comparison, setComparison] = useState(false);
   const [inputs, setInputs] = useState<Record<string, PayInputs>>({});
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState('');
@@ -57,7 +58,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       const response = await officeFetch(`${API}&action=payroll_month&year=${year}&month=${month}`);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
-      setAsOf(data.asOf);
+      setAsOf(data.asOf); setComparison(Boolean(data.comparison));
       setStaff(data.staff);
       setInputs(Object.fromEntries(data.staff.map((member: RunStaff) => [member.id, { ...NO_INPUTS, ...(member.payslip?.inputs || {}) }])));
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load the pay run.'); setStaff([]); }
@@ -98,13 +99,14 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="font-semibold">Monthly pay run</h3><p className="mt-0.5 text-xs text-slate-500">Pay period {dmy(period.from)} to {dmy(period.to)} (OT and unpaid leave are counted for these days). Year-to-date totals in from Infotech up to {asOf || 'October 2026'}; each month needs the one before it locked.</p></div>
       <div className="flex flex-wrap items-center gap-2">
-        <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
+        <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[10, 11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
       </div>
     </div>
     {staff === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !staff.length ? <p className="mt-4 text-sm text-slate-500">Nothing to show for this month.</p> : <>
+      {comparison && <p className="mt-3 rounded-xl bg-sky-50 p-3 text-sm text-sky-800">This month is only for checking: it is worked out again from the year-to-date totals as they stood a month earlier, with what was entered in Infotech, so you can compare each line with the Infotech payslip. Do not lock it.</p>}
       {blocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">An earlier month is not locked yet, so the year-to-date totals (and PCB) below are not final.</p>}
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1640px] text-left text-xs">
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1900px] text-left text-xs">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Basic</th>{FIELDS.map(([, label]) => <th key={label} className="pr-2">{label}</th>)}<th className="pr-3 text-right">Gross</th><th className="pr-3 text-right">KWSP</th><th className="pr-3 text-right">PERKESO</th><th className="pr-3 text-right">EIS</th><th className="pr-3 text-right">SKBBK</th><th className="pr-3 text-right">PCB</th><th className="text-right">Net</th></tr></thead>
         <tbody>{rows.map(({ member, out }) => { const slipLocked = member.payslip?.status === 'locked'; return <tr key={member.id} className="border-t border-slate-100">
           <td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{member.fullName}</p><p className="text-[10px] text-slate-400">{member.employeeCode}{!member.hasYtd && ' · no year-to-date'}{member.status === 'Inactive' && ' · left, final pay'}{slipLocked && ' · locked'}</p></td>
@@ -116,7 +118,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       </table></div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="button" disabled={Boolean(busy) || locked} onClick={() => void save(false)} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy === 'save' ? 'Saving…' : 'Save draft'}</button>
-        <button type="button" disabled={Boolean(busy) || locked || blocked} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
+        <button type="button" disabled={Boolean(busy) || locked || blocked || comparison} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
         <span className="inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5">
           <select value={fileCompany} onChange={(event) => setFileCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
           {([['bank', 'Maybank'], ['epf', 'KWSP'], ['socso', 'PERKESO / EIS'], ['epcb', 'ePCB']] as const).map(([kind, label]) => <button key={kind} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === fileCompany && member.payslip)} onClick={() => void download(kind)} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />{label}</button>)}
