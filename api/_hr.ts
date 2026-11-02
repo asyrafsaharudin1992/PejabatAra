@@ -263,7 +263,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
       settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
   });
-  return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, comparison, staff };
+  return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, baseMonth, comparison, staff };
 }
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -1131,7 +1131,8 @@ export async function hrHandler(req: any, res: any) {
       const year = Math.round(Number(req.query.year ?? body.year)), month = Math.round(Number(req.query.month ?? body.month));
       if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
       const context = await payrollContext(db, year, month, req.method === 'GET');
-      if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, comparison: context.comparison, staff: context.staff });
+      // A month already paid (brought over from Infotech) lists only the staff who were paid in it.
+      if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, comparison: context.comparison, staff: month <= context.baseMonth ? context.staff.filter((member: any) => member.payslip) : context.staff });
       if (req.method !== 'POST') throw fail(405, 'Method not allowed');
       const lock = body.lock === true;
       if (lock && context.comparison) throw fail(400, 'This month is only for comparison with Infotech and cannot be locked.');
