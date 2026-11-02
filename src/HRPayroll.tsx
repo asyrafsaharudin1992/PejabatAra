@@ -10,7 +10,7 @@ const SETUP: Step[] = [
   { title: 'Payroll settings per staff', text: 'KWSP rate, PERKESO category, EIS, SKBBK, tax residency, pay group, OT type, probation, flexi hours, rest day.', done: true },
   { title: 'Allowance types', text: 'Only the types in use: Director Fee, which counts towards PCB but not KWSP, PERKESO, EIS or HRDF. The other 16 Infotech types are not paid to anyone, so they are left out.', done: true },
   { title: 'Reference lists', text: 'Bank codes and LHDN branches, for the bank file and the PCB submission.' },
-  { title: 'Year to date, January to October', text: 'Earnings, KWSP, PERKESO, EIS and PCB already paid this year, read from the Infotech payslips, so November PCB is worked out correctly.' },
+  { title: 'Year to date, January to October', text: 'Wages, KWSP relief and PCB already paid this year for the 26 current staff, read from the Infotech pay run, so November PCB is worked out correctly.', done: true },
 ];
 const MONTHLY: Step[] = [
   { title: 'Start the month', text: 'Pick the month and the staff, then fix the pay period for each pay group.' },

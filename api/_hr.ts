@@ -791,6 +791,37 @@ export async function hrHandler(req: any, res: any) {
 
     // Duty roster: one row per person and date. `roster` reads a month; `roster_import` replaces the dates it
     // is given for the people it names (rows: { code, company, date, shift }).
+    if (req.method === 'GET' && action === 'roster_draft_context') {
+      const month = String(req.query.month || ''), source = String(req.query.source || '');
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isDate(source) || !Number.isFinite(Date.parse(`${source}T00:00:00Z`)) || new Date(`${source}T00:00:00Z`).toISOString().slice(0, 10) !== source) throw fail(400, 'Choose a valid target month and pattern start date.');
+      const group = String(req.query.group || ''), company = String(req.query.company || ''), sampleLength = Number(req.query.length);
+      if (![7, 14, 28].includes(sampleLength)) throw fail(400, 'Choose a 7, 14 or 28-day pattern sample.');
+      if (!['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a roster group and clinic.');
+      const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+      const sourceEnd = new Date(Date.parse(`${source}T00:00:00Z`) + (sampleLength - 1) * 86400000).toISOString().slice(0, 10);
+      const before = new Date(Date.parse(`${start}T00:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
+      let staffQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation', { count: 'exact' }).eq('status', 'Active');
+      if (company) staffQuery = staffQuery.eq('company', company);
+      const staff = await staffQuery.limit(501);
+      if (staff.error) throw staff.error;
+      if ((staff.count || 0) > 500 || (staff.count || 0) > (staff.data || []).length) throw fail(422, 'Too many staff for the roster trial. Choose one clinic.');
+      const scope = String(req.query.scope || 'ca');
+      if (!['ca', 'all'].includes(scope)) throw fail(400, 'Choose a roster scope.');
+      const people = (staff.data || []).filter((p: any) => (group === 'doctors') === /\b(DR|DOCTOR)\b/i.test(p.designation || '')).filter((p: any) => group === 'doctors' || scope === 'all' || /CLINIC ASSISTANT|PEMBANTU KLINIK/i.test(p.designation || ''));
+      const ids = people.map((p: any) => p.id);
+      if (!ids.length) return res.status(200).json({ people: [], sourceDays: [], targetDays: [], leave: [] });
+      const [sourceDays, targetDays, leave] = await Promise.all([
+        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', source).lte('work_date', sourceEnd).limit(2000),
+        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', before).lte('work_date', end).limit(2000),
+        db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day', { count: 'exact' }).in('employee_id', ids).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(500),
+      ]);
+      for (const result of [sourceDays, targetDays, leave]) {
+        if (result.error) throw result.error;
+        if ((result.count || 0) > (result.data || []).length) throw fail(422, 'Roster trial exceeds its read limit. Choose one clinic to avoid incomplete results.');
+      }
+      const mapDays = (rows: any[]) => rows.map((r) => ({ id: r.employee_id, date: r.work_date, shift: r.shift }));
+      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '' })), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
+    }
     if (req.method === 'GET' && action === 'roster') {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';
       if (!month) throw fail(400, 'Choose a month.');
@@ -875,7 +906,11 @@ export async function hrHandler(req: any, res: any) {
       const historyKey = (r: any) => [r.employee_id, r.event_date || '', r.kind, r.detail, r.from_value, r.to_value].join('|');
       const knownHistory = new Set<string>();
       const historyRead = await db.from('hr_career_history').select('employee_id,event_date,kind,detail,from_value,to_value').limit(20000);
-      const historyReady = !historyRead.error;   // the table is not set up yet: history is skipped
+      const historyReady = !historyRead.error;
+      const ytdRead = await db.from('hr_payroll_ytd').select('employee_id,year').limit(5000);
+      const ytdReady = !ytdRead.error;   // the table is not set up yet: year-to-date totals are skipped
+      const knownYtd = new Set<string>((ytdRead.data || []).map((r: any) => `${r.employee_id}|${r.year}`));
+      const newYtd: any[] = [];   // the table is not set up yet: history is skipped
       for (const r of historyRead.data || []) knownHistory.add(historyKey(r));
       const slashDate = (value: unknown) => { const m = String(value || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
       const unknown: string[] = []; const counts: Record<string, number> = {}; const results: { code: string; name: string; fields: string[] }[] = [];
@@ -935,6 +970,15 @@ export async function hrHandler(req: any, res: any) {
           const merged = { ...incoming, ...existing };
           if (Object.keys(incoming).some((key) => !(key in existing))) { patch.payroll_settings = merged; changes.payroll_settings = [existing, merged]; }
         }
+        let ytdEntry: any = null;
+        // Year-to-date totals (wages, KWSP relief, PCB paid) for the first pay run; a year already saved for this person is left alone.
+        if (ytdReady && row.ytd && typeof row.ytd === 'object') {
+          const year = Math.round(Number(row.ytd.year)), money = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
+          if (year >= 2020 && year <= 2100 && !knownYtd.has(`${person.id}|${year}`)) {
+            knownYtd.add(`${person.id}|${year}`);
+            ytdEntry = ({ employee_id: person.id, year, as_of: text(row.ytd.asOf, 20), wages: money(row.ytd.wages), kwsp_relief: money(row.ytd.kwspRelief), pcb_paid: money(row.ytd.pcbPaid), zakat_paid: money(row.ytd.zakatPaid), source: 'Infotech', updated_at: new Date().toISOString() });
+          }
+        }
         const newHistory: any[] = [];
         if (historyReady) for (const item of (Array.isArray(row.history) ? row.history : []).slice(0, 200)) {
           const money = Number(String(item?.increment || item?.bonus || '').replace(/,/g, ''));
@@ -943,18 +987,23 @@ export async function hrHandler(req: any, res: any) {
           if (knownHistory.has(key)) continue;
           knownHistory.add(key); newHistory.push(entry);
         }
-        if (!Object.keys(patch).length && !newHistory.length) continue;
+        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry) continue;
         if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
           const merged = { ...person, ...patch };
           patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
         }
         for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
+        if (ytdEntry) { counts.payroll_ytd = (counts.payroll_ytd || 0) + 1; changes.payroll_ytd = ['', `${ytdEntry.year} to ${ytdEntry.as_of}`]; }
         if (newHistory.length) { counts.career_history = (counts.career_history || 0) + newHistory.length; changes.career_history = ['', `${newHistory.length} entries`]; }
         results.push({ code: `${company} ${code}`, name: person.full_name, fields: Object.keys(changes) });
         if (!dryRun) {
           if (Object.keys(patch).length) {
             const { error } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', person.id);
             if (error) throw error;
+          }
+          if (ytdEntry) {
+            const { error: ytdError } = await db.from('hr_payroll_ytd').insert(ytdEntry);
+            if (ytdError) throw ytdError;
           }
           if (newHistory.length) {
             const { error: historyError } = await db.from('hr_career_history').insert(newHistory);
