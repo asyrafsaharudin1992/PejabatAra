@@ -53,7 +53,7 @@ assert.equal(result.events.find(e => e.id === event.id)!.state, 'done'); // Actu
 const payrollKey = payroll.id;
 assert.equal(buildHrCalendar('2026-11', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events.find(e => e.category === 'payroll')!.state, 'done');
 assert.equal(buildHrCalendar('2026-12', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events.find(e => e.category === 'payroll')!.state, 'open'); // Monthly completion never leaks.
-assert.equal(buildHrCalendar('2026-11', [], { settings: { statutoryPayments: false, shareForecast: false, payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false }, rules: [], probation: {} }).events.length, 0);
+assert.equal(buildHrCalendar('2026-11', [], { settings: { statutoryPayments: false, shareForecast: false, payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false, payrollDay: 15, forecastDay: 7, statutoryDay: 15, probationDays: 14, confirmMonths: 3 }, rules: [], probation: {} }).events.length, 0);
 assert.throws(() => validateCalendarRule({ ...rule, date: '2026-02-30' }));
 assert.throws(() => validateCalendarRule({ ...rule, every: 0 }));
 assert.throws(() => validateCalendarRule({ ...rule, anchor: 'join', employeeId: '' }));
