@@ -1209,7 +1209,7 @@ export async function hrHandler(req: any, res: any) {
       const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row.result || {}]));
       const problems: string[] = [];
       const name = (person: any) => String(person.full_name || '').toUpperCase();
-      // Infotech's "Employee EPF Name" (for example BT for BINTI) goes in the KWSP and ePCB files when it differs from the full name.
+      // Infotech's "Employee EPF Name" (for example BT for BINTI) goes in the KWSP, PERKESO and ePCB files when it differs from the full name.
       const epfName = (person: any) => String(person.payroll_settings?.epfName || '').toUpperCase() || name(person);
       const rows = (people || []).map((person: any) => ({ person, r: slipOf.get(person.id) as any })).filter((item: any) => item.r && item.r.gross > 0);
       // Months brought over from Infotech keep the totals but not the KWSP and PERKESO wages, so their files cannot be made here (they were filed from Infotech).
@@ -1226,7 +1226,7 @@ export async function hrHandler(req: any, res: any) {
         file = `EPF_${digits9(employer.epf_no)}_${stamp.slice(6)}${stamp.slice(4, 6)}${stamp.slice(0, 4)}.txt`;
       } else if (kind === 'socso') {
         for (const { person } of rows) if (String(person.ic_no || '').replace(/\D/g, '').length !== 12) problems.push(`${name(person)}: IC is not 12 digits`);
-        content = socsoFile({ employerSocsoNo: employer.socso_no, companyRegNo: employer.company_reg_no, wageMonth: mmyyyy(year, month), rows: rows.map(({ person, r }: any) => ({ ic: person.ic_no, name: name(person), wages: r.socsoWage, socsoEmployer: r.socsoEmployer, socsoEmployee: r.socsoEmployee, eisEmployer: r.eisEmployer, eisEmployee: r.eisEmployee, skbbk: r.skbbk })) });
+        content = socsoFile({ employerSocsoNo: employer.socso_no, companyRegNo: employer.company_reg_no, wageMonth: mmyyyy(year, month), rows: rows.map(({ person, r }: any) => ({ ic: person.ic_no, name: epfName(person), wages: r.socsoWage, socsoEmployer: r.socsoEmployer, socsoEmployee: r.socsoEmployee, eisEmployer: r.eisEmployer, eisEmployee: r.eisEmployee, skbbk: r.skbbk })) });
         file = `${employer.socso_no}_${mmyyyy(year, month)}.txt`;
       } else {
         // The ePCB reference is Infotech's "LHDN EmployeeCode" (for example IG28758028) when one is set, otherwise the staff code.
