@@ -169,19 +169,6 @@ const wanted = (track: string, joinDate: string | null) => {
   return { al: Math.round(sum / 12), ml: part ? null : POLICY_ML[tierOf(yearsAt(`${year}-12-31`))], hosp: part ? null : 60 };
 };
 
-// The company policy table, also shown on Leave Year End so HR can see the figures the new year is built from.
-export function LeavePolicySummary() {
-  return <details className={card}>
-    <summary className="cursor-pointer font-semibold">Company leave policy used for the new year</summary>
-    <p className="mt-2 text-sm text-slate-500">Annual leave depends on the staff category and years of service. Sick leave is 14, 18 or 22 days and hospital leave 60 days for permanent staff. For someone who passes 2 or 5 years during the year, annual leave is shared by month and sick leave uses their tier on 31 December. Year End uses these figures for the new year's entitlement; brought-forward days are worked out separately below.</p>
-    <div className="mt-4 grid gap-4 text-sm sm:grid-cols-5">
-      <div><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Years of service</p><ul className="mt-2 space-y-1 text-slate-600">{TIER.map((label) => <li key={label}>{label[0].toUpperCase() + label.slice(1)}</li>)}</ul></div>
-      {TRACKS.map(([key, label]) => <div key={key}><p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p><ul className="mt-2 space-y-1 font-semibold text-[#0b587b]">{POLICY_AL[key].map((days, index) => <li key={index}>{days} days</li>)}</ul></div>)}
-      <div><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Sick leave (permanent)</p><ul className="mt-2 space-y-1 font-semibold text-[#0b587b]">{POLICY_ML.map((days, index) => <li key={index}>{days} days</li>)}</ul></div>
-    </div>
-  </details>;
-}
-
 function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (message: string) => void }) {
   const [rows, setRows] = useState<PolicyRow[] | null>(null);
   const [tracks, setTracks] = useState<Record<string, string>>({});
@@ -212,10 +199,11 @@ function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (messa
     <section className={card}>
       <h3 className="font-semibold">Company leave policy</h3>
       <p className="mt-1 text-sm text-slate-500">Annual leave depends on the staff category and years of service. Sick leave is 14, 18 or 22 days and hospital leave 60 days for permanent staff. When someone passes 2 or 5 years during the year, annual leave is shared by month (the same way Infotech does it: the figure for their tier at the end of each month, averaged over 12 months) and sick leave uses their tier on 31 December. Choose a category for each person, pick who to update and press Apply. Nothing changes until you do.</p>
-      <div className="mt-4 grid gap-4 text-sm sm:grid-cols-4">
-        <div><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Years of service</p><ul className="mt-2 space-y-1 text-slate-600">{TIER.map((label) => <li key={label}>{label[0].toUpperCase() + label.slice(1)}</li>)}</ul></div>
-        {TRACKS.map(([key, label]) => <div key={key}><p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p><ul className="mt-2 space-y-1 font-semibold text-[#0b587b]">{POLICY_AL[key].map((days, index) => <li key={index}>{days} days</li>)}</ul></div>)}
-      </div>
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
+        <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Years of service</th>{TRACKS.map(([key, label]) => <th key={key} className="py-2 pr-4 font-semibold">Annual · {label}</th>)}<th className="py-2 pr-4 font-semibold">Sick leave (permanent)</th><th className="py-2 font-semibold">Hospital (permanent)</th></tr></thead>
+        <tbody>{TIER.map((label, index) => <tr key={label} className="border-b border-slate-50"><td className="py-2 pr-4 text-slate-600">{label[0].toUpperCase() + label.slice(1)}</td>{TRACKS.map(([key]) => <td key={key} className="py-2 pr-4 font-semibold text-[#0b587b]">{POLICY_AL[key][index]} days</td>)}<td className="py-2 pr-4 font-semibold text-[#0b587b]">{POLICY_ML[index]} days</td><td className="py-2 font-semibold text-[#0b587b]">60 days</td></tr>)}</tbody>
+      </table></div>
+      <p className="mt-2 text-xs text-slate-400">Part-time staff have no sick or hospital leave under this policy.</p>
     </section>
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyDiffer} onChange={(event) => setOnlyDiffer(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Only staff who need attention <span className="text-slate-400">(leave differs from the policy, or category not saved yet)</span></label>

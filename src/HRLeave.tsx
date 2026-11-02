@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
-import { HRLeaveStaff, LeavePolicySummary } from './HRLeaveStaff';
+import { HRLeaveStaff } from './HRLeaveStaff';
 import { HRLeaveReport } from './HRLeaveReport';
 import { HRLeaveApply } from './HRLeaveApply';
 import { AttachmentLinks } from './LeaveAttachments';
@@ -116,7 +116,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
 }
 
 type YearEndRow = { employeeId: string; company: string; code: string; name: string; joinDate: string | null; track: string; annual: { eligible: number; broughtForward: number; calculatedCarry?: number; carryOverride?: { days: number; note: string } | null; sourceBalance: number | null; gcr?: { burn: number; bfExpired: number; eligibleUnused: number; paid: number; carry: number; qualifies: boolean; overLimit: number; limit: number; overdrawn: number } | null }; medical: { eligible: number; broughtForward: number; sourceBalance: number | null }; missingJoinDate: boolean; missingAnnual: boolean; missingMedical: boolean; missingPolicy: boolean };
-type YearEndPreview = { targetYear: number; sourceYear: number; rows: YearEndRow[]; pending: { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; status: string }[]; closure: null | { target_year: number; source_year: number; bf_expiry: string; staff_count: number; processed_at: string } };
+type YearEndPreview = { gcrSettings?: { minUsedPercent: number; maxDays: number; carry: { admin: number; clinical: number; parttime: number } }; targetYear: number; sourceYear: number; rows: YearEndRow[]; pending: { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; status: string }[]; closure: null | { target_year: number; source_year: number; bf_expiry: string; staff_count: number; processed_at: string } };
 async function hrLeaveApi(query: string, body?: unknown) {
   const response = await officeFetch(`/api/status?resource=hr&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
@@ -142,6 +142,23 @@ function CarryCell({ row, year, onChanged, onError }: { row: YearEndRow; year: n
   </div>;
 }
 
+// The GCR (Gantian Cuti Rehat) rules Year End applies, read from the settings HR keeps under Leave → Reports → GCR.
+function GcrPolicy({ settings }: { settings?: { minUsedPercent: number; maxDays: number; carry: { admin: number; clinical: number; parttime: number } } }) {
+  if (!settings) return null;
+  return <details className={card} open>
+    <summary className="cursor-pointer font-semibold">GCR policy (Gantian Cuti Rehat) used at Year End</summary>
+    <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600">
+      <li>Credit leave is used first. Any credit left on 31 December burns: it is never paid and never carried forward.</li>
+      <li>Leave taken then comes off the year's eligible days first, and after that off the brought-forward days.</li>
+      <li>Staff who used at least <strong>{settings.minUsedPercent}%</strong> of their eligible days may choose to be paid for the eligible days still unused, up to <strong>{settings.maxDays} days</strong>.</li>
+      <li>Whatever is left (after any GCR payment) is carried forward, up to the limit for the staff category.</li>
+      <li>Brought-forward days that are not used by the BF expiry date you set when processing are forfeited.</li>
+    </ul>
+    <div className="mt-3 grid max-w-xl gap-3 text-sm sm:grid-cols-3">{([['Administrative officer', settings.carry.admin], ['Doctor / clinic assistant (permanent)', settings.carry.clinical], ['Doctor / clinic assistant (part-time)', settings.carry.parttime]] as const).map(([label, days]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Carry-forward limit</p><p className="mt-1 text-xs text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-[#0b587b]">{days} days</p></div>)}</div>
+    <p className="mt-3 text-xs text-slate-400">HR can change these numbers under Leave → Reports → GCR. HR can also set a carry-forward figure by hand for one person, with the reason.</p>
+  </details>;
+}
+
 function YearEndPanel({ onError }: { onError: (message: string) => void }) {
   const [preview, setPreview] = useState<YearEndPreview | null>(null);
   const [expiry, setExpiry] = useState('');
@@ -164,7 +181,7 @@ function YearEndPanel({ onError }: { onError: (message: string) => void }) {
   const blocked = preview.targetYear > currentYear || preview.pending.length > 0 || preview.rows.some((row) => row.missingJoinDate || row.missingAnnual || row.missingMedical) || preview.closure !== null;
   return <div className="space-y-5">
     <section className="ara-hero rounded-[28px] p-6 text-white sm:p-8"><div className="flex items-start gap-4"><CalendarDays className="mt-1 h-6 w-6 shrink-0 text-[#70d8fa]" /><div><h3 className="text-xl font-semibold">Leave Year End · {preview.sourceYear} → {preview.targetYear}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-[#b9cfdd]">Review the projected Annual Leave (AL) and Medical Leave (ML) entitlement and bring-forward figures. Every pending request dated in {preview.sourceYear} must be approved, rejected, or cancelled first. Processing locks the old year.</p></div></div></section>
-    <LeavePolicySummary />
+    <GcrPolicy settings={preview.gcrSettings} />
     {preview.closure && <p className={`${card} bg-emerald-50 text-sm text-emerald-800`}>Year {preview.sourceYear} was closed on {new Date(preview.closure.processed_at).toLocaleDateString('en-MY')}. BF expires {preview.closure.bf_expiry}.</p>}
     {preview.pending.length > 0 && <p className={`${card} border border-amber-200 bg-amber-50 text-sm text-amber-800`}>Year End is blocked: {preview.pending.length} leave request(s) from {preview.sourceYear} are still waiting for a decision.</p>}
     {preview.rows.some((row) => row.missingJoinDate) && <p className={`${card} border border-rose-200 bg-rose-50 text-sm text-rose-800`}>Add a join date to every active staff profile before processing the new year.</p>}

@@ -781,7 +781,7 @@ export async function hrHandler(req: any, res: any) {
           medical: { eligible: policy?.ml ?? Number(oldML?.eligible || 0), broughtForward: 0, sourceBalance: oldML ? Number(oldML.balance) : null },
           missingJoinDate: !person.join_date, missingAnnual: !oldAL, missingMedical: !oldML };
       });
-      return res.status(200).json({ targetYear, sourceYear: targetYear - 1, rows, pending: pending || [], closure: closure || null });
+      return res.status(200).json({ targetYear, sourceYear: targetYear - 1, rows, pending: pending || [], closure: closure || null, gcrSettings });
     }
 
     if (req.method === 'POST' && action === 'leave_year_end_process') {
