@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
-import { HRLeaveStaff } from './HRLeaveStaff';
+import { HRLeaveStaff, LeavePolicySummary } from './HRLeaveStaff';
 import { HRLeaveReport } from './HRLeaveReport';
 import { HRLeaveApply } from './HRLeaveApply';
 import { AttachmentLinks } from './LeaveAttachments';
@@ -164,6 +164,7 @@ function YearEndPanel({ onError }: { onError: (message: string) => void }) {
   const blocked = preview.targetYear > currentYear || preview.pending.length > 0 || preview.rows.some((row) => row.missingJoinDate || row.missingAnnual || row.missingMedical) || preview.closure !== null;
   return <div className="space-y-5">
     <section className="ara-hero rounded-[28px] p-6 text-white sm:p-8"><div className="flex items-start gap-4"><CalendarDays className="mt-1 h-6 w-6 shrink-0 text-[#70d8fa]" /><div><h3 className="text-xl font-semibold">Leave Year End · {preview.sourceYear} → {preview.targetYear}</h3><p className="mt-2 max-w-3xl text-sm leading-6 text-[#b9cfdd]">Review the projected Annual Leave (AL) and Medical Leave (ML) entitlement and bring-forward figures. Every pending request dated in {preview.sourceYear} must be approved, rejected, or cancelled first. Processing locks the old year.</p></div></div></section>
+    <LeavePolicySummary />
     {preview.closure && <p className={`${card} bg-emerald-50 text-sm text-emerald-800`}>Year {preview.sourceYear} was closed on {new Date(preview.closure.processed_at).toLocaleDateString('en-MY')}. BF expires {preview.closure.bf_expiry}.</p>}
     {preview.pending.length > 0 && <p className={`${card} border border-amber-200 bg-amber-50 text-sm text-amber-800`}>Year End is blocked: {preview.pending.length} leave request(s) from {preview.sourceYear} are still waiting for a decision.</p>}
     {preview.rows.some((row) => row.missingJoinDate) && <p className={`${card} border border-rose-200 bg-rose-50 text-sm text-rose-800`}>Add a join date to every active staff profile before processing the new year.</p>}
