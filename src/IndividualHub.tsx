@@ -5,6 +5,7 @@ import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
 import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
+import MyPayslips from './MyPayslips';
 import MyAnnouncements from './MyAnnouncements';
 import { DocumentsPanel, type Doc } from './DocumentsPanel';
 const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
@@ -13,7 +14,7 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
 type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
+type View = 'home' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -248,6 +249,7 @@ export default function IndividualHub() {
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
   if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster /></Screen>;
+  if (view === 'payslip') return <Screen nav={phoneNav} title="Payslip" onBack={() => setView('home')}><MyPayslips /></Screen>;
   if (view === 'profile') return <Screen nav={phoneNav} title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
   if (view === 'settings') return <Screen nav={phoneNav} title="Settings" onBack={() => setView('home')}>
     <div className="space-y-3">
@@ -266,7 +268,7 @@ export default function IndividualHub() {
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
-    { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', soon: true },
+    { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip') },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },
     { label: 'Assessment Room', desc: 'Periodic staff assessments', icon: ClipboardCheck, tone: 'bg-[#91d7ed]/40 text-[#0b3046]', href: '#office/assessment' },

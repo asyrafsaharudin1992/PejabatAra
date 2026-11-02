@@ -488,6 +488,26 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     return res.status(200).json({ success: true });
   }
   // The staff member's own documents (a copy of the IC, a certificate...). They can add, open and remove what they added; HR sees them all.
+  // The signed-in person's own payslips. Only a month HR has locked is shown, and only to the person it belongs to.
+  if (action === 'my_payslips' || action === 'my_payslip') {
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department').eq('assessment_staff_id', staff.id).maybeSingle();
+    if (meError) throw meError;
+    if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
+    if (action === 'my_payslips') {
+      const { data, error } = await db.from('hr_payslips').select('year,month,result').eq('employee_id', me.id).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+      if (error) { if (error.code === '42P01') return res.status(200).json({ payslips: [] }); throw error; }
+      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month, gross: Number(row.result?.gross || 0), net: Number(row.result?.net || 0) })) });
+    }
+    const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+    const { data, error } = await db.from('hr_payslips').select('year,month,result,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
+    if (error) throw error;
+    if (!data) throw fail(404, 'That payslip is not available.');
+    const r = data.result || {};
+    return res.status(200).json({ payslip: { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
+      basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
+      eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid } });
+  }
+
   if (action.startsWith('my_document')) {
     const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
