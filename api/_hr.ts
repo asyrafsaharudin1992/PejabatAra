@@ -829,6 +829,20 @@ export async function hrHandler(req: any, res: any) {
       ]);
       if (error) throw error;
       const current = (employee: string, group: string) => (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year)[0];
+      // A category that was only guessed is saved as soon as the person's figures already match that category's policy.
+      const confirmed: Record<string, string> = {};
+      for (const p of people || []) {
+        if (p.leave_policy || !p.join_date) continue;
+        const al = current(p.id, 'AL'), ml = current(p.id, 'ML'), hosp = current(p.id, 'HOSP');
+        if (!al) continue;
+        const track = Number(al.eligible) >= 15 ? 'admin' : 'clinical', want = policyFor(track, p.join_date);
+        if (Number(al.eligible) === want.al && (want.ml === null || (ml && Number(ml.eligible) === want.ml)) && (want.hosp === null || (hosp && Number(hosp.eligible) === want.hosp))) confirmed[p.id] = track;
+      }
+      for (const track of new Set(Object.values(confirmed))) {
+        const ids = Object.keys(confirmed).filter((id) => confirmed[id] === track);
+        const { error: confirmError } = await db.from('hr_employees').update({ leave_policy: track }).in('id', ids);
+        if (!confirmError) for (const p of people || []) if (confirmed[p.id] === track) p.leave_policy = track;
+      }
       return res.status(200).json({ staff: (people || []).map((p: any) => {
         const al = current(p.id, 'AL'), ml = current(p.id, 'ML'), hosp = current(p.id, 'HOSP');
         const track = p.leave_policy || (al ? (Number(al.eligible) >= 15 ? 'admin' : 'clinical') : guessLeaveTrack(p));
