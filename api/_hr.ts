@@ -3,6 +3,7 @@ import { officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { newCode } from '../src/lib/shiftCodes.js';
+import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
@@ -207,6 +208,46 @@ async function ensureLeaveSetup(db: any, userId: string, now: string) {
   } catch { return 0; }
 }
 
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+// The active staff for one pay month with what the pay needs: salary, allowances, family, payroll settings and the year-to-date totals
+// (the totals read off Infotech, plus every month locked since). A month can only be run once the months before it are locked.
+async function payrollContext(db: any, year: number, month: number) {
+  const [{ data: staffRows, error }, ytdRead, payslipRead] = await Promise.all([
+    db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings').eq('status', 'Active').order('company').order('employee_code'),
+    db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid').eq('year', year),
+    db.from('hr_payslips').select('employee_id,month,status,inputs,result').eq('year', year),
+  ]);
+  if (error) throw error;
+  if (ytdRead.error) throw fail(400, 'The year-to-date totals are not set up yet.');
+  if (payslipRead.error) throw fail(400, 'Payslips are not set up yet (migration 202611020005).');
+  const base = new Map<string, any>((ytdRead.data || []).map((row: any) => [row.employee_id, row]));
+  const baseMonth = Math.max(0, ...(ytdRead.data || []).map((row: any) => MONTHS.indexOf(String(row.as_of || '').slice(0, 3).toLowerCase()) + 1));
+  if (!baseMonth) throw fail(400, 'No year-to-date totals for this year.');
+  if (month <= baseMonth) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
+  const payslips = payslipRead.data || [];
+  const staff = (staffRows || []).map((row: any) => {
+    const own = payslips.filter((item: any) => item.employee_id === row.id);
+    const earlier = own.filter((item: any) => item.month > baseMonth && item.month < month);
+    const start = base.get(row.id);
+    const ytd = { wages: Number(start?.wages || 0), kwspRelief: Number(start?.kwsp_relief || 0), pcbPaid: Number(start?.pcb_paid || 0), zakatPaid: Number(start?.zakat_paid || 0) };
+    let earlierLocked = true;
+    for (let m = baseMonth + 1; m < month; m++) {
+      const slip = earlier.find((item: any) => item.month === m);
+      if (!slip || slip.status !== 'locked') { earlierLocked = false; continue; }
+      ytd.wages = Math.round((ytd.wages + Number(slip.result?.gross || 0)) * 100) / 100;
+      ytd.kwspRelief = Math.min(4000, Math.round((ytd.kwspRelief + Number(slip.result?.kwspEmployee || 0)) * 100) / 100);
+      ytd.pcbPaid = Math.round((ytd.pcbPaid + Number(slip.result?.pcb || 0)) * 100) / 100;
+    }
+    const slip = own.find((item: any) => item.month === month);
+    return {
+      id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [],
+      maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
+      settings: row.payroll_settings || {}, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
+    };
+  });
+  return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, staff };
+}
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -1017,6 +1058,36 @@ export async function hrHandler(req: any, res: any) {
     }
 
     // A staff member's employment history (HR only; the staff API never reads this table).
+    // Monthly pay run. The staff and what they were paid so far this year come from here; the pay itself is worked out by the same code
+    // the screen uses (src/lib/payrollRun.ts), so what is saved is always what the server worked out, not what the browser sent.
+    if (action === 'payroll_month' || action === 'payroll_save') {
+      const year = Math.round(Number(req.query.year ?? body.year)), month = Math.round(Number(req.query.month ?? body.month));
+      if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
+      const context = await payrollContext(db, year, month);
+      if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, staff: context.staff });
+      if (req.method !== 'POST') throw fail(405, 'Method not allowed');
+      const lock = body.lock === true;
+      const items: { employeeId: string; inputs: any }[] = Array.isArray(body.items) ? body.items : [];
+      const byId = new Map(context.staff.map((member: any) => [member.id, member]));
+      const now = new Date().toISOString();
+      const rows: any[] = [];
+      for (const item of items) {
+        const member: any = byId.get(String(item?.employeeId));
+        if (!member) continue;
+        if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
+        const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
+        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction) };
+        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings }, inputs, member.ytd, year, month);
+        rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result, locked_at: lock ? now : null, updated_at: now });
+      }
+      if (lock) {
+        const missing = context.staff.filter((member: any) => member.payslip?.status !== 'locked' && !rows.some((row) => row.employee_id === member.id));
+        if (missing.length) throw fail(400, `Every staff member needs a payslip before the month is locked: ${missing.slice(0, 5).map((member: any) => member.employeeCode).join(', ')}${missing.length > 5 ? ' and more' : ''}.`);
+      }
+      if (rows.length) { const { error } = await db.from('hr_payslips').upsert(rows, { onConflict: 'employee_id,year,month' }); if (error) throw error; }
+      return res.status(200).json({ saved: rows.length, locked: lock });
+    }
+
     if (req.method === 'GET' && action === 'career') {
       const employeeId = text(req.query.employeeId, 60);
       if (!employeeId) throw fail(400, 'Choose a staff member.');

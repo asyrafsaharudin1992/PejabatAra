@@ -113,5 +113,5 @@ export function pcbNormal(input: PcbInput) {
   const left = tax - (input.zakatBefore ?? 0) - input.pcbPaidBefore;
   const monthly = left > 0 ? left / (input.monthsLeft + 1) : 0;
   // Rounded up to the next 5 sen.
-  return { chargeable, tax, pcb: Math.ceil(monthly * 20 - 1e-9) / 20 };
+  return { chargeable, tax, pcb: monthly > 0 ? Math.ceil(monthly * 20 - 1e-9) / 20 : 0 };
 }

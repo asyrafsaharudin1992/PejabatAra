@@ -184,7 +184,7 @@ export default function OfficeHR() {
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && <HRAttendance onError={setError} />}
-        {view === 'payroll' && <HRPayroll />}
+        {view === 'payroll' && <HRPayroll onError={setError} />}
         {view === 'reports' && <HRReports onError={setError} />}
       </main>
     </div>
