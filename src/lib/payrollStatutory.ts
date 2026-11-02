@@ -69,3 +69,49 @@ export function skbbk(wage: number) {
 
 // HRDF is paid by the employer only: 1% of the basic salary after unpaid leave is taken off.
 export const hrdf = (basicSalaryAfterUnpaidLeave: number) => Math.round(toSen(basicSalaryAfterUnpaidLeave) * 0.01);
+
+// ---- PCB (monthly tax deduction), normal remuneration, resident --------------------------------------------------------------
+// The LHDN computerised method as Infotech applies it: the year's chargeable income is projected from what was earned so far,
+// this month and the months still to come; the tax on it, less the PCB already paid, is spread over this month and the rest.
+// All figures here are in ringgit. Bands above RM100,000 are not checked against Infotech yet (nobody earns that much).
+const TAX_BANDS: [number, number][] = [[5000, 0], [20000, 0.01], [35000, 0.03], [50000, 0.06], [70000, 0.11], [100000, 0.19], [250000, 0.24], [400000, 0.245], [600000, 0.25], [1000000, 0.26], [2000000, 0.28], [Infinity, 0.3]];
+const REBATE_LIMIT = 35000;
+const REBATE = 400;
+
+export function incomeTax(chargeable: number) {
+  let tax = 0, from = 0;
+  for (const [to, rate] of TAX_BANDS) { if (chargeable > from) tax += (Math.min(chargeable, to) - from) * rate; from = to; if (chargeable <= to) break; }
+  return chargeable <= REBATE_LIMIT ? Math.max(0, tax - REBATE) : tax;
+}
+
+export type PcbInput = {
+  earnedBefore: number;        // Y: ordinary wages earned in the earlier months of the year
+  kwspBefore: number;          // K: KWSP paid in the earlier months (the relief is capped at 4,000 for the year)
+  thisMonth: number;           // Y1: this month's ordinary wages
+  kwspThisMonth: number;       // K1: KWSP taken this month
+  nextMonth: number;           // Y2: ordinary wages expected in each month still to come
+  kwspNextMonth: number;       // K2: KWSP expected in each month still to come
+  monthsLeft: number;          // n: months of the year after this one
+  individual?: number;         // D: 9,000
+  spouse?: number;             // S: 4,000 when the spouse does not work, otherwise 0
+  children?: number;           // C: children counted for relief
+  perChild?: number;           // Q: 2,000 for a child under 18
+  otherReliefBefore?: number;  // Lp
+  otherReliefThisMonth?: number; // Lp1
+  pcbPaidBefore: number;       // X
+  zakatBefore?: number;        // Z
+};
+
+export function pcbNormal(input: PcbInput) {
+  const cap = 4000;
+  const kBefore = Math.min(input.kwspBefore, cap);
+  const k1 = Math.max(0, Math.min(input.kwspThisMonth, cap - kBefore));
+  const k2Total = Math.max(0, Math.min(input.kwspNextMonth * input.monthsLeft, cap - kBefore - k1));
+  const relief = (input.individual ?? 9000) + (input.spouse ?? 0) + (input.children ?? 0) * (input.perChild ?? 2000) + (input.otherReliefBefore ?? 0) + (input.otherReliefThisMonth ?? 0);
+  const chargeable = (input.earnedBefore - kBefore) + (input.thisMonth - k1) + (input.nextMonth * input.monthsLeft - k2Total) - relief;
+  const tax = incomeTax(Math.max(0, chargeable));
+  const left = tax - (input.zakatBefore ?? 0) - input.pcbPaidBefore;
+  const monthly = left > 0 ? left / (input.monthsLeft + 1) : 0;
+  // Rounded up to the next 5 sen.
+  return { chargeable, tax, pcb: Math.ceil(monthly * 20 - 1e-9) / 20 };
+}
