@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { buildHrCalendar, defaultCalendarConfig, validateCalendarRule, validateCalendarSettings, calendarEventOverdue, type CalendarPerson, type CalendarRule } from '../src/lib/hrCalendar';
 const ca: CalendarPerson = { id: 'a', name: 'CA A', code: 'A', company: 'KJ', designation: 'CLINIC ASSISTANT', joinDate: '2026-10-20', confirmDate: null };
 const dr: CalendarPerson = { ...ca, id: 'b', name: 'Doctor B', code: 'B', designation: 'DR RESIDENT', joinDate: '2026-10-25' };
-const config = defaultCalendarConfig();
+const config = { ...defaultCalendarConfig(), probation: { a: 'probation' as const, b: 'probation' as const } };
 let result = buildHrCalendar('2026-11', [ca, dr], config);
 assert.equal(result.events.filter(e => e.category === 'payroll').length, 1);
 const payroll = result.events.find(e => e.category === 'payroll')!;
@@ -51,7 +51,7 @@ assert.equal(result.events.find(e => e.id === event.id)!.state, 'done'); // Actu
 const payrollKey = payroll.id;
 assert.equal(buildHrCalendar('2026-11', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events[0].state, 'done');
 assert.equal(buildHrCalendar('2026-12', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events[0].state, 'open'); // Monthly completion never leaks.
-assert.equal(buildHrCalendar('2026-11', [], { settings: { payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false }, rules: [] }).events.length, 0);
+assert.equal(buildHrCalendar('2026-11', [], { settings: { payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false }, rules: [], probation: {} }).events.length, 0);
 assert.throws(() => validateCalendarRule({ ...rule, date: '2026-02-30' }));
 assert.throws(() => validateCalendarRule({ ...rule, every: 0 }));
 assert.throws(() => validateCalendarRule({ ...rule, anchor: 'join', employeeId: '' }));
@@ -85,3 +85,15 @@ result = buildHrCalendar('2026-02', [leapPerson], { ...config, rules: [birthdayG
 assert.equal(result.events.find(e => e.ruleId)!.date, '2026-02-21');
 assert.ok(buildHrCalendar('2026-11', [ca], config).missingDates.some(m => m.includes('birthday')));
 console.log('Annual confirmation anniversaries, birthdays, leap years, birthday-based gift reminders and missing-date warnings passed.');
+
+// Unknown confirmation dates are not enough to infer probation.
+const verified = { ...ca, confirmDate: null };
+assert.ok(!buildHrCalendar('2026-11', [verified], defaultCalendarConfig()).events.some(e => e.category === 'evaluation'));
+assert.ok(buildHrCalendar('2026-11', [verified], defaultCalendarConfig()).missingDates.some(m => m.includes('probation status needs HR verification')));
+assert.ok(!buildHrCalendar('2026-11', [verified], { ...config, probation: { a: 'not-probation' } }).events.some(e => e.category === 'evaluation'));
+const futureConfirmation = { ...ca, confirmDate: '2026-12-01' };
+assert.ok(buildHrCalendar('2026-11', [futureConfirmation], config, {}, [], '2026-11-02').events.some(e => e.category === 'evaluation'));
+assert.ok(!buildHrCalendar('2026-12', [futureConfirmation], config, {}, [], '2026-11-02').events.some(e => e.category === 'evaluation'));
+assert.ok(!buildHrCalendar('2026-11', [futureConfirmation], config, {}, [], '2026-12-01').events.some(e => e.category === 'evaluation'));
+assert.ok(!buildHrCalendar('2026-11', [{ ...ca, confirmDate: '2026-11-03' }], config, {}, [], '2026-11-02').events.some(e => e.category === 'evaluation'));
+console.log('Probation-only CA evaluation tests passed: unknown status, HR verification, explicit non-probation and confirmation cutoff.');

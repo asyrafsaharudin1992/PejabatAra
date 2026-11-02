@@ -1,9 +1,10 @@
 import { branchId } from './_office-db.js';
+import { malaysiaToday } from '../src/lib/reviewReminders.js';
 import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, validateCalendarRule, validateCalendarSettings, type CalendarConfig, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
 const BRANCH = 'AraOffice HR Private';
 const CONFIG_KEY = 'hr_calendar_config';
 const stateKey = (month: string) => `hr_calendar_done:${month}`;
-const storedConfig = (payload: any): CalendarConfig => ({ settings: { ...defaultCalendarConfig().settings, ...(payload?.settings || {}) }, rules: Array.isArray(payload?.rules) ? payload.rules : [] });
+const storedConfig = (payload: any): CalendarConfig => ({ settings: { ...defaultCalendarConfig().settings, ...(payload?.settings || {}) }, rules: Array.isArray(payload?.rules) ? payload.rules : [], probation: payload?.probation && typeof payload.probation === 'object' && !Array.isArray(payload.probation) ? payload.probation : {} });
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 async function readRecord(db: any, branch: string | null, key: string) {
   if (!branch) return null;
@@ -22,7 +23,7 @@ async function writeRecord(db: any, userId: string, branch: string, key: string,
   return data.updated_at;
 }
 export async function hrCalendarAction(req: any, res: any, db: any, user: { id: string }, action: string, body: any) {
-  if (!['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
+  if (!['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
   if (req.method !== (action === 'calendar_month' ? 'GET' : 'POST')) throw fail(405, 'Method not allowed.');
   const month = req.method === 'GET' ? req.query.month : body.month;
   if (!calendarMonth(month)) throw fail(400, 'Choose a valid calendar month.');
@@ -46,11 +47,21 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     return res.status(200).json({ ...buildHrCalendar(month, people, config, states, reviews), people: people.map(({ birthday, ...safe }) => safe), config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });
   }
   if (req.method !== 'POST' || !branch) throw fail(405, 'Method not allowed.');
-  if (['calendar_rule_save', 'calendar_rule_delete', 'calendar_settings'].includes(action)) {
+  if (['calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation'].includes(action)) {
     const current = await readRecord(db, branch, CONFIG_KEY);
     const config: CalendarConfig = storedConfig(current?.payload);
     let next: CalendarConfig;
-    if (action === 'calendar_settings') {
+    if (action === 'calendar_probation') {
+      if (!body.statuses || typeof body.statuses !== 'object' || Array.isArray(body.statuses) || Object.keys(body.statuses).length > 500) throw fail(400, 'Enter a valid staff probation list.');
+      const entries = Object.entries(body.statuses);
+      if (entries.some(([id, state]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !['probation', 'not-probation'].includes(String(state)))) throw fail(400, 'Choose a valid probation status for each staff member.');
+      const ids = entries.map(([id]) => id);
+      const staff = ids.length ? await db.from('hr_employees').select('id,confirm_date').eq('status', 'Active').in('id', ids).limit(500) : { data: [], error: null };
+      if (staff.error) throw staff.error;
+      if ((staff.data || []).length !== ids.length) throw fail(400, 'The probation list must contain active staff only. Refresh the calendar.');
+      if ((staff.data || []).some((person: any) => body.statuses[person.id] === 'probation' && person.confirm_date && person.confirm_date <= malaysiaToday())) throw fail(400, 'A staff member already has a confirmation date. Update the profile if that date is incorrect.');
+      next = { ...config, probation: Object.fromEntries(entries) as CalendarConfig['probation'] };
+    } else if (action === 'calendar_settings') {
       let settings; try { settings = validateCalendarSettings(body.settings); } catch (cause) { throw fail(400, (cause as Error).message); }
       next = { ...config, settings };
     } else if (action === 'calendar_rule_save') {

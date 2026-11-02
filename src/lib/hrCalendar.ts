@@ -4,11 +4,12 @@ export const calendarCategories: Record<CalendarCategory, string> = { payroll: '
 export type CalendarPerson = { id: string; name: string; code: string; company: string; designation: string; joinDate: string | null; confirmDate: string | null; birthday?: string | null };
 export type CalendarRule = { id: string; title: string; category: CalendarCategory; employeeId: string; company: string; anchor: 'date' | 'join' | 'confirmation' | 'birthday'; date: string; offsetMonths: number; offsetDays: number; repeat: 'none' | 'monthly' | 'yearly'; every: number; notes: string; enabled: boolean };
 export type CalendarSettings = { payroll: boolean; probationWeeks: boolean; probationMonths: boolean; caEvaluation: boolean; appraisal: boolean; birthdays: boolean };
-export type CalendarConfig = { settings: CalendarSettings; rules: CalendarRule[] };
+export type ProbationState = 'probation' | 'not-probation';
+export type CalendarConfig = { settings: CalendarSettings; rules: CalendarRule[]; probation: Record<string, ProbationState> };
 export type CalendarOccurrence = { state: 'done' | 'skipped'; at: string; by: string };
 export type CalendarEvent = { id: string; title: string; category: CalendarCategory; date: string; start: string; employeeId: string; person: string; company: string; notes: string; source: 'automatic' | 'manual' | 'review'; ruleId?: string; reviewId?: string; reviewDone?: boolean; state: 'open' | 'done' | 'skipped' | 'assigned' };
 export type CalendarReview = { id: string; employeeId: string; label: string; due: string; status: string };
-export const defaultCalendarConfig = (): CalendarConfig => ({ settings: { payroll: true, probationWeeks: true, probationMonths: true, caEvaluation: true, appraisal: true, birthdays: true }, rules: [] });
+export const defaultCalendarConfig = (): CalendarConfig => ({ settings: { payroll: true, probationWeeks: true, probationMonths: true, caEvaluation: true, appraisal: true, birthdays: true }, rules: [], probation: {} });
 export const shiftCalendarDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export const calendarMonth = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && Number(value.slice(0, 4)) >= 1900 && Number(value.slice(0, 4)) <= 2200;
 export const calendarMonthEnd = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
@@ -55,7 +56,7 @@ function ruleDates(rule: CalendarRule, base: string, month: string): string[] {
   }
   return [...new Set(dates)];
 }
-export function buildHrCalendar(month: string, people: CalendarPerson[], config: CalendarConfig, states: Record<string, CalendarOccurrence> = {}, reviews: CalendarReview[] = []): { events: CalendarEvent[]; missingDates: string[] } {
+export function buildHrCalendar(month: string, people: CalendarPerson[], config: CalendarConfig, states: Record<string, CalendarOccurrence> = {}, reviews: CalendarReview[] = [], today = malaysiaToday()): { events: CalendarEvent[]; missingDates: string[] } {
   if (!calendarMonth(month)) throw new Error('Choose a valid calendar month.');
   const events: CalendarEvent[] = [], missingDates: string[] = [];
   const active = new Map(people.map((p) => [p.id, p]));
@@ -86,6 +87,10 @@ export function buildHrCalendar(month: string, people: CalendarPerson[], config:
         }
       } else missingDates.push(`${person.name}: confirmation date is missing for annual appraisal.`);
     }
+    const confirmed = Boolean(person.confirmDate && validReminderDate(person.confirmDate) && person.confirmDate <= today);
+    const probation = config.probation?.[person.id] === 'probation' && !confirmed;
+    if (!confirmed && !config.probation?.[person.id]) missingDates.push(`${person.name}: probation status needs HR verification; not treated as on probation automatically.`);
+    if (!probation) continue;
     if (!person.joinDate || !validReminderDate(person.joinDate)) {
       if (config.settings.probationWeeks || config.settings.probationMonths || config.settings.caEvaluation && isCalendarCa(person)) missingDates.push(`${person.name}: joining date is missing for automatic milestones.`);
       continue;
@@ -93,10 +98,10 @@ export function buildHrCalendar(month: string, people: CalendarPerson[], config:
     const first = shiftCalendarDays(person.joinDate, 14), third = addReviewMonths(person.joinDate, 3);
     if (config.settings.probationWeeks && !(config.settings.caEvaluation && isCalendarCa(person)) && (!person.confirmDate || person.confirmDate > first)) add({ ...base, title: '2-week probation check', start: first, date: first, category: 'probation', notes: `14 days after joining (${person.joinDate}). HR to check progress and arrange the assessment.` }, `probation-14:${person.id}`);
     if (config.settings.probationMonths && (!person.confirmDate || person.confirmDate > third)) add({ ...base, title: '3-month confirmation check', start: third, date: third, category: 'probation', notes: `3 calendar months after joining (${person.joinDate}). Check confirmation requirements; this reminder does not confirm employment.` }, `probation-3:${person.id}`);
-    if (config.settings.caEvaluation && isCalendarCa(person)) for (const due of recurringDates(first, month, 1)) {
+    if (config.settings.caEvaluation && isCalendarCa(person)) for (const due of recurringDates(first, month, 1).filter((date) => !person.confirmDate || date < person.confirmDate)) {
       const match = reviews.filter((r) => r.employeeId === person.id && r.due === due && /evaluation|assessment|performance|month|week|minggu|penilaian/i.test(r.label) && !/appraisal/i.test(r.label)).sort((a, b) => Number(b.status === 'submitted') - Number(a.status === 'submitted'))[0];
       if (match) matchedReviews.add(match.id);
-      add({ ...base, title: due === first ? 'First CA evaluation · 2 weeks' : 'Monthly CA evaluation', start: due, date: due, category: 'evaluation', notes: `First evaluation: ${first} (joining date + 14 days), then monthly on that anniversary. ${due === first && config.settings.probationWeeks ? 'Includes the 2-week probation check. ' : ''}A matching submitted review completes this assessment reminder.`, reviewId: match?.id, reviewDone: match?.status === 'submitted' }, `ca-evaluation:${person.id}`);
+      add({ ...base, title: due === first ? 'First CA evaluation · 2 weeks' : 'Monthly CA evaluation', start: due, date: due, category: 'evaluation', notes: `First evaluation: ${first} (joining date + 14 days), then monthly on that anniversary while on probation, stopping before confirmation. ${due === first && config.settings.probationWeeks ? 'Includes the 2-week probation check. ' : ''}A matching submitted review completes this assessment reminder.`, reviewId: match?.id, reviewDone: match?.status === 'submitted' }, `ca-evaluation:${person.id}`);
     }
   }
   for (const rule of config.rules.filter((r) => r.enabled)) {

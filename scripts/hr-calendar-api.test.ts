@@ -76,3 +76,14 @@ response = await call('calendar_month');
 await call('calendar_rule_delete', { id: rule.id, version: response.body.configVersion });
 assert.equal((await call('calendar_month')).body.config.rules.length, 0);
 console.log('HR calendar API tests passed: read-only GET, private shared persistence, clinic validation, save/reload, concurrent edits, completion/reopen, month isolation, bounds and schedule deletion.');
+
+response = await call('calendar_month');
+await assert.rejects(() => call('calendar_probation', { statuses: { a: 'probation' }, version: response.body.configVersion }), { status: 400 });
+await assert.rejects(() => call('calendar_probation', { statuses: { missing: 'probation' }, version: response.body.configVersion }), { status: 400 });
+tables.hr_employees.push({ ...realPeople[0], id: 'new-ca', full_name: 'New CA', confirm_date: null });
+response = await call('calendar_month');
+await call('calendar_probation', { statuses: { 'new-ca': 'probation' }, version: response.body.configVersion });
+response = await call('calendar_month');
+assert.equal(response.body.config.probation['new-ca'], 'probation');
+assert.ok(response.body.events.some((e: any) => e.employeeId === 'new-ca' && e.category === 'evaluation'));
+console.log('Probation list API validation and persistence passed; confirmed and inactive/missing staff cannot be marked probation.');
