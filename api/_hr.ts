@@ -342,6 +342,16 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, days });
     }
 
+    // Last working day, set from the staffing forecast so the staff profile follows it. Status stays as it is.
+    if (req.method === 'POST' && action === 'set_resign_date') {
+      const id = text(body.id, 60);
+      if (!isDate(body.resignDate)) throw fail(400, 'Enter the last working day.');
+      const { error } = await db.from('hr_employees').update({ resign_date: body.resignDate, updated_at: now, updated_by: user.id }).eq('id', id);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { resign_date: body.resignDate }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+
     // The public holiday group a person belongs to (SG-MNG, SG-OPS, MLHL, NO-PH, or none): leave is not counted on
     // that group's holidays unless the duty roster says the person works the day.
     if (req.method === 'POST' && action === 'set_holiday_group') {
