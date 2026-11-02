@@ -120,7 +120,11 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
       if (leaveRow && !clockIn) { push({ ...day, status: 'leave' }); continue; }
       // Management do not clock: their working days count as present.
-      if (required === 'none') { push({ ...day, status: 'exempt' }); continue; }
+      // They may still clock: a clock in/out is shown and the hours are recorded, but nothing is counted against them (no late, early or OT).
+      if (required === 'none') {
+        if (clockIn) { push({ ...day, status: 'present', worked: clockOut ? Math.round((clockOut.at - clockIn.at) / MIN) : 0 }); continue; }
+        push({ ...day, status: 'exempt' }); continue;
+      }
       if (clockIn) {
         day.late = Math.max(0, Math.round((clockIn.at - start) / MIN));
         day.lateCounted = day.late > rules.lateGrace ? day.late : 0;
