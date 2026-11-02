@@ -37,7 +37,7 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
 type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
 const API = '/api/status?resource=hr';
-const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidLeave', 'Unpaid leave'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
+const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
