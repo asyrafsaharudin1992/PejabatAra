@@ -13,7 +13,7 @@ export function displayedCell(row: ProjectionRow, month: string, plan: Projectio
   const override = plan.cells[`${row.id}:${month}`];
   if (override) {
     const date = (value: string) => `${Number(value.slice(8))}/${Number(value.slice(5, 7))}`;
-    const notes = [override.note, override.startsOn?.slice(0, 7) === month ? `From ${date(override.startsOn)}` : '', override.endsOn?.slice(0, 7) === month ? `Until ${date(override.endsOn)}` : ''].filter(Boolean) as string[];
+    const notes = (override.status === 'resigned' ? [override.note, override.endsOn?.slice(0, 7) === month ? `Last ${date(override.endsOn)}` : ''] : [override.note, override.startsOn?.slice(0, 7) === month ? `From ${date(override.startsOn)}` : '', override.endsOn?.slice(0, 7) === month ? `Until ${date(override.endsOn)}` : '']).filter(Boolean) as string[];
     return override.status === 'absent' ? null : { status: override.status, notes, planned: true, company: override.company || row.company, endsOn: override.endsOn };
   }
   const lastForecast = Object.entries(plan.cells).filter(([key, value]) => key.startsWith(`${row.id}:`) && key.slice(-7) < month && value.status !== 'absent').sort(([a], [b]) => b.localeCompare(a))[0]?.[1];
