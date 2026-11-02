@@ -490,7 +490,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   // The staff member's own documents (a copy of the IC, a certificate...). They can add, open and remove what they added; HR sees them all.
   // The signed-in person's own payslips. Only a month HR has locked is shown, and only to the person it belongs to.
   if (action === 'my_payslips' || action === 'my_payslip') {
-    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department').eq('assessment_staff_id', staff.id).maybeSingle();
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
     if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
     if (action === 'my_payslips') {
@@ -505,7 +505,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const r = data.result || {};
     return res.status(200).json({ payslip: { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
       basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
-      eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid } });
+      eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
+      bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) } });
   }
 
   if (action.startsWith('my_document')) {
