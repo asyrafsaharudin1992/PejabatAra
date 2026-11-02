@@ -1156,12 +1156,17 @@ export async function hrHandler(req: any, res: any) {
 
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).
     if (req.method === 'GET' && action === 'payroll_bank') {
-      const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      // The same file is made for the confirmed incentive pay of a claim month (claimMonth=YYYY-MM), paid on the 16th, instead of a month's salary.
+      const claimMonth = text(req.query.claimMonth, 7);
+      const incentiveRun = /^\d{4}-\d{2}$/.test(claimMonth);
+      const year = incentiveRun ? Number(claimMonth.slice(0, 4)) : Math.round(Number(req.query.year)), month = incentiveRun ? Number(claimMonth.slice(5, 7)) : Math.round(Number(req.query.month));
       const company = text(req.query.company, 2).toUpperCase();
       const valueDate = text(req.query.valueDate, 10);
       if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12) || !['KJ', 'SK'].includes(company) || !isDate(valueDate)) throw fail(400, 'Choose the month, the company and the value date.');
-      const { data: slips, error } = await db.from('hr_payslips').select('employee_id,status,result').eq('year', year).eq('month', month);
-      if (error) throw fail(400, 'Payslips are not set up yet.');
+      const { data: slips, error } = incentiveRun
+        ? await db.from('hr_incentive_pay').select('employee_id,amount').eq('claim_month', claimMonth).then((read: any) => ({ data: (read.data || []).map((row: any) => ({ employee_id: row.employee_id, result: { net: Number(row.amount) } })), error: read.error }))
+        : await db.from('hr_payslips').select('employee_id,status,result').eq('year', year).eq('month', month);
+      if (error) throw fail(400, incentiveRun ? 'Incentive pay is not set up yet.' : 'Payslips are not set up yet.');
       const ids = (slips || []).map((row: any) => row.employee_id);
       const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,company,full_name,ic_no,passport_no,bank_name,bank_account').in('id', ids).eq('company', company) : { data: [], error: null };
       if (peopleError) throw peopleError;
@@ -1189,7 +1194,7 @@ export async function hrHandler(req: any, res: any) {
         total += net; count++;
       }
       const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
-      return res.status(200).json({ file: `MaybankSal_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: body, count, total: Math.round(total * 100) / 100, problems });
+      return res.status(200).json({ file: `${incentiveRun ? 'MaybankInc' : 'MaybankSal'}_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: body, count, total: Math.round(total * 100) / 100, problems });
     }
 
     // Files for the portals: KWSP Form A, PERKESO / EIS / SKBBK and ePCB, one company at a time, from the month's payslips.

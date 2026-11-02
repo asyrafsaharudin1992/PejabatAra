@@ -79,6 +79,13 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
     setBusy('');
   };
+  // The month's pay run as one sheet (like Infotech's Monthly Payroll Summary) for finance; the same figures as the table.
+  const summary = () => {
+    const head = ['Code', 'Name', 'Company', 'Basic', 'OT', 'Rest/PH', 'Allowances', 'Gross', 'KWSP employee', 'KWSP employer', 'PERKESO employee', 'PERKESO employer', 'EIS employee', 'EIS employer', 'SKBBK', 'HRDF', 'PCB', 'Total deductions', 'Net'];
+    const cell = (value: string | number) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+    const lines = rows.filter(({ member }) => member.payslip || member.company).map(({ member, out }) => [member.employeeCode, member.fullName, member.company, out.basic, out.ot, out.restPh, out.allowances.reduce((sum, item) => sum + item.amount, 0), out.gross, out.kwspEmployee, out.kwspEmployer, out.socsoEmployee, out.socsoEmployer, out.eisEmployee, out.eisEmployer, out.skbbk, out.hrdf, out.pcb, out.deductions, out.net]);
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([[head, ...lines].map((row) => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv' })); link.download = `PayrollSummary_${year}-${String(month).padStart(2, '0')}.csv`; document.body.appendChild(link); link.click(); link.remove();
+  };
   const download = async (kind: 'bank' | 'epf' | 'socso' | 'epcb') => {
     setBusy('file'); setNote('');
     try {
@@ -123,6 +130,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
           <select value={fileCompany} onChange={(event) => setFileCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
           {([['bank', 'Maybank'], ['epf', 'KWSP'], ['socso', 'PERKESO / EIS'], ['epcb', 'ePCB']] as const).map(([kind, label]) => <button key={kind} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === fileCompany && member.payslip)} onClick={() => void download(kind)} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />{label}</button>)}
         </span>
+        <button type="button" onClick={summary} disabled={!show} title={show ? '' : 'Press Show amounts first'} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Summary (CSV)</button>
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
       <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800"><strong>Before you upload any file to a portal or to Maybank:</strong> open it in Notepad and compare it with the Infotech file for the same month (names, numbers, amounts and totals). Do not upload the first file without checking it. The KWSP, PERKESO / EIS and ePCB files were checked byte for byte against the October 2026 files from Infotech; the Maybank bank names only for Maybank, RHB and Hong Leong.</p>
@@ -157,6 +165,16 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to confirm.'); }
     setBusy(false);
   };
+  const [bankCompany, setBankCompany] = useState<'KJ' | 'SK'>('KJ');
+  const bankFile = async () => {
+    setBusy(true); setNote('');
+    try {
+      const response = await officeFetch(`${API}&action=payroll_bank&claimMonth=${month}&company=${bankCompany}&valueDate=${paidOn}`); const data = await response.json(); if (data.error) throw new Error(data.error);
+      const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([data.csv], { type: 'text/plain' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
+      setNote(`${data.file}: ${data.count} staff.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
+    setBusy(false);
+  };
   const total = (items || []).reduce((sum, item) => sum + (item.confirmed ? item.confirmedAmount || 0 : item.received ? item.amount : 0), 0);
   const cell = (value: number) => show ? fmt(value) : '••••';
   const dmy = (value: string) => value.split('-').reverse().join('/');
@@ -177,6 +195,10 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
       </table></div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="button" disabled={busy || !ready.length} onClick={() => { if (window.confirm(`Confirm ${ready.length} incentive payment(s) for ${paidOn ? dmy(paidOn) : 'the 16th'}? The amounts are fixed after this and staff will see them.`)) void confirm(); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy ? 'Confirming…' : `Confirm ${ready.length} for payment`}</button>
+        <span className="inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5">
+          <select value={bankCompany} onChange={(event) => setBankCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
+          <button type="button" disabled={busy || !items.some((item) => item.confirmed)} onClick={() => void bankFile()} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank</button>
+        </span>
         {note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
     </>}
