@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banknote, Check, Circle, Eye, EyeOff, Lock } from 'lucide-react';
+import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
 import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
@@ -77,6 +77,19 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
     setBusy('');
   };
+  const bankFile = async (company: 'KJ' | 'SK') => {
+    setBusy('bank'); setNote('');
+    try {
+      const valueDate = `${year}-${String(month).padStart(2, '0')}-26`;
+      const response = await officeFetch(`${API}&action=payroll_bank&year=${year}&month=${month}&company=${company}&valueDate=${valueDate}`);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([data.csv], { type: 'text/csv' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
+      setNote(`${data.file}: ${data.count} payees, RM ${fmt(data.total)}.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the bank file.'); }
+    setBusy('');
+  };
   const cell = (value: number) => show ? fmt(value) : '••••';
   const period = payPeriod(year, month);
   const dmy = (value: string) => value.split('-').reverse().join('/');
@@ -103,6 +116,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="button" disabled={Boolean(busy) || locked} onClick={() => void save(false)} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy === 'save' ? 'Saving…' : 'Save draft'}</button>
         <button type="button" disabled={Boolean(busy) || locked || blocked} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
+        {(['KJ', 'SK'] as const).map((company) => <button key={company} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === company && member.payslip)} onClick={() => void bankFile(company)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank file {company}</button>)}
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
       <p className="mt-3 text-xs text-slate-400">OT hours (at the rate HR approved), rest days and public holidays worked, unpaid leave and the like are typed in by HR for now; they will come from attendance and leave when those are brought over. Amounts stay hidden until Show amounts is pressed.</p>

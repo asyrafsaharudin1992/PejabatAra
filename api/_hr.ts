@@ -2,6 +2,7 @@ import { randomBytes, scryptSync } from 'node:crypto';
 import { officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
+import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
@@ -255,6 +256,8 @@ export async function hrHandler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
+
+    if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
     if (action.startsWith('attendance_')) return await attendanceHrAction(req, res, db, action, body, text((user as any)?.email, 120));
 
@@ -1086,6 +1089,44 @@ export async function hrHandler(req: any, res: any) {
       }
       if (rows.length) { const { error } = await db.from('hr_payslips').upsert(rows, { onConflict: 'employee_id,year,month' }); if (error) throw error; }
       return res.status(200).json({ saved: rows.length, locked: lock });
+    }
+
+    // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).
+    if (req.method === 'GET' && action === 'payroll_bank') {
+      const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      const company = text(req.query.company, 2).toUpperCase();
+      const valueDate = text(req.query.valueDate, 10);
+      if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12) || !['KJ', 'SK'].includes(company) || !isDate(valueDate)) throw fail(400, 'Choose the month, the company and the value date.');
+      const { data: slips, error } = await db.from('hr_payslips').select('employee_id,status,result').eq('year', year).eq('month', month);
+      if (error) throw fail(400, 'Payslips are not set up yet.');
+      const ids = (slips || []).map((row: any) => row.employee_id);
+      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,company,full_name,ic_no,passport_no,bank_name,bank_account').in('id', ids).eq('company', company) : { data: [], error: null };
+      if (peopleError) throw peopleError;
+      const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row]));
+      // Maybank2U's bank names; only MAYBANK, RHB and HONG LEONG are checked against a real file so far.
+      const KNOWN = ['MAYBANK', 'RHB', 'HONG LEONG'];
+      const bankName = (name: string) => { const n = String(name || '').toUpperCase(); if (/MAYBANK|MALAYAN BANKING/.test(n)) return 'MAYBANK'; if (/RHB/.test(n)) return 'RHB'; if (/HONG LEONG/.test(n)) return 'HONG LEONG'; return n.replace(/\(.*?\)/g, '').replace(/\b(BERHAD|BHD)\b/g, '').replace(/\s+/g, ' ').trim(); };
+      const csv = (value: unknown) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+      const [vy, vm, vd] = valueDate.split('-');
+      const dd = `${vd}${vm}${vy.slice(2)}`;
+      const clock = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 19).replace(/:/g, '');
+      const lines = [['Employer Info :'], ['Crediting Date (eg. dd/MM/yyyy)', `${vd}/${vm}/${vy}`], ['Payment Reference', `MBPREF${dd}`], ['Payment Description', `MBPDEC${dd}`], ['Bulk Payment Type', 'Salary'], [''],
+        ['Beneficiary Name', 'Beneficiary Bank', 'Beneficiary Account No', 'ID Type', 'ID Number', 'Payment Amount', 'Payment Reference', 'Payment Description']];
+      const problems: string[] = []; let total = 0, count = 0;
+      for (const person of (people || []).sort((a: any, b: any) => String(a.full_name).localeCompare(String(b.full_name)))) {
+        const net = Math.round(Number((slipOf.get(person.id) as any)?.result?.net || 0) * 100) / 100;
+        if (net <= 0) continue;
+        const account = String(person.bank_account || '').replace(/\D/g, ''), ic = String(person.ic_no || '').replace(/\D/g, '');
+        const bank = bankName(person.bank_name);
+        if (!account || !bank) { problems.push(`${person.full_name}: bank account missing`); continue; }
+        if (!KNOWN.includes(bank)) problems.push(`${person.full_name}: bank "${bank}" is not checked against a Maybank2U file yet`);
+        const idType = ic.length === 12 ? 'NRIC' : 'PASSPORT', idNumber = ic.length === 12 ? ic : String(person.passport_no || '').trim();
+        if (!idNumber) problems.push(`${person.full_name}: no IC or passport number`);
+        lines.push([person.full_name, bank, account, idType, idNumber, net.toFixed(2), `PRE${dd}${clock}777`, `PDC${dd}${clock}777`]);
+        total += net; count++;
+      }
+      const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
+      return res.status(200).json({ file: `MaybankSal_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: body, count, total: Math.round(total * 100) / 100, problems });
     }
 
     // Incentive pay. The approved claims HR has received for a month, one amount per person; HR confirms them for payment on the 16th of the next month.
