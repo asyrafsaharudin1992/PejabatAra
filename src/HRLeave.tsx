@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Search, Tags, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, ScrollText, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
@@ -144,9 +144,12 @@ function CarryCell({ row, year, onChanged, onError }: { row: YearEndRow; year: n
 
 // The GCR (Gantian Cuti Rehat) rules Year End applies, read from the settings HR keeps under Leave → Reports → GCR.
 function GcrPolicy({ settings }: { settings?: { minUsedPercent: number; maxDays: number; carry: { admin: number; clinical: number; parttime: number } } }) {
+  const [open, setOpen] = useState(false);
   if (!settings) return null;
-  return <details className={card} open>
-    <summary className="cursor-pointer font-semibold">GCR policy (Gantian Cuti Rehat) used at Year End</summary>
+  if (!open) return <div><button onClick={() => setOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />GCR policy</button></div>;
+  return <section className={card}>
+    <button onClick={() => setOpen(false)} className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#0b587b] shadow-sm ring-1 ring-slate-100 hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />Close</button>
+    <h3 className="font-semibold">GCR policy (Gantian Cuti Rehat) used at Year End</h3>
     <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600">
       <li>Credit leave is used first. Any credit left on 31 December burns: it is never paid and never carried forward.</li>
       <li>Leave taken then comes off the year's eligible days first, and after that off the brought-forward days.</li>
@@ -156,7 +159,7 @@ function GcrPolicy({ settings }: { settings?: { minUsedPercent: number; maxDays:
     </ul>
     <div className="mt-3 grid max-w-xl gap-3 text-sm sm:grid-cols-3">{([['Administrative officer', settings.carry.admin], ['Doctor / clinic assistant (permanent)', settings.carry.clinical], ['Doctor / clinic assistant (part-time)', settings.carry.parttime]] as const).map(([label, days]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Carry-forward limit</p><p className="mt-1 text-xs text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-[#0b587b]">{days} days</p></div>)}</div>
     <p className="mt-3 text-xs text-slate-400">HR can change these numbers under Leave → Reports → GCR. HR can also set a carry-forward figure by hand for one person, with the reason.</p>
-  </details>;
+  </section>;
 }
 
 function YearEndPanel({ onError }: { onError: (message: string) => void }) {
