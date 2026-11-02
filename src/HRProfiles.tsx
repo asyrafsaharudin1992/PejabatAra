@@ -23,7 +23,7 @@ export type Employee = {
   spouseName: string; spouseIc: string; spouseEmployer: string; spousePhone: string; education: { level: string; institution: string; course: string; year: string }[];
   emergencyName: string; emergencyRelation: string; emergencyPhone: string;
   branch: string; department: string; designation: string; employmentType: string; joinDate: string | null; confirmDate: string | null; resignDate: string | null;
-  status: string; workDays?: number[]; holidayGroup?: string; leaveCalendarCompanies?: string[]; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; updatedAt?: string;
+  status: string; workDays?: number[]; holidayGroup?: string; leaveCalendarCompanies?: string[]; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null; leaveGroup: string; basicSalary: number; fixedAllowances: Allowance[]; bankName: string; bankAccount: string; epfNo: string; socsoNo: string; taxNo: string; remarks: string; payroll?: Record<string, string | number | boolean>; updatedAt?: string;
 };
 type Summary = Pick<Employee, 'id' | 'company' | 'employeeCode' | 'fullName' | 'branch' | 'department' | 'designation' | 'employmentType' | 'status' | 'joinDate'> & { shortName?: string; signIn?: 'none' | 'not_set' | 'set'; leaveApproverId?: string | null; leaveBackupApproverId?: string | null; finalApproverId?: string | null };
 type Audit = { action: string; changes: Record<string, [unknown, unknown]>; at: string; by: string };
@@ -42,7 +42,7 @@ function service(joinDate: string | null) {
   return `${Math.floor(months / 12)}y ${months % 12}m`;
 }
 const STATUS_TONE: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
-const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', career_history: 'Employment history entries', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances' };
+const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', career_history: 'Employment history entries', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances', payroll_settings: 'Payroll settings' };
 // IC, bank and salary changes are shown without their values in the history.
 const SECRET = new Set(['ic_no', 'passport_no', 'bank_account', 'basic_salary', 'fixed_allowances', 'epf_no', 'socso_no', 'tax_no']);
 
@@ -297,6 +297,15 @@ function ProfileCareer({ employeeId, reveal, onError, onLoaded }: { employeeId: 
   </section>;
 }
 
+// How this person is treated in the monthly pay run, read off Infotech. HR only; there are no pay figures here.
+const PAYROLL_ROWS: [string, string][] = [['epfRate', 'KWSP rate (%)'], ['socsoCategory', 'PERKESO category'], ['socsoEmployed', 'PERKESO employed'], ['eis', 'EIS'], ['hrdf', 'HRDF'], ['skbbk', 'SKBBK (24-hour cover)'], ['taxResident', 'Tax resident'], ['taxType', 'Tax remuneration type'], ['pcbApplied', 'PCB applied'], ['payGroup', 'Pay group'], ['otType', 'OT type'], ['probationMonths', 'Probation (months)'], ['flexi', 'Flexi hours'], ['restDay', 'Rest day'], ['defaultShift', 'Default shift']];
+function PayrollSettingsCard({ settings }: { settings: Record<string, string | number | boolean> }) {
+  const shown = PAYROLL_ROWS.filter(([key]) => key in settings);
+  return <section className={card}><h3 className="font-semibold">Payroll settings</h3>
+    {!shown.length ? <p className="mt-2 text-sm text-slate-500">Not set yet.</p> : <dl className="mt-2 divide-y divide-slate-100">{shown.map(([key, label]) => { const value = settings[key]; return <div key={key}><Row label={label}>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}</Row></div>; })}</dl>}
+  </section>;
+}
+
 export function ProfileView({ id, onBack, onError }: { id: string; onBack: () => void; onError: (message: string) => void }) {
   const [data, setData] = useState<{ employee: Employee; audit: Audit[]; signIn?: { linked: boolean; hasPassword: boolean | null } } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -334,6 +343,7 @@ export function ProfileView({ id, onBack, onError }: { id: string; onBack: () =>
       <section className={card}><h3 className="font-semibold">Pay & statutory</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="Basic salary">{reveal ? money(e.basicSalary) : '••••'}</Row><Row label="Fixed allowances">{reveal ? (e.fixedAllowances.length ? e.fixedAllowances.map((item) => `${item.name} ${money(item.amount)}`).join(', ') : 'None') : '••••'}</Row><Row label="Bank">{e.bankName}</Row><Row label="Account no.">{secret(e.bankAccount)}</Row><Row label="KWSP no.">{secret(e.epfNo)}</Row><Row label="PERKESO no.">{secret(e.socsoNo)}</Row><Row label="Income tax no.">{secret(e.taxNo)}</Row>
       </dl></section>
+      <PayrollSettingsCard settings={e.payroll || {}} />
       <section className={card}><h3 className="font-semibold">Family & emergency</h3><dl className="mt-2 divide-y divide-slate-100">
         <Row label="Marital status">{e.maritalStatus}</Row>{(e.maritalStatus === 'Married' || e.spouseName) && <><Row label="Spouse">{[e.spouseName, e.spouseEmployer, hiddenPhone(e.spousePhone)].filter(Boolean).join(' · ')}</Row>{e.spouseIc && <Row label="Spouse IC no.">{secret(e.spouseIc)}</Row>}</>}{e.maritalStatus === 'Married' && <Row label="Spouse working">{e.spouseWorking === null ? '' : e.spouseWorking ? 'Yes' : 'No'}</Row>}<Row label="Children">{e.children.length ? e.children.map((child) => `${child.name}${child.dateOfBirth ? ` (${dmy(child.dateOfBirth)})` : ''}${child.studying ? ', studying' : ''}${child.disabled ? ', OKU' : ''}`).join('; ') : 'None'}</Row><Row label="Emergency contact">{[e.emergencyName, e.emergencyRelation, hiddenPhone(e.emergencyPhone)].filter(Boolean).join(' · ')}</Row><Row label="Education"><span className="whitespace-pre-line">{e.education.length ? e.education.map((item) => [[item.level, item.course].filter(Boolean).join(' · '), [item.institution, item.year].filter(Boolean).join(' ')].filter(Boolean).join(', ')).join('\n') : ''}</span></Row>
       </dl></section>

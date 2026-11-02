@@ -12,6 +12,8 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 // Staff profiles hold personal and pay details, so the list sends only what the
 // directory shows; the full profile is read one person at a time, and every change
 // is written to hr_audit.
+// The payroll settings kept per person (see 202611020003_payroll_settings.sql).
+const PAYROLL_KEYS = ['epfRate', 'socsoCategory', 'socsoEmployed', 'eis', 'hrdf', 'skbbk', 'taxResident', 'taxType', 'pcbApplied', 'payGroup', 'otType', 'probationMonths', 'flexi', 'restDay', 'defaultShift'];
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -30,7 +32,7 @@ const decode = (row: any) => ({
   spouseName: row.spouse_name || '', spouseIc: row.spouse_ic || '', spouseEmployer: row.spouse_employer || '', spousePhone: row.spouse_phone || '', education: row.education || [],
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
   joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
-  basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
+  payroll: row.payroll_settings || {}, basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
   workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveCalendarCompanies: row.leave_calendar_companies || [], leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
 });
 
@@ -924,6 +926,14 @@ export async function hrHandler(req: any, res: any) {
             changed = true; return { ...child, studying, disabled };
           });
           if (changed) { patch.children = nextChildren; changes.children = [person.children, nextChildren]; }
+        }
+        // Payroll settings read off Infotech (KWSP rate, PERKESO category, EIS and so on): only keys not saved yet are added.
+        if (row.payroll && typeof row.payroll === 'object') {
+          const incoming: Record<string, string | number | boolean> = {};
+          for (const key of PAYROLL_KEYS) { const value = (row.payroll as any)[key]; if (typeof value === 'boolean' || typeof value === 'number') incoming[key] = value; else if (typeof value === 'string' && value.trim()) incoming[key] = value.trim().slice(0, 80); }
+          const existing = person.payroll_settings && typeof person.payroll_settings === 'object' ? person.payroll_settings : {};
+          const merged = { ...incoming, ...existing };
+          if (Object.keys(incoming).some((key) => !(key in existing))) { patch.payroll_settings = merged; changes.payroll_settings = [existing, merged]; }
         }
         const newHistory: any[] = [];
         if (historyReady) for (const item of (Array.isArray(row.history) ? row.history : []).slice(0, 200)) {
