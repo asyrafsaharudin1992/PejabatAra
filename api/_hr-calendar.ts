@@ -66,12 +66,12 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
   }
   if (req.method === 'GET' && action === 'calendar_month') {
     const [staff, configRow, stateRow] = await Promise.all([
-      db.from('hr_employees').select('id,full_name,employee_code,company,designation,join_date,confirm_date,date_of_birth', { count: 'exact' }).eq('status', 'Active').order('full_name').limit(500),
+      db.from('hr_employees').select('id,full_name,employee_code,company,designation,join_date,confirm_date,resign_date,date_of_birth', { count: 'exact' }).eq('status', 'Active').order('full_name').limit(500),
       readRecord(db, branch, CONFIG_KEY), readRecord(db, branch, stateKey(month)),
     ]);
     if (staff.error) throw staff.error;
     if ((staff.count || 0) > (staff.data || []).length) throw fail(422, 'More than 500 active staff: the calendar needs pagination before it can be shown safely.');
-    const people: CalendarPerson[] = (staff.data || []).map((p: any) => ({ id: p.id, name: p.full_name, code: p.employee_code, company: p.company, designation: p.designation || '', joinDate: p.join_date, confirmDate: p.confirm_date, birthday: p.date_of_birth }));
+    const people: CalendarPerson[] = (staff.data || []).map((p: any) => ({ id: p.id, name: p.full_name, code: p.employee_code, company: p.company, designation: p.designation || '', joinDate: p.join_date, confirmDate: p.confirm_date, resignDate: p.resign_date || null, birthday: p.date_of_birth }));
     const reviewResult = people.length ? await db.from('hr_reviews').select('id,employee_id,period_label,period_end,status', { count: 'exact' }).in('employee_id', people.map((p) => p.id)).gte('period_end', `${month}-01`).lte('period_end', calendarMonthEnd(month)).limit(500) : { data: [], error: null, count: 0 };
     if (reviewResult.error) throw reviewResult.error;
     if ((reviewResult.count || 0) > (reviewResult.data || []).length) throw fail(422, 'More than 500 reviews in this month. The calendar cannot display partial results safely.');
