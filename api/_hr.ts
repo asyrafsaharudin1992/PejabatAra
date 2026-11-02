@@ -1057,6 +1057,15 @@ export async function hrHandler(req: any, res: any) {
         }
         // Months already paid and locked in Infotech (taken as they were, not worked out again), so staff and HR can look back at them.
         const slipHistory: any[] = [];
+        // A correction to a slip already brought over from Infotech (for example the KWSP wage after a leave deduction): only these fields are changed, nothing else on the slip.
+        const slipFixes: { year: number; month: number; fields: Record<string, number> }[] = [];
+        if (!slipRead.error && Array.isArray(row.payslipHistory)) for (const item of row.payslipHistory.slice(0, 36)) {
+          const fixYear = Math.round(Number(item?.year)), fixMonth = Math.round(Number(item?.month));
+          if (!item?.fix || typeof item.fix !== 'object' || !(fixYear >= 2020 && fixYear <= 2100 && fixMonth >= 1 && fixMonth <= 12)) continue;
+          const fields: Record<string, number> = {};
+          for (const key of ['kwspWage', 'socsoWage']) if (Number.isFinite(Number(item.fix[key]))) fields[key] = Math.round(Number(item.fix[key]) * 100) / 100;
+          if (Object.keys(fields).length && knownSlips.has(`${person.id}|${fixYear}|${fixMonth}`)) slipFixes.push({ year: fixYear, month: fixMonth, fields });
+        }
         if (!slipRead.error && Array.isArray(row.payslipHistory)) for (const item of row.payslipHistory.slice(0, 36)) {
           const slipYear = Math.round(Number(item?.year)), slipMonth = Math.round(Number(item?.month));
           if (!(slipYear >= 2020 && slipYear <= 2100 && slipMonth >= 1 && slipMonth <= 12) || !item?.result || typeof item.result !== 'object' || (knownSlips.has(`${person.id}|${slipYear}|${slipMonth}`) && !draftSlips.has(`${person.id}|${slipYear}|${slipMonth}`))) continue;
@@ -1075,13 +1084,14 @@ export async function hrHandler(req: any, res: any) {
           if (knownHistory.has(key)) continue;
           knownHistory.add(key); newHistory.push(entry);
         }
-        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry && !ytdPrev && !inputsEntry && !slipHistory.length) continue;
+        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry && !ytdPrev && !inputsEntry && !slipHistory.length && !slipFixes.length) continue;
         if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
           const merged = { ...person, ...patch };
           patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
         }
         for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
         if (ytdPrev) { counts.payroll_ytd_previous = (counts.payroll_ytd_previous || 0) + 1; changes.payroll_ytd_previous = ['', ytdPrev.prev_as_of]; }
+        if (slipFixes.length) { counts.payslip_fix = (counts.payslip_fix || 0) + slipFixes.length; changes.payslip_fix = ['', `${slipFixes.length} slips`]; }
         if (slipHistory.length) { counts.payslip_history = (counts.payslip_history || 0) + slipHistory.length; changes.payslip_history = ['', `${slipHistory.length} months`]; }
         if (inputsEntry) { counts.payslip_inputs = (counts.payslip_inputs || 0) + 1; changes.payslip_inputs = ['', `${inputsEntry.year}-${inputsEntry.month}`]; }
         if (ytdEntry) { counts.payroll_ytd = (counts.payroll_ytd || 0) + 1; changes.payroll_ytd = ['', `${ytdEntry.year} to ${ytdEntry.as_of}`]; }
@@ -1100,6 +1110,13 @@ export async function hrHandler(req: any, res: any) {
           if (inputsEntry) {
             const { error: inputsError } = await db.from('hr_payslips').insert(inputsEntry);
             if (inputsError) throw inputsError;
+          }
+          for (const fix of slipFixes) {
+            const { data: current, error: readError } = await db.from('hr_payslips').select('result,status').eq('employee_id', person.id).eq('year', fix.year).eq('month', fix.month).maybeSingle();
+            if (readError) throw readError;
+            if (!current || current.status !== 'locked' || current.result?.source !== 'Infotech') continue;   // only slips brought over from Infotech can be corrected here
+            const { error: fixError } = await db.from('hr_payslips').update({ result: { ...current.result, ...fix.fields }, updated_at: now }).eq('employee_id', person.id).eq('year', fix.year).eq('month', fix.month);
+            if (fixError) throw fixError;
           }
           if (slipHistory.length) {
             for (const item of slipHistory) if (draftSlips.has(`${item.employee_id}|${item.year}|${item.month}`)) {
