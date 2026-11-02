@@ -314,6 +314,13 @@
 
 .hr-table-wide th:first-child, .hr-table-wide td:first-child { width: 42mm; }
 .hr-table-wide th:nth-child(2), .hr-table-wide td:nth-child(2) { width: 28mm; }
+.hr-staff-summary table { table-layout: fixed; }
+.hr-staff-summary th, .hr-staff-summary td { overflow-wrap: anywhere; font-size: 7pt; padding: 1.5mm 1mm; }
+.hr-staff-summary th:first-child, .hr-staff-summary td:first-child { width: 4%; }
+.hr-staff-summary th:nth-child(2), .hr-staff-summary td:nth-child(2) { width: 9%; }
+.hr-staff-summary th:nth-child(3), .hr-staff-summary td:nth-child(3) { width: 22%; }
+.hr-staff-summary th:nth-child(4), .hr-staff-summary td:nth-child(4) { width: 16%; }
+.hr-staff-summary th:nth-child(5), .hr-staff-summary td:nth-child(5) { width: 11%; }
 
 .hr-roster-table td, .hr-roster-legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .hr-roster-legend { display: flex; flex-wrap: wrap; gap: 1mm; margin-bottom: 3mm; font-size: 7pt; }

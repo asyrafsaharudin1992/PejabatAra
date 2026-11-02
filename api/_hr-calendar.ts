@@ -1,5 +1,6 @@
 import { branchId } from './_office-db.js';
 import { malaysiaToday } from '../src/lib/reviewReminders.js';
+import { emptyProjectionPlan, mergeProjectionPlans, shiftProjectionMonth, validateProjectionPlan } from '../src/lib/hrProjection.js';
 import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, validateCalendarRule, validateCalendarSettings, type CalendarConfig, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
 const BRANCH = 'AraOffice HR Private';
 const CONFIG_KEY = 'hr_calendar_config';
@@ -23,13 +24,46 @@ async function writeRecord(db: any, userId: string, branch: string, key: string,
   return data.updated_at;
 }
 export async function hrCalendarAction(req: any, res: any, db: any, user: { id: string }, action: string, body: any) {
-  if (!['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
-  if (req.method !== (action === 'calendar_month' ? 'GET' : 'POST')) throw fail(405, 'Method not allowed.');
+  if (!['calendar_projection_save', 'calendar_projection', 'calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
+  if (req.method !== (['calendar_month', 'calendar_projection'].includes(action) ? 'GET' : 'POST')) throw fail(405, 'Method not allowed.');
   const month = req.method === 'GET' ? req.query.month : body.month;
   if (!calendarMonth(month)) throw fail(400, 'Choose a valid calendar month.');
   let branch: string | null;
   try { branch = await branchId(db, BRANCH, req.method === 'POST'); }
   catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, BRANCH, false); }
+  if (action === 'calendar_projection') {
+    const through = req.query.through || `${month.slice(0, 4)}-12`;
+    if (!calendarMonth(through) || through < month || through > shiftProjectionMonth(month, 11)) throw fail(400, 'Choose a projection window of at most 12 months.');
+    const years = [...new Set([month.slice(0, 4), through.slice(0, 4)])];
+    const [staff, configRow, planRows, historyRows] = await Promise.all([
+      db.from('hr_employees').select('id,full_name,employee_code,company,designation,employment_type,status,join_date,confirm_date,resign_date', { count: 'exact' }).order('full_name').limit(500),
+      readRecord(db, branch, CONFIG_KEY),
+      Promise.all(years.map((year) => readRecord(db, branch, `hr_projection:${year}`))),
+      branch ? db.from('portal_state').select('state_key,payload', { count: 'exact' }).eq('branch_id', branch).gte('state_key', 'hr_projection:1900').lt('state_key', `hr_projection:${month.slice(0, 4)}`).limit(100) : { data: [], count: 0, error: null },
+    ]);
+    if (staff.error) throw staff.error;
+    if (historyRows.error) throw historyRows.error;
+    if ((historyRows.count || 0) > (historyRows.data || []).length) throw fail(422, 'Projection history needs pagination before it can be shown safely.');
+    if ((staff.count || 0) > (staff.data || []).length) throw fail(422, 'More than 500 staff: projection needs pagination.');
+    const plans = Object.fromEntries(years.map((year, index) => [year, planRows[index]?.payload || emptyProjectionPlan()]));
+    const versions = Object.fromEntries(years.map((year, index) => [year, planRows[index]?.updated_at || null]));
+    const latest = new Map<string, [string, any]>();
+    for (const record of historyRows.data || []) for (const [key, cell] of Object.entries(record.payload?.cells || {}) as [string, any][]) {
+      const id = key.slice(0, key.lastIndexOf(':'));
+      if (cell.status !== 'absent' && (!latest.has(id) || latest.get(id)![0].slice(-7) < key.slice(-7))) latest.set(id, [key, cell]);
+    }
+    const historyPlan = { rows: [], cells: Object.fromEntries([...latest.values()]) };
+    return res.status(200).json({ people: (staff.data || []).map((p: any) => ({ id: p.id, name: p.full_name, code: p.employee_code, company: p.company, designation: p.designation || '', employmentType: p.employment_type, status: p.status, joinDate: p.join_date, confirmDate: p.confirm_date, resignDate: p.resign_date })), probation: storedConfig(configRow?.payload).probation, plan: mergeProjectionPlans({ history: historyPlan, ...plans }), historyPlan, plans, versions, version: versions[month.slice(0, 4)] });
+  }
+  if (action === 'calendar_projection_save') {
+    if (!branch) throw fail(400, 'Projection storage is unavailable.');
+    const key = `hr_projection:${month.slice(0, 4)}`;
+    const [current, staff] = await Promise.all([readRecord(db, branch, key), db.from('hr_employees').select('id').limit(1000)]);
+    if (staff.error) throw staff.error;
+    let plan; try { plan = validateProjectionPlan(body.plan, month.slice(0, 4), (staff.data || []).map((p: any) => p.id)); } catch (cause) { throw fail(400, (cause as Error).message); }
+    const version = await writeRecord(db, user.id, branch, key, current, body.version, plan);
+    return res.status(200).json({ version });
+  }
   if (req.method === 'GET' && action === 'calendar_month') {
     const [staff, configRow, stateRow] = await Promise.all([
       db.from('hr_employees').select('id,full_name,employee_code,company,designation,join_date,confirm_date,date_of_birth', { count: 'exact' }).eq('status', 'Active').order('full_name').limit(500),
@@ -83,7 +117,7 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     return res.status(200).json({ version });
   }
   if (action === 'calendar_state') {
-    if (typeof body.id !== 'string' || body.id.length > 300 || !/^(payroll|(?:manual|review|probation-14|probation-3|ca-evaluation|birthday|appraisal):[a-zA-Z0-9-]{1,80}):\d{4}-\d{2}-\d{2}$/.test(body.id) || !body.id.endsWith(`:${month}-${body.id.slice(-2)}`) || !['done', 'skipped', 'open'].includes(body.state)) throw fail(400, 'Choose a valid reminder occurrence and status.');
+    if (typeof body.id !== 'string' || body.id.length > 300 || !/^(payroll|share-forecast|statutory|(?:manual|review|probation-14|probation-3|ca-evaluation|birthday|appraisal):[a-zA-Z0-9-]{1,80}):\d{4}-\d{2}-\d{2}$/.test(body.id) || !body.id.endsWith(`:${month}-${body.id.slice(-2)}`) || !['done', 'skipped', 'open'].includes(body.state)) throw fail(400, 'Choose a valid reminder occurrence and status.');
     const due = body.id.slice(-10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number(due.slice(8)) < 1 || due > calendarMonthEnd(month)) throw fail(400, 'Choose a reminder in this month.');
     const current = await readRecord(db, branch, stateKey(month));
@@ -91,7 +125,7 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     if (body.state === 'open') delete states[body.id]; else states[body.id] = { state: body.state, at: new Date().toISOString(), by: user.id };
     if (Object.keys(states).length > 500) throw fail(422, 'This month exceeds 500 reminder status entries.');
     const version = await writeRecord(db, user.id, branch, stateKey(month), current, body.version, { states });
-    return res.status(200).json({ version });
+    return res.status(200).json({ version, occurrence: states[body.id] || null });
   }
   throw fail(400, 'Unknown calendar action.');
 }

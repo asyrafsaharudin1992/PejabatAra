@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db.js';
+import { branchId, officeAccess } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
@@ -134,16 +134,23 @@ export async function reviewHandler(req: any, res: any) {
       // One extra row detects overflow rather than silently reporting incomplete statuses.
       const readLimit = 500;
       const today = malaysiaToday();
-      const [peopleResult, settingsResult] = await Promise.all([
-        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,status').eq('status', 'Active').limit(readLimit + 1),
+      const [peopleResult, settingsResult, probation] = await Promise.all([
+        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,confirm_date,designation,status').eq('status', 'Active').limit(readLimit + 1),
         db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle(),
+        (async () => {
+          const branch = await branchId(db, 'AraOffice HR Private', false);
+          if (!branch) return {};
+          const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'hr_calendar_config').maybeSingle();
+          if (error) throw error;
+          return data?.payload?.probation || {};
+        })(),
       ]);
       if (peopleResult.error) throw peopleResult.error;
       if ((peopleResult.data || []).length > readLimit) throw fail(422, 'Too many active staff to load reminders safely. Please contact the system administrator.');
       const settingsNotSetUp = !settingsResult.data && (!settingsResult.error || ['PGRST205', '42P01'].includes(settingsResult.error.code));
       if (settingsResult.error && !settingsNotSetUp) throw settingsResult.error;
       const settings = normalizeReviewSettings(settingsResult.data?.settings || defaultReviewSettings(), settingsResult.data?.settings || defaultReviewSettings());
-      const people = (peopleResult.data || []).map((r: any) => ({ id: r.id, company: r.company, employeeCode: r.employee_code, fullName: r.full_name, joinDate: r.join_date, status: r.status }));
+      const people = (peopleResult.data || []).map((r: any) => ({ id: r.id, company: r.company, employeeCode: r.employee_code, fullName: r.full_name, joinDate: r.join_date, confirmDate: r.confirm_date, designation: r.designation, probationStatus: probation[r.id], status: r.status }));
       const customResult = people.length
         ? await db.from('hr_review_reminders').select('id,employee_id,period_label,due_on,notes,completed_at,cancelled_at').in('employee_id', people.map((person) => person.id)).order('due_on').limit(readLimit + 1)
         : { data: [], error: null };

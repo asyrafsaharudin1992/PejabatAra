@@ -6,6 +6,8 @@ import { HRReportDialog } from './HRReportDialog';
 const REPORTS = [
   { id: 'roster', category: 'Roster', title: 'Monthly Roster', description: 'Monthly duty roster by clinic for staff or doctors, with shift codes.', format: 'Print / PDF', icon: CalendarDays },
   { id: 'staff-profile', category: 'Staff Profiles', title: 'Staff Profile', description: 'Individual personal, employment, pay, family and education details.', format: 'Print / PDF', icon: IdCard },
+  { id: 'staff-summary', category: 'Staff Profiles', title: 'Staff Profile Summary', description: 'All staff in one summary: staff codes, positions, branches, joining and confirmation dates.', format: 'CSV / Excel / PDF', icon: IdCard },
+  { id: 'forecast', category: 'Staff Profiles', title: 'Forecast', description: 'Monthly CA staffing forecast with saved HR edits. Kajang and Seri Kembangan each on their own branded page.', format: 'CSV / Excel / PDF', icon: CalendarDays },
   { id: 'leave-consolidate', category: 'Leave', title: 'Leave Consolidate', description: 'Annual and medical leave entitlement, taken days and balances per staff member.', format: 'Print / PDF', icon: CalendarCheck },
   { id: 'leave-credit', category: 'Leave', title: 'Credit Annual Leave', description: 'Additional annual leave credits by staff member, reason and period.', format: 'Print / PDF', icon: CalendarCheck },
   { id: 'leave-gcr', category: 'Leave', title: 'GCR', description: 'Leave eligible for payment, forfeited days and balances to carry forward.', format: 'Print / PDF', icon: CalendarCheck },

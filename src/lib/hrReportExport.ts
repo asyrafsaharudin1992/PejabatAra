@@ -3,12 +3,22 @@ import type { CareerEntry, Employee } from '../HRProfiles';
 import type { Claim } from '../ClinicalIncentives';
 import { AREAS, ReviewFull, percentLabel } from './performanceReview';
 import { approvedTotal, claimTotal } from './incentiveCodes';
+import { displayedCell, projectionColors, projectionRows } from '../HRProjectionDocument';
+import { projectionLabels, type ProjectionPerson, type ProjectionPlan } from './hrProjection';
+import type { ProbationState } from './hrCalendar';
 
-export type ReportSection = { roster?: boolean; title?: string; note?: string; headers: string[]; rows: (string | number)[][] };
-export type PreparedReport = { kind: 'table'; sections: ReportSection[]; subtitle: string } | { kind: 'profile'; employee: Employee; career: CareerEntry[] } | { kind: 'review'; review: ReviewFull } | { kind: 'incentives'; claims: Claim[]; subtitle: string };
+export type ReportSection = { roster?: boolean; title?: string; note?: string; headers: string[]; rows: (string | number)[][]; cellColors?: string[][] };
+export type ForecastReport = { kind: 'forecast'; people: ProjectionPerson[]; plan: ProjectionPlan; probation: Record<string, ProbationState>; months: string[]; branches: string[]; subtitle: string };
+export type PreparedReport = { kind: 'table'; sections: ReportSection[]; subtitle: string } | { kind: 'profile'; employee: Employee; career: CareerEntry[] } | { kind: 'review'; review: ReviewFull } | { kind: 'incentives'; claims: Claim[]; subtitle: string } | ForecastReport;
 
 export function reportExportSections(report: PreparedReport, reveal: boolean): ReportSection[] {
   if (report.kind === 'table') return report.sections;
+  if (report.kind === 'forecast') return report.branches.map((branch) => {
+    const people = projectionRows(report.people, report.plan, report.months, branch);
+    const columns = report.months.map((month) => people.map((row) => ({ row, cell: displayedCell(row, month, report.plan, report.probation) })).filter((entry) => entry.cell?.company === branch));
+    const lines = Math.max(11, ...columns.map((column) => column.length));
+    return { title: `${branch} Forecast`, note: report.subtitle, headers: ['No.', ...report.months], rows: Array.from({ length: lines }, (_, index) => [index + 1, ...columns.map((column) => { const entry = column[index]; return entry?.cell ? `${entry.row.name} · ${projectionLabels[entry.cell.status]}${entry.cell.notes.length ? ` · ${entry.cell.notes.join('; ')}` : ''}` : ''; })]), cellColors: Array.from({ length: lines }, (_, index) => ['', ...columns.map((column) => column[index]?.cell ? projectionColors[column[index].cell!.status] : '')]) };
+  });
   if (report.kind === 'profile') {
     const e = report.employee;
     const hidden = (value: string | number | null) => value == null || value === '' ? '—' : reveal ? String(value) : '••••';
@@ -45,7 +55,7 @@ export async function downloadReportExcel(sections: ReportSection[], name: strin
   const header = { fontWeight: 'bold' as const, textColor: '#FFFFFF', backgroundColor: '#0B3D59', wrap: true };
   const sheets = sections.map((section, index) => ({
     sheet: `${index + 1} ${section.title || 'Report'}`.replace(/[\\/?*\[\]:]/g, '').slice(0, 31),
-    data: [...(section.note ? [section.headers.map((_, column) => ({ value: column === 0 ? section.note || '' : '', wrap: true }))] : []), section.headers.map((value) => ({ ...header, value })), ...section.rows.map((row) => row.map((value, column) => { const color = section.roster && column > 0 ? rosterShiftColor(value) : undefined; return { value, wrap: true, ...(color ? { backgroundColor: color.backgroundColor, textColor: color.textColor, fontWeight: 'bold' as const } : {}) }; }))],
+    data: [...(section.note ? [section.headers.map((_, column) => ({ value: column === 0 ? section.note || '' : '', wrap: true }))] : []), section.headers.map((value) => ({ ...header, value })), ...section.rows.map((row, rowIndex) => row.map((value, column) => { const color = section.roster && column > 0 ? rosterShiftColor(value) : undefined; const backgroundColor = section.cellColors?.[rowIndex]?.[column]; return { value, wrap: true, ...(color ? { backgroundColor: color.backgroundColor, textColor: color.textColor, fontWeight: 'bold' as const } : {}), ...(backgroundColor ? { backgroundColor } : {}) }; }))],
     columns: section.headers.map((_, column) => ({ width: column === 0 ? 34 : 24 })), stickyRowsCount: section.note ? 2 : 1,
   }));
   await writeExcelFile(sheets, { fontFamily: 'Arial', fontSize: 10 }).toFile(`${name}.xlsx`);

@@ -285,6 +285,17 @@ export async function hrHandler(req: any, res: any) {
     }
 
     // Directory list: only what the cards show, no personal or pay details.
+    if (req.method === 'GET' && action === 'staff_summary_report') {
+      const company = text(req.query.company, 10), status = text(req.query.status, 20);
+      if (company && !['KJ', 'SK'].includes(company) || status && !['Active', 'Inactive'].includes(status)) throw fail(400, 'Choose a valid company and staff status.');
+      let query = db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,employment_type,join_date,confirm_date,resign_date,status', { count: 'exact' }).order('company').order('employee_code').limit(1000);
+      if (company) query = query.eq('company', company);
+      if (status) query = query.eq('status', status);
+      const { data, error, count } = await query;
+      if (error) throw error;
+      if ((count || 0) > (data || []).length) throw fail(422, 'More than 1,000 staff: this report needs pagination.');
+      return res.status(200).json({ rows: (data || []).map((p: any) => ({ id: p.id, company: p.company, employeeCode: p.employee_code, fullName: p.full_name, designation: p.designation, department: p.department, employmentType: p.employment_type, joinDate: p.join_date, confirmDate: p.confirm_date, resignDate: p.resign_date, status: p.status })) });
+    }
     if (req.method === 'GET' && action === 'employees') {
       // leave_approver_id is new: until its migration is run the list is read without it.
       let result: any = await db.from('hr_employees').select(`${SUMMARY},leave_approver_id,leave_backup_approver_id,final_approver_id`).order('company').order('full_name');

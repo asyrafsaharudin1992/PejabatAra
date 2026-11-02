@@ -1,6 +1,7 @@
-import { lazy, ReactNode, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
 import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
+import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
@@ -20,13 +21,11 @@ const HRHomeCalendar = lazy(() => import('./HRHomeCalendar'));
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos';
-type Staff = { id: string; name: string; code: string; branch: string; active: boolean };
+type View = 'home' | 'profiles' | 'reviews' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos';
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
   { id: 'reviews', label: 'Performance Reviews', note: 'Reviews from supervisors', icon: ClipboardCheck, tone: 'text-[#4ade80]' },
-  { id: 'staff', label: 'Staff Directory', note: 'Assessment staff list', icon: Users, tone: 'text-[#70d8fa]' },
   { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
   { id: 'incentives', label: 'Incentive', note: 'Sent by Clinical Admin', icon: Wallet, tone: 'text-[#ffb000]' },
   { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]' },
@@ -35,7 +34,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'memos', label: 'Memo/Guide', note: 'Memos and guides from HR', icon: BookOpen, tone: 'text-[#70d8fa]' },
   { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
+const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -75,18 +74,17 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { b
   </>;
 }
 
-function HomeView({ staff, onNavigate }: { staff: Staff[] | null; onNavigate: (view: View) => void }) {
-  const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
-  const active = staff?.filter((member) => member.active) || [];
-  const branches = [...new Set(active.map((member) => member.branch || 'No branch'))];
+function HomeView({ onNavigate, onForecast }: { onNavigate: (view: View) => void; onForecast: () => void }) {
+  const today = useMalaysiaToday();
+  const date = new Date(`${today}T12:00:00+08:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
   return <div className="mx-auto max-w-[1500px] space-y-8">
     <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
       <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Human Resources</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome to Office HR</h2><p className="mt-3 text-base text-[#bed2df]">{staff ? `${active.length} active staff across ${branches.length} ${branches.length === 1 ? 'branch' : 'branches'}.` : 'Loading staff…'}</p></div>
+        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Human Resources</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome to Office HR</h2><p className="mt-3 text-base text-[#bed2df]">Your people, upcoming milestones and monthly priorities.</p></div>
         <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“Train people well enough so they can leave, treat them well enough so they don’t want to.”</p></div>
       </div>
     </section>
-    <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR calendar…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} /></Suspense>
+    <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR overview…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} onProfiles={() => onNavigate('profiles')} onForecast={onForecast} /></Suspense>
     <section>
       <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]">
@@ -94,33 +92,6 @@ function HomeView({ staff, onNavigate }: { staff: Staff[] | null; onNavigate: (v
         <p className="mt-6 font-semibold">{item.label}</p><p className="mt-1 text-sm text-[#9bb5c7]">{item.note}</p>
       </button>)}</div>
     </section>
-  </div>;
-}
-
-function StaffDirectory({ staff }: { staff: Staff[] | null }) {
-  const [query, setQuery] = useState('');
-  const [branch, setBranch] = useState('');
-  const [showInactive, setShowInactive] = useState(false);
-  const branches = useMemo(() => [...new Set((staff || []).map((member) => member.branch || 'No branch'))].sort(), [staff]);
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = (staff || []).filter((member) => (showInactive || member.active) && (!branch || (member.branch || 'No branch') === branch) && words.every((word) => `${member.name} ${member.code}`.toLowerCase().includes(word)));
-  const grouped = branches.map((name) => [name, shown.filter((member) => (member.branch || 'No branch') === name)] as const).filter(([, members]) => members.length);
-  return <div className="mx-auto max-w-[1500px] space-y-5">
-    <Hero title="Staff directory" text="Everyone on the staff list, by branch. The list is the one System Admin keeps in Control Centre for the Assessment Room and Incentive Claims." />
-    <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3"><Search className="h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or staff code" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
-      <select value={branch} onChange={(event) => setBranch(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All branches</option>{branches.map((name) => <option key={name} value={name}>{name}</option>)}</select>
-      <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} className="accent-[#0b587b]" />Show inactive</label>
-      <span className="ml-auto text-xs text-slate-400">{staff ? `${shown.length} shown` : 'Loading…'}</span>
-    </section>
-    {grouped.map(([name, members]) => <section key={name}>
-      <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-[#0b9aca]">{name} · {members.length}</h3>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{members.map((member) => <article key={member.id} className={`flex items-center gap-3 rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.05)] ${member.active ? '' : 'opacity-60'}`}>
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#e9f6fb] text-sm font-bold text-[#0b587b]">{member.name.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}</span>
-        <div className="min-w-0"><p className="truncate font-semibold" title={member.name}>{member.name}</p><p className="text-xs text-slate-500"><span className="font-mono">{member.code}</span>{member.active ? '' : ' · Inactive'}</p></div>
-      </article>)}</div>
-    </section>)}
-    {staff && !grouped.length && <p className={`${card} text-sm text-slate-500`}>No staff match.</p>}
   </div>;
 }
 
@@ -149,17 +120,13 @@ function ComingSoon({ view }: { view: View }) {
 export default function OfficeHR() {
   const [view, setView] = useState<View>('home');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [staff, setStaff] = useState<Staff[] | null>(null);
   const [error, setError] = useState('');
+  const [profileTab, setProfileTab] = useState<'list' | 'projection'>('list');
   const [pendingRequests, setPendingRequests] = useState(0);
   // The number on Staff Profiles: staff change requests waiting for HR.
   useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
-  // The staff list is read once when the office opens.
-  useEffect(() => {
-    officeFetch(`${API}&action=staff`).then((response) => response.json()).then((result) => setStaff(result.staff)).catch((cause) => { setStaff([]); setError(cause instanceof Error ? cause.message : 'Unable to load staff.'); });
-  }, []);
-  const navigate = (next: View) => { setView(next); setMenuOpen(false); window.scrollTo({ top: 0 }); };
+  const navigate = (next: View) => { setProfileTab('list'); setView(next); setMenuOpen(false); window.scrollTo({ top: 0 }); };
   const logout = async () => {
     await signOutSupabase();
     localStorage.removeItem('ara_portal_session');
@@ -179,12 +146,11 @@ export default function OfficeHR() {
       </header>
       <main className="p-4 sm:p-6 lg:p-[38px]">
         {error && <p className="mx-auto mb-4 max-w-[1500px] rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-        {view === 'home' && <HomeView staff={staff} onNavigate={navigate} />}
-        {view === 'profiles' && <HRProfiles onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
+        {view === 'home' && <HomeView onNavigate={navigate} onForecast={() => { navigate('profiles'); setProfileTab('projection'); }} />}
+        {view === 'profiles' && <HRProfiles initialTab={profileTab} onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
         {view === 'reviews' && <HRReviews onError={setError} />}
         {view === 'roster' && <HRRoster onError={setError} />}
         {view === 'incentives' && <HRIncentives onError={setError} />}
-        {view === 'staff' && <StaffDirectory staff={staff} />}
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && <HRAttendance onError={setError} />}
