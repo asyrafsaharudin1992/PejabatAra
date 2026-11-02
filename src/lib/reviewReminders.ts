@@ -1,4 +1,4 @@
-import { defaultReviewSettings, type ReviewSettings } from './reviewSettings';
+import { defaultReviewSettings, type ReviewSettings } from './reviewSettings.js';
 
 export type ReminderPerson = { id: string; company: string; employeeCode: string; fullName: string; joinDate: string | null; status: string };
 export type ReminderReview = { id: string; employeeId?: string | null; employeeCode: string; staffName: string; periodLabel: string; periodEnd: string | null; status: string; submittedAt: string | null };

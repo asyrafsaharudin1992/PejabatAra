@@ -1,4 +1,4 @@
-import { addReviewMonths, malaysiaToday, validReminderDate } from './reviewReminders';
+import { addReviewMonths, malaysiaToday, validReminderDate } from './reviewReminders.js';
 export type CalendarCategory = 'payroll' | 'probation' | 'evaluation' | 'review' | 'contract' | 'appraisal' | 'birthday' | 'other';
 export const calendarCategories: Record<CalendarCategory, string> = { payroll: 'Payroll', probation: 'Probation / Confirmation', evaluation: 'CA Evaluation', review: 'Performance Review', contract: 'Contract renewal', appraisal: 'Appraisal', birthday: 'Birthday / Gift', other: 'Other' };
 export type CalendarPerson = { id: string; name: string; code: string; company: string; designation: string; joinDate: string | null; confirmDate: string | null; birthday?: string | null };

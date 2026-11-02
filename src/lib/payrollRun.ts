@@ -1,5 +1,5 @@
-import { allowanceType } from './payrollAllowances';
-import { eis, hrdf, kwsp, pcbNormal, perkeso, ringgit, skbbk } from './payrollStatutory';
+import { allowanceType } from './payrollAllowances.js';
+import { eis, hrdf, kwsp, pcbNormal, perkeso, ringgit, skbbk } from './payrollStatutory.js';
 
 // One staff member's pay for one month, worked out from their profile and the figures HR enters for the month.
 // Everything is in ringgit with two decimals. The profile supplies salary, fixed allowances, family (for PCB) and the payroll settings;
