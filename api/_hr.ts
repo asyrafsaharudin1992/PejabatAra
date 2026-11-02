@@ -1044,6 +1044,18 @@ export async function hrHandler(req: any, res: any) {
             inputsEntry = { employee_id: person.id, year: slipYear, month: slipMonth, status: 'draft', inputs: { ot: amount(given.ot), restPh: amount(given.restPh), shiftAllowance: amount(given.shiftAllowance), unpaidLeave: amount(given.unpaidLeave), otherAllowance: amount(given.otherAllowance), otherDeduction: amount(given.otherDeduction), annualLeaveDeduction: amount(given.annualLeaveDeduction) } };
           }
         }
+        // Months already paid and locked in Infotech (taken as they were, not worked out again), so staff and HR can look back at them.
+        const slipHistory: any[] = [];
+        if (!slipRead.error && Array.isArray(row.payslipHistory)) for (const item of row.payslipHistory.slice(0, 36)) {
+          const slipYear = Math.round(Number(item?.year)), slipMonth = Math.round(Number(item?.month));
+          if (!(slipYear >= 2020 && slipYear <= 2100 && slipMonth >= 1 && slipMonth <= 12) || !item?.result || typeof item.result !== 'object' || knownSlips.has(`${person.id}|${slipYear}|${slipMonth}`)) continue;
+          const number = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100, r = item.result;
+          knownSlips.add(`${person.id}|${slipYear}|${slipMonth}`);
+          slipHistory.push({ employee_id: person.id, year: slipYear, month: slipMonth, status: 'locked', locked_at: now, updated_at: now, inputs: typeof item.inputs === 'object' && item.inputs ? item.inputs : {},
+            result: { basic: number(r.basic), allowances: (Array.isArray(r.allowances) ? r.allowances : []).slice(0, 20).map((a: any) => ({ name: text(a?.name, 60), amount: number(a?.amount) })), ot: number(r.ot), restPh: number(r.restPh), gross: number(r.gross),
+              kwspEmployee: number(r.kwspEmployee), kwspEmployer: number(r.kwspEmployer), socsoEmployee: number(r.socsoEmployee), socsoEmployer: number(r.socsoEmployer), eisEmployee: number(r.eisEmployee), eisEmployer: number(r.eisEmployer),
+              skbbk: number(r.skbbk), hrdf: number(r.hrdf), pcb: number(r.pcb), deductions: number(r.deductions), net: number(r.net), ytdAfter: { wages: number(r.ytdAfter?.wages), pcbPaid: number(r.ytdAfter?.pcbPaid) }, source: 'Infotech' } });
+        }
         const newHistory: any[] = [];
         if (historyReady) for (const item of (Array.isArray(row.history) ? row.history : []).slice(0, 200)) {
           const money = Number(String(item?.increment || item?.bonus || '').replace(/,/g, ''));
@@ -1052,13 +1064,14 @@ export async function hrHandler(req: any, res: any) {
           if (knownHistory.has(key)) continue;
           knownHistory.add(key); newHistory.push(entry);
         }
-        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry && !ytdPrev && !inputsEntry) continue;
+        if (!Object.keys(patch).length && !newHistory.length && !ytdEntry && !ytdPrev && !inputsEntry && !slipHistory.length) continue;
         if (['address_line1', 'address_line2', 'city', 'state', 'postcode'].some((column) => column in patch)) {
           const merged = { ...person, ...patch };
           patch.address = [merged.address_line1, merged.address_line2, [merged.postcode, merged.city].filter(Boolean).join(' '), merged.state].filter(Boolean).join(', ');
         }
         for (const column of Object.keys(changes)) counts[column] = (counts[column] || 0) + 1;
         if (ytdPrev) { counts.payroll_ytd_previous = (counts.payroll_ytd_previous || 0) + 1; changes.payroll_ytd_previous = ['', ytdPrev.prev_as_of]; }
+        if (slipHistory.length) { counts.payslip_history = (counts.payslip_history || 0) + slipHistory.length; changes.payslip_history = ['', `${slipHistory.length} months`]; }
         if (inputsEntry) { counts.payslip_inputs = (counts.payslip_inputs || 0) + 1; changes.payslip_inputs = ['', `${inputsEntry.year}-${inputsEntry.month}`]; }
         if (ytdEntry) { counts.payroll_ytd = (counts.payroll_ytd || 0) + 1; changes.payroll_ytd = ['', `${ytdEntry.year} to ${ytdEntry.as_of}`]; }
         if (newHistory.length) { counts.career_history = (counts.career_history || 0) + newHistory.length; changes.career_history = ['', `${newHistory.length} entries`]; }
@@ -1076,6 +1089,10 @@ export async function hrHandler(req: any, res: any) {
           if (inputsEntry) {
             const { error: inputsError } = await db.from('hr_payslips').insert(inputsEntry);
             if (inputsError) throw inputsError;
+          }
+          if (slipHistory.length) {
+            const { error: slipError } = await db.from('hr_payslips').insert(slipHistory);
+            if (slipError) throw slipError;
           }
           if (ytdEntry) {
             const { error: ytdError } = await db.from('hr_payroll_ytd').insert(ytdEntry);
@@ -1231,6 +1248,15 @@ export async function hrHandler(req: any, res: any) {
       const rows = items.filter((item: any) => item.linked && item.received && !item.confirmed && item.amount > 0).map((item: any) => ({ employee_id: item.employeeId, claim_month: month, amount: item.amount, procedures: item.procedures, paid_on: paidOn, confirmed_by: text(user?.email || '', 120) }));
       if (rows.length) { const { error } = await db.from('hr_incentive_pay').insert(rows); if (error) throw error; }
       return res.status(200).json({ confirmed: rows.length, paidOn });
+    }
+
+    // The months already paid for one person (HR only): what Infotech paid before AraOffice, and what AraOffice has locked since.
+    if (req.method === 'GET' && action === 'payroll_history') {
+      const employeeId = text(req.query.employeeId, 60);
+      if (!employeeId) throw fail(400, 'Choose a staff member.');
+      const { data, error } = await db.from('hr_payslips').select('year,month,status,result').eq('employee_id', employeeId).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+      if (error) { if (error.code === '42P01') return res.status(200).json({ months: [] }); throw error; }
+      return res.status(200).json({ months: (data || []).map((row: any) => ({ year: row.year, month: row.month, source: row.result?.source || 'AraOffice', gross: Number(row.result?.gross || 0), kwsp: Number(row.result?.kwspEmployee || 0), perkeso: Number(row.result?.socsoEmployee || 0), eis: Number(row.result?.eisEmployee || 0), pcb: Number(row.result?.pcb || 0), net: Number(row.result?.net || 0) })) });
     }
 
     if (req.method === 'GET' && action === 'career') {

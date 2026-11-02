@@ -42,7 +42,7 @@ function service(joinDate: string | null) {
   return `${Math.floor(months / 12)}y ${months % 12}m`;
 }
 const STATUS_TONE: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
-const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', career_history: 'Employment history entries', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances', payroll_settings: 'Payroll settings', payroll_ytd: 'Year-to-date pay totals', payroll_ytd_previous: 'Year-to-date totals a month earlier', payslip_inputs: 'Month entered in Infotech' };
+const FIELD_LABEL: Record<string, string> = { full_name: 'Full name', employee_code: 'Employee code', company: 'Company', ic_no: 'IC', bank_account: 'Bank account', basic_salary: 'Basic salary', branch: 'Branch', department: 'Department', designation: 'Designation', status: 'Status', address: 'Address', address_line1: 'Address line 1', address_line2: 'Address line 2', date_of_birth: 'Date of birth', religion: 'Religion', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', postcode: 'Postcode', city: 'City', state: 'State', race: 'Race', bank_name: 'Bank', epf_no: 'KWSP no.', socso_no: 'PERKESO no.', tax_no: 'Income tax no.', foreign_id_no: 'Foreign ID', spouse_name: 'Spouse', spouse_ic: 'Spouse IC', career_history: 'Employment history entries', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', education: 'Education', phone: 'Phone', marital_status: 'Marital status', children: 'Children', fixed_allowances: 'Allowances', payroll_settings: 'Payroll settings', payroll_ytd: 'Year-to-date pay totals', payroll_ytd_previous: 'Year-to-date totals a month earlier', payslip_inputs: 'Month entered in Infotech', payslip_history: 'Past payslips (months)' };
 // IC, bank and salary changes are shown without their values in the history.
 const SECRET = new Set(['ic_no', 'passport_no', 'bank_account', 'basic_salary', 'fixed_allowances', 'epf_no', 'socso_no', 'tax_no']);
 
@@ -297,6 +297,24 @@ function ProfileCareer({ employeeId, reveal, onError, onLoaded }: { employeeId: 
   </section>;
 }
 
+// Months already paid, from Infotech and from AraOffice's own locked pay runs. HR only here; staff open their own slip under Payslip.
+type PayMonth = { year: number; month: number; source: string; gross: number; kwsp: number; perkeso: number; eis: number; pcb: number; net: number };
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function ProfilePayHistory({ employeeId, reveal, onError }: { employeeId: string; reveal: boolean; onError: (message: string) => void }) {
+  const [months, setMonths] = useState<PayMonth[] | null>(null);
+  useEffect(() => { setMonths(null); api(`action=payroll_history&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); setMonths(result.months || []); }).catch((cause: Error) => { setMonths([]); onError(cause.message); }); }, [employeeId]);
+  const paged = usePaged<PayMonth>(months || [], 12, employeeId);
+  const show = (value: number) => reveal ? money(value) : '••••';
+  return <section className={card}>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-semibold">Payroll history</h3><span className="text-xs text-slate-400">HR only · amounts hidden until you show them</span></div>
+    {months === null ? <p className="mt-2 text-sm text-slate-500">Loading…</p> : !months.length ? <p className="mt-2 text-sm text-slate-500">No pay recorded yet.</p> : <>
+      <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Month</th><th className="pr-4 text-right">Gross</th><th className="pr-4 text-right">KWSP</th><th className="pr-4 text-right">PERKESO</th><th className="pr-4 text-right">EIS</th><th className="pr-4 text-right">PCB</th><th className="pr-4 text-right">Net</th><th>From</th></tr></thead>
+        <tbody>{paged.rows.map((item) => <tr key={`${item.year}-${item.month}`} className="border-t border-slate-100 tabular-nums"><td className="py-2 pr-4 whitespace-nowrap font-semibold text-[#14233b]">{MONTH_NAMES[item.month - 1]} {item.year}</td><td className="pr-4 text-right">{show(item.gross)}</td><td className="pr-4 text-right">{show(item.kwsp)}</td><td className="pr-4 text-right">{show(item.perkeso)}</td><td className="pr-4 text-right">{show(item.eis)}</td><td className="pr-4 text-right">{show(item.pcb)}</td><td className="pr-4 text-right font-semibold">{show(item.net)}</td><td className="text-xs text-slate-400">{item.source}</td></tr>)}</tbody></table></div>
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
+    </>}
+  </section>;
+}
+
 // How this person is treated in the monthly pay run, read off Infotech. HR only; there are no pay figures here.
 const PAYROLL_ROWS: [string, string][] = [['epfRate', 'KWSP rate (%)'], ['socsoCategory', 'PERKESO category'], ['socsoEmployed', 'PERKESO employed'], ['eis', 'EIS'], ['hrdf', 'HRDF'], ['skbbk', 'SKBBK (24-hour cover)'], ['taxResident', 'Tax resident'], ['taxType', 'Tax remuneration type'], ['pcbApplied', 'PCB applied'], ['payGroup', 'Pay group'], ['otType', 'OT type'], ['probationMonths', 'Probation (months)'], ['flexi', 'Flexi hours'], ['restDay', 'Rest day'], ['defaultShift', 'Default shift']];
 function PayrollSettingsCard({ settings }: { settings: Record<string, string | number | boolean> }) {
@@ -349,6 +367,7 @@ export function ProfileView({ id, onBack, onError }: { id: string; onBack: () =>
       </dl></section>
     </div>
     <ProfileDocuments employeeId={id} onError={onError} />
+    <ProfilePayHistory employeeId={id} reveal={reveal} onError={onError} />
     <ProfileCareer employeeId={id} reveal={reveal} onError={onError} onLoaded={setCareer} />
     {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
       <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
