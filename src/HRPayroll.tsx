@@ -119,6 +119,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
         {(['KJ', 'SK'] as const).map((company) => <button key={company} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === company && member.payslip)} onClick={() => void bankFile(company)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank file {company}</button>)}
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
+      <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800"><strong>Before you upload a Maybank file:</strong> open it in Notepad and compare it with the Infotech file for the same month (names, account numbers, amounts and the total). Do not upload the first file without checking it. The bank names are only checked for Maybank, RHB and Hong Leong so far.</p>
       <p className="mt-3 text-xs text-slate-400">OT hours (at the rate HR approved), rest days and public holidays worked, unpaid leave and the like are typed in by HR for now; they will come from attendance and leave when those are brought over. Amounts stay hidden until Show amounts is pressed.</p>
     </>}
   </section>;
