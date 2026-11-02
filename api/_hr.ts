@@ -959,8 +959,9 @@ export async function hrHandler(req: any, res: any) {
       const historyReady = !historyRead.error;
       const ytdRead = await db.from('hr_payroll_ytd').select('employee_id,year,prev_as_of').limit(5000);
       const ytdReady = !ytdRead.error;   // the table is not set up yet: year-to-date totals are skipped
-      const slipRead = await db.from('hr_payslips').select('employee_id,year,month').limit(5000);
+      const slipRead = await db.from('hr_payslips').select('employee_id,year,month,status').limit(5000);
       const knownSlips = new Set<string>((slipRead.data || []).map((r: any) => `${r.employee_id}|${r.year}|${r.month}`));
+      const draftSlips = new Set<string>((slipRead.data || []).filter((r: any) => r.status !== 'locked').map((r: any) => `${r.employee_id}|${r.year}|${r.month}`));   // a draft month is replaced by what Infotech paid
       const knownYtd = new Set<string>((ytdRead.data || []).map((r: any) => `${r.employee_id}|${r.year}`));
       const knownPrevYtd = new Set<string>((ytdRead.data || []).filter((r: any) => r.prev_as_of).map((r: any) => `${r.employee_id}|${r.year}`));
       const newYtd: any[] = [];   // the table is not set up yet: history is skipped
@@ -1048,7 +1049,7 @@ export async function hrHandler(req: any, res: any) {
         const slipHistory: any[] = [];
         if (!slipRead.error && Array.isArray(row.payslipHistory)) for (const item of row.payslipHistory.slice(0, 36)) {
           const slipYear = Math.round(Number(item?.year)), slipMonth = Math.round(Number(item?.month));
-          if (!(slipYear >= 2020 && slipYear <= 2100 && slipMonth >= 1 && slipMonth <= 12) || !item?.result || typeof item.result !== 'object' || knownSlips.has(`${person.id}|${slipYear}|${slipMonth}`)) continue;
+          if (!(slipYear >= 2020 && slipYear <= 2100 && slipMonth >= 1 && slipMonth <= 12) || !item?.result || typeof item.result !== 'object' || (knownSlips.has(`${person.id}|${slipYear}|${slipMonth}`) && !draftSlips.has(`${person.id}|${slipYear}|${slipMonth}`))) continue;
           const number = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100, r = item.result;
           knownSlips.add(`${person.id}|${slipYear}|${slipMonth}`);
           slipHistory.push({ employee_id: person.id, year: slipYear, month: slipMonth, status: 'locked', locked_at: now, updated_at: now, inputs: typeof item.inputs === 'object' && item.inputs ? item.inputs : {},
@@ -1091,6 +1092,10 @@ export async function hrHandler(req: any, res: any) {
             if (inputsError) throw inputsError;
           }
           if (slipHistory.length) {
+            for (const item of slipHistory) if (draftSlips.has(`${item.employee_id}|${item.year}|${item.month}`)) {
+              const { error: dropError } = await db.from('hr_payslips').delete().eq('employee_id', item.employee_id).eq('year', item.year).eq('month', item.month).neq('status', 'locked');
+              if (dropError) throw dropError;
+            }
             const { error: slipError } = await db.from('hr_payslips').insert(slipHistory);
             if (slipError) throw slipError;
           }
