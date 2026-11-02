@@ -215,7 +215,8 @@ const digits9 = (value: unknown) => String(value ?? '').replace(/\D/g, '').padSt
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 // The active staff for one pay month with what the pay needs: salary, allowances, family, payroll settings and the year-to-date totals
 // (the totals read off Infotech, plus every month locked since). A month can only be run once the months before it are locked.
-async function payrollContext(db: any, year: number, month: number) {
+// `viewOnly` lets a month already in the year-to-date totals (brought over from Infotech) be looked at; saving it is still refused.
+async function payrollContext(db: any, year: number, month: number, viewOnly = false) {
   // Staff who left during or after this pay period are still paid their last month.
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
@@ -240,7 +241,7 @@ async function payrollContext(db: any, year: number, month: number) {
   // The last month in the totals can be run again for comparison with Infotech, from the totals as they stood the month before.
   // Once the month's slips were brought over from Infotech as locked slips there is nothing left to compare.
   const comparison = month === baseMonth && (ytdRead.data || []).some((row: any) => row.prev_as_of) && !(payslipRead.data || []).some((row: any) => row.month === month && row.status === 'locked');
-  if (month < baseMonth || (month === baseMonth && !comparison)) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
+  if (!viewOnly && (month < baseMonth || (month === baseMonth && !comparison))) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
   const payslips = payslipRead.data || [];
   const staff = (staffRows || []).map((row: any) => {
     const own = payslips.filter((item: any) => item.employee_id === row.id);
@@ -1129,7 +1130,7 @@ export async function hrHandler(req: any, res: any) {
     if (action === 'payroll_month' || action === 'payroll_save') {
       const year = Math.round(Number(req.query.year ?? body.year)), month = Math.round(Number(req.query.month ?? body.month));
       if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
-      const context = await payrollContext(db, year, month);
+      const context = await payrollContext(db, year, month, req.method === 'GET');
       if (req.method === 'GET') return res.status(200).json({ year, month, asOf: context.asOf, comparison: context.comparison, staff: context.staff });
       if (req.method !== 'POST') throw fail(405, 'Method not allowed');
       const lock = body.lock === true;

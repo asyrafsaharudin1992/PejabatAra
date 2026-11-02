@@ -35,7 +35,7 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 }
 
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
-type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
+type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs; result?: Record<string, unknown> } | null };
 const API = '/api/status?resource=hr';
 const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct'], ['ot', 'OT RM'], ['restPh', 'Rest/PH RM']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -64,8 +64,11 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load the pay run.'); setStaff([]); }
   };
   useEffect(() => { void load(); }, [month]);
-  const rows = useMemo(() => (staff || []).map((member) => ({ member, out: calculatePayslip(member, inputs[member.id] || NO_INPUTS, member.ytd, year, month) })), [staff, inputs, month]);
-  const locked = Boolean(staff?.length && staff.every((member) => member.payslip?.status === 'locked'));
+  // A locked month shows what was saved (for October, what Infotech paid), not a fresh calculation.
+  const rows = useMemo(() => (staff || []).map((member) => ({ member, out: member.payslip?.status === 'locked' && member.payslip.result ? { ...calculatePayslip(member, NO_INPUTS, member.ytd, year, month), ...member.payslip.result } as ReturnType<typeof calculatePayslip> : calculatePayslip(member, inputs[member.id] || NO_INPUTS, member.ytd, year, month) })), [staff, inputs, month]);
+  // A month already in the year-to-date totals (October, from Infotech) is finished and can only be looked at.
+  const doneMonth = MONTH_NAMES.findIndex((name) => asOf.toLowerCase().startsWith(name.slice(0, 3).toLowerCase())) + 1;
+  const locked = Boolean(staff?.length && (staff.every((member) => member.payslip?.status === 'locked') || (doneMonth > 0 && month <= doneMonth && !comparison)));
   const blocked = Boolean(staff?.some((member) => !member.earlierLocked));
   const total = (pick: (row: (typeof rows)[number]) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
   const save = async (lock: boolean) => {
@@ -106,7 +109,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="font-semibold">Monthly pay run</h3><p className="mt-0.5 text-xs text-slate-500">Pay period {dmy(period.from)} to {dmy(period.to)} (OT and unpaid leave are counted for these days). Year-to-date totals in from Infotech up to {asOf || 'October 2026'}; each month needs the one before it locked.</p></div>
       <div className="flex flex-wrap items-center gap-2">
-        <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
+        <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[10, 11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
       </div>
     </div>
