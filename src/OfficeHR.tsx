@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
+import { lazy, ReactNode, Suspense, useEffect, useMemo, useState } from 'react';
+import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
@@ -12,13 +12,15 @@ import { HRLeave } from './HRLeave';
 import { HRIncentives } from './HRIncentives';
 import { HRReports } from './HRReports';
 import { HRPayroll } from './HRPayroll';
+const HRMemoGuide = lazy(() => import('./HRMemoGuide'));
+const HRHomeCalendar = lazy(() => import('./HRHomeCalendar'));
 
 // Office HR, laid out like the CA and Clinical Admin offices. Built a piece at a time: the
 // staff directory and the leave types (the same codes as Infotech) come first; leave
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports';
+type View = 'home' | 'profiles' | 'reviews' | 'staff' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos';
 type Staff = { id: string; name: string; code: string; branch: string; active: boolean };
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
@@ -30,9 +32,10 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]' },
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'payroll', label: 'Payroll', note: 'Monthly pay & payslips', icon: Banknote, tone: 'text-[#f59e0b]' },
+  { id: 'memos', label: 'Memo/Guide', note: 'Memos and guides from HR', icon: BookOpen, tone: 'text-[#70d8fa]' },
   { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports' };
+const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', staff: 'Staff Directory', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -83,6 +86,7 @@ function HomeView({ staff, onNavigate }: { staff: Staff[] | null; onNavigate: (v
         <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“Train people well enough so they can leave, treat them well enough so they don’t want to.”</p></div>
       </div>
     </section>
+    <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR calendar…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} /></Suspense>
     <section>
       <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]">
@@ -185,6 +189,7 @@ export default function OfficeHR() {
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && <HRAttendance onError={setError} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
+        {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
         {view === 'reports' && <HRReports onError={setError} />}
       </main>
     </div>

@@ -1,6 +1,7 @@
 import { branchId, officeAccess } from './_office-db.js';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { listDriveFiles } from './_panel-drive.js';
+import { isHrReference } from '../src/lib/hrReferences.js';
 
 // Official memos are shared by every office that shows the Reference Hub, so
 // they live in one record instead of inside a single office's workspace state.
@@ -35,7 +36,7 @@ function memoFolderId() {
   return value.match(/folders\/([\w-]+)/)?.[1] || value.match(/[?&]id=([\w-]+)/)?.[1] || value.split(/[?#/]/)[0];
 }
 
-type Resource = { id: string; sourceUrl?: string; [key: string]: unknown };
+type Resource = { id: string; category?: string; sourceUrl?: string; [key: string]: unknown };
 type Payload = { resources: Resource[]; pendingMemos?: Resource[]; driveSyncedAt?: string };
 
 // Before this record existed, memo edits were saved in the CA workspace.
@@ -67,7 +68,9 @@ async function withDriveMemos(payload: Payload, force: boolean) {
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const { db, user, profile } = await officeAccess(req, false, READER_OFFICES);
+    const hrOnly = req.query.department === 'hr';
+    const { db, user, profile } = await officeAccess(req, false, hrOnly ? 'hr' : READER_OFFICES);
+    if (hrOnly && (req.method !== 'GET' || req.query.action)) return res.status(405).json({ error: 'HR Memo/Guide is a read-only list.' });
     const sharedBranch = await branchId(db, SHARED_BRANCH, true);
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', sharedBranch).eq('state_key', STATE_KEY).maybeSingle();
     if (readError) throw readError;
@@ -118,6 +121,8 @@ export default async function handler(req: any, res: any) {
         if (resources) current = { resources };
       }
       if (!current) return res.status(200).json({ payload: null, updatedAt: null });
+      // HR reads the same published resources, without fetching PDFs or triggering Drive sync.
+      if (hrOnly) return res.status(200).json({ payload: { resources: current.resources.filter(isHrReference) }, updatedAt: existing?.updated_at || null });
       let drive = { added: 0, error: '' };
       try {
         const result = await withDriveMemos(current, forceSync);

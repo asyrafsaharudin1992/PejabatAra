@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, FileText, RefreshCw, Search, X } from "lucide-react";
 import { KnowledgeResource, knowledgeResources } from "./portalData";
 import { cn } from "./lib/utils";
+import { isHrReference } from "./lib/hrReferences";
 
 // Reference Hub shared by every office that lists the official memos.
 const categoryLabelMap: Record<string, string> = {
@@ -26,6 +27,7 @@ const departmentValues = ["Kewangan", "Sumber Manusia", "Operasi", "Kualiti"];
 
 function normalizeDepartmentValue(value: string) {
   if (departmentValues.includes(value)) return value;
+  if (isHrReference({ category: value })) return "Sumber Manusia";
   if (["Pematuhan", "Training"].includes(value)) return "Kualiti";
   return "Operasi";
 }
@@ -44,8 +46,9 @@ function resourceTypeLabel(type: KnowledgeResource["type"]) {
   return "Guideline";
 }
 
-export function KnowledgeView({ initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource, onCommit, onSyncDrive, syncing = false, pendingMemos = [], onApprovePendingMemo, memoText = {}, onNeedText, onReadText, reading = false }: { initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void; onCommit?: () => void; onSyncDrive?: () => void; syncing?: boolean; pendingMemos?: KnowledgeResource[]; onApprovePendingMemo?: (resource: KnowledgeResource) => void; memoText?: Record<string, string>; onNeedText?: () => void; onReadText?: () => void; reading?: boolean }) {
-  const safeResources = Array.isArray(resources) ? resources : knowledgeResources;
+export function KnowledgeView({ hrOnly = false, initialSearch, readResources, onOpen, resources = knowledgeResources, canEdit = false, onUpdateResource, onCommit, onSyncDrive, syncing = false, pendingMemos = [], onApprovePendingMemo, memoText = {}, onNeedText, onReadText, reading = false }: { hrOnly?: boolean; initialSearch: string; readResources: string[]; onOpen: (resource: KnowledgeResource) => void; resources?: KnowledgeResource[]; canEdit?: boolean; onUpdateResource?: (resource: KnowledgeResource) => void; onCommit?: () => void; onSyncDrive?: () => void; syncing?: boolean; pendingMemos?: KnowledgeResource[]; onApprovePendingMemo?: (resource: KnowledgeResource) => void; memoText?: Record<string, string>; onNeedText?: () => void; onReadText?: () => void; reading?: boolean }) {
+  const allResources = Array.isArray(resources) ? resources : knowledgeResources;
+  const safeResources = hrOnly ? allResources.filter(isHrReference) : allResources;
   const safePendingMemos = Array.isArray(pendingMemos) ? pendingMemos : [];
   const [search, setSearch] = useState(initialSearch);
   const [category, setCategory] = useState("Semua");
@@ -55,14 +58,14 @@ export function KnowledgeView({ initialSearch, readResources, onOpen, resources 
   const pendingMemo = canEdit ? safePendingMemos.find((memo) => !dismissedPending.includes(memo.id)) : undefined;
   // Keep the hub filter aligned with the four official departments. Legacy
   // labels are normalised into these departments in the table and filter.
-  const categories = ["Semua", ...departmentValues];
+  const categories = hrOnly ? ["Sumber Manusia"] : ["Semua", ...departmentValues];
   // The wording inside each memo is fetched the first time someone searches.
   useEffect(() => { if (search.trim()) onNeedText?.(); }, [search, onNeedText]);
   const filtered = safeResources.filter((item) => {
     const haystack = `${item.title} ${item.summary} ${item.category} ${item.keywords.join(" ")} ${memoText[item.id] || ""}`.toLowerCase();
     const itemDepartments = item.category.split(" / ").map((part) => normalizeDepartmentValue(part.trim()));
     const itemStatus = item.status === "TERBATAL" ? "TERBATAL" : "AKTIF";
-    return (category === "Semua" || itemDepartments.includes(category))
+    return (hrOnly || category === "Semua" || itemDepartments.includes(category))
       && (typeFilter === "Semua" || resourceTypeLabel(item.type) === typeFilter)
       && (statusFilter === "Semua" || itemStatus === statusFilter)
       && haystack.includes(search.toLowerCase());
@@ -74,8 +77,8 @@ export function KnowledgeView({ initialSearch, readResources, onOpen, resources 
   return (
     <div className="mx-auto w-full max-w-[1500px]">
       <div className="rounded-[24px] border border-[#1c5570] bg-[#0b3d59] px-5 py-5 text-white shadow-[0_16px_36px_rgba(11,61,89,0.16)] sm:px-6 sm:py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Reference hub</p><h2 className="mt-1.5 text-2xl font-semibold tracking-tight">Find answers quickly</h2><p className="mt-1 text-sm text-[#b9cfdd]">SOPs, policies, work guides and FAQs organised by topic.</p></div><div className="flex w-full max-w-lg items-center gap-3 rounded-xl border border-slate-200/70 bg-white px-3.5 py-2.5 text-[#14233b] shadow-sm"><Search className="h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Try: leave, patient complaint, Plato..." className="w-full bg-transparent text-sm outline-none" /></div></div>
-      <div className="mt-4"><p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#8fb8c9]">Department</p><div className="flex gap-1.5 overflow-x-auto pb-1">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={cn("whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition", category === item ? "bg-white text-[#0b3d59] shadow-sm" : "bg-white/10 text-[#c4d7e3] hover:bg-white/15")}>{categoryLabel(item)}</button>)}</div></div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{hrOnly ? "Office HR · Human Resources" : "Reference hub"}</p><h2 className="mt-1.5 text-2xl font-semibold tracking-tight">{hrOnly ? "Memo/Guide" : "Find answers quickly"}</h2><p className="mt-1 text-sm text-[#b9cfdd]">{hrOnly ? "Memos, policies and guides issued by Human Resources." : "SOPs, policies, work guides and FAQs organised by topic."}</p></div><div className="flex w-full max-w-lg items-center gap-3 rounded-xl border border-slate-200/70 bg-white px-3.5 py-2.5 text-[#14233b] shadow-sm"><Search className="h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={hrOnly ? "Search HR memos and guides…" : "Try: leave, patient complaint, Plato..."} aria-label={hrOnly ? "Search HR memos and guides" : "Search references"} className="w-full bg-transparent text-sm outline-none" /></div></div>
+      <div className="mt-4"><p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#8fb8c9]">Department</p><div className="flex gap-1.5 overflow-x-auto pb-1">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={cn("whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition", (hrOnly || category === item) ? "bg-white text-[#0b3d59] shadow-sm" : "bg-white/10 text-[#c4d7e3] hover:bg-white/15")}>{categoryLabel(item)}</button>)}</div></div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
         <FilterChipGroup label="Type" value={typeFilter} onChange={setTypeFilter} options={["Semua", "Memo", "SOP", "Guideline"]} />
         <FilterChipGroup label="Status" value={statusFilter} onChange={setStatusFilter} options={["Semua", "AKTIF", "TERBATAL"]} optionLabels={{ Semua: "All", AKTIF: "Active", TERBATAL: "Not active" }} />
@@ -83,7 +86,7 @@ export function KnowledgeView({ initialSearch, readResources, onOpen, resources 
       </div>
       <div className="mt-4 flex flex-col gap-3 border-t border-white/15 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-[#8de2fa]"><FileText className="h-4 w-4" /></div><div className="min-w-0"><p className="truncate text-sm font-semibold text-white">Official Documents <span className="ml-1 text-xs font-normal text-[#a9c5d2]">· {safeResources.length} connected</span></p></div></div>
-        <div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">Memos & policies</span><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">Clinical SOPs</span><span className="rounded-full bg-[#fff7d8] px-2.5 py-1 text-[10px] font-semibold text-[#876700]">Official Drive</span>{canEdit && onReadText && <button type="button" onClick={() => onReadText()} disabled={reading} title="Read the words inside each memo so search can find them" className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1 text-[10px] font-bold text-[#d9eef5] transition hover:bg-white/10 disabled:opacity-60"><Search className={cn("h-3 w-3", reading && "animate-pulse")} />{reading ? "Reading…" : "Read memo text"}</button>}{onSyncDrive && <button type="button" onClick={onSyncDrive} disabled={syncing} className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1 text-[10px] font-bold text-[#d9eef5] transition hover:bg-white/10 disabled:opacity-60"><RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} />{syncing ? "Syncing…" : "Sync Drive"}</button>}</div>
+        <div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">Memos & policies</span><span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#c4d7e3]">{hrOnly ? "HR guides" : "Clinical SOPs"}</span><span className="rounded-full bg-[#fff7d8] px-2.5 py-1 text-[10px] font-semibold text-[#876700]">Official Drive</span>{canEdit && onReadText && <button type="button" onClick={() => onReadText()} disabled={reading} title="Read the words inside each memo so search can find them" className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1 text-[10px] font-bold text-[#d9eef5] transition hover:bg-white/10 disabled:opacity-60"><Search className={cn("h-3 w-3", reading && "animate-pulse")} />{reading ? "Reading…" : "Read memo text"}</button>}{onSyncDrive && <button type="button" onClick={onSyncDrive} disabled={syncing} className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 px-2.5 py-1 text-[10px] font-bold text-[#d9eef5] transition hover:bg-white/10 disabled:opacity-60"><RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} />{syncing ? "Syncing…" : "Sync Drive"}</button>}</div>
       </div>
       </div>
       <div className="mt-6 flex items-center justify-between"><p className="text-sm font-bold text-slate-500">{filtered.length} memos found</p><p className="text-xs text-slate-400">Official AraSihat source</p></div>
