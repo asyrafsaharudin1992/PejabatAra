@@ -1,5 +1,5 @@
 import { ArrowUpRight, CalendarCheck, ClipboardCheck, UserMinus, UserRoundPlus, Users } from 'lucide-react';
-import { calendarEventOverdue, type CalendarConfig, type CalendarEvent, type CalendarPerson } from './lib/hrCalendar';
+import { calendarEventOverdue, shiftCalendarDays, type CalendarConfig, type CalendarEvent, type CalendarPerson } from './lib/hrCalendar';
 
 type Props = {
   people: CalendarPerson[] | null;
@@ -17,6 +17,8 @@ const dateLabel = (date: string) => new Date(`${date}T12:00:00+08:00`).toLocaleD
 export default function HRHomeSummary({ people, config, events, today, month, onProfiles, onProbation, onTasks }: Props) {
   const upcoming = (people || []).filter((p) => p.joinDate && p.joinDate > today).sort((a, b) => a.joinDate!.localeCompare(b.joinDate!));
   const leaving = (people || []).filter((p) => p.resignDate && p.resignDate >= today).sort((a, b) => a.resignDate!.localeCompare(b.resignDate!));
+  // A new starter stays on the card for 7 days after the joining date.
+  const starters = (people || []).filter((p) => p.joinDate && p.joinDate >= shiftCalendarDays(today, -7)).sort((a, b) => a.joinDate!.localeCompare(b.joinDate!));
   const started = (people || []).filter((p) => p.joinDate && p.joinDate <= today);
   const probation = started.filter((p) => config?.probation[p.id] === 'probation' && (!p.confirmDate || p.confirmDate > today));
   const pending = events.filter((e) => !['done', 'skipped'].includes(e.state));
@@ -27,7 +29,7 @@ export default function HRHomeSummary({ people, config, events, today, month, on
   const cards = [
     { title: 'Staff profiles', count: people?.length, icon: Users, tone: 'bg-sky-50 text-sky-700', detail: branches || 'KJ and SK', note: `${started.length} started${upcoming.length ? ` · ${upcoming.length} upcoming` : ''}${missingJoin ? ` · ${missingJoin} joining date missing` : ''}`, action: onProfiles },
     { title: 'On probation', count: people ? probation.length : undefined, icon: ClipboardCheck, tone: 'bg-violet-50 text-violet-700', detail: probation.length ? probation.map(shortName).join(' · ') : 'No staff currently on probation', note: 'HR-verified · already started', action: onProbation },
-    { title: 'Upcoming starters', count: people ? upcoming.length : undefined, icon: UserRoundPlus, tone: 'bg-emerald-50 text-emerald-700', detail: upcoming[0] ? `${shortName(upcoming[0])} · ${upcoming[0].company}` : 'No upcoming joining dates', note: upcoming[0] ? `Starts ${dateLabel(upcoming[0].joinDate!)}` : 'Based on Staff Profile joining dates', action: onProfiles },
+    { title: 'Upcoming starters', count: people ? starters.length : undefined, icon: UserRoundPlus, tone: 'bg-emerald-50 text-emerald-700', detail: starters.length ? starters.map((p) => `${shortName(p)} · ${p.company}`).join(' · ') : 'No upcoming joining dates', note: starters.length ? starters.map((p) => `${p.joinDate! > today ? 'Starts' : 'Started'} ${dateLabel(p.joinDate!)}`).join(' · ') : 'Based on Staff Profile joining dates, kept for 7 days after they start', action: onProfiles },
     { title: 'Leaving', count: people ? leaving.length : undefined, icon: UserMinus, tone: 'bg-rose-50 text-rose-700', detail: leaving.length ? leaving.map((p) => `${shortName(p)} · ${dateLabel(p.resignDate!)}`).join(' · ') : 'No resignations planned', note: 'Last working day, from Staff Profile', action: onProfiles },
     { title: 'HR to-do', count: people ? pending.length : undefined, icon: CalendarCheck, tone: overdue.length ? 'bg-amber-50 text-amber-700' : 'bg-cyan-50 text-cyan-700', detail: monthLabel, note: overdue.length ? `${overdue.length} overdue · ${pending.length - overdue.length} upcoming / due today` : 'All reminders on track', action: onTasks },
   ];
