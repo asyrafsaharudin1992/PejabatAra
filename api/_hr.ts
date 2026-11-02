@@ -16,7 +16,7 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 // directory shows; the full profile is read one person at a time, and every change
 // is written to hr_audit.
 // The payroll settings kept per person (see 202611020003_payroll_settings.sql).
-const PAYROLL_KEYS = ['epfRate', 'socsoCategory', 'socsoEmployed', 'eis', 'hrdf', 'skbbk', 'taxResident', 'taxType', 'pcbApplied', 'payGroup', 'otType', 'probationMonths', 'flexi', 'restDay', 'defaultShift'];
+const PAYROLL_KEYS = ['epfRate', 'socsoCategory', 'socsoEmployed', 'eis', 'hrdf', 'skbbk', 'taxResident', 'taxType', 'pcbApplied', 'payGroup', 'otType', 'probationMonths', 'flexi', 'restDay', 'defaultShift', 'epfName', 'lhdnEmployeeCode'];
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -1204,12 +1204,16 @@ export async function hrHandler(req: any, res: any) {
       if (employerError || slipError) throw fail(400, 'Payroll files are not set up yet (migration 202611020007).');
       if (!employer) throw fail(400, "The employer's statutory numbers have not been entered yet.");
       const ids = (slips || []).map((row: any) => row.employee_id);
-      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,employee_code,full_name,ic_no,epf_no,tax_no').in('id', ids).eq('company', company) : { data: [], error: null };
+      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,employee_code,full_name,ic_no,epf_no,tax_no,payroll_settings').in('id', ids).eq('company', company) : { data: [], error: null };
       if (peopleError) throw peopleError;
       const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row.result || {}]));
       const problems: string[] = [];
       const name = (person: any) => String(person.full_name || '').toUpperCase();
+      // Infotech's "Employee EPF Name" (for example BT for BINTI) goes in the KWSP and ePCB files when it differs from the full name.
+      const epfName = (person: any) => String(person.payroll_settings?.epfName || '').toUpperCase() || name(person);
       const rows = (people || []).map((person: any) => ({ person, r: slipOf.get(person.id) as any })).filter((item: any) => item.r && item.r.gross > 0);
+      // Months brought over from Infotech keep the totals but not the KWSP and PERKESO wages, so their files cannot be made here (they were filed from Infotech).
+      if (kind !== 'epcb' && rows.some((item: any) => item.r && (typeof item.r.kwspWage !== 'number' || typeof item.r.socsoWage !== 'number'))) throw fail(400, 'This month was brought over from Infotech and was filed from there, so its KWSP and PERKESO file cannot be made here.');
       if (!rows.length) throw fail(400, `No payslips saved for ${company} in this month.`);
       const now = new Date(Date.now() + 8 * 3600 * 1000);
       const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
@@ -1218,14 +1222,15 @@ export async function hrHandler(req: any, res: any) {
       if (kind === 'epf') {
         for (const { person } of rows) { if (!String(person.epf_no || '').replace(/\D/g, '')) problems.push(`${name(person)}: no KWSP number`); if (String(person.ic_no || '').replace(/\D/g, '').length !== 12) problems.push(`${name(person)}: IC is not 12 digits`); }
         const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
-        content = epfFormA({ employerEpfNo: employer.epf_no, generated: stamp, contributionMonth: mmyyyy(next.y, next.m), rows: rows.map(({ person, r }: any) => ({ memberNo: person.epf_no, ic: person.ic_no, name: name(person), code: person.employee_code, employer: r.kwspEmployer, employee: r.kwspEmployee, wages: r.kwspWage })) });
+        content = epfFormA({ employerEpfNo: employer.epf_no, generated: stamp, contributionMonth: mmyyyy(next.y, next.m), rows: rows.map(({ person, r }: any) => ({ memberNo: person.epf_no, ic: person.ic_no, name: epfName(person), code: person.employee_code, employer: r.kwspEmployer, employee: r.kwspEmployee, wages: r.kwspWage })) });
         file = `EPF_${digits9(employer.epf_no)}_${stamp.slice(6)}${stamp.slice(4, 6)}${stamp.slice(0, 4)}.txt`;
       } else if (kind === 'socso') {
         for (const { person } of rows) if (String(person.ic_no || '').replace(/\D/g, '').length !== 12) problems.push(`${name(person)}: IC is not 12 digits`);
         content = socsoFile({ employerSocsoNo: employer.socso_no, companyRegNo: employer.company_reg_no, wageMonth: mmyyyy(year, month), rows: rows.map(({ person, r }: any) => ({ ic: person.ic_no, name: name(person), wages: r.socsoWage, socsoEmployer: r.socsoEmployer, socsoEmployee: r.socsoEmployee, eisEmployer: r.eisEmployer, eisEmployee: r.eisEmployee, skbbk: r.skbbk })) });
         file = `${employer.socso_no}_${mmyyyy(year, month)}.txt`;
       } else {
-        const list = rows.map(({ person, r }: any) => ({ taxNo: person.tax_no, name: name(person), ic: person.ic_no, pcb: r.pcb, code: person.employee_code }));
+        // The ePCB reference is Infotech's "LHDN EmployeeCode" (for example IG28758028) when one is set, otherwise the staff code.
+        const list = rows.map(({ person, r }: any) => ({ taxNo: person.tax_no, name: epfName(person), ic: person.ic_no, pcb: r.pcb, code: String(person.payroll_settings?.lhdnEmployeeCode || '') || person.employee_code }));
         for (const item of list) if (String(item.taxNo || '').replace(/\D/g, '').length < 10) problems.push(`${item.name}: income tax number missing or short`);
         list.sort((a: any, b: any) => String(a.taxNo || '').replace(/\D/g, '').localeCompare(String(b.taxNo || '').replace(/\D/g, '')));
         content = epcbFile({ employerENo: employer.employer_e_no, year, month, rows: list });

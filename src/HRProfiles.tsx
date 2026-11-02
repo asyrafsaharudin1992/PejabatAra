@@ -316,7 +316,7 @@ function ProfilePayHistory({ employeeId, reveal, onError }: { employeeId: string
 }
 
 // How this person is treated in the monthly pay run, read off Infotech. HR only; there are no pay figures here.
-const PAYROLL_ROWS: [string, string][] = [['epfRate', 'KWSP rate (%)'], ['socsoCategory', 'PERKESO category'], ['socsoEmployed', 'PERKESO employed'], ['eis', 'EIS'], ['hrdf', 'HRDF'], ['skbbk', 'SKBBK (24-hour cover)'], ['taxResident', 'Tax resident'], ['taxType', 'Tax remuneration type'], ['pcbApplied', 'PCB applied'], ['payGroup', 'Pay group'], ['otType', 'OT type'], ['probationMonths', 'Probation (months)'], ['flexi', 'Flexi hours'], ['restDay', 'Rest day'], ['defaultShift', 'Default shift']];
+const PAYROLL_ROWS: [string, string][] = [['epfRate', 'KWSP rate (%)'], ['socsoCategory', 'PERKESO category'], ['socsoEmployed', 'PERKESO employed'], ['eis', 'EIS'], ['hrdf', 'HRDF'], ['skbbk', 'SKBBK (24-hour cover)'], ['taxResident', 'Tax resident'], ['taxType', 'Tax remuneration type'], ['pcbApplied', 'PCB applied'], ['payGroup', 'Pay group'], ['otType', 'OT type'], ['probationMonths', 'Probation (months)'], ['flexi', 'Flexi hours'], ['restDay', 'Rest day'], ['defaultShift', 'Default shift'], ['epfName', 'Name on KWSP and ePCB files'], ['lhdnEmployeeCode', 'LHDN employee code']];
 function PayrollSettingsCard({ settings }: { settings: Record<string, string | number | boolean> }) {
   const shown = PAYROLL_ROWS.filter(([key]) => key in settings);
   return <section className={card}><h3 className="font-semibold">Payroll settings</h3>
