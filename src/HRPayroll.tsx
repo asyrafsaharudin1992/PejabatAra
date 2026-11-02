@@ -35,9 +35,9 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 }
 
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
-type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
+type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
 const API = '/api/status?resource=hr';
-const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
+const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -104,10 +104,10 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     </div>
     {staff === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !staff.length ? <p className="mt-4 text-sm text-slate-500">Nothing to show for this month.</p> : <>
       {blocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">An earlier month is not locked yet, so the year-to-date totals (and PCB) below are not final.</p>}
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1500px] text-left text-xs">
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1640px] text-left text-xs">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Basic</th>{FIELDS.map(([, label]) => <th key={label} className="pr-2">{label}</th>)}<th className="pr-3 text-right">Gross</th><th className="pr-3 text-right">KWSP</th><th className="pr-3 text-right">PERKESO</th><th className="pr-3 text-right">EIS</th><th className="pr-3 text-right">SKBBK</th><th className="pr-3 text-right">PCB</th><th className="text-right">Net</th></tr></thead>
         <tbody>{rows.map(({ member, out }) => { const slipLocked = member.payslip?.status === 'locked'; return <tr key={member.id} className="border-t border-slate-100">
-          <td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{member.fullName}</p><p className="text-[10px] text-slate-400">{member.employeeCode}{!member.hasYtd && ' · no year-to-date'}{slipLocked && ' · locked'}</p></td>
+          <td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{member.fullName}</p><p className="text-[10px] text-slate-400">{member.employeeCode}{!member.hasYtd && ' · no year-to-date'}{member.status === 'Inactive' && ' · left, final pay'}{slipLocked && ' · locked'}</p></td>
           <td className="pr-3 text-right">{cell(out.basic)}</td>
           {FIELDS.map(([key]) => <td key={key} className="pr-2"><input type="number" min="0" step="0.01" disabled={slipLocked} value={inputs[member.id]?.[key] || ''} onChange={(event) => setInputs({ ...inputs, [member.id]: { ...(inputs[member.id] || NO_INPUTS), [key]: Number(event.target.value) || 0 } })} className="h-8 w-[74px] rounded-lg border border-slate-200 px-2 text-right disabled:bg-slate-50" /></td>)}
           <td className="pr-3 text-right font-semibold">{cell(out.gross)}</td><td className="pr-3 text-right">{cell(out.kwspEmployee)}</td><td className="pr-3 text-right">{cell(out.socsoEmployee)}</td><td className="pr-3 text-right">{cell(out.eisEmployee)}</td><td className="pr-3 text-right">{cell(out.skbbk)}</td><td className="pr-3 text-right">{cell(out.pcb)}</td><td className="text-right font-bold text-[#0b587b]">{cell(out.net)}</td>

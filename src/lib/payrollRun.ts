@@ -12,12 +12,14 @@ export type PayStaff = {
   spouseWorking: boolean | null;
   children: PayChild[];
   settings: Record<string, string | number | boolean>;
+  joinDate?: string | null;     // YYYY-MM-DD; the first month is paid for the days from here
+  resignDate?: string | null;   // YYYY-MM-DD; the last month is paid up to here
 };
 export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakatPaid: number };
 // What HR enters for the month. OT is entered as hours at each rate (the rate HR chose when approving it in Attendance), rest days and public
 // holidays worked as a count of days; the amounts are worked out from the salary. `ot` and `restPh` are for an amount that does not fit those.
-export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number };
-export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0, unpaidDays: 0 };
+export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number; annualLeaveDeduction?: number };
+export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0, unpaidDays: 0, annualLeaveDeduction: 0 };
 
 const money = (value: number) => Math.round(value * 100) / 100;
 // Infotech: daily rate = salary / 26; hourly rate = daily rate / 8, shown to the sen. OT hours are paid at the hourly rate times the rate chosen.
@@ -25,6 +27,17 @@ const money = (value: number) => Math.round(value * 100) / 100;
 export const dailyRate = (salary: number) => salary / 26;
 // Unpaid leave is cut at salary / 30 per day (Infotech's setting), the daily amount shown to the sen.
 export const unpaidDayRate = (salary: number) => money(salary / 30);
+
+// A joiner or leaver is paid for the days employed inside the pay period out of all its days (Infotech: RM1,700 for 25 of 31 days is RM1,370.97).
+export function proratedSalary(salary: number, year: number, month: number, joinDate?: string | null, resignDate?: string | null) {
+  const period = payPeriod(year, month);
+  const day = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10))) / 86400000;
+  const total = day(period.to) - day(period.from) + 1;
+  const start = joinDate && joinDate > period.from ? joinDate : period.from;
+  const end = resignDate && resignDate < period.to ? resignDate : period.to;
+  const worked = Math.max(0, day(end) - day(start) + 1);
+  return { amount: worked >= total ? salary : money((salary * worked) / total), worked, total };
+}
 export const hourlyRate = (salary: number) => money(dailyRate(salary) / 8);
 export function overtimePay(salary: number, hours: { ot10?: number; ot15?: number; ot20?: number; ot30?: number }) {
   const rate = hourlyRate(salary);
@@ -41,16 +54,18 @@ export function childrenForRelief(children: PayChild[], year: number) {
 export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd, year: number, month: number) {
   const s = staff.settings;
   const unpaid = money(inputs.unpaidLeave + unpaidDayRate(staff.basicSalary) * (inputs.unpaidDays || 0));
-  const basic = Math.max(0, staff.basicSalary - unpaid);
+  const earned = proratedSalary(staff.basicSalary, year, month, staff.joinDate, staff.resignDate).amount;
+  const basic = Math.max(0, earned - unpaid);
   const allowances = staff.fixedAllowances.map((item) => ({ ...item, type: allowanceType(item.name) }));
   const allowanceTotal = allowances.reduce((sum, item) => sum + item.amount, 0);
   const otAmount = money(inputs.ot + overtimePay(staff.basicSalary, inputs));
   const restPh = money(inputs.restPh + restPhPay(staff.basicSalary, inputs.restDays || 0, inputs.phDays || 0));
   const gross = money(basic + allowanceTotal + otAmount + restPh + inputs.shiftAllowance + inputs.otherAllowance);
   // KWSP counts salary, rest-day and shift pay and any allowance flagged for it; OT and other allowances do not count.
-  const kwspWage = basic + restPh + inputs.shiftAllowance + allowances.filter((item) => item.type?.kwsp).reduce((sum, item) => sum + item.amount, 0);
+  const leaveCut = inputs.annualLeaveDeduction || 0;
+  const kwspWage = Math.max(0, basic - leaveCut) + restPh + inputs.shiftAllowance + allowances.filter((item) => item.type?.kwsp).reduce((sum, item) => sum + item.amount, 0);
   // PERKESO, EIS and SKBBK count everything except the allowances that are not flagged for them.
-  const socsoWage = gross - allowances.filter((item) => !(item.type?.perkeso)).reduce((sum, item) => sum + item.amount, 0) - inputs.otherAllowance;
+  const socsoWage = gross - leaveCut - allowances.filter((item) => !(item.type?.perkeso)).reduce((sum, item) => sum + item.amount, 0) - inputs.otherAllowance;
   const rate = typeof s.epfRate === 'number' ? s.epfRate : 11;
   const k = kwsp(kwspWage, rate), p = perkeso(socsoWage), e = eis(socsoWage);
   const useSocso = flag(s, 'socsoEmployed', true), useEis = flag(s, 'eis', true);
@@ -69,7 +84,7 @@ export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd
     });
     pcb = money(result.pcb); chargeable = money(result.chargeable);
   }
-  const deductions = money(kwspEmployee + socsoEmployee + eisEmployee + skbbkEmployee + pcb + inputs.otherDeduction);
+  const deductions = money(kwspEmployee + socsoEmployee + eisEmployee + skbbkEmployee + pcb + inputs.otherDeduction + leaveCut);
   return {
     ot: otAmount, restPh, basic: money(basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
     kwspEmployee, kwspEmployer, socsoEmployee, socsoEmployer, eisEmployee, eisEmployer, skbbk: skbbkEmployee, hrdf: hrdfEmployer, pcb, chargeable, deductions, net: money(gross - deductions),

@@ -216,8 +216,10 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 // The active staff for one pay month with what the pay needs: salary, allowances, family, payroll settings and the year-to-date totals
 // (the totals read off Infotech, plus every month locked since). A month can only be run once the months before it are locked.
 async function payrollContext(db: any, year: number, month: number) {
+  // Staff who left during or after this pay period are still paid their last month.
+  const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const [{ data: staffRows, error }, ytdRead, payslipRead] = await Promise.all([
-    db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings').eq('status', 'Active').order('company').order('employee_code'),
+    db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
     db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid').eq('year', year),
     db.from('hr_payslips').select('employee_id,month,status,inputs,result').eq('year', year),
   ]);
@@ -246,7 +248,7 @@ async function payrollContext(db: any, year: number, month: number) {
     return {
       id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [],
       maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
-      settings: row.payroll_settings || {}, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
+      settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
   });
   return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, staff };
@@ -1081,8 +1083,8 @@ export async function hrHandler(req: any, res: any) {
         if (!member) continue;
         if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
         const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
-        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays) };
-        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings }, inputs, member.ytd, year, month);
+        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays), annualLeaveDeduction: num(item.inputs?.annualLeaveDeduction) };
+        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate }, inputs, member.ytd, year, month);
         rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result, locked_at: lock ? now : null, updated_at: now });
       }
       if (lock) {
