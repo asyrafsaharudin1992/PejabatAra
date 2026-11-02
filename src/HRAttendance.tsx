@@ -2,6 +2,7 @@ import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { NEW_CODE, newCode } from './lib/shiftCodes';
 import { ImportRow, readInfotechReport } from './lib/infotechReport';
 
 // Office HR > Attendance: who clocked in today, the month in numbers, OT to approve, corrections staff asked for, the late
@@ -259,7 +260,7 @@ function Staff({ onError }: { onError: (message: string) => void }) {
   const [places, setPlaces] = useState<Place[]>([]);
   const [shifts, setShifts] = useState<string[]>([]);
   const [saved, setSaved] = useState('');
-  const load = () => Promise.all([api('action=attendance_people'), api('action=attendance_places'), api('action=attendance_rules')]).then(([a, b, c]) => { setPeople(a.people); setPlaces(b.places); setShifts([...new Set<string>((c.times as TimeRow[]).filter((row) => row.kind === 'staff').map((row) => row.code))]); }).catch((cause: Error) => { setPeople([]); onError(cause.message); });
+  const load = () => Promise.all([api('action=attendance_people'), api('action=attendance_places'), api('action=attendance_rules')]).then(([a, b, c]) => { setPeople(a.people); setPlaces(b.places); setShifts([...new Set<string>((c.times as TimeRow[]).filter((row) => row.kind === 'staff' && !NEW_CODE[row.code]).map((row) => row.code))]); }).catch((cause: Error) => { setPeople([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
   const save = async (person: Person) => { try { const result = await api('action=attendance_person_save', { id: person.id, mode: person.mode, placeIds: person.placeIds, clockRequired: person.clockRequired, defaultShift: person.defaultShift }); if (result.error) throw new Error(result.error); setSaved(person.id); setTimeout(() => setSaved(''), 1500); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const patch = (id: string, next: Partial<Person>) => setPeople((list) => (list || []).map((person) => person.id === id ? { ...person, ...next } : person));
@@ -271,7 +272,7 @@ function Staff({ onError }: { onError: (message: string) => void }) {
       <tbody>{people.map((person) => <tr key={person.id} className="border-t border-slate-100 align-top">
         <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{person.name}</p><p className="text-[11px] text-slate-400">{person.company} · {person.code}{person.doctor ? ' · doctor' : ''}</p></td>
         <td className="pr-3"><select value={person.clockRequired} onChange={(event) => patch(person.id, { clockRequired: event.target.value as Person['clockRequired'] })} aria-label={`Who clocks: ${person.name}`} className={field}><option value="full">In and out</option><option value="in_only">In only</option><option value="none">Optional (management)</option></select></td>
-        <td className="pr-3"><select value={person.defaultShift} onChange={(event) => patch(person.id, { defaultShift: event.target.value })} aria-label={`Shift when not on roster: ${person.name}`} className={field}><option value="">Follow roster, else office hours (AM-5)</option>{shifts.map((code) => <option key={code} value={code}>{code}</option>)}</select></td>
+        <td className="pr-3"><select value={newCode(person.defaultShift)} onChange={(event) => patch(person.id, { defaultShift: event.target.value })} aria-label={`Shift when not on roster: ${person.name}`} className={field}><option value="">Follow roster, else office hours (AM-5)</option>{shifts.map((code) => <option key={code} value={code}>{code}</option>)}</select></td>
         <td className="pr-3"><select value={person.mode} onChange={(event) => patch(person.id, { mode: event.target.value as Person['mode'] })} aria-label={`Where ${person.name} may clock`} className={field}><option value="places">At the clinic / places</option><option value="anywhere">Anywhere (home)</option></select></td>
         <td className="pr-3">{person.mode === 'anywhere' ? <span className="text-xs text-slate-400">Not checked</span> : <div className="flex flex-wrap gap-x-3 gap-y-1">{extra.filter((place) => place.company !== person.company).map((place) => <label key={place.id} className="inline-flex items-center gap-1.5 text-xs"><input type="checkbox" checked={person.placeIds.includes(place.id)} onChange={(event) => patch(person.id, { placeIds: event.target.checked ? [...person.placeIds, place.id] : person.placeIds.filter((id) => id !== place.id) })} />{place.name}</label>)}{!extra.filter((place) => place.company !== person.company).length && <span className="text-xs text-slate-400">—</span>}</div>}</td>
         <td className="text-right"><button onClick={() => void save(person)} className={ghost}>{saved === person.id ? 'Saved' : 'Save'}</button></td>
@@ -298,7 +299,7 @@ function Rules({ onError }: { onError: (message: string) => void }) {
     <section className={`${card} space-y-3`}>
       <h3 className="font-semibold">Shifts</h3>
       <p className="text-sm text-slate-500">The start and end of each roster code. The code always shows what time it starts (AM-9 starts at 9AM, AM-12 at 12PM), the same for KJ and SK. A shift that ends before it starts runs overnight. A person with no roster is expected on their usual shift on their working weekdays.</p>
-      <div className="grid gap-2">{rules.times.map((row, index) => <div key={`${row.kind}-${row.code}-${index}`} className="flex flex-wrap items-center gap-3 text-sm">
+      <div className="grid gap-2">{rules.times.map((row, index) => NEW_CODE[row.code] ? null : <div key={`${row.kind}-${row.code}-${index}`} className="flex flex-wrap items-center gap-3 text-sm">
         <span className="w-16 text-xs text-slate-400">{row.kind === 'doctor' ? 'Doctors' : 'Staff'}</span><span className="w-20 font-mono text-xs font-bold text-[#0b587b]">{row.code}</span>
         <input type="time" value={row.start} onChange={(event) => setTime(index, { start: event.target.value })} className={field} aria-label={`${row.code} start`} /><span className="text-slate-400">to</span><input type="time" value={row.end} onChange={(event) => setTime(index, { end: event.target.value })} className={field} aria-label={`${row.code} end`} />
         {WAS[row.code] && <span className="text-xs text-slate-400">was {WAS[row.code]} in Infotech</span>}
