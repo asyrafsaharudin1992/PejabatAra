@@ -177,6 +177,19 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
     setBusy(false);
   };
+  const financeSummary = () => {
+    const paid = (items || []).filter((item) => item.confirmed), amountOf = (item: IncentiveItem) => item.confirmedAmount || 0;
+    const q = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const lines = [[`Incentive pay: claims of ${monthText(month)}`], [`To be paid on ${paidOn ? dmy(paidOn) : '16th'}`, 'No KWSP, PERKESO, EIS or PCB deducted'], [], ['Company', 'Staff code', 'Name', 'Approved entries', 'Amount (RM)']];
+    for (const company of ['KJ', 'SK']) {
+      const rows = paid.filter((item) => item.company === company);
+      for (const item of rows) lines.push([company, item.code, item.name, String(item.procedures), amountOf(item).toFixed(2)]);
+      lines.push([`${company} total`, '', '', String(rows.reduce((sum, item) => sum + item.procedures, 0)), rows.reduce((sum, item) => sum + amountOf(item), 0).toFixed(2)], []);
+    }
+    lines.push(['Grand total', '', '', String(paid.reduce((sum, item) => sum + item.procedures, 0)), paid.reduce((sum, item) => sum + amountOf(item), 0).toFixed(2)]);
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([lines.map((line) => line.map(q).join(',')).join('\r\n')], { type: 'text/csv' })); link.download = `Incentive_Summary_${month}.csv`; document.body.appendChild(link); link.click(); link.remove();
+    setNote(`Finance summary: ${paid.length} staff, only confirmed payments.`);
+  };
   const total = (items || []).reduce((sum, item) => sum + (item.confirmed ? item.confirmedAmount || 0 : item.received ? item.amount : 0), 0);
   const cell = (value: number) => show ? fmt(value) : '••••';
   const dmy = (value: string) => value.split('-').reverse().join('/');
@@ -201,6 +214,7 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
           <select value={bankCompany} onChange={(event) => setBankCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
           <button type="button" disabled={busy || !items.some((item) => item.confirmed)} onClick={() => void bankFile()} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank</button>
         </span>
+        <button type="button" disabled={!items.some((item) => item.confirmed)} onClick={financeSummary} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Finance summary</button>
         {note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
     </>}

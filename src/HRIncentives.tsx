@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, Undo2 } from 'lucide-react';
+import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, ScrollText, Undo2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { approvedTotal, claimTotal, codeName, dmy, monthLabel, rm } from './lib/incentiveCodes';
@@ -26,6 +26,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
   const [receiver, setReceiver] = useState(() => { try { return localStorage.getItem(RECEIVER_KEY) || ''; } catch { return ''; } });
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
+  const [flowOpen, setFlowOpen] = useState(false);
   const [printing, setPrinting] = useState<'' | 'print' | 'pdf'>('');
   const load = () => {
     setClaims(null);
@@ -65,10 +66,22 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{claimMonths().map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select>
       <select value={state} onChange={(event) => setState(event.target.value)} aria-label="Status" className={field}><option value="">All</option><option value="waiting">Not received yet</option><option value="received">Received</option></select>
       <select value={branch} onChange={(event) => setBranch(event.target.value)} aria-label="Branch" className={field}><option value="">All branches</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+      <button onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Incentive flow</button>
       <button onClick={load} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button>
       <button onClick={() => setPrinting('pdf')} disabled={!shown.length} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({shown.length})</button>
       <button onClick={() => setPrinting('print')} disabled={!shown.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" />Print all</button>
     </section>
+    {flowOpen && <section className={card}>
+      <h3 className="font-semibold">How incentives reach payment</h3>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">
+        <li>Staff add their incentive entries for the month.</li>
+        <li>Clinical Admin checks each entry, ticks the approved ones and sends the claim to HR.</li>
+        <li>The claim appears here. HR marks it <strong>Received</strong> once the paperwork is in hand.</li>
+        <li>In <strong>Payroll → Incentive pay</strong>, HR confirms the received claims. The amounts are then fixed and staff can see them.</li>
+        <li>From the same place, HR downloads the Maybank file and the <strong>Finance summary</strong>. Incentive is paid on the <strong>16th of the next month</strong>, with no KWSP, PERKESO, EIS or PCB taken.</li>
+      </ol>
+      <p className="mt-2 text-xs text-slate-400">Only entries that Clinical Admin ticked are counted. Returning a claim in Clinical Admin takes it off this list.</p>
+    </section>}
     {problem && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">Could not mark received: {problem}</p>}
     {notSetUp && <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Sending incentives to HR is not set up yet. System Admin needs to run the latest database migration first.</p>}
     {claims && waiting.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-[#f4fafd] p-4"><p className="min-w-[200px] flex-1 text-sm text-slate-700"><strong>{waiting.length} {waiting.length === 1 ? 'claim' : 'claims'}</strong> {waiting.length === 1 ? 'has' : 'have'} not been marked received.</p>
