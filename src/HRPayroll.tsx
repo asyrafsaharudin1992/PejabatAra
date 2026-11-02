@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
+import { incentiveSummaryCsv } from './lib/incentiveSummary';
 import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 
 // Payroll room, built a piece at a time: it replaces Infotech's Info-Pay from the November 2026 pay run.
@@ -178,16 +179,8 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
     setBusy(false);
   };
   const financeSummary = () => {
-    const paid = (items || []).filter((item) => item.confirmed), amountOf = (item: IncentiveItem) => item.confirmedAmount || 0;
-    const q = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
-    const lines = [[`Incentive pay: claims of ${monthText(month)}`], [`To be paid on ${paidOn ? dmy(paidOn) : '16th'}`, 'No KWSP, PERKESO, EIS or PCB deducted'], [], ['Company', 'Staff code', 'Name', 'Approved entries', 'Amount (RM)']];
-    for (const company of ['KJ', 'SK']) {
-      const rows = paid.filter((item) => item.company === company);
-      for (const item of rows) lines.push([company, item.code, item.name, String(item.procedures), amountOf(item).toFixed(2)]);
-      lines.push([`${company} total`, '', '', String(rows.reduce((sum, item) => sum + item.procedures, 0)), rows.reduce((sum, item) => sum + amountOf(item), 0).toFixed(2)], []);
-    }
-    lines.push(['Grand total', '', '', String(paid.reduce((sum, item) => sum + item.procedures, 0)), paid.reduce((sum, item) => sum + amountOf(item), 0).toFixed(2)]);
-    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([lines.map((line) => line.map(q).join(',')).join('\r\n')], { type: 'text/csv' })); link.download = `Incentive_Summary_${month}.csv`; document.body.appendChild(link); link.click(); link.remove();
+    const paid = (items || []).filter((item) => item.confirmed);
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([incentiveSummaryCsv(monthText(month), paidOn ? dmy(paidOn) : '16th', paid)], { type: 'text/csv' })); link.download = `Incentive_Summary_${month}.csv`; document.body.appendChild(link); link.click(); link.remove();
     setNote(`Finance summary: ${paid.length} staff, only confirmed payments.`);
   };
   const total = (items || []).reduce((sum, item) => sum + (item.confirmed ? item.confirmedAmount || 0 : item.received ? item.amount : 0), 0);
