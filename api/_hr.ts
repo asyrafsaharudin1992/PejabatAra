@@ -5,6 +5,7 @@ import { attendanceHrAction } from './_attendance.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
+import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
@@ -210,6 +211,7 @@ async function ensureLeaveSetup(db: any, userId: string, now: string) {
 }
 
 
+const digits9 = (value: unknown) => String(value ?? '').replace(/\D/g, '').padStart(9, '0');
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 // The active staff for one pay month with what the pay needs: salary, allowances, family, payroll settings and the year-to-date totals
 // (the totals read off Infotech, plus every month locked since). A month can only be run once the months before it are locked.
@@ -1127,6 +1129,48 @@ export async function hrHandler(req: any, res: any) {
       }
       const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
       return res.status(200).json({ file: `MaybankSal_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: body, count, total: Math.round(total * 100) / 100, problems });
+    }
+
+    // Files for the portals: KWSP Form A, PERKESO / EIS / SKBBK and ePCB, one company at a time, from the month's payslips.
+    if (req.method === 'GET' && action === 'payroll_file') {
+      const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      const company = text(req.query.company, 2).toUpperCase(), kind = text(req.query.kind, 8);
+      if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12) || !['KJ', 'SK'].includes(company) || !['epf', 'socso', 'epcb'].includes(kind)) throw fail(400, 'Choose the month, the company and the file.');
+      const [{ data: employer, error: employerError }, { data: slips, error: slipError }] = await Promise.all([
+        db.from('hr_employer_details').select('epf_no,socso_no,employer_e_no,company_reg_no').eq('key', 'group').maybeSingle(),
+        db.from('hr_payslips').select('employee_id,result').eq('year', year).eq('month', month),
+      ]);
+      if (employerError || slipError) throw fail(400, 'Payroll files are not set up yet (migration 202611020007).');
+      if (!employer) throw fail(400, "The employer's statutory numbers have not been entered yet.");
+      const ids = (slips || []).map((row: any) => row.employee_id);
+      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,employee_code,full_name,ic_no,epf_no,tax_no').in('id', ids).eq('company', company) : { data: [], error: null };
+      if (peopleError) throw peopleError;
+      const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row.result || {}]));
+      const problems: string[] = [];
+      const name = (person: any) => String(person.full_name || '').toUpperCase();
+      const rows = (people || []).map((person: any) => ({ person, r: slipOf.get(person.id) as any })).filter((item: any) => item.r && item.r.gross > 0);
+      if (!rows.length) throw fail(400, `No payslips saved for ${company} in this month.`);
+      const now = new Date(Date.now() + 8 * 3600 * 1000);
+      const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
+      const mmyyyy = (y: number, m: number) => `${String(m).padStart(2, '0')}${y}`;
+      let content = '', file = '';
+      if (kind === 'epf') {
+        for (const { person } of rows) { if (!String(person.epf_no || '').replace(/\D/g, '')) problems.push(`${name(person)}: no KWSP number`); if (String(person.ic_no || '').replace(/\D/g, '').length !== 12) problems.push(`${name(person)}: IC is not 12 digits`); }
+        const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+        content = epfFormA({ employerEpfNo: employer.epf_no, generated: stamp, contributionMonth: mmyyyy(next.y, next.m), rows: rows.map(({ person, r }: any) => ({ memberNo: person.epf_no, ic: person.ic_no, name: name(person), code: person.employee_code, employer: r.kwspEmployer, employee: r.kwspEmployee, wages: r.kwspWage })) });
+        file = `EPF_${digits9(employer.epf_no)}_${stamp.slice(6)}${stamp.slice(4, 6)}${stamp.slice(0, 4)}.txt`;
+      } else if (kind === 'socso') {
+        for (const { person } of rows) if (String(person.ic_no || '').replace(/\D/g, '').length !== 12) problems.push(`${name(person)}: IC is not 12 digits`);
+        content = socsoFile({ employerSocsoNo: employer.socso_no, companyRegNo: employer.company_reg_no, wageMonth: mmyyyy(year, month), rows: rows.map(({ person, r }: any) => ({ ic: person.ic_no, name: name(person), wages: r.socsoWage, socsoEmployer: r.socsoEmployer, socsoEmployee: r.socsoEmployee, eisEmployer: r.eisEmployer, eisEmployee: r.eisEmployee, skbbk: r.skbbk })) });
+        file = `${employer.socso_no}_${mmyyyy(year, month)}.txt`;
+      } else {
+        const list = rows.map(({ person, r }: any) => ({ taxNo: person.tax_no, name: name(person), ic: person.ic_no, pcb: r.pcb, code: person.employee_code }));
+        for (const item of list) if (String(item.taxNo || '').replace(/\D/g, '').length < 10) problems.push(`${item.name}: income tax number missing or short`);
+        list.sort((a: any, b: any) => String(a.taxNo || '').replace(/\D/g, '').localeCompare(String(b.taxNo || '').replace(/\D/g, '')));
+        content = epcbFile({ employerENo: employer.employer_e_no, year, month, rows: list });
+        file = `${String(employer.employer_e_no).replace(/\D/g, '')}${String(month).padStart(2, '0')}_${year}.txt`;
+      }
+      return res.status(200).json({ file, content, count: rows.length, problems });
     }
 
     // Incentive pay. The approved claims HR has received for a month, one amount per person; HR confirms them for payment on the 16th of the next month.

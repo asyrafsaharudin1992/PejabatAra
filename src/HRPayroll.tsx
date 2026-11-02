@@ -50,6 +50,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState('');
+  const [fileCompany, setFileCompany] = useState<'KJ' | 'SK'>('KJ');
   const load = async () => {
     setStaff(null); setNote('');
     try {
@@ -77,17 +78,17 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); }
     setBusy('');
   };
-  const bankFile = async (company: 'KJ' | 'SK') => {
-    setBusy('bank'); setNote('');
+  const download = async (kind: 'bank' | 'epf' | 'socso' | 'epcb') => {
+    setBusy('file'); setNote('');
     try {
-      const valueDate = `${year}-${String(month).padStart(2, '0')}-26`;
-      const response = await officeFetch(`${API}&action=payroll_bank&year=${year}&month=${month}&company=${company}&valueDate=${valueDate}`);
+      const url = kind === 'bank' ? `${API}&action=payroll_bank&year=${year}&month=${month}&company=${fileCompany}&valueDate=${year}-${String(month).padStart(2, '0')}-26` : `${API}&action=payroll_file&kind=${kind}&year=${year}&month=${month}&company=${fileCompany}`;
+      const response = await officeFetch(url);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(new Blob([data.csv], { type: 'text/csv' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
-      setNote(`${data.file}: ${data.count} payees, RM ${fmt(data.total)}.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
-    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the bank file.'); }
+      link.href = URL.createObjectURL(new Blob([kind === 'bank' ? data.csv : data.content], { type: 'text/plain' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
+      setNote(`${data.file}: ${data.count} staff.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
     setBusy('');
   };
   const cell = (value: number) => show ? fmt(value) : '••••';
@@ -116,10 +117,13 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="button" disabled={Boolean(busy) || locked} onClick={() => void save(false)} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy === 'save' ? 'Saving…' : 'Save draft'}</button>
         <button type="button" disabled={Boolean(busy) || locked || blocked} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
-        {(['KJ', 'SK'] as const).map((company) => <button key={company} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === company && member.payslip)} onClick={() => void bankFile(company)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank file {company}</button>)}
+        <span className="inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5">
+          <select value={fileCompany} onChange={(event) => setFileCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
+          {([['bank', 'Maybank'], ['epf', 'KWSP'], ['socso', 'PERKESO / EIS'], ['epcb', 'ePCB']] as const).map(([kind, label]) => <button key={kind} type="button" disabled={Boolean(busy) || !staff.some((member) => member.company === fileCompany && member.payslip)} onClick={() => void download(kind)} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />{label}</button>)}
+        </span>
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
-      <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800"><strong>Before you upload a Maybank file:</strong> open it in Notepad and compare it with the Infotech file for the same month (names, account numbers, amounts and the total). Do not upload the first file without checking it. The bank names are only checked for Maybank, RHB and Hong Leong so far.</p>
+      <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800"><strong>Before you upload any file to a portal or to Maybank:</strong> open it in Notepad and compare it with the Infotech file for the same month (names, numbers, amounts and totals). Do not upload the first file without checking it. The KWSP, PERKESO / EIS and ePCB files were checked byte for byte against the October 2026 files from Infotech; the Maybank bank names only for Maybank, RHB and Hong Leong.</p>
       <p className="mt-3 text-xs text-slate-400">OT hours (at the rate HR approved), rest days and public holidays worked, unpaid leave and the like are typed in by HR for now; they will come from attendance and leave when those are brought over. Amounts stay hidden until Show amounts is pressed.</p>
     </>}
   </section>;
