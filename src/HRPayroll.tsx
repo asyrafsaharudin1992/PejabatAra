@@ -191,6 +191,7 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
       <div><h3 className="font-semibold">Incentive pay</h3><p className="mt-0.5 text-xs text-slate-500">Approved claims that HR has received, paid on {paidOn ? dmy(paidOn) : 'the 16th of the next month'}. No KWSP, PERKESO, EIS or PCB is taken.</p></div>
       <div className="flex flex-wrap items-center gap-2">
         <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{months.map((m) => <option key={m} value={m}>Claims of {monthText(m)}</option>)}</select>
+        <button type="button" disabled={!(items || []).some((item) => item.confirmed)} onClick={financeSummary} title="Available once incentive payments are confirmed" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] disabled:opacity-40"><Download className="h-4 w-4" />Finance summary</button>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
       </div>
     </div>
@@ -207,7 +208,6 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
           <select value={bankCompany} onChange={(event) => setBankCompany(event.target.value as 'KJ' | 'SK')} className="h-9 rounded-lg border border-slate-200 px-2 text-sm font-semibold"><option value="KJ">KJ</option><option value="SK">SK</option></select>
           <button type="button" disabled={busy || !items.some((item) => item.confirmed)} onClick={() => void bankFile()} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Maybank</button>
         </span>
-        <button type="button" disabled={!items.some((item) => item.confirmed)} onClick={financeSummary} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Finance summary</button>
         {note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
     </>}
