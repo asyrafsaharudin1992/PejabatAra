@@ -36,3 +36,17 @@ export function socsoFile(input: { employerSocsoNo: string; companyRegNo: string
   const lines = input.rows.map((row) => pad(`${pad(input.employerSocsoNo, 12)}${pad(digits(input.companyRegNo), 12)}${' '.repeat(8)}${digits(row.ic).padStart(12, '0')}${pad(row.name.toUpperCase().replace(/[-'’]/g, ''), 150)}${input.wageMonth}${' '.repeat(8)}${blank(row.wages)}${blank(row.socsoEmployer)}${blank(row.socsoEmployee)}${blank(row.eisEmployer)}${blank(row.eisEmployee)}${row.skbbk > 0 ? blank(row.skbbk) : ' '.repeat(6)}`, 278));
   return lines.join('\r\n') + '\r\n';
 }
+
+export type PcbRow = { taxNo: string; name: string; ic: string; pcb: number; cp38?: number; code: string };
+
+// ePCB text file for LHDN (MyTax e-PCB): a header of 57 characters and one 136-character line a staff member, CRLF.
+// `employerENo` is the employer's E number; `year` and `month` are the pay month. Everyone is listed, zero PCB included.
+export function epcbFile(input: { employerENo: string; year: number; month: number; rows: PcbRow[] }) {
+  const eNo = digits(input.employerENo);
+  const rows = input.rows;   // in the order given
+  const total = rows.reduce((sum, row) => sum + Math.round(row.pcb * 100), 0);
+  const withPcb = rows.filter((row) => row.pcb > 0).length;
+  const header = `H${eNo}${eNo}${input.year}${String(input.month).padStart(2, '0')}${String(total).padStart(10, '0')}${String(withPcb).padStart(5, '0')}${'0'.repeat(15)}`;
+  const detail = rows.map((row) => pad(`D${digits(row.taxNo).padStart(11, '0')}${pad(row.name, 72)}${digits(row.ic).padStart(12, '0')}${' '.repeat(14)}${String(Math.round(row.pcb * 100)).padStart(8, '0')}${String(Math.round((row.cp38 || 0) * 100)).padStart(8, '0')}${row.code}`, 136));
+  return [header, ...detail].join('\r\n') + '\r\n';
+}
