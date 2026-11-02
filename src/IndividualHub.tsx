@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Baby, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound, Users } from 'lucide-react';
+import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
+import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
@@ -7,12 +7,13 @@ import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
 import MyAnnouncements from './MyAnnouncements';
 import { DocumentsPanel, type Doc } from './DocumentsPanel';
+const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type View = 'home' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -188,10 +189,10 @@ function MyProfile() {
 // written anywhere, and screens still show the real account's data.
 const AS_KEY = 'ara_dev_view_as';
 const VIEW_AS: Record<string, Partial<Me['staff']>> = {
-  Staff: { preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Doctor: { preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Supervisor: { preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Admin: { preview: true, isApprover: true, canReview: true, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Staff: { isDoctor: false, preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Doctor: { isDoctor: true, preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Supervisor: { isDoctor: false, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Admin: { isDoctor: false, preview: true, isApprover: true, canReview: true, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
 };
 const readViewAs = () => { try { const value = localStorage.getItem(AS_KEY) || ''; return value in VIEW_AS ? value : ''; } catch { return ''; } };
 
@@ -241,6 +242,7 @@ export default function IndividualHub() {
 
   const phoneNav = <PhoneNav view={view} onGo={setView} />;
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
+  if (view === 'toolkit' && me?.staff.isDoctor) return <Screen nav={phoneNav} title="Medical Toolkit" onBack={() => setView('home')}><Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening Medical Toolkit…</p>}><MedicalToolkit /></Suspense></Screen>;
   if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
@@ -258,6 +260,7 @@ export default function IndividualHub() {
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
   const items: Item[] = [
+    ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
     ...([{ label: 'Announcements', desc: me?.staff.announcementsUnread ? `${me.staff.announcementsUnread} to read` : 'Team updates and memos', icon: Bell, tone: 'bg-[#ffe4e8] text-[#e0314f]', onClick: () => setView('announcements'), badge: me?.staff.announcementsUnread || 0 } as Item]),
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },

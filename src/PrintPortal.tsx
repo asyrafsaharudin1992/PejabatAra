@@ -18,12 +18,12 @@ export function PrintPortal({ margin = 10, children }: { margin?: number; childr
     const node = root.current;
     if (!node) return;
     node.classList.add('cv-measuring');
-    const mm = (node.querySelector('.cv-mm') as HTMLElement | null)?.offsetWidth || 3.78;
+    const mm = ((node.querySelector('.cv-mm') as HTMLElement | null)?.offsetWidth || 378) / 100;
     const room = (209 - margin * 2 - 2) * mm;
     node.querySelectorAll<HTMLElement>('.cv-fit').forEach((fit) => {
       fit.style.zoom = '1';
       // A little to spare, as print and screen lay text out very slightly differently.
-      fit.style.zoom = String(Math.min(1, (room * 0.96) / fit.offsetHeight));
+      fit.style.zoom = String(Math.min(1, (room * 0.96) / Math.max(1, fit.offsetHeight), ((297 - margin * 2) * mm * 0.99) / Math.max(1, fit.scrollWidth)));
     });
     node.classList.remove('cv-measuring');
   }, [margin]);

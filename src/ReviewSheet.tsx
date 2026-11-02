@@ -40,10 +40,14 @@ function Lines({ text, min = 6 }: { text: string; min?: number }) {
 }
 
 export function ReviewSheet({ review }: { review: ReviewFull }) {
+  return createPortal(<ReviewDocument review={review} />, document.body);
+}
+
+export function ReviewDocument({ review }: { review: ReviewFull }) {
   const score = review.totalScore;
   const band = bandOf(score);
   const period = [review.periodStart ? `${dmy(review.periodStart)} - ${dmy(review.periodEnd)}` : '', review.periodLabel ? `(${review.periodLabel})` : ''].filter(Boolean).join(' ');
-  return createPortal(<div className="rv-print">
+  return <div className="rv-print">
     <section className="rv-page">
       <div className="rv-letterhead"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><strong>HSO Healthcare Sdn Bhd</strong><span>Klinik ARA 24 Jam</span></div></div>
       <div className="rv-title">PERFORMANCE ASSESSMENT REVIEW</div>
@@ -93,5 +97,5 @@ export function ReviewSheet({ review }: { review: ReviewFull }) {
       </div>
       <div className="rv-hr"><p><strong><em>For Human Resource/Admin Use</em></strong></p><p>Received on : {dmy(review.hrReceivedOn)} &nbsp;&nbsp;&nbsp; Received by : {review.hrReceivedBy}</p><p>Remarks : {review.hrRemarks}</p></div>
     </section>
-  </div>, document.body);
+  </div>;
 }

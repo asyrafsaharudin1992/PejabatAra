@@ -1,4 +1,6 @@
 import { officeAccess } from './_office-db.js';
+import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
+import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
 // Performance Review, served from /api/status?resource=review (the Vercel Hobby plan allows
 // only 12 functions).
@@ -124,9 +126,84 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_list', 'hr_get', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
+    if (req.method === 'GET' && action === 'hr_reminders') {
+      // Read the small settings/staff lists first, then only the reminder dates we need.
+      // One extra row detects overflow rather than silently reporting incomplete statuses.
+      const readLimit = 500;
+      const today = malaysiaToday();
+      const [peopleResult, settingsResult] = await Promise.all([
+        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,status').eq('status', 'Active').limit(readLimit + 1),
+        db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle(),
+      ]);
+      if (peopleResult.error) throw peopleResult.error;
+      if ((peopleResult.data || []).length > readLimit) throw fail(422, 'Too many active staff to load reminders safely. Please contact the system administrator.');
+      const settingsNotSetUp = !settingsResult.data && (!settingsResult.error || ['PGRST205', '42P01'].includes(settingsResult.error.code));
+      if (settingsResult.error && !settingsNotSetUp) throw settingsResult.error;
+      const settings = normalizeReviewSettings(settingsResult.data?.settings || defaultReviewSettings(), settingsResult.data?.settings || defaultReviewSettings());
+      const people = (peopleResult.data || []).map((r: any) => ({ id: r.id, company: r.company, employeeCode: r.employee_code, fullName: r.full_name, joinDate: r.join_date, status: r.status }));
+      const customResult = people.length
+        ? await db.from('hr_review_reminders').select('id,employee_id,period_label,due_on,notes,completed_at,cancelled_at').in('employee_id', people.map((person) => person.id)).order('due_on').limit(readLimit + 1)
+        : { data: [], error: null };
+      const notSetUp = customResult.error && ['PGRST205', '42P01'].includes(customResult.error.code);
+      if (customResult.error && !notSetUp) throw customResult.error;
+      if ((customResult.data || []).length > readLimit) throw fail(422, 'More than 500 staff reminders match. Please contact the system administrator to paginate reminders.');
+      const custom = (customResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, periodLabel: r.period_label, dueOn: r.due_on, notes: r.notes, completedAt: r.completed_at, cancelledAt: r.cancelled_at }));
+      const candidates = buildReviewReminders(people, [], custom, today, settings);
+      const dates = [...new Set(candidates.map((item) => item.dueOn))];
+      // Undated legacy reviews still participate in matching, as before.
+      const reviewsResult = dates.length
+        ? await db.from('hr_reviews').select('id,employee_id,employee_code,staff_name,period_label,period_end,status,submitted_at').or(`period_end.in.(${dates.join(',')}),period_end.is.null`).order('created_at', { ascending: false }).limit(readLimit + 1)
+        : { data: [], error: null };
+      if (reviewsResult.error) throw reviewsResult.error;
+      if ((reviewsResult.data || []).length > readLimit) throw fail(422, 'More than 500 reviews match the reminders. Reduce the review date window or contact the system administrator.');
+      const reviews = (reviewsResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, employeeCode: r.employee_code, staffName: r.staff_name, periodLabel: r.period_label, periodEnd: r.period_end, status: r.status, submittedAt: r.submitted_at }));
+      return res.status(200).json({ reminders: buildReviewReminders(people, reviews, custom, today, settings), settings, settingsVersion: settingsResult.data?.updated_at || null, settingsNotSetUp: Boolean(settingsNotSetUp), notSetUp: Boolean(notSetUp) });
+    }
+    if (req.method === 'POST' && action === 'hr_review_settings_save') {
+      const { data: current, error: readError } = await db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle();
+      if (readError) throw readError;
+      if (!current) throw fail(409, 'Review settings are not set up yet. Run the review-settings migration first.');
+      if (body.version !== current.updated_at) throw fail(409, 'Review settings changed in another session. Refresh and check the latest settings before saving.');
+      let settings;
+      try { settings = normalizeReviewSettings(body.settings, current.settings); }
+      catch (cause: any) { throw fail(400, cause.message); }
+      const { data, error } = await db.from('hr_review_settings').update({ settings, updated_by: user.id, updated_at: new Date().toISOString() }).eq('id', 1).eq('updated_at', current.updated_at).select('settings,updated_at').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(409, 'Another HR session saved first. Refresh the settings before saving.');
+      return res.status(200).json({ settings: data.settings, version: data.updated_at });
+    }
+    if (req.method === 'POST' && action === 'hr_reminder_save') {
+      if (!isId(body.employeeId)) throw fail(400, 'Choose an active staff member.');
+      const label = text(body.periodLabel, 40);
+      if (!label) throw fail(400, 'Enter the assessment needed.');
+      if (!validReminderDate(String(body.dueOn || ''))) throw fail(400, 'Choose a valid due date.');
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,status').eq('id', body.employeeId).maybeSingle();
+      if (personError) throw personError;
+      if (!person || person.status !== 'Active') throw fail(400, 'Choose an active staff member.');
+      const now = new Date().toISOString();
+      const next = { employee_id: person.id, period_label: label, due_on: body.dueOn, notes: text(body.notes, 2000), updated_by: user.id, updated_at: now };
+      if (body.id) {
+        if (!isId(body.id)) throw fail(400, 'Invalid reminder.');
+        const { data, error } = await db.from('hr_review_reminders').update(next).eq('id', body.id).is('completed_at', null).is('cancelled_at', null).select('id').maybeSingle();
+        if (error) throw error;
+        if (!data) throw fail(409, 'This reminder is no longer open.');
+      } else {
+        const { error } = await db.from('hr_review_reminders').insert({ ...next, created_by: user.id });
+        if (error) throw error;
+      }
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'POST' && action === 'hr_reminder_state') {
+      if (!isId(body.id) || !['complete', 'cancel', 'reopen'].includes(body.state)) throw fail(400, 'Choose a valid reminder action.');
+      const now = new Date().toISOString();
+      const { data, error } = await db.from('hr_review_reminders').update({ completed_at: body.state === 'complete' ? now : null, cancelled_at: body.state === 'cancel' ? now : null, updated_by: user.id, updated_at: now }).eq('id', body.id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(404, 'Reminder not found.');
+      return res.status(200).json({ success: true });
+    }
     if (req.method === 'GET' && action === 'hr_list') {
       const { data, error } = await db.from('hr_reviews').select(REVIEW_SUMMARY).order('created_at', { ascending: false }).limit(500);
       if (error) throw error;

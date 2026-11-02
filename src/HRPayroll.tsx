@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Banknote, Check, Circle, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
-import { calculatePayslip, NO_INPUTS, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
+import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 
 // Payroll room, built a piece at a time: it replaces Infotech's Info-Pay from the November 2026 pay run.
 // Nothing here changes any pay record yet; the list shows what is in place and what is still to come.
@@ -78,9 +78,11 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     setBusy('');
   };
   const cell = (value: number) => show ? fmt(value) : '••••';
+  const period = payPeriod(year, month);
+  const dmy = (value: string) => value.split('-').reverse().join('/');
   return <section className={card}>
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="font-semibold">Monthly pay run</h3><p className="mt-0.5 text-xs text-slate-500">Year-to-date totals in from Infotech up to {asOf || 'October 2026'}. Each month needs the one before it locked.</p></div>
+      <div><h3 className="font-semibold">Monthly pay run</h3><p className="mt-0.5 text-xs text-slate-500">Pay period {dmy(period.from)} to {dmy(period.to)} (OT and unpaid leave are counted for these days). Year-to-date totals in from Infotech up to {asOf || 'October 2026'}; each month needs the one before it locked.</p></div>
       <div className="flex flex-wrap items-center gap-2">
         <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>

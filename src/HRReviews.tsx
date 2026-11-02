@@ -3,18 +3,20 @@ import { Printer, Search, Send } from 'lucide-react';
 import { ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { HRReviewReminders } from './HRReviewReminders';
+import type { ReviewReminder } from './lib/reviewReminders';
+import { defaultReviewSettings, type ReviewSettings } from './lib/reviewSettings';
 import { AREAS, LEVELS, ReviewFull, ReviewSummary, dmy, percentLabel, reviewApi, scoreTone } from './lib/performanceReview';
 
 // Office HR: the Performance Reviews supervisors have submitted, with the
 // "For HR use" box (received on, received by, remarks) from the paper form.
 const field = 'w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 
-const PERIODS = ['1st Month', '2nd Month', '3rd Month', '6th Month', 'Annual'];
 type Person = { id: string; fullName: string; employeeCode: string; designation: string; department: string; status: string; company: string };
 const blankAssign = () => ({ employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
 
 export function HRReviews({ onError, reportOnly = false }: { onError: (message: string) => void; reportOnly?: boolean }) {
-  const [tab, setTab] = useState<'assign' | 'reports'>(reportOnly ? 'reports' : 'assign');
+  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders'>(reportOnly ? 'reports' : 'assign');
   const [staff, setStaff] = useState<Person[]>([]);
   const [supervisors, setSupervisors] = useState<{ id: string; name: string; person?: string }[]>([]);
   const [assign, setAssign] = useState(blankAssign);
@@ -28,6 +30,18 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
   const [hr, setHr] = useState({ receivedOn: '', receivedBy: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [reminders, setReminders] = useState<ReviewReminder[] | null>(null);
+  const [remindersNotSetUp, setRemindersNotSetUp] = useState(false);
+  const [reviewSettings, setReviewSettings] = useState<ReviewSettings>(defaultReviewSettings);
+  const [settingsVersion, setSettingsVersion] = useState<string | null>(null);
+  const [settingsNotSetUp, setSettingsNotSetUp] = useState(false);
+  const PERIODS = [...new Set([...reviewSettings.milestones.filter((rule) => rule.enabled).map((rule) => rule.label), ...(reviewSettings.recurringEnabled ? [reviewSettings.recurringLabel] : [])])];
+  const loadReminders = async () => {
+    try { const result = await reviewApi('action=hr_reminders'); setReminders(result.reminders || []); setRemindersNotSetUp(Boolean(result.notSetUp)); setReviewSettings(result.settings || defaultReviewSettings()); setSettingsVersion(result.settingsVersion || null); setSettingsNotSetUp(Boolean(result.settingsNotSetUp)); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load reminders.'); }
+  };
+  useEffect(() => { if (!reportOnly) void loadReminders(); }, []);
+  const dueReminders = (reminders || []).filter((item) => item.status === 'due' || item.status === 'overdue').length;
 
   useEffect(() => {
     officeFetch('/api/status?resource=hr&action=employees').then((response) => response.json()).then((result) => setStaff((result.employees || []).filter((person: Person) => person.status === 'Active').sort((a: Person, b: Person) => a.fullName.localeCompare(b.fullName)))).catch(() => setStaff([]));
@@ -52,7 +66,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
       const result = await reviewApi('action=hr_assign', assign);
       setNotice(`Review assigned: ${result.review.staffName} to ${result.review.assessorName}.`);
       setAssign({ ...blankAssign(), assessorId: assign.assessorId, periodLabel: assign.periodLabel, periodStart: assign.periodStart, periodEnd: assign.periodEnd });
-      await reload();
+      await reload(); await loadReminders();
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to assign the review.'); }
     setAssigning(false);
   };
@@ -80,7 +94,10 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
-    {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>}
+    {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report'], ['reminders', 'Reminder']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'reminders' && dueReminders > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{dueReminders}</span>}</button>)}</div>}
+    {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
+      onAssign={(item) => { setAssign({ employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
+      onView={(id) => { setSelected(id); setTab('reports'); window.scrollTo({ top: 0 }); }} />}
     {tab === 'assign' && <section id="review-panel-assign" role="tabpanel" aria-labelledby="review-tab-assign" className={card}>
       <h3 className="text-lg font-semibold">Assign a review</h3>
       <p className="text-sm text-slate-500">Choose who is reviewed, who does the review and for which period. It appears in that supervisor's Performance Review to fill in.</p>

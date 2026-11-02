@@ -128,7 +128,7 @@
 .cv-print { display: none; font-family: Arial, Helvetica, sans-serif; }
 /* PrintPortal measures the print copy off screen before printing (see .cv-fit). */
 .cv-print.cv-measuring { display: block; position: fixed; left: -10000px; top: 0; width: 297mm; visibility: hidden; }
-.cv-print .cv-mm { position: absolute; width: 1mm; height: 0; }
+.cv-print .cv-mm { position: absolute; width: 100mm; height: 0; }
 .cv-measuring .cv-turn { box-sizing: border-box; width: 297mm; padding: var(--pad, 10mm); }
 @media print {
   html:has(body.cv-printing), body.cv-printing { background: #fff !important; }
@@ -256,18 +256,24 @@
 }
 
 /* Staff profile: a portrait document with no office controls or navigation. */
-.staff-profile-print { display: none; font: 10pt/1.4 Arial, Helvetica, sans-serif; color: #14233b; }
-.staff-profile-print header { border-bottom: 2px solid #0b3d59; padding-bottom: 4mm; margin-bottom: 4mm; }
-.staff-profile-print h1 { font-size: 20pt; font-weight: bold; margin: 2mm 0; }
+.staff-profile-print { display: none; width: 182mm; max-width: 100%; font: 9.5pt/1.35 Arial, Helvetica, sans-serif; color: #14233b; }
+.staff-profile-print header { display: flex; align-items: center; gap: 5mm; break-inside: avoid; border-bottom: 2px solid #0b3d59; padding-bottom: 4mm; margin-bottom: 4mm; }
+.staff-profile-print header img { width: 23mm; height: 23mm; flex-shrink: 0; object-fit: contain; }
+.staff-profile-print header > div { min-width: 0; overflow-wrap: anywhere; }
+.sp-page + .sp-page { break-before: page; }
+.staff-profile-print h1 { font-size: 18pt; font-weight: bold; margin: 2mm 0; }
 .staff-profile-print h2 { font-size: 14pt; font-weight: bold; }
+.staff-profile-print dl, .staff-profile-print dd { margin: 0; }
 .staff-profile-print small { font-size: 8pt; color: #526477; }
 .sp-section { margin-top: 4mm; }
 .sp-section h3 { font-size: 11pt; font-weight: bold; padding: 1.5mm 2mm; background: #edf3f7; break-after: avoid; }
-.sp-row { display: grid; grid-template-columns: 43mm 1fr; gap: 3mm; border-bottom: 1px solid #dce4ed; padding: 1.3mm 2mm; break-inside: avoid; }
+.sp-row { display: grid; grid-template-columns: 43mm 1fr; gap: 3mm; border-bottom: 1px solid #dce4ed; padding: 1.1mm 2mm; break-inside: avoid; }
 .sp-row dt { font-weight: bold; }
 .sp-row dd { white-space: pre-wrap; overflow-wrap: anywhere; }
 .roster-print { font: 8pt/1.3 Arial, Helvetica, sans-serif; color: #14233b; }
-.roster-print header { margin-bottom: 4mm; }
+.roster-print header { display: flex; align-items: center; gap: 5mm; margin-bottom: 4mm; border-bottom: 1px solid #0b3d59; padding-bottom: 3mm; }
+.roster-print header img { width: 22mm; height: 22mm; flex-shrink: 0; object-fit: contain; }
+.roster-print header > div { min-width: 0; }
 .roster-print h1 { font-size: 17pt; font-weight: bold; margin: 1mm 0; }
 .roster-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .roster-print th, .roster-print td { border: 1px solid #b7c5d3; padding: 1.8mm 0.3mm; text-align: center; font-size: 6.5pt; overflow-wrap: anywhere; }
@@ -282,3 +288,33 @@
   body.staff-profile-printing .staff-profile-print { display: block; page: staff-profile; }
   .staff-profile-print *, .roster-print * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Direct report sheets share the same paper layout and logo. */
+.hr-table-print { font: 9pt/1.35 Arial, Helvetica, sans-serif; color: #14233b; }
+.hr-table-print header { display: flex; align-items: center; gap: 5mm; border-bottom: 1px solid #0b3d59; padding-bottom: 3mm; margin-bottom: 3mm; }
+.hr-table-print header img { width: 22mm; height: 22mm; flex-shrink: 0; object-fit: contain; }
+.hr-table-print h1 { font-size: 17pt; font-weight: bold; margin: 1mm 0; }
+.hr-table-print h2 { font-size: 11pt; font-weight: bold; margin-top: 1mm; }
+.hr-table-print .hr-table-note { font-size: 8pt; margin-bottom: 3mm; }
+.hr-table-print table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+.hr-table-print th, .hr-table-print td { padding: 2mm 1.5mm; border: 1px solid #b7c5d3; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hr-table-print th { background: #edf3f7; font-weight: bold; }
+.hr-table-print footer { margin-top: 3mm; text-align: right; font-size: 8pt; color: #526477; }
+.hr-roster-table th:first-child, .hr-roster-table td:first-child { width: 42mm; font-size: 7pt; text-align: left; }
+.hr-roster-table th, .hr-roster-table td { padding: 1.6mm .3mm; text-align: center; font-size: 6.5pt; }
+@media print { .report-options { display: none !important; } }
+
+/* Preview uses the same sheet markup and physical widths as the print document. */
+.report-preview-landscape, .report-preview .cv-page { box-sizing: border-box; width: 297mm; min-height: 209mm; padding: 10mm; background: white; margin-bottom: 16px; box-shadow: 0 1px 6px #0002; }
+.report-preview .staff-profile-print { display: block; width: 210mm; max-width: none; }
+.report-preview .sp-page { box-sizing: border-box; width: 210mm; min-height: 297mm; padding: 14mm; background: white; margin-bottom: 16px; box-shadow: 0 1px 6px #0002; }
+.report-preview .rv-print { display: block; }
+.report-preview .rv-page { box-sizing: content-box; width: 180mm; min-height: 255mm; padding: 14mm; margin: 0 0 16px; background: white; box-shadow: 0 1px 6px #0002; }
+.report-preview .sp-page + .sp-page { break-before: auto; }
+
+.hr-table-wide th:first-child, .hr-table-wide td:first-child { width: 42mm; }
+.hr-table-wide th:nth-child(2), .hr-table-wide td:nth-child(2) { width: 28mm; }
+
+.hr-roster-table td, .hr-roster-legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.hr-roster-legend { display: flex; flex-wrap: wrap; gap: 1mm; margin-bottom: 3mm; font-size: 7pt; }
+.hr-roster-legend span { padding: .8mm 1.5mm; border: 1px solid #b7c5d3; border-radius: 1mm; font-weight: 700; }

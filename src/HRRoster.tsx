@@ -6,6 +6,7 @@ import { newCode } from './lib/shiftCodes';
 import { Pager, usePaged } from './Pager';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { usePrintSheet } from './IncentiveSheet';
+import { HRRosterDraft } from './HRRosterDraft';
 
 // Office HR: the duty roster by month, for staff and for doctors, as a table (one row per person and one column per day)
 // or as a calendar. Leave is counted on the days marked as working here; a date with no roster falls back to the
@@ -61,6 +62,7 @@ function Choice<T extends string>({ value, onChange, options, label }: { value: 
 export function HRRoster({ onError }: { onError: (message: string) => void }) {
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [printing, setPrinting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   usePrintSheet(printing, `Roster - ${month}`, () => setPrinting(false));
   const [company, setCompany] = useState('');
   const [group, setGroup] = useState<'staff' | 'doctors'>('staff');
@@ -135,10 +137,10 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
   const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700';
 
   const printPeople = view === 'calendar' && selected ? [selected] : people;
-  const printPages = Array.from({ length: Math.ceil(printPeople.length / 12) }, (_, index) => printPeople.slice(index * 12, (index + 1) * 12));
+  const printPages = Array.from({ length: Math.ceil(printPeople.length / 10) }, (_, index) => printPeople.slice(index * 10, (index + 1) * 10));
   return <div className="mx-auto max-w-[1500px] space-y-5">
     {printing && <PrintPortal margin={8}>{printPages.map((page, index) => <PrintPage key={index}><div className="cv-fit roster-print">
-      <header><p>KLINIK ARA 24 JAM · HUMAN RESOURCES</p><h1>Duty Roster · {monthName(month)}</h1><p>{company || 'KJ and SK'} · {group === 'doctors' ? 'Doctors' : 'Staff'} · {codes === 'new' ? 'AraOffice codes' : 'Infotech codes'} · Page {index + 1} of {printPages.length}</p></header>
+      <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><p>KLINIK ARA 24 JAM · HUMAN RESOURCES</p><h1>Duty Roster · {monthName(month)}</h1><p>{company || 'KJ and SK'} · {group === 'doctors' ? 'Doctors' : 'Staff'} · {codes === 'new' ? 'AraOffice codes' : 'Infotech codes'} · Page {index + 1} of {printPages.length}</p></div></header>
       <table><colgroup><col style={{ width: '42mm' }} />{dates.map((date) => <col key={date} />)}</colgroup><thead><tr><th>Staff</th>{dates.map((date) => <th key={date}>{WEEKDAY[new Date(`${date}T00:00:00`).getDay()]}<br />{Number(date.slice(8))}</th>)}</tr></thead><tbody>{page.map((person) => <tr key={person.id}><th>{person.name}<small>{person.company} · {person.code}</small></th>{dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className={cellTone(day && { ...day, shift: shown(day.shift) })}>{day ? shown(day.shift) : '·'}</td>; })}</tr>)}</tbody></table>
       <footer>{(codes === 'original' ? OLD_CODES : [...(group === 'doctors' ? DOCTOR_CODES : STAFF_CODES), ...OTHER_CODES]).map(([code, label]) => <span key={`${code}-${label}`}><b>{code}</b>: {label}</span>)}<span>· = No roster</span></footer>
     </div></PrintPage>)}</PrintPortal>}
@@ -151,7 +153,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
           <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
           {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-1 text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}
         </div>
-        <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+        <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => setDrafting((open) => !open)} className="h-10 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-4 text-sm font-semibold text-[#0b587b]">Pattern draft · Trial</button><button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
         <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label></div>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-slate-100 pt-4">
@@ -162,6 +164,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
         {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={field}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>}
       </div>
     </section>
+    {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} onClose={() => setDrafting(false)} />}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>

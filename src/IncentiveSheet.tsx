@@ -16,8 +16,11 @@ export function usePrintSheet(active: boolean, title: string, onDone: () => void
     document.title = title.replace(/[\\/:*?"<>|]/g, '');
     const done = () => { document.body.classList.remove('cv-printing'); document.title = previous; onDone(); };
     window.addEventListener('afterprint', done, { once: true });
-    const timer = window.setTimeout(() => window.print(), 50);
-    return () => { window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('cv-printing'); document.title = previous; };
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.cv-print img'), (image) => image.decode())]).then(() => { if (!cancelled) window.print(); }).catch(() => { if (!cancelled) { window.alert('A report image could not be loaded. Please try printing again.'); done(); } });
+    }, 50);
+    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('cv-printing'); document.title = previous; };
   }, [active]);
 }
 

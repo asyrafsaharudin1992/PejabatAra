@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+import { generateRosterDraft, cellKey, type DraftPerson } from '../src/lib/rosterDraft';
+const a: DraftPerson = { id: 'a', company: 'KJ', code: 'A', name: 'A', designation: 'CLINIC ASSISTANT' };
+const b: DraftPerson = { ...a, id: 'b', code: 'B', name: 'B' };
+const base = { month: '2026-12', people: [a], patterns: { a: { enabled: true, anchor: '2026-11-30', cycle: 'AM-9, PM, OFF, REST' } }, existing: [], leave: [], requests: [], locks: {}, preserve: false, minDay: 0, minNight: 0 };
+const at = (result: ReturnType<typeof generateRosterDraft>, id: string, date: string) => result.cells.find((c) => c.id === id && c.date === date)!;
+let result = generateRosterDraft(base);
+assert.equal(result.cells.length, 31);
+assert.equal(at(result, 'a', '2026-12-01').shift, 'PM');
+assert.equal(at(result, 'a', '2026-12-02').shift, 'OFF');
+assert.equal(at(generateRosterDraft({ ...base, patterns: { a: { ...base.patterns.a, anchor: '2026-12-03' } } }), 'a', '2026-12-01').shift, 'OFF');
+const leave = [{ id: 'a', start: '2026-12-01', end: '2026-12-01', shift: 'ML', halfDay: false }];
+result = generateRosterDraft({ ...base, leave, locks: { [cellKey('a', '2026-12-01')]: 'AM-9' }, requests: [{ id: 'a', date: '2026-12-01', shift: 'PM', required: true }] });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'ML');
+assert.ok(result.warnings.some((w) => w.includes('protected day')));
+result = generateRosterDraft({ ...base, leave: [{ ...leave[0], halfDay: true }] });
+assert.equal(result.blocked, true);
+assert.equal(generateRosterDraft({ ...base, leave: [{ ...leave[0], shift: 'HOSP' }] }).blocked, true);
+assert.equal(at(generateRosterDraft({ ...base, leave: [{ ...leave[0], shift: 'UL' }] }), 'a', '2026-12-01').shift, 'UPL');
+result = generateRosterDraft({ ...base, preserve: true, existing: [{ id: 'a', date: '2026-12-01', shift: 'OFF' }], locks: { [cellKey('a', '2026-12-01')]: 'PM' } });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'OFF');
+assert.ok(result.warnings.some((w) => w.includes('draft edit conflicts')));
+const preference = { id: 'a', date: '2026-12-01', shift: 'OFF', required: false };
+result = generateRosterDraft({ ...base, minNight: 1, requests: [preference] });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'PM');
+assert.ok(result.warnings.some((w) => w.includes('could not be met')));
+result = generateRosterDraft({ ...base, minNight: 1, requests: [{ ...preference, required: true }] });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'OFF');
+assert.ok(result.warnings.some((w) => w.includes('2026-12-01 · KJ: coverage')));
+result = generateRosterDraft({ ...base, people: [a, b], patterns: { ...base.patterns, b: base.patterns.a }, minNight: 1, requests: [preference] });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'OFF');
+result = generateRosterDraft({ ...base, people: [a, { ...b, company: 'SK' }], patterns: { ...base.patterns, b: base.patterns.a }, minNight: 1, requests: [preference] });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'PM'); // SK cannot cover a KJ gap.
+result = generateRosterDraft({ ...base, patterns: { a: { enabled: true, anchor: '2026-12-01', cycle: 'AM-9' } }, existing: [{ id: 'a', date: '2026-11-30', shift: 'PM' }] });
+assert.ok(result.warnings.some((w) => w.includes('2026-12-01') && w.includes('night-to-day')));
+assert.ok(result.warnings.some((w) => w.includes('7 consecutive')));
+const dr = { ...a, designation: 'RESIDENT DOCTOR' };
+result = generateRosterDraft({ ...base, people: [dr], patterns: { a: { enabled: true, anchor: '2026-12-01', cycle: 'AM, PM, OFF, OH, REST' } } });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'AM');
+assert.throws(() => generateRosterDraft({ ...base, people: [dr] }), /Use AM, PM or OH/);
+assert.throws(() => generateRosterDraft({ ...base, patterns: { a: { ...base.patterns.a, cycle: 'AM-9, AL' } } }), /leave and holidays must not repeat/);
+assert.throws(() => generateRosterDraft({ ...base, patterns: { a: { ...base.patterns.a, cycle: '?' } } }));
+const before = JSON.stringify(base);
+generateRosterDraft(base);
+assert.equal(JSON.stringify(base), before);
+console.log('Roster draft tests passed: cycle continuity, CA/doctors, protected days/leave, requests, cross-clinic coverage, boundary recovery, missing patterns and no input mutation.');
+// KJ doctor rules: fixed OH is separate from AM/PM; weekends OFF and nights may need locum.
+const officeDoctor: DraftPerson = { ...b, designation: 'DOCTOR RESIDENT', name: 'Hanis' };
+const rotation = { enabled: true, anchor: '2026-12-07', cycle: '', doctorMode: 'rotation' as const, weekdayOff: 1, nightWeeks: '2,1' };
+const officePattern = { ...rotation, doctorMode: 'office' as const };
+const weekly = { ...base, people: [dr, officeDoctor], patterns: { a: rotation, b: officePattern }, minDay: 1, minNight: 1 };
+result = generateRosterDraft(weekly);
+for (const [start, end, nights] of [['2026-12-07', '2026-12-11', 2], ['2026-12-14', '2026-12-18', 1]] as const) {
+  const week = result.cells.filter((c) => c.id === 'a' && c.date >= start && c.date <= end);
+  assert.equal(week.filter((c) => c.shift === 'PM').length, nights);
+  assert.equal(week.filter((c) => c.shift === 'AM').length, 4 - nights);
+  assert.equal(week.filter((c) => c.shift === 'OFF').length, 1);
+}
+assert.equal(at(result, 'b', '2026-12-07').shift, 'OH');
+assert.equal(at(result, 'b', '2026-12-12').shift, 'OFF');
+for (const c of result.cells) if ([0, 6].includes(new Date(`${c.date}T00:00:00Z`).getUTCDay())) assert.equal(c.shift, 'OFF');
+assert.ok(result.locum.some((slot) => slot.date === '2026-12-07' && slot.shift === 'PM'));
+assert.ok(result.warnings.some((w) => w.startsWith('2026-12-07 · KJ: coverage day 0/1'))); // Hanis OH cannot cover AM.
+assert.ok(!result.warnings.some((w) => w.includes('night 0/1'))); // Uncovered KJ nights are planned locum slots.
+result = generateRosterDraft({ ...weekly, requests: [{ id: 'a', date: '2026-12-12', shift: 'PM', required: true }, { id: 'b', date: '2026-12-08', shift: 'AM', required: true }] });
+assert.equal(at(result, 'a', '2026-12-12').shift, 'OFF');
+assert.equal(at(result, 'b', '2026-12-08').shift, 'OH');
+assert.ok(result.warnings.filter((w) => w.includes('fixed doctor rules')).length >= 2);
+result = generateRosterDraft({ ...weekly, locks: { [cellKey('a', '2026-12-12')]: 'AM' } });
+assert.equal(result.blocked, true);
+result = generateRosterDraft({ ...weekly, patterns: { a: { ...rotation, nightWeeks: '2,2,1,1' }, b: officePattern } });
+assert.equal(result.cells.filter((c) => c.id === 'a' && c.date >= '2026-12-14' && c.date <= '2026-12-18' && c.shift === 'PM').length, 2);
+assert.throws(() => generateRosterDraft({ ...weekly, patterns: { a: { ...rotation, nightWeeks: '3' }, b: officePattern } }));
+assert.throws(() => generateRosterDraft({ ...weekly, patterns: { a: { ...rotation, weekdayOff: 6 }, b: officePattern } }));
+console.log('KJ weekly rotation, fixed OH exclusion, weekend protection, editable weekly sequence and locum planning tests passed.');
+// Dr Asyraf: two nights Mon/Tue, one night Monday; weekday OFF follows the final night.
+const asyrafPattern = { ...rotation, nightPlacement: 'mon-tue' as const };
+const asyrafInput = { ...weekly, patterns: { a: asyrafPattern, b: officePattern } };
+result = generateRosterDraft(asyrafInput);
+for (const [date, shift] of [['2026-12-07', 'PM'], ['2026-12-08', 'PM'], ['2026-12-09', 'OFF'], ['2026-12-10', 'AM'], ['2026-12-11', 'AM'], ['2026-12-14', 'PM'], ['2026-12-15', 'OFF'], ['2026-12-16', 'AM'], ['2026-12-17', 'AM'], ['2026-12-18', 'AM']]) assert.equal(at(result, 'a', date).shift, shift);
+assert.ok(!result.warnings.some((w) => w.includes('A: night-to-day')));
+// The phase remains correct across a month boundary (Monday 30 November).
+const boundaryPattern = { ...asyrafPattern, anchor: '2026-11-30' };
+result = generateRosterDraft({ ...asyrafInput, patterns: { a: boundaryPattern, b: officePattern } });
+assert.equal(at(result, 'a', '2026-12-01').shift, 'PM');
+assert.equal(at(result, 'a', '2026-12-02').shift, 'OFF');
+result = generateRosterDraft({ ...asyrafInput, leave: [{ id: 'a', start: '2026-12-07', end: '2026-12-07', shift: 'AL', halfDay: false }] });
+assert.equal(at(result, 'a', '2026-12-07').shift, 'AL');
+assert.ok(result.warnings.some((w) => w.includes('preferred Monday/Tuesday')));
+result = generateRosterDraft({ ...asyrafInput, preserve: true, existing: [{ id: 'a', date: '2026-12-10', shift: 'PM' }] });
+assert.equal(at(result, 'a', '2026-12-10').shift, 'PM');
+assert.ok(result.warnings.some((w) => w.includes('2026-12-10') && w.includes('preferred Monday/Tuesday')));
+console.log('Asyraf Mon/Tue PM preference, Monday single PM, recovery OFF, month boundaries and exception protection passed.');

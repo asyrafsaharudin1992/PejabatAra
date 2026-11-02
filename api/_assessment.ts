@@ -597,7 +597,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

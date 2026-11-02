@@ -10,7 +10,7 @@ export function StaffProfileReport({ onError }: { onError: (message: string) => 
     officeFetch('/api/status?resource=hr&action=employees').then(async (response) => {
       const result = await response.json();
       if (!response.ok || result.error) throw new Error(result.error || 'Unable to load staff.');
-      setPeople((result.employees || []).sort((a: { fullName: string }, b: { fullName: string }) => a.fullName.localeCompare(b.fullName)));
+      setPeople((result.employees || []).filter((person: { status: string }) => person.status === 'Active').sort((a: { fullName: string }, b: { fullName: string }) => a.fullName.localeCompare(b.fullName)));
     }).catch((cause: Error) => { setPeople([]); onError(cause.message); });
   }, []);
   return <div className="space-y-5">

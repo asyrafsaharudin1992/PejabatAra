@@ -60,3 +60,11 @@ export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd
     ytdAfter: { wages: money(ytd.wages + gross), kwspRelief: money(Math.min(4000, ytd.kwspRelief + kwspEmployee)), pcbPaid: money(ytd.pcbPaid + pcb), zakatPaid: ytd.zakatPaid },
   };
 }
+
+// The pay period for a month: from the 20th of the month before to the 19th of the month itself. Management and Operation, the only two
+// pay groups in use, are the same. OT, unpaid leave and late are counted for the days inside it.
+export function payPeriod(year: number, month: number) {
+  const prev = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return { from: iso(prev.year, prev.month, 20), to: iso(year, month, 19) };
+}

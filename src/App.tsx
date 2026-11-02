@@ -1365,15 +1365,14 @@ export default function App() {
           >
             {activeTab === "Overview" && (
               <>
-                <section className="relative overflow-hidden ara-hero rounded-[30px] p-7 text-white sm:p-9">
-                  <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-[#1a6a8d]/50 blur-3xl" />
-                  <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+                <section className="ara-hero rounded-[26px] p-6 text-white sm:p-7">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                     <div className="max-w-2xl">
                       <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Quality &amp; Corporate Office</p>
-                      <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                         {visitor ? `Welcome, ${visitor}.` : `Welcome back, ${user?.fullName?.split(' ')[0]}.`}
                       </h2>
-                      <p className="mt-3 max-w-xl leading-7 text-[#b9cfdd]">
+                      <p className="mt-2 max-w-xl text-sm leading-6 text-[#b9cfdd]">
                         {visitor ? "This is the Quality & Corporate page." : "A clear view of today’s priorities and the work already recorded by your team."}
                       </p>
                     </div>
