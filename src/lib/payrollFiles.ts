@@ -24,3 +24,15 @@ export function epfFormA(input: { employerEpfNo: string; generated: string; cont
   ];
   return out.join('\r\n') + '\r\n';
 }
+
+// Amounts in this file are in sen with at least three digits, right-aligned with spaces; no SKBBK is left blank.
+const blank = (ringgit: number) => String(Math.round(ringgit * 100)).padStart(3, '0').padStart(6, ' ');
+
+export type SocsoRow = { ic: string; name: string; wages: number; socsoEmployer: number; socsoEmployee: number; eisEmployer: number; eisEmployee: number; skbbk: number };
+
+// PERKESO / EIS / SKBBK text file (one file for the three): 278 characters a line, one line a member, CRLF, no header or footer.
+// `wageMonth` is MMYYYY of the pay month (unlike the KWSP file, which carries the month after).
+export function socsoFile(input: { employerSocsoNo: string; companyRegNo: string; wageMonth: string; rows: SocsoRow[] }) {
+  const lines = input.rows.map((row) => pad(`${pad(input.employerSocsoNo, 12)}${pad(digits(input.companyRegNo), 12)}${' '.repeat(8)}${digits(row.ic).padStart(12, '0')}${pad(row.name.toUpperCase().replace(/[-'’]/g, ''), 150)}${input.wageMonth}${' '.repeat(8)}${blank(row.wages)}${blank(row.socsoEmployer)}${blank(row.socsoEmployee)}${blank(row.eisEmployer)}${blank(row.eisEmployee)}${row.skbbk > 0 ? blank(row.skbbk) : ' '.repeat(6)}`, 278));
+  return lines.join('\r\n') + '\r\n';
+}
