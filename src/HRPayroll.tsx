@@ -110,6 +110,58 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
+// ---- Incentive pay: approved claims of a month, paid on the 16th of the next month, with no deductions ------------------------
+type IncentiveItem = { employeeId: string; code: string; name: string; company: string; linked: boolean; received: boolean; procedures: number; amount: number; confirmed: boolean; confirmedAmount: number | null };
+const claimMonths = () => { const out: string[] = []; const now = new Date(); for (let index = now.getFullYear() * 12 + now.getMonth(); index >= 2026 * 12 + 9; index--) out.push(`${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`); return out.length ? out : ['2026-10']; };
+const monthText = (month: string) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+
+function IncentivePay({ onError }: { onError: (message: string) => void }) {
+  const months = useMemo(claimMonths, []);
+  const [month, setMonth] = useState(months[months.length > 1 ? 1 : 0]);
+  const [items, setItems] = useState<IncentiveItem[] | null>(null);
+  const [paidOn, setPaidOn] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const load = async () => {
+    setItems(null); setNote('');
+    try { const response = await officeFetch(`${API}&action=payroll_incentive&month=${month}`); const data = await response.json(); if (data.error) throw new Error(data.error); setItems(data.items); setPaidOn(data.paidOn); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load incentives.'); setItems([]); }
+  };
+  useEffect(() => { void load(); }, [month]);
+  const ready = (items || []).filter((item) => item.linked && item.received && !item.confirmed && item.amount > 0);
+  const confirm = async () => {
+    setBusy(true); setNote('');
+    try { const response = await officeFetch(`${API}&action=payroll_incentive_confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) }); const data = await response.json(); if (data.error) throw new Error(data.error); setNote(`${data.confirmed} confirmed for payment.`); await load(); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to confirm.'); }
+    setBusy(false);
+  };
+  const total = (items || []).reduce((sum, item) => sum + (item.confirmed ? item.confirmedAmount || 0 : item.received ? item.amount : 0), 0);
+  const cell = (value: number) => show ? fmt(value) : '••••';
+  const dmy = (value: string) => value.split('-').reverse().join('/');
+  return <section className={card}>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h3 className="font-semibold">Incentive pay</h3><p className="mt-0.5 text-xs text-slate-500">Approved claims that HR has received, paid on {paidOn ? dmy(paidOn) : 'the 16th of the next month'}. No KWSP, PERKESO, EIS or PCB is taken.</p></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{months.map((m) => <option key={m} value={m}>Claims of {monthText(m)}</option>)}</select>
+        <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
+      </div>
+    </div>
+    {items === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !items.length ? <p className="mt-4 text-sm text-slate-500">No claims were sent to HR for this month.</p> : <>
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
+        <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Approved entries</th><th className="pr-3 text-right">Amount (RM)</th><th>Status</th></tr></thead>
+        <tbody>{items.map((item) => <tr key={`${item.employeeId}-${item.name}`} className="border-t border-slate-100"><td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{item.name || 'Not linked to a staff record'}</p><p className="text-[10px] text-slate-400">{item.code}</p></td><td className="pr-3 text-right">{item.procedures}</td><td className="pr-3 text-right font-semibold">{cell(item.confirmed ? item.confirmedAmount || 0 : item.amount)}</td>
+          <td className="text-xs">{item.confirmed ? <span className="font-semibold text-emerald-600">Confirmed</span> : !item.linked ? <span className="text-amber-700">Not linked: ask System Admin</span> : !item.received ? <span className="text-slate-400">Not received by HR yet</span> : item.amount <= 0 ? <span className="text-slate-400">Nothing approved</span> : <span className="text-[#0b587b]">Ready to confirm</span>}</td></tr>)}</tbody>
+        <tfoot><tr className="border-t-2 border-slate-200 font-semibold"><td className="py-2 pr-3">Total</td><td /><td className="pr-3 text-right text-[#0b587b]">{cell(total)}</td><td /></tr></tfoot>
+      </table></div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" disabled={busy || !ready.length} onClick={() => { if (window.confirm(`Confirm ${ready.length} incentive payment(s) for ${paidOn ? dmy(paidOn) : 'the 16th'}? The amounts are fixed after this and staff will see them.`)) void confirm(); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy ? 'Confirming…' : `Confirm ${ready.length} for payment`}</button>
+        {note && <span className="text-sm text-slate-600">{note}</span>}
+      </div>
+    </>}
+  </section>;
+}
+
 export function HRPayroll({ onError = () => {} }: { onError?: (message: string) => void }) {
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
@@ -118,6 +170,7 @@ export function HRPayroll({ onError = () => {} }: { onError?: (message: string) 
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. Being built in pieces; pay is still run in Infotech until this is checked against it.</p>
     </section>
     <PayRun onError={onError} />
+    <IncentivePay onError={onError} />
     <div className="grid gap-5 lg:grid-cols-2">
       <List title="Set up first" steps={SETUP} />
       <List title="Each month" steps={MONTHLY} />

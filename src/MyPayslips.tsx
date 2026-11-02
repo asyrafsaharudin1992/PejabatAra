@@ -6,6 +6,7 @@ import { payPeriod } from './lib/payrollRun';
 // My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number; gross: number; net: number };
+type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
 type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -28,9 +29,10 @@ function Pair({ label, value }: { label: string; value: number }) {
 
 export default function MyPayslips() {
   const [items, setItems] = useState<Item[] | null>(null);
+  const [incentives, setIncentives] = useState<Incentive[]>([]);
   const [slip, setSlip] = useState<Slip | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { assessmentFetch('action=my_payslips').then((result: { payslips: Item[] }) => setItems(result.payslips)).catch((cause: Error) => { setError(cause.message); setItems([]); }); }, []);
+  useEffect(() => { assessmentFetch('action=my_payslips').then((result: { payslips: Item[]; incentives?: Incentive[] }) => { setItems(result.payslips); setIncentives(result.incentives || []); }).catch((cause: Error) => { setError(cause.message); setItems([]); }); }, []);
   const open = async (item: Item) => { setError(''); try { const result = await assessmentFetch(`action=my_payslip&year=${item.year}&month=${item.month}`); setSlip(result.payslip); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to open the payslip.'); } };
   if (slip) {
     const company = COMPANY[slip.company] || { name: slip.company, address: '' };
@@ -72,6 +74,7 @@ export default function MyPayslips() {
   if (items === null) return <p className="text-sm text-slate-500">Loading…</p>;
   return <div className="space-y-3">
     {error && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+    {incentives.map((item) => <div key={item.claimMonth} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.06)]"><span><strong className="block text-sm text-[#14233b]">Incentive · {MONTHS[Number(item.claimMonth.slice(5, 7)) - 1]} {item.claimMonth.slice(0, 4)} claims</strong><span className="text-xs text-slate-500">{item.procedures} approved {item.procedures === 1 ? 'entry' : 'entries'} · paid on {longDate(item.paidOn)} · no deductions</span></span><strong className="text-base tabular-nums text-[#1f8a4c]">RM {fmt(item.amount)}</strong></div>)}
     {!items.length ? <p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No payslips yet. A month appears here once HR has finished it.</p>
       : items.map((item) => <button key={`${item.year}-${item.month}`} type="button" onClick={() => void open(item)} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-[0_8px_25px_rgba(20,35,59,0.06)] hover:bg-slate-50"><span><strong className="block text-sm text-[#14233b]">{MONTHS[item.month - 1]} {item.year}</strong><span className="text-xs text-slate-500">Net pay</span></span><strong className="text-base tabular-nums text-[#0b587b]">RM {fmt(item.net)}</strong></button>)}
   </div>;

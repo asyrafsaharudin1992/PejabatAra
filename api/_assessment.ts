@@ -496,7 +496,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (action === 'my_payslips') {
       const { data, error } = await db.from('hr_payslips').select('year,month,result').eq('employee_id', me.id).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
       if (error) { if (error.code === '42P01') return res.status(200).json({ payslips: [] }); throw error; }
-      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month, gross: Number(row.result?.gross || 0), net: Number(row.result?.net || 0) })) });
+      const { data: incentive } = await db.from('hr_incentive_pay').select('claim_month,amount,paid_on,procedures').eq('employee_id', me.id).order('claim_month', { ascending: false }).limit(36);
+      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month, gross: Number(row.result?.gross || 0), net: Number(row.result?.net || 0) })), incentives: (incentive || []).map((row: any) => ({ claimMonth: row.claim_month, amount: Number(row.amount), paidOn: row.paid_on, procedures: row.procedures })) });
     }
     const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
     const { data, error } = await db.from('hr_payslips').select('year,month,result,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();

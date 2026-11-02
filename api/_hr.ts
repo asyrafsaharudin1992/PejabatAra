@@ -1088,6 +1088,35 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ saved: rows.length, locked: lock });
     }
 
+    // Incentive pay. The approved claims HR has received for a month, one amount per person; HR confirms them for payment on the 16th of the next month.
+    if (action === 'payroll_incentive' || action === 'payroll_incentive_confirm') {
+      const month = text(req.query.month ?? body.month, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      const { data: claims, error: claimError } = await db.from('incentive_claims').select('staff_id,entries,hr_received_at').eq('month', month).not('hr_submitted_at', 'is', null);
+      if (claimError) { if (claimError.code === '42703') throw fail(400, 'Incentive claims are not set up yet.'); throw claimError; }
+      const staffIds = [...new Set((claims || []).map((row: any) => row.staff_id))];
+      const { data: people, error: peopleError } = staffIds.length ? await db.from('hr_employees').select('id,assessment_staff_id,employee_code,full_name,company').in('assessment_staff_id', staffIds) : { data: [], error: null };
+      if (peopleError) throw peopleError;
+      const personOf = new Map((people || []).map((row: any) => [row.assessment_staff_id, row]));
+      const { data: paid, error: paidError } = await db.from('hr_incentive_pay').select('employee_id,amount,paid_on').eq('claim_month', month);
+      if (paidError) throw fail(400, 'Incentive pay is not set up yet (migration 202611020006).');
+      const paidOf = new Map((paid || []).map((row: any) => [row.employee_id, row]));
+      const [year, number] = month.split('-').map(Number);
+      const paidOn = `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, '0')}-16`;
+      const items = (claims || []).map((row: any) => {
+        const person: any = personOf.get(row.staff_id);
+        const approved = (Array.isArray(row.entries) ? row.entries : []).filter((entry: any) => entry?.review === 'approved');
+        const amount = Math.round(approved.reduce((sum: number, entry: any) => sum + Number(entry.rm || 0), 0) * 100) / 100;
+        const done: any = person ? paidOf.get(person.id) : null;
+        return { employeeId: person?.id || '', code: person?.employee_code || '', name: person?.full_name || '', company: person?.company || '', linked: Boolean(person), received: Boolean(row.hr_received_at), procedures: approved.length, amount, confirmed: Boolean(done), confirmedAmount: done ? Number(done.amount) : null };
+      }).sort((a: any, b: any) => a.code.localeCompare(b.code));
+      if (req.method === 'GET') return res.status(200).json({ month, paidOn, items });
+      if (req.method !== 'POST') throw fail(405, 'Method not allowed');
+      const rows = items.filter((item: any) => item.linked && item.received && !item.confirmed && item.amount > 0).map((item: any) => ({ employee_id: item.employeeId, claim_month: month, amount: item.amount, procedures: item.procedures, paid_on: paidOn, confirmed_by: text(user?.email || '', 120) }));
+      if (rows.length) { const { error } = await db.from('hr_incentive_pay').insert(rows); if (error) throw error; }
+      return res.status(200).json({ confirmed: rows.length, paidOn });
+    }
+
     if (req.method === 'GET' && action === 'career') {
       const employeeId = text(req.query.employeeId, 60);
       if (!employeeId) throw fail(400, 'Choose a staff member.');
