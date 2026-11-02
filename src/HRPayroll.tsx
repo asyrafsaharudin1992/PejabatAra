@@ -12,16 +12,15 @@ const SETUP: Step[] = [
   { title: 'Staff pay details', text: 'Basic salary, bank, KWSP, PERKESO and tax numbers, monthly allowances (Director Fee), employment history.', done: true },
   { title: 'Payroll settings per staff', text: 'KWSP rate, PERKESO category, EIS, SKBBK, tax residency, pay group, OT type, probation, flexi hours, rest day.', done: true },
   { title: 'Allowance types', text: 'Only the types in use. Director Fee counts towards PCB but not KWSP, PERKESO, EIS or HRDF. Care Coordinator counts towards KWSP only; Annual Leave Payment, Advance, Incentives and Tuntutan Ganti Notis count towards nothing. The other Infotech types are not paid to anyone, so they are left out.', done: true },
-  { title: 'Reference lists', text: 'Bank codes and LHDN branches, for the bank file and the PCB submission.' },
   { title: 'Year to date, January to October', text: 'Wages, KWSP relief and PCB already paid this year for the 26 current staff, read from the Infotech pay run, so November PCB is worked out correctly.', done: true },
 ];
 const MONTHLY: Step[] = [
-  { title: 'Start the month', text: 'Pick the month and the staff, then fix the pay period for each pay group.' },
-  { title: 'Bring in attendance, leave and claims', text: 'Late, unpaid leave and OT from AraOffice.' },
-  { title: 'Work out the pay', text: 'KWSP, PERKESO, EIS, SKBBK and PCB, then net pay.' },
-  { title: 'Check against Infotech', text: 'Each payslip beside the Infotech payslip for the same month, with every difference shown.' },
-  { title: 'Lock and publish payslips', text: 'Staff see only their own payslip in Individual Sign In.' },
-  { title: 'Bank file and statutory submissions', text: 'Salary transfer file, KWSP, PERKESO, EIS and PCB.' },
+  { title: 'Start the month', text: 'Pick the month: staff, pay period (20th to 19th) and raises in the middle of the period are worked out for you.', done: true },
+  { title: 'Bring in attendance, leave and claims', text: 'Late, unpaid leave and OT from AraOffice. Until attendance and leave are brought over, HR types OT hours, rest and public holiday days and unpaid days in each month.' },
+  { title: 'Work out the pay', text: 'KWSP, PERKESO, EIS, SKBBK and PCB, then net pay. October 2026 matched Infotech for every staff member.', done: true },
+  { title: 'Check against Infotech', text: 'November: open the generated files in Notepad beside the Infotech files for the same month, and compare names, numbers and totals before uploading anything.' },
+  { title: 'Lock and publish payslips', text: 'Staff see only their own payslip in Individual Sign In. January to October 2026 are already there, as Infotech paid them.', done: true },
+  { title: 'Bank file and statutory submissions', text: 'Maybank salary file (and the 16th incentive file), KWSP, PERKESO / EIS and ePCB, laid out as Infotech writes them, plus a summary sheet (CSV).', done: true },
 ];
 
 function List({ title, steps }: { title: string; steps: Step[] }) {
@@ -213,7 +212,7 @@ export function HRPayroll({ onError = () => {} }: { onError?: (message: string) 
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p>
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
-      <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. Being built in pieces; pay is still run in Infotech until this is checked against it.</p>
+      <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>
     <PayRun onError={onError} />
     <IncentivePay onError={onError} />
