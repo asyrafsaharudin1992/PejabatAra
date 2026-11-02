@@ -14,10 +14,21 @@ export type PayStaff = {
   settings: Record<string, string | number | boolean>;
 };
 export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakatPaid: number };
-export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number };
-export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0 };
+// What HR enters for the month. OT is entered as hours at each rate (the rate HR chose when approving it in Attendance), rest days and public
+// holidays worked as a count of days; the amounts are worked out from the salary. `ot` and `restPh` are for an amount that does not fit those.
+export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number };
+export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0 };
 
 const money = (value: number) => Math.round(value * 100) / 100;
+// Infotech: daily rate = salary / 26; hourly rate = daily rate / 8, shown to the sen. OT hours are paid at the hourly rate times the rate chosen.
+// A rest day worked is paid one day's rate, a public holiday worked two days' rate (hours beyond the normal day go in as OT at 2.0).
+export const dailyRate = (salary: number) => salary / 26;
+export const hourlyRate = (salary: number) => money(dailyRate(salary) / 8);
+export function overtimePay(salary: number, hours: { ot10?: number; ot15?: number; ot20?: number; ot30?: number }) {
+  const rate = hourlyRate(salary);
+  return money(rate * ((hours.ot10 || 0) * 1 + (hours.ot15 || 0) * 1.5 + (hours.ot20 || 0) * 2 + (hours.ot30 || 0) * 3));
+}
+export const restPhPay = (salary: number, restDays: number, phDays: number) => money(dailyRate(salary) * (restDays + phDays * 2));
 const flag = (settings: PayStaff['settings'], key: string, fallback: boolean) => typeof settings[key] === 'boolean' ? settings[key] as boolean : fallback;
 
 // A child counts for PCB relief when under 18 on 31 December of the pay year, or still studying.
@@ -30,9 +41,11 @@ export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd
   const basic = Math.max(0, staff.basicSalary - inputs.unpaidLeave);
   const allowances = staff.fixedAllowances.map((item) => ({ ...item, type: allowanceType(item.name) }));
   const allowanceTotal = allowances.reduce((sum, item) => sum + item.amount, 0);
-  const gross = money(basic + allowanceTotal + inputs.ot + inputs.restPh + inputs.shiftAllowance + inputs.otherAllowance);
+  const otAmount = money(inputs.ot + overtimePay(staff.basicSalary, inputs));
+  const restPh = money(inputs.restPh + restPhPay(staff.basicSalary, inputs.restDays || 0, inputs.phDays || 0));
+  const gross = money(basic + allowanceTotal + otAmount + restPh + inputs.shiftAllowance + inputs.otherAllowance);
   // KWSP counts salary, rest-day and shift pay and any allowance flagged for it; OT and other allowances do not count.
-  const kwspWage = basic + inputs.restPh + inputs.shiftAllowance + allowances.filter((item) => item.type?.kwsp).reduce((sum, item) => sum + item.amount, 0);
+  const kwspWage = basic + restPh + inputs.shiftAllowance + allowances.filter((item) => item.type?.kwsp).reduce((sum, item) => sum + item.amount, 0);
   // PERKESO, EIS and SKBBK count everything except the allowances that are not flagged for them.
   const socsoWage = gross - allowances.filter((item) => !(item.type?.perkeso)).reduce((sum, item) => sum + item.amount, 0) - inputs.otherAllowance;
   const rate = typeof s.epfRate === 'number' ? s.epfRate : 11;
@@ -55,7 +68,7 @@ export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd
   }
   const deductions = money(kwspEmployee + socsoEmployee + eisEmployee + skbbkEmployee + pcb + inputs.otherDeduction);
   return {
-    basic: money(basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
+    ot: otAmount, restPh, basic: money(basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
     kwspEmployee, kwspEmployer, socsoEmployee, socsoEmployer, eisEmployee, eisEmployer, skbbk: skbbkEmployee, hrdf: hrdfEmployer, pcb, chargeable, deductions, net: money(gross - deductions),
     ytdAfter: { wages: money(ytd.wages + gross), kwspRelief: money(Math.min(4000, ytd.kwspRelief + kwspEmployee)), pcbPaid: money(ytd.pcbPaid + pcb), zakatPaid: ytd.zakatPaid },
   };

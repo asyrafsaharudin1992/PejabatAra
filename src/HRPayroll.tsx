@@ -37,7 +37,7 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
 type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; payslip: { status: 'draft' | 'locked'; inputs: PayInputs } | null };
 const API = '/api/status?resource=hr';
-const FIELDS: [keyof PayInputs, string][] = [['ot', 'OT'], ['restPh', 'Rest / PH'], ['shiftAllowance', 'Shift'], ['unpaidLeave', 'Unpaid leave'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
+const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidLeave', 'Unpaid leave'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -90,7 +90,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     </div>
     {staff === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !staff.length ? <p className="mt-4 text-sm text-slate-500">Nothing to show for this month.</p> : <>
       {blocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">An earlier month is not locked yet, so the year-to-date totals (and PCB) below are not final.</p>}
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1180px] text-left text-xs">
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1500px] text-left text-xs">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Basic</th>{FIELDS.map(([, label]) => <th key={label} className="pr-2">{label}</th>)}<th className="pr-3 text-right">Gross</th><th className="pr-3 text-right">KWSP</th><th className="pr-3 text-right">PERKESO</th><th className="pr-3 text-right">EIS</th><th className="pr-3 text-right">SKBBK</th><th className="pr-3 text-right">PCB</th><th className="text-right">Net</th></tr></thead>
         <tbody>{rows.map(({ member, out }) => { const slipLocked = member.payslip?.status === 'locked'; return <tr key={member.id} className="border-t border-slate-100">
           <td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{member.fullName}</p><p className="text-[10px] text-slate-400">{member.employeeCode}{!member.hasYtd && ' · no year-to-date'}{slipLocked && ' · locked'}</p></td>
@@ -105,7 +105,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
         <button type="button" disabled={Boolean(busy) || locked || blocked} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
-      <p className="mt-3 text-xs text-slate-400">OT, rest-day / PH pay, unpaid leave and the like are typed in by HR for now; they will come from attendance and leave when those are brought over. Amounts stay hidden until Show amounts is pressed.</p>
+      <p className="mt-3 text-xs text-slate-400">OT hours (at the rate HR approved), rest days and public holidays worked, unpaid leave and the like are typed in by HR for now; they will come from attendance and leave when those are brought over. Amounts stay hidden until Show amounts is pressed.</p>
     </>}
   </section>;
 }

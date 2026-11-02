@@ -1076,7 +1076,7 @@ export async function hrHandler(req: any, res: any) {
         if (!member) continue;
         if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
         const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
-        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction) };
+        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays) };
         const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings }, inputs, member.ytd, year, month);
         rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result, locked_at: lock ? now : null, updated_at: now });
       }
