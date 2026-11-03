@@ -122,7 +122,7 @@ export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot'
   const dates = Array.from({ length: 15 }, (_, index) => addDay(state.today, -index));
   const requestSections = <>
     {waiting.length > 0 && <section className={`${card} space-y-3`}>
-      <h3 className="font-semibold">Waiting for your approval</h3>
+      <h3 className="font-semibold">Approve OT <span className="text-xs font-normal text-slate-400">· waiting for your approval</span></h3>
       <ul className="divide-y divide-slate-100">{waiting.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
@@ -130,7 +130,7 @@ export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot'
     </section>}
 
     <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">OT request</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">Apply OT</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
       {form && <div className="space-y-3">
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
         <div className="grid grid-cols-3 gap-3"><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">OT hours (hh:mm)</span><input type="time" value={form.otTime} onChange={(event) => setForm({ ...form, otTime: event.target.value })} className={field} /></label></div>
