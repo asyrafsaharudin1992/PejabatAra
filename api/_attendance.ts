@@ -148,7 +148,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
 
 const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '' });
 const PERSON = 'id,company,employee_code,full_name,designation,work_days,holiday_group,default_shift,clock_required';
-const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', reason: row.reason, status: row.status, decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, createdAt: row.created_at });
+const minutesText = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', otMinutes: Number(row.ot_minutes || 0), otText: minutesText(Number(row.ot_minutes || 0)), reason: row.reason, remarks: row.remarks || '', status: row.status, supervisorDecidedBy: row.supervisor_decided_by || '', supervisorNote: row.supervisor_note || '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, rate: row.ot_multiplier === null || row.ot_multiplier === undefined ? null : Number(row.ot_multiplier), createdAt: row.created_at });
 
 // Approving a correction adds the clocks it asks for (an out time before the in time means the next day, for a night shift).
 async function applyRequest(db: any, request: any) {
@@ -162,16 +163,42 @@ async function applyRequest(db: any, request: any) {
   }
   if (rows.length) { const { error } = await db.from('hr_attendance_clocks').insert(rows); if (error) throw error; }
 }
-async function decideRequest(db: any, id: string, decision: string, note: string, by: string, allow: (request: any) => boolean) {
-  if (!['approved', 'rejected'].includes(decision)) throw fail(400, 'Choose approve or reject.');
+// Infotech's way: the supervisor approves first, then HR confirms. Only HR's confirmation adds the clocks and the OT.
+async function readRequest(db: any, id: string) {
   const { data: request, error } = await db.from('hr_attendance_requests').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   if (!request) throw fail(404, 'That request was not found.');
-  if (!allow(request)) throw fail(403, 'This request is not waiting for you.');
+  return request;
+}
+async function supervisorDecide(db: any, id: string, decision: string, note: string, by: string, supervisorId: string) {
+  if (!['approved', 'rejected'].includes(decision)) throw fail(400, 'Choose approve or reject.');
+  const request = await readRequest(db, id);
+  if (request.approver_id !== supervisorId) throw fail(403, 'This request is not waiting for you.');
   if (request.status !== 'pending') throw fail(409, 'This request has already been decided.');
-  const { error: updateError } = await db.from('hr_attendance_requests').update({ status: decision, decided_by: by, decided_at: new Date().toISOString(), decision_note: note }).eq('id', id).eq('status', 'pending');
-  if (updateError) throw updateError;
-  if (decision === 'approved') await applyRequest(db, request);
+  const now = new Date().toISOString();
+  const patch = decision === 'approved' ? { status: 'supervisor_approved', supervisor_decided_by: by, supervisor_decided_at: now, supervisor_note: note } : { status: 'rejected', supervisor_decided_by: by, supervisor_decided_at: now, supervisor_note: note, decided_by: by, decided_at: now, decision_note: note };
+  const { error } = await db.from('hr_attendance_requests').update(patch).eq('id', id).eq('status', 'pending');
+  if (error) throw error;
+}
+async function hrDecide(db: any, id: string, decision: string, note: string, by: string, rate: number, minutes: unknown) {
+  if (!['approved', 'rejected'].includes(decision)) throw fail(400, 'Choose approve or reject.');
+  const request = await readRequest(db, id);
+  if (!['pending', 'supervisor_approved'].includes(request.status)) throw fail(409, 'This request has already been decided.');
+  const requested = Number(request.ot_minutes || 0);
+  const approvedMinutes = decision === 'approved' && requested > 0 ? Math.max(0, Math.min(requested, Math.round(Number(minutes ?? requested)))) : 0;
+  if (decision === 'approved' && approvedMinutes > 0 && !OT_RATES.includes(rate)) throw fail(400, 'Choose the OT rate: 1.0, 1.5, 2.0 or 3.0.');
+  const { error } = await db.from('hr_attendance_requests').update({ status: decision, decided_by: by, decided_at: new Date().toISOString(), decision_note: note, ot_multiplier: approvedMinutes > 0 ? rate : null }).eq('id', id).in('status', ['pending', 'supervisor_approved']);
+  if (error) throw error;
+  if (decision !== 'approved') return;
+  await applyRequest(db, request);
+  if (approvedMinutes > 0) {
+    // The OT table is what Payroll reads: record the approved minutes at the chosen rate (never less than what the clocks captured).
+    const { data: one } = await db.from('hr_employees').select(PERSON).eq('id', request.employee_id).maybeSingle();
+    let captured = approvedMinutes;
+    if (one) { const day = ((await buildDays(db, [one], request.work_date, request.work_date, await loadRules(db))).get(request.employee_id) || [])[0]; captured = Math.max(day?.otCounted || 0, approvedMinutes); }
+    const { error: otError } = await db.from('hr_attendance_ot').upsert({ employee_id: request.employee_id, work_date: request.work_date, captured_minutes: captured, status: 'approved', approved_minutes: approvedMinutes, multiplier: rate, note: text(`Requested by staff. ${note}`, 300), decided_by: by, decided_at: new Date().toISOString() }, { onConflict: 'employee_id,work_date' });
+    if (otError) throw otError;
+  }
 }
 
 // ---- Staff side (Individual Sign In) ----
@@ -238,16 +265,39 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     if (listError) throw listError;
     return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, new Map([[me.id, me.full_name]]))) });
   }
-  if (req.method === 'POST' && action === 'attendance_request_create') {
-    const date = isDate(body.date) ? String(body.date) : '', inTime = body.inTime ? String(body.inTime) : '', outTime = body.outTime ? String(body.outTime) : '', reason = text(body.reason, 300);
+  // Create, or edit a draft: the staff member asks for a corrected clock and/or OT hours for a day, as in Infotech's Attendance / OT Request.
+  if (req.method === 'POST' && (action === 'attendance_request_create' || action === 'attendance_request_update')) {
+    const date = isDate(body.date) ? String(body.date) : '', inTime = body.inTime ? String(body.inTime) : '', outTime = body.outTime ? String(body.outTime) : '', reason = text(body.reason, 300), remarks = text(body.remarks, 500);
+    const otText = body.otTime ? String(body.otTime) : '';
+    if (otText && !isTime(otText)) throw fail(400, 'Enter the OT hours as hh:mm.');
+    const otMinutes = otText ? Number(otText.slice(0, 2)) * 60 + Number(otText.slice(3, 5)) : 0;
+    const draft = body.draft === true;
     if (!date || date > today() || date < addDay(today(), -30)) throw fail(400, 'Choose a date within the last 30 days.');
-    if (!inTime && !outTime) throw fail(400, 'Enter the time you clocked in, the time you clocked out, or both.');
+    if (!inTime && !outTime && !otMinutes) throw fail(400, 'Enter the time you clocked in or out, the OT hours, or both.');
     if ((inTime && !isTime(inTime)) || (outTime && !isTime(outTime))) throw fail(400, 'Enter the times as hh:mm.');
-    if (!reason) throw fail(400, 'Say why (for example: forgot to clock out).');
-    const { data: waiting } = await db.from('hr_attendance_requests').select('id').eq('employee_id', me.id).eq('work_date', date).eq('status', 'pending').limit(1);
-    if (waiting?.length) throw fail(409, 'You already have a request waiting for that date.');
-    const { error: insertError } = await db.from('hr_attendance_requests').insert({ employee_id: me.id, work_date: date, in_time: inTime || null, out_time: outTime || null, reason, approver_id: me.leave_approver_id || me.final_approver_id || null });
-    if (insertError) throw insertError;
+    if (!reason) throw fail(400, 'Choose or write the reason.');
+    const supervisor = [me.leave_approver_id, me.final_approver_id].find((id: string | null) => id && id !== me.id) || null;
+    const waiting = await db.from('hr_attendance_requests').select('id').eq('employee_id', me.id).eq('work_date', date).in('status', ['pending', 'supervisor_approved']).limit(1);
+    if (waiting.data?.length && !(action === 'attendance_request_update' && waiting.data[0].id === text(body.id, 60))) throw fail(409, 'You already have a request waiting for that date.');
+    // No supervisor set: it goes straight to HR.
+    const fields = { work_date: date, in_time: inTime || null, out_time: outTime || null, ot_minutes: otMinutes, reason, remarks, approver_id: supervisor, status: draft ? 'draft' : supervisor ? 'pending' : 'supervisor_approved' };
+    if (action === 'attendance_request_update') {
+      const id = text(body.id, 60), mine = await readRequest(db, id);
+      if (mine.employee_id !== me.id || mine.status !== 'draft') throw fail(403, 'Only your own draft can be changed.');
+      const { error: updateError } = await db.from('hr_attendance_requests').update(fields).eq('id', id).eq('status', 'draft');
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await db.from('hr_attendance_requests').insert({ employee_id: me.id, ...fields });
+      if (insertError) { if (insertError.code === '42703' || insertError.code === '23514') throw fail(400, 'OT requests are not set up yet. Ask HR (the database update has not been run).'); throw insertError; }
+    }
+    return res.status(200).json({ success: true });
+  }
+  if (req.method === 'POST' && action === 'attendance_request_cancel') {
+    const id = text(body.id, 60), mine = await readRequest(db, id);
+    if (mine.employee_id !== me.id) throw fail(403, 'That is not your request.');
+    if (!['draft', 'pending', 'supervisor_approved'].includes(mine.status)) throw fail(409, 'Only a draft or a request still waiting can be cancelled.');
+    const { error: cancelError } = await db.from('hr_attendance_requests').update({ status: 'cancelled', decided_by: me.full_name, decided_at: new Date().toISOString() }).eq('id', id).in('status', ['draft', 'pending', 'supervisor_approved']);
+    if (cancelError) throw cancelError;
     return res.status(200).json({ success: true });
   }
   if (req.method === 'GET' && action === 'attendance_request_approvals') {
@@ -258,7 +308,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, new Map((people || []).map((p: any) => [p.id, p.full_name])))) });
   }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
-    await decideRequest(db, text(body.id, 60), String(body.decision), text(body.note, 300), me.full_name, (request) => request.approver_id === me.id);
+    await supervisorDecide(db, text(body.id, 60), String(body.decision), text(body.note, 300), me.full_name, me.id);
     return res.status(200).json({ success: true });
   }
   throw fail(404, 'Unknown attendance action.');
@@ -334,8 +384,8 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   // Corrections asked by staff: HR can decide any of them.
   if (req.method === 'GET' && action === 'attendance_requests') {
     const status = req.query.status === 'all' ? 'all' : 'pending';
-    let query = db.from('hr_attendance_requests').select('*').order('created_at', { ascending: false }).limit(100);
-    if (status === 'pending') query = query.eq('status', 'pending');
+    let query = db.from('hr_attendance_requests').select('*').neq('status', 'draft').order('created_at', { ascending: false }).limit(100);
+    if (status === 'pending') query = query.in('status', ['pending', 'supervisor_approved']);
     const { data, error } = await query;
     if (error) throw error;
     const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
@@ -344,7 +394,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, names)) });
   }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
-    await decideRequest(db, text(body.id, 60), String(body.decision), text(body.note, 300), userLabel || 'HR', () => true);
+    await hrDecide(db, text(body.id, 60), String(body.decision), text(body.note, 300), userLabel || 'HR', Number(body.rate), body.minutes);
     return res.status(200).json({ success: true });
   }
 

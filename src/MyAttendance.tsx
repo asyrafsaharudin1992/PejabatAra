@@ -8,7 +8,10 @@ import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 // sees the requests waiting for them here.
 type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; leave: string };
 type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
-type Req = { id: string; name: string; date: string; inTime: string; outTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; note: string };
+type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string };
+const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
+const REASONS = ['Forgot to clock in', 'Forgot to clock out', 'Overtime', 'Worked on rest day / public holiday', 'Other'];
+const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${request.otText}`].filter(Boolean).join(' · ');
 
 const DEVICE_KEY = 'ara_clock_device';
 // Anonymous browser identifier recorded with each clock for audit only; changing browsers is allowed.
@@ -24,7 +27,7 @@ const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emer
 const badge = (status: string) => { const [label, tone] = STATUS[status] || [status, 'bg-slate-100 text-slate-500']; return <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{label}</span>; };
 const card = 'rounded-[22px] border border-black/[0.045] bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.025)] sm:p-6';
 const field = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
-const reqStatus = (request: Req) => request.status === 'pending' ? 'bg-amber-50 text-amber-700' : request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500';
+const reqStatus = (request: Req) => request.status === 'pending' || request.status === 'supervisor_approved' ? 'bg-amber-50 text-amber-700' : request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500';
 
 // What to do on this person's phone when the page has been refused location (shown as a pop up).
 const phoneKind = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'ios' : /Android/i.test(navigator.userAgent) ? 'android' : 'other';
@@ -58,7 +61,7 @@ export default function MyAttendance() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [mine, setMine] = useState<Req[]>([]);
   const [waiting, setWaiting] = useState<Req[]>([]);
-  const [form, setForm] = useState<{ date: string; inTime: string; outTime: string; reason: string } | null>(null);
+  const [form, setForm] = useState<{ id?: string; date: string; inTime: string; outTime: string; otTime: string; reason: string; remarks: string } | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [tip, setTip] = useState(false);
@@ -94,11 +97,18 @@ export default function MyAttendance() {
       setError(text);
     } finally { if (locationCheck.current === controller) locationCheck.current = null; setLocating(false); setBusy(false); }
   };
-  const send = async () => {
+  const send = async (draft = false) => {
     if (!form) return;
     setBusy(true); setError(''); setMessage('');
-    try { await assessmentFetch('action=attendance_request_create', { method: 'POST', body: JSON.stringify({ date: form.date, inTime: form.inTime, outTime: form.outTime, reason: form.reason }) }); setForm(null); setMessage('Your request was sent. Your supervisor or HR will approve it.'); loadRequests(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to send the request.'); } finally { setBusy(false); }
+    try {
+      await assessmentFetch(form.id ? 'action=attendance_request_update' : 'action=attendance_request_create', { method: 'POST', body: JSON.stringify({ ...form, draft }) });
+      setForm(null); setMessage(draft ? 'Saved as a draft. Send it when you are ready.' : 'Your request was sent. Your supervisor approves first, then HR confirms.'); loadRequests();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to send the request.'); } finally { setBusy(false); }
+  };
+  const cancelRequest = async (id: string) => {
+    setBusy(true); setError('');
+    try { await assessmentFetch('action=attendance_request_cancel', { method: 'POST', body: JSON.stringify({ id }) }); loadRequests(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to cancel.'); } finally { setBusy(false); }
   };
   const decide = async (id: string, decision: 'approved' | 'rejected') => {
     setBusy(true); setError('');
@@ -128,21 +138,22 @@ export default function MyAttendance() {
     {waiting.length > 0 && <section className={`${card} space-y-3`}>
       <h3 className="font-semibold">Waiting for your approval</h3>
       <ul className="divide-y divide-slate-100">{waiting.map((request) => <li key={request.id} className="py-3 text-sm">
-        <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {request.inTime && `in ${request.inTime}`}{request.inTime && request.outTime && ' · '}{request.outTime && `out ${request.outTime}`}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}</p>
+        <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
       </li>)}</ul>
     </section>}
 
     <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">Forgot to clock?</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', reason: 'Forgot to clock out' })} className="text-sm font-semibold text-[#0b587b]">Send a request</button>}</div>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">Attendance / OT request</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
       {form && <div className="space-y-3">
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
-        <div className="grid grid-cols-2 gap-3"><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label></div>
-        <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><input value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} maxLength={300} className={field} /></label>
-        <p className="text-xs text-slate-400">Fill only the time you missed. Your supervisor or HR must approve it.</p>
-        <div className="flex gap-2"><button onClick={() => void send()} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Cancel</button></div>
+        <div className="grid grid-cols-3 gap-3"><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">OT hours (hh:mm)</span><input type="time" value={form.otTime} onChange={(event) => setForm({ ...form, otTime: event.target.value })} className={field} /></label></div>
+        <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={REASONS.includes(form.reason) ? form.reason : 'Other'} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
+        <label className="block text-sm"><span className="mb-1 block text-slate-500">Remarks (optional)</span><input value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} maxLength={500} className={field} /></label>
+        <p className="text-xs text-slate-400">Fill only what you need: the clock time you missed, the OT hours you worked, or both. Your supervisor approves first, then HR confirms.</p>
+        <div className="flex flex-wrap gap-2"><button onClick={() => void send(false)} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => void send(true)} disabled={busy} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-[#0b587b] disabled:opacity-60">Save draft</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Close</button></div>
       </div>}
-      {mine.length > 0 && <ul className="divide-y divide-slate-100">{mine.slice(0, 5).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="flex-1 text-slate-600">{dayName(request.date)} · {request.inTime && `in ${request.inTime}`}{request.inTime && request.outTime && ' · '}{request.outTime && `out ${request.outTime}`}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{request.status === 'pending' ? 'Waiting' : request.status === 'approved' ? 'Approved' : 'Rejected'}</span></li>)}</ul>}
+      {mine.length > 0 && <ul className="divide-y divide-slate-100">{mine.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
     </section>
 
     <section className={card}>
