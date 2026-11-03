@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Send, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
@@ -126,16 +126,17 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   // is saved in the background; saves go one after another (the server rewrites the whole
   // claim each time), and if one fails the rows go back to what the server holds.
   const queue = useRef(Promise.resolve());
-  const applyMark = (list: IncentiveEntry[], entryId: string, review: 'approved' | 'rejected' | null) => list.map((entry) => {
+  const applyMark = (list: IncentiveEntry[], entryId: string, review: 'approved' | 'rejected' | null, reason?: string) => list.map((entry) => {
     if (entryId === '*' ? entry.review : entry.id !== entryId) return entry;
-    const { review: _previous, ...rest } = entry;
-    return review ? { ...rest, review } : rest;
+    const { review: _previous, reason: kept, ...rest } = entry;
+    const why = reason !== undefined ? reason : kept;
+    return review ? { ...rest, review, ...(review === 'rejected' && why ? { reason: why } : {}) } : rest;
   });
-  const mark = (entryId: string, review: 'approved' | 'rejected' | null) => {
-    setEntries((current) => applyMark(current, entryId, review));
+  const mark = (entryId: string, review: 'approved' | 'rejected' | null, reason?: string) => {
+    setEntries((current) => applyMark(current, entryId, review, reason));
     setMarking((count) => count + 1);
     queue.current = queue.current.then(async () => {
-      try { await post({ action: 'incentive_entry', id: claim.id, entryId, review }); }
+      try { await post({ action: 'incentive_entry', id: claim.id, entryId, review, ...(reason !== undefined ? { reason } : {}) }); }
       catch (cause) {
         onError(cause instanceof Error ? cause.message : 'Unable to save.');
         try { setEntries((await (await officeFetch(`${API}&action=incentives&branch=${encodeURIComponent(claim.branch)}&month=${claim.month}`)).json()).claims.find((item: Claim) => item.id === claim.id)?.entries || claim.entries); } catch { /* keep what is shown */ }
@@ -182,14 +183,14 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       <table className="w-full min-w-[720px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-400"><tr><th className="py-2 pr-3">Date</th><th className="pr-3">Patient</th><th className="pr-3">Clinic ID</th><th className="pr-3">Outstanding</th><th className="pr-3">Code</th><th className="pr-3 text-right">RM</th><th className="text-center">Approve</th></tr></thead>
         <tbody className="divide-y divide-slate-100">{entries.map((entry) => {
           const rejected = entry.review === 'rejected';
-          return <tr key={entry.id} className={rejected ? 'bg-rose-50/40 text-slate-400' : entry.review === 'approved' ? 'bg-emerald-50/30' : ''}>
+          return <Fragment key={entry.id}><tr className={rejected ? 'bg-rose-50/40 text-slate-400' : entry.review === 'approved' ? 'bg-emerald-50/30' : ''}>
             <td className={`whitespace-nowrap py-2.5 pr-3 ${rejected ? 'line-through' : ''}`}>{dmy(entry.date)}</td><td className={`pr-3 ${rejected ? 'line-through' : ''}`}>{entry.patient || '—'}</td><td className={`pr-3 font-mono text-xs ${rejected ? 'line-through' : ''}`}>{entry.clinicId || '—'}</td><td className="pr-3 text-xs">{entry.outstanding || ''}</td>
             <td className={`pr-3 ${rejected ? 'line-through' : ''}`}><span className="font-mono text-xs font-bold text-[#0b587b]">{entry.code}</span> <span className="text-xs text-slate-500">{codeName(entry.code)}</span></td>
             <td className={`pr-3 text-right font-semibold ${rejected ? 'line-through' : ''}`}>{entry.rm.toFixed(2)}</td>
             <td className="whitespace-nowrap py-1.5 text-center">{open
               ? <span className="inline-flex gap-1">{markButton(entry, 'approved')}{markButton(entry, 'rejected')}</span>
               : <span className={`text-xs font-bold ${rejected ? 'text-rose-600' : 'text-emerald-600'}`}>{rejected ? '✗ Not approved' : '✓ Approved'}</span>}</td>
-          </tr>;
+          </tr>{rejected && (open || entry.reason) && <tr className="bg-rose-50/40"><td colSpan={7} className="pb-2 pr-3 text-xs">{open ? <label className="flex items-center gap-2 text-rose-700"><span className="shrink-0 font-semibold">Why not approved? (the staff will see this)</span><input key={`${entry.id}-${entry.reason || ''}`} defaultValue={entry.reason || ''} maxLength={200} onBlur={(event) => { if (event.target.value.trim() !== (entry.reason || '')) mark(entry.id, 'rejected', event.target.value.trim()); }} placeholder="e.g. no clinic ID, patient not seen on that date" className="h-8 min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-2 text-xs text-slate-700" /></label> : <span className="text-rose-700">Reason: {entry.reason}</span>}</td></tr>}</Fragment>;
         })}</tbody>
         <tfoot><tr className="border-t-2 border-slate-200"><td colSpan={5} className="pt-3 text-right font-semibold">Total claimed incentives</td><td className="pr-3 pt-3 text-right font-semibold">{total.toFixed(2)}</td><td /></tr>
           <tr><td colSpan={5} className="pb-3 text-right font-semibold text-emerald-700">Total approved{rejectedCount ? ` (${rejectedCount} not approved)` : ''}{unchecked && open ? ` · ${unchecked} not checked` : ''}</td><td className="pr-3 pb-3 text-right text-lg font-semibold text-emerald-700">{approved.toFixed(2)}</td><td /></tr></tfoot>

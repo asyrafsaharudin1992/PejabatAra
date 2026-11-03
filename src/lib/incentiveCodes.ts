@@ -38,7 +38,7 @@ export const INCENTIVE_CODES: IncentiveCode[] = [
 export const INCENTIVE_BRANCHES: Record<string, string> = { KJ: 'Kajang', SK: 'Seri Kembangan' };
 
 // `review` is set by the Clinical Admin row by row; a row without it has not been checked yet.
-export type IncentiveEntry = { id: string; date: string; patient: string; clinicId: string; outstanding: string; code: string; rm: number; review?: 'approved' | 'rejected' };
+export type IncentiveEntry = { id: string; date: string; patient: string; clinicId: string; outstanding: string; code: string; rm: number; review?: 'approved' | 'rejected'; reason?: string };
 export type IncentiveStatus = 'draft' | 'submitted' | 'approved' | 'returned';
 export const claimTotal = (entries: IncentiveEntry[]) => Math.round(entries.reduce((total, entry) => total + Number(entry.rm || 0), 0) * 100) / 100;
 export const approvedTotal = (entries: IncentiveEntry[]) => claimTotal(entries.filter((entry) => entry.review === 'approved'));

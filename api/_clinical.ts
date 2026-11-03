@@ -221,12 +221,15 @@ export async function clinicalHandler(req: any, res: any) {
       if (claim.status === 'approved') throw fail(409, 'This claim is already approved. Return it first to change an entry.');
       const entryId = text(body.entryId, 60);
       const review = body.review === 'approved' || body.review === 'rejected' ? body.review : null;
+      const reason = typeof body.reason === 'string' ? text(body.reason, 200) : undefined;
       // entryId '*' approves every row not checked yet.
       if (entryId !== '*' && !(claim.entries || []).some((entry: any) => entry.id === entryId)) throw fail(404, 'Entry not found.');
       const entries = (claim.entries || []).map(({ rejected: _old, ...entry }: any) => {
         if (entryId === '*' ? entry.review : entry.id !== entryId) return entry;
-        const { review: _previous, ...rest } = entry;
-        return review ? { ...rest, review } : rest;
+        // A reason for not approving belongs to the rejected row only; it goes when the row is approved or cleared.
+        const { review: _previous, reason: kept, ...rest } = entry;
+        const why = reason !== undefined ? reason : kept;
+        return review ? { ...rest, review, ...(review === 'rejected' && why ? { reason: why } : {}) } : rest;
       });
       const { error: saveError } = await db.from('incentive_claims').update({ entries, updated_at: now }).eq('id', claim.id);
       if (saveError) throw saveError;
