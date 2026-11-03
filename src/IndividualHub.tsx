@@ -1,5 +1,5 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
@@ -14,7 +14,7 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
 type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'review' | 'profile' | 'settings' | 'password';
+type View = 'home' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -62,9 +62,9 @@ function PhoneTile({ item }: { key?: string; item: PhoneItem }) {
 }
 
 function PhoneNav({ view, onGo }: { view: string; onGo: (next: View) => void }) {
-  const tabs: [View, string, typeof Settings, string[]][] = [['home', 'Home', House, ['home']], ['roster', 'Roster', CalendarDays, ['roster']], ['attendance', 'Attendance', Clock3, ['attendance']], ['settings', 'More', MoreHorizontal, ['settings', 'profile']]];
+  const tabs: [View, string, typeof Settings, string[]][] = [['home', 'Home', House, ['home']], ['roster', 'Roster', CalendarDays, ['roster']], ['attendance', 'Attendance', Clock3, ['attendance']], ['ot', 'OT', Timer, ['ot']], ['settings', 'More', MoreHorizontal, ['settings', 'profile']]];
   return <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 rounded-t-[26px] bg-white px-3 pb-[max(env(safe-area-inset-bottom),10px)] pt-2 shadow-[0_-6px_26px_rgba(11,42,74,0.1)] md:hidden">
-    <div className="grid grid-cols-4">{tabs.map(([target, label, Icon, active]) => { const on = active.includes(view); return <button key={label} onClick={() => onGo(target)} aria-current={on ? 'page' : undefined} className={`flex flex-col items-center gap-1 rounded-xl py-1.5 text-[12px] font-semibold ${on ? 'text-[#1f6feb]' : 'text-slate-400'}`}><Icon className="h-6 w-6" strokeWidth={on ? 2 : 1.6} />{label}</button>; })}</div>
+    <div className="grid grid-cols-5">{tabs.map(([target, label, Icon, active]) => { const on = active.includes(view); return <button key={label} onClick={() => onGo(target)} aria-current={on ? 'page' : undefined} className={`flex flex-col items-center gap-1 rounded-xl py-1.5 text-[12px] font-semibold ${on ? 'text-[#1f6feb]' : 'text-slate-400'}`}><Icon className="h-6 w-6" strokeWidth={on ? 2 : 1.6} />{label}</button>; })}</div>
   </nav>;
 }
 
@@ -248,6 +248,7 @@ export default function IndividualHub() {
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
+  if (view === 'ot') return <Screen nav={phoneNav} title="OT & attendance requests" onBack={() => setView('home')}><MyAttendance mode="ot" /></Screen>;
   if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster /></Screen>;
   if (view === 'payslip') return <Screen nav={phoneNav} title="Payslip" onBack={() => setView('home')}><MyPayslips /></Screen>;
   if (view === 'profile') return <Screen nav={phoneNav} title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
@@ -264,6 +265,7 @@ export default function IndividualHub() {
   const items: Item[] = [
     ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
+    { label: 'OT & requests', desc: 'Ask for overtime or a missed clock', icon: Timer, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('ot') },
     ...([{ label: 'Announcements', desc: me?.staff.announcementsUnread ? `${me.staff.announcementsUnread} to read` : 'Team updates and memos', icon: Bell, tone: 'bg-[#ffe4e8] text-[#e0314f]', onClick: () => setView('announcements'), badge: me?.staff.announcementsUnread || 0 } as Item]),
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
