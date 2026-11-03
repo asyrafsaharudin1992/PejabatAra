@@ -15,7 +15,8 @@ async function api(query: string, body?: unknown) {
   return response.json();
 }
 type Tab = 'today' | 'month' | 'ot' | 'late' | 'import' | 'places' | 'staff' | 'rules';
-type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; leave: string };
+type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
+type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; days: number; note: string }[]; balance: number | null; hoursPerDay: number };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
 type Place = { id: string; name: string; company: string; latitude: number; longitude: number; radius: number; active: boolean };
 type Person = { id: string; company: string; code: string; name: string; doctor: boolean; mode: 'places' | 'anywhere'; placeIds: string[]; clockRequired: 'full' | 'in_only' | 'none'; defaultShift: string };
@@ -56,10 +57,14 @@ function Today({ onError }: { onError: (message: string) => void }) {
   const [company, setCompany] = useState('');
   const [open, setOpen] = useState('');
   const [clocks, setClocks] = useState<Clock[] | null>(null);
+  const [credit, setCredit] = useState<CreditInfo | null>(null);
+  const [useForm, setUseForm] = useState({ kind: 'late' as 'late' | 'early', hours: '', note: '' });
   const load = () => { setRows(null); api(`action=attendance_daily&date=${date}`).then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); };
   useEffect(() => { setOpen(''); load(); }, [date]);
   const loadClocks = async (id: string) => { setClocks(null); try { const result = await api(`action=attendance_clocks&id=${id}&date=${date}`); setClocks(result.clocks); } catch (cause) { setClocks([]); onError(cause instanceof Error ? cause.message : 'Unable to load the clocks.'); } };
-  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setAdd({ kind: 'in', time: '', nextDay: false, note: '' }); await loadClocks(id); };
+  const loadCredit = async (id: string) => { try { const result = await api(`action=attendance_credit_info&id=${id}&date=${date}`); if (result.error) throw new Error(result.error); setCredit(result); } catch { setCredit(null); } };
+  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setAdd({ kind: 'in', time: '', nextDay: false, note: '' }); setUseForm({ kind: 'late', hours: '', note: '' }); setCredit(null); void loadCredit(id); await loadClocks(id); };
+  const useCredit = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadCredit(id); setUseForm({ kind: 'late', hours: '', note: '' }); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const [add, setAdd] = useState({ kind: 'in' as 'in' | 'out', time: '', nextDay: false, note: '' });
   const change = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadClocks(id); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const SOURCE = { phone: 'phone', infotech: 'from Infotech', hr: 'added by HR', request: 'from an approved request' } as const;
@@ -82,7 +87,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
         <tbody>{shown.filter((row) => row.status !== 'off').map((row) => <>
           <tr key={row.id} className="border-t border-slate-100">
             <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
-            <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.shift}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span></td>
+            <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.shift}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
             <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
             <td className="pr-3">{badge(row.status)}</td>
@@ -97,6 +102,15 @@ function Today({ onError }: { onError: (message: string) => void }) {
                 <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={add.nextDay} onChange={(event) => setAdd({ ...add, nextDay: event.target.checked })} />next day (night shift)</label>
                 <input value={add.note} onChange={(event) => setAdd({ ...add, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
                 <button onClick={() => void change(() => api('action=attendance_clock_add', { id: row.id, date, kind: add.kind, time: add.time, nextDay: add.nextDay, note: add.note }), row.id)} disabled={!add.time} className={button}>Add</button></div>
+              <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">Use Annual Leave credit (hours) for {dayName(date)}</span>{credit && credit.balance !== null && <span className="text-slate-500">AL balance {credit.balance} day(s) · {credit.hoursPerDay} hours = 1 day</span>}</div>
+                {credit && credit.uses.length > 0 && <ul className="space-y-1">{credit.uses.map((use) => <li key={use.id} className="flex flex-wrap items-center gap-x-2"><span className="font-semibold text-violet-700">{use.hours} h ({use.days} day)</span> {use.kind === 'late' ? 'late arrival' : 'early leave'}{use.note && ` · ${use.note}`}<button onClick={() => void useCredit(() => api('action=attendance_credit_use_delete', { useId: use.id }), row.id)} className="ml-1 font-semibold text-rose-700 hover:underline">Remove</button></li>)}</ul>}
+                <div className="flex flex-wrap items-center gap-2">
+                  <select value={useForm.kind} onChange={(event) => setUseForm({ ...useForm, kind: event.target.value as 'late' | 'early' })} aria-label="Late arrival or early leave" className={field}><option value="late">Came in late</option><option value="early">Left early</option></select>
+                  <input type="number" min="0.25" max="12" step="0.25" value={useForm.hours} onChange={(event) => setUseForm({ ...useForm, hours: event.target.value })} placeholder="Hours" aria-label="Hours of credit" className={`${field} w-24`} />
+                  <input value={useForm.note} onChange={(event) => setUseForm({ ...useForm, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
+                  <button onClick={() => void useCredit(() => api('action=attendance_credit_use_add', { id: row.id, date, kind: useForm.kind, hours: Number(useForm.hours), note: useForm.note }), row.id)} disabled={!(Number(useForm.hours) > 0)} className={button}>Use credit</button></div>
+              </div>
             </>}</td></tr>}
         </>)}</tbody>
       </table>}

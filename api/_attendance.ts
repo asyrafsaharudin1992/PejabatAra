@@ -46,24 +46,27 @@ function shiftTimes(rules: Rules, code: string, doctor: boolean) {
 }
 
 export type Employee = { id: string; company: string; employee_code: string; full_name: string; designation: string; work_days: number[] | null; holiday_group: string | null; default_shift?: string | null; clock_required?: string | null };
-export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; leave: string };
+export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; creditHours: number; leave: string };
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
-type Data = { roster: any[]; clocks: any[]; leave: any[]; holidays: any[]; ot: any[] };
+type Data = { roster: any[]; clocks: any[]; leave: any[]; holidays: any[]; ot: any[]; credit: any[] };
+// Annual leave credit used in hours counts 8 hours as one day.
+export const CREDIT_HOURS_PER_DAY = 8;
 // Everything a range needs, fetched at the same time (the database is far from the server, so one round of
 // queries is much faster than several in turn). Pass ids to read only those people; leave it out for everyone.
 export async function fetchData(db: any, from: string, to: string, ids?: string[]): Promise<Data> {
   const wide = { from: `${addDay(from, -1)}T00:00:00+08:00`, to: `${addDay(to, 2)}T00:00:00+08:00` };
   const only = (query: any) => ids ? query.in('employee_id', ids) : query;
-  const [{ data: roster }, { data: clocks }, { data: leave }, { data: holidays }, { data: ot }] = await Promise.all([
+  const [{ data: roster }, { data: clocks }, { data: leave }, { data: holidays }, { data: ot }, { data: credit }] = await Promise.all([
     only(db.from('hr_roster').select('employee_id,work_date,shift,works').gte('work_date', from).lte('work_date', to)).limit(20000),
     only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').limit(30000),
     only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).limit(5000),
     db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to).limit(1000),
     only(db.from('hr_attendance_ot').select('employee_id,work_date,status,approved_minutes,multiplier,note').gte('work_date', from).lte('work_date', to)).limit(10000),
+    only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).limit(5000),
   ]);
-  return { roster: roster || [], clocks: clocks || [], leave: leave || [], holidays: holidays || [], ot: ot || [] };
+  return { roster: roster || [], clocks: clocks || [], leave: leave || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
 }
 
 export async function buildDays(db: any, people: Employee[], from: string, to: string, rules: Rules) {
@@ -79,6 +82,7 @@ export const RECORDS_FROM = '2026-10-01';
 export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));
   const { roster, clocks, leave, holidays, ot: otRows } = data;
+  const creditOf = new Map<string, number>((data.credit || []).map((row: any) => [`${row.employee_id}|${row.work_date}|${row.kind}`, Number(row.hours)]));
   const rosterOf = new Map<string, { shift: string; works: boolean }>((roster || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
   const holidayOn = new Set((holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
   const decided = new Map<string, any>((otRows || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
@@ -104,7 +108,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       else if (workDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) code = person.default_shift || OFFICE_CODE;
       const leaveRow = (leave || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date);
       const shift = code ? shiftTimes(rules, code, doctor) : null;
-      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', leave: leaveRow?.leave_type || '' };
+      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', creditHours: 0, leave: leaveRow?.leave_type || '' };
       // Before the records start there is nothing to judge: not absent, not expected. Approved leave is still shown.
       if (date < RECORDS_FROM && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       if (!shift) {
@@ -116,8 +120,11 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
         if (!leaveRow && first && last && last.at > first.at && !doctor && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN); day.ot = day.worked; day.otCounted = day.worked >= rules.otMin ? day.worked : 0; }
         push(day); continue;
       }
-      const start = at(date, shift.start); let end = at(date, shift.end); if (end <= start) end += 24 * HOUR;
-      const day: Day = { ...blank, start: new Date(start).toISOString(), end: new Date(end).toISOString() };
+      // Annual leave credit used in hours moves the start (late arrival) or the end (early leave), so those hours are not counted late or early.
+      const lateCredit = creditOf.get(`${person.id}|${date}|late`) || 0, earlyCredit = creditOf.get(`${person.id}|${date}|early`) || 0;
+      const shiftStart = at(date, shift.start); let shiftEnd = at(date, shift.end); if (shiftEnd <= shiftStart) shiftEnd += 24 * HOUR;
+      const start = shiftStart + lateCredit * HOUR, end = shiftEnd - earlyCredit * HOUR;
+      const day: Day = { ...blank, start: new Date(start).toISOString(), end: new Date(end).toISOString(), creditHours: lateCredit + earlyCredit };
       // A clock in counts for this shift from 5 hours before it starts until 10 hours after, but not once the shift is nearly over (that is a clock out recorded as an in).
       const clockIn = mine.find((clock) => clock.kind === 'in' && clock.at >= start - 5 * HOUR && clock.at <= Math.min(start + 10 * HOUR, end - 30 * MIN));
       const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
@@ -408,6 +415,45 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const { data, error } = await db.from('hr_attendance_clocks').select('id,kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)').eq('employee_id', id).gte('clock_at', `${addDay(date, -1)}T12:00:00+08:00`).lte('clock_at', `${addDay(date, 1)}T12:00:00+08:00`).order('clock_at');
     if (error) throw error;
     return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: row.device === 'request' ? 'request' : row.device === 'hr' ? 'hr' : String(row.device).startsWith('infotech') ? 'infotech' : 'phone', kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && !['request', 'hr'].includes(row.device) && !String(row.device).startsWith('infotech'), fromRequest: row.device === 'request', device: row.device })) });
+  }
+
+  // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
+  if (req.method === 'GET' && action === 'attendance_credit_info') {
+    const id = text(req.query.id, 60), date = isDate(req.query.date) ? String(req.query.date) : today();
+    const [uses, balance] = await Promise.all([
+      db.from('hr_credit_hour_use').select('id,kind,hours,days,note,created_by').eq('employee_id', id).eq('work_date', date),
+      db.from('hr_leave_balances').select('balance').eq('employee_id', id).eq('leave_group', 'AL').eq('year', Number(date.slice(0, 4))).maybeSingle(),
+    ]);
+    if (uses.error) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040001_credit_hour_use first.');
+    return res.status(200).json({ uses: uses.data || [], balance: balance.data ? Number(balance.data.balance) : null, hoursPerDay: CREDIT_HOURS_PER_DAY });
+  }
+  if (req.method === 'POST' && action === 'attendance_credit_use_add') {
+    const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : '', kind = body.kind === 'early' ? 'early' : 'late';
+    const hours = Math.round(Number(body.hours) * 4) / 4;
+    if (!id || !date) throw fail(400, 'Choose a person and a date.');
+    if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12.');
+    const year = Number(date.slice(0, 4)), days = Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100;
+    const { data: balance, error: balanceError } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', id).eq('leave_group', 'AL').eq('year', year).maybeSingle();
+    if (balanceError) throw balanceError;
+    if (!balance) throw fail(400, `No ${year} Annual Leave balance for this person.`);
+    if (Number(balance.balance) + 0.001 < days) throw fail(400, `Only ${Number(balance.balance)} day(s) of Annual Leave left, and ${hours} hours is ${days} day(s).`);
+    const { error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days, note: text(body.note, 200), created_by: userLabel });
+    if (error) throw fail(error.code === '23505' ? 409 : 400, error.code === '23505' ? `Credit hours are already recorded for this ${kind === 'late' ? 'late arrival' : 'early leave'}. Remove it first to change it.` : error.message);
+    await db.from('hr_leave_balances').update({ taken: Number(balance.taken) + days, balance: Number(balance.balance) - days, updated_at: new Date().toISOString() }).eq('id', balance.id);
+    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h (${days} day) for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
+  if (req.method === 'POST' && action === 'attendance_credit_use_delete') {
+    const useId = text(body.useId, 60);
+    const { data: use } = await db.from('hr_credit_hour_use').select('id,employee_id,work_date,kind,hours,days').eq('id', useId).maybeSingle();
+    if (!use) throw fail(404, 'That credit use was not found.');
+    const year = Number(String(use.work_date).slice(0, 4));
+    const { data: balance } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', use.employee_id).eq('leave_group', 'AL').eq('year', year).maybeSingle();
+    const { error } = await db.from('hr_credit_hour_use').delete().eq('id', useId);
+    if (error) throw error;
+    if (balance) await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(balance.taken) - Number(use.days)), balance: Number(balance.balance) + Number(use.days), updated_at: new Date().toISOString() }).eq('id', balance.id);
+    await db.from('hr_audit').insert({ employee_id: use.employee_id, action: 'update', changes: { credit_hours_removed: `${use.hours} h on ${use.work_date}`, by: userLabel } });
+    return res.status(200).json({ success: true });
   }
 
   // HR adds or removes a clock directly (for example a clock the person could not make). Each change is written to the audit trail.
