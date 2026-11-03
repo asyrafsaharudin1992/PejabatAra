@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PayrollCharts } from './PayrollCharts';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
@@ -233,17 +234,21 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
 }
 
 export function HRPayroll({ onError = () => {} }: { onError?: (message: string) => void }) {
+  const [tab, setTab] = useState<'run' | 'chart'>('run');
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p>
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>
-    <PayRun onError={onError} />
-    <IncentivePay onError={onError} />
-    <div className="grid gap-5 lg:grid-cols-2">
-      <List title="Set up first" steps={SETUP} />
-      <List title="Each month" steps={MONTHLY} />
-    </div>
+    <div role="tablist" aria-label="Payroll" className="inline-flex rounded-xl bg-slate-100 p-1">{([['run', 'Pay run'], ['chart', 'Chart']] as const).map(([key, text]) => <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{text}</button>)}</div>
+    {tab === 'chart' ? <PayrollCharts /> : <>
+      <PayRun onError={onError} />
+      <IncentivePay onError={onError} />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <List title="Set up first" steps={SETUP} />
+        <List title="Each month" steps={MONTHLY} />
+      </div>
+    </>}
   </div>;
 }

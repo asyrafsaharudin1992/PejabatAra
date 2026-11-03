@@ -1181,6 +1181,41 @@ export async function hrHandler(req: any, res: any) {
     // A staff member's employment history (HR only; the staff API never reads this table).
     // Monthly pay run. The staff and what they were paid so far this year come from here; the pay itself is worked out by the same code
     // the screen uses (src/lib/payrollRun.ts), so what is saved is always what the server worked out, not what the browser sent.
+    // Twelve months of payroll cost, head count and joiners/leavers for the Payroll Chart tab and the HR home.
+    if (req.method === 'GET' && action === 'payroll_trend') {
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      const nowMy = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+      const months: string[] = [];
+      for (let back = 11; back >= 0; back--) { const index = Number(nowMy.slice(0, 4)) * 12 + Number(nowMy.slice(5, 7)) - 1 - back; months.push(`${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`); }
+      let people = db.from('hr_employees').select('id,company,join_date,resign_date').limit(2000);
+      if (company) people = people.eq('company', company);
+      const { data: staff, error: staffError } = await people;
+      if (staffError) throw staffError;
+      const ids = new Set((staff || []).map((p: any) => p.id));
+      const years = [...new Set(months.map((m) => Number(m.slice(0, 4))))];
+      const { data: slips, error: slipError } = await db.from('hr_payslips').select('employee_id,year,month,result').in('year', years).limit(10000);
+      if (slipError) { if (slipError.code === '42P01') return res.status(200).json({ months, cost: {}, headcount: [], joined: [], left: [] }); throw slipError; }
+      const keys = ['basic', 'ot', 'allowance', 'gross', 'net', 'kwspEmployee', 'kwspEmployer', 'eisEmployee', 'eisEmployer', 'socsoEmployee', 'socsoEmployer', 'pcb'];
+      const cost: Record<string, number[]> = Object.fromEntries(keys.map((key) => [key, months.map(() => 0)]));
+      const paidStaff = months.map(() => 0);
+      for (const slip of slips || []) {
+        if (!ids.has(slip.employee_id)) continue;
+        const at = months.indexOf(`${slip.year}-${String(slip.month).padStart(2, '0')}`);
+        if (at < 0) continue;
+        const r = slip.result || {};
+        paidStaff[at]++;
+        cost.basic[at] += Number(r.basic || 0); cost.ot[at] += Number(r.ot || 0);
+        cost.allowance[at] += (Array.isArray(r.allowances) ? r.allowances : []).reduce((sum: number, a: any) => sum + Number(a?.amount || 0), 0);
+        for (const key of keys.slice(3)) cost[key][at] += Number(r[key] || 0);
+      }
+      const round = (value: number) => Math.round(value * 100) / 100;
+      for (const key of keys) cost[key] = cost[key].map(round);
+      const headcount = months.map((m) => (staff || []).filter((p: any) => p.join_date && p.join_date.slice(0, 7) <= m && (!p.resign_date || p.resign_date.slice(0, 7) >= m)).length);
+      const joined = months.map((m) => (staff || []).filter((p: any) => p.join_date && p.join_date.slice(0, 7) === m).length);
+      const left = months.map((m) => (staff || []).filter((p: any) => p.resign_date && p.resign_date.slice(0, 7) === m).length);
+      return res.status(200).json({ months, cost, paidStaff, headcount, joined, left });
+    }
+
     if (action === 'payroll_month' || action === 'payroll_save') {
       const year = Math.round(Number(req.query.year ?? body.year)), month = Math.round(Number(req.query.month ?? body.month));
       if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');

@@ -15,6 +15,7 @@ import { HRReports } from './HRReports';
 import { HRPayroll } from './HRPayroll';
 const HRMemoGuide = lazy(() => import('./HRMemoGuide'));
 const HRHomeCalendar = lazy(() => import('./HRHomeCalendar'));
+const PayrollCharts = lazy(() => import('./PayrollCharts').then((module) => ({ default: module.PayrollCharts })));
 
 // Office HR, laid out like the CA and Clinical Admin offices. Built a piece at a time: the
 // staff directory and the leave types (the same codes as Infotech) come first; leave
@@ -85,6 +86,7 @@ function HomeView({ onNavigate, onForecast }: { onNavigate: (view: View) => void
       </div>
     </section>
     <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR overview…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} onProfiles={() => onNavigate('profiles')} onForecast={onForecast} /></Suspense>
+    <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading charts…</p>}><PayrollCharts compact /></Suspense>
   </div>;
 }
 
