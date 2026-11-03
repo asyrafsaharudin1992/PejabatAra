@@ -310,7 +310,9 @@ export async function hrHandler(req: any, res: any) {
       // Once the last working day has passed, the person is no longer Active.
       await db.from('hr_employees').update({ status: 'Inactive', updated_at: now }).eq('status', 'Active').lt('resign_date', new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }));
       // leave_approver_id is new: until its migration is run the list is read without it.
-      let result: any = await db.from('hr_employees').select(`${SUMMARY},phone,leave_approver_id,leave_backup_approver_id,final_approver_id`).order('company').order('full_name');
+      // whatsapp_username is new too: for a few staff who can only be reached by their WhatsApp username, not the phone number.
+      let result: any = await db.from('hr_employees').select(`${SUMMARY},phone,whatsapp_username,leave_approver_id,leave_backup_approver_id,final_approver_id`).order('company').order('full_name');
+      if (result.error?.code === '42703') result = await db.from('hr_employees').select(`${SUMMARY},phone,leave_approver_id,leave_backup_approver_id,final_approver_id`).order('company').order('full_name');
       if (result.error?.code === '42703') result = await db.from('hr_employees').select(`${SUMMARY},phone`).order('company').order('full_name');
       const { data, error } = result;
       if (error) throw error;
@@ -319,7 +321,7 @@ export async function hrHandler(req: any, res: any) {
       const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name,password_hash').in('id', linked) : { data: [] };
       const hasPassword = new Map((logins || []).map((login: any) => [login.id, Boolean(login.password_hash)]));
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
-      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, shortName: shortNames.get(row.assessment_staff_id) || '', phone: row.phone || '', branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, status: row.status, resignDate: row.resign_date, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
+      return res.status(200).json({ employees: (data || []).map((row: any) => ({ id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, shortName: shortNames.get(row.assessment_staff_id) || '', phone: row.phone || '', branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type, whatsappUsername: row.whatsapp_username || '', status: row.status, resignDate: row.resign_date, joinDate: row.join_date, assessmentStaffId: row.assessment_staff_id, leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, signIn: !row.assessment_staff_id ? 'none' : hasPassword.get(row.assessment_staff_id) ? 'set' : 'not_set' })) });
     }
 
     // One full profile, with its recent changes.
