@@ -35,9 +35,9 @@ function List({ title, steps }: { title: string; steps: Step[] }) {
 }
 
 // ---- Monthly pay run -------------------------------------------------------------------------------------------------------
-type RunStaff = PayStaff & { id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs; result?: Record<string, unknown> } | null };
+type RunStaff = PayStaff & { attendanceOt?: { ot10?: number; ot15?: number; ot20?: number; ot30?: number }; id: string; company: string; employeeCode: string; fullName: string; ytd: PayYtd; hasYtd: boolean; earlierLocked: boolean; status?: string; payslip: { status: 'draft' | 'locked'; inputs: PayInputs; result?: Record<string, unknown> } | null };
 const API = '/api/status?resource=hr';
-const FIELDS: [keyof PayInputs, string][] = [['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct'], ['ot', 'OT RM'], ['restPh', 'Rest/PH RM']];
+const FIELDS: [keyof PayInputs, string][] = [['ot10', 'OT 1.0 h'], ['ot15', 'OT 1.5 h'], ['ot20', 'OT 2.0 h'], ['ot30', 'OT 3.0 h'], ['restDays', 'Rest days'], ['phDays', 'PH days'], ['shiftAllowance', 'Shift'], ['unpaidDays', 'Unpaid days'], ['annualLeaveDeduction', 'Leave deduct'], ['otherAllowance', 'Other add'], ['otherDeduction', 'Other deduct'], ['ot', 'OT RM'], ['restPh', 'Rest/PH RM']];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -71,6 +71,12 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   const locked = Boolean(staff?.length && (staff.every((member) => member.payslip?.status === 'locked') || (doneMonth > 0 && month <= doneMonth && !comparison)));
   const blocked = Boolean(staff?.some((member) => !member.earlierLocked));
   const total = (pick: (row: (typeof rows)[number]) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
+  // The OT HR approved in Attendance for this pay period (20th to 19th) goes into the OT hour columns. Only the OT hour columns change.
+  const withAttendanceOt = (staff || []).filter((member) => Object.values(member.attendanceOt || {}).some((hours) => Number(hours) > 0));
+  const fillOt = () => {
+    setInputs((current) => ({ ...current, ...Object.fromEntries((staff || []).map((member) => [member.id, { ...(current[member.id] || NO_INPUTS), ot10: member.attendanceOt?.ot10 || 0, ot15: member.attendanceOt?.ot15 || 0, ot20: member.attendanceOt?.ot20 || 0, ot30: member.attendanceOt?.ot30 || 0 }])) }));
+    setNote(withAttendanceOt.length ? `OT from Attendance filled for ${withAttendanceOt.length} staff. Check it, then Save draft.` : 'No OT approved in Attendance for this pay period.');
+  };
   const save = async (lock: boolean) => {
     setBusy(lock ? 'lock' : 'save'); setNote('');
     try {
@@ -117,6 +123,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       {comparison && <p className="mt-3 rounded-xl bg-sky-50 p-3 text-sm text-sky-800">This month is only for checking: it is worked out again from the year-to-date totals as they stood a month earlier, with what was entered in Infotech, so you can compare each line with the Infotech payslip. Do not lock it.</p>}
       {blocked && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">An earlier month is not locked yet, so the year-to-date totals (and PCB) below are not final.</p>}
       <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" disabled={Boolean(busy) || locked} onClick={fillOt} title="Fills the OT hour columns from OT approved in Attendance for this pay period" className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50">Fill OT from Attendance</button>
         <button type="button" disabled={Boolean(busy) || locked} onClick={() => void save(false)} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy === 'save' ? 'Saving…' : 'Save draft'}</button>
         <button type="button" disabled={Boolean(busy) || locked || blocked || comparison} onClick={() => { if (window.confirm(`Lock ${MONTH_NAMES[month - 1]} ${year}? A locked month cannot be changed and feeds the next month's PCB.`)) void save(true); }} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-900 disabled:opacity-50"><Lock className="h-4 w-4" />{busy === 'lock' ? 'Locking…' : 'Lock month'}</button>
         <span className="inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5">

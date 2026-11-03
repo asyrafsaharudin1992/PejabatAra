@@ -219,6 +219,16 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 async function payrollContext(db: any, year: number, month: number, viewOnly = false) {
   // Staff who left during or after this pay period are still paid their last month.
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
+  const periodTo = `${year}-${String(month).padStart(2, '0')}-19`;
+  // OT that HR approved in Attendance for this pay period (20th to 19th), as hours at each rate.
+  const otRead = await db.from('hr_attendance_ot').select('employee_id,approved_minutes,multiplier').eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
+  const attendanceOt = new Map<string, { ot10: number; ot15: number; ot20: number; ot30: number }>();
+  for (const row of otRead.error ? [] : otRead.data || []) {
+    const sums = attendanceOt.get(row.employee_id) || { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
+    const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, 'ot10' | 'ot15' | 'ot20' | 'ot30'>)[Number(row.multiplier)];
+    if (key) sums[key] += Number(row.approved_minutes || 0) / 60;
+    attendanceOt.set(row.employee_id, sums);
+  }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
     db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
     db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid,prev_as_of,prev_wages,prev_kwsp_relief,prev_pcb_paid').eq('year', year),
@@ -260,7 +270,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     return {
       id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [], salaryChanges: raises.get(row.id) || [],
       maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
-      settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
+      attendanceOt: Object.fromEntries(Object.entries(attendanceOt.get(row.id) || {}).map(([key, value]) => [key, Math.round(Number(value) * 100) / 100])), settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
   });
   return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, baseMonth, comparison, staff };
