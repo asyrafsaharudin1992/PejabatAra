@@ -103,6 +103,7 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
   const [team, setTeam] = useState<Team | null>(null);
   const [error, setError] = useState('');
   const [who, setWho] = useState('');
+  const [group, setGroup] = useState<'all' | 'staff' | 'doctor'>('all');
   const [picked, setPicked] = useState('');
   useEffect(() => { setTeam(null); setError(''); setWho(''); setPicked(''); assessmentFetch(`action=leave_roster_team&company=${company}&month=${month}`).then((result) => setTeam(result)).catch((cause: Error) => setError(cause.message)); }, [company, month]);
   if (error) return <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
@@ -117,10 +118,12 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
     const shift = newCode(day.shift);
     return { label: shift, kind: kindOf(shift, day.works), note: MEANING[shift] || shift };
   };
-  const people = who ? team.people.filter((person) => person.id === who) : team.people;
+  const pool = team.people.filter((person) => group === 'all' || (group === 'doctor') === person.doctor);
+  const people = who ? pool.filter((person) => person.id === who) : pool;
+  // A short name that still tells people apart (NUR / SITI / MUHAMMAD alone are not enough).
+  const short = (name: string) => { const words = name.trim().split(/\s+/); return /^(NUR|NURUL|SITI|MUHAMMAD|MOHAMAD|MOHD|AHMAD)$/i.test(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0]; };
   const onDate = (date: string) => people.map((person) => ({ person, item: cell(person, date) })).filter((row): row is { person: Person; item: { label: string; kind: Kind; note: string } } => row.item !== null);
-  const counts = (date: string) => { const result: Record<string, number> = {}; for (const row of onDate(date)) if (row.item.kind !== 'off' && row.item.kind !== 'holiday') result[row.item.kind] = (result[row.item.kind] || 0) + 1; return result; };
-  const SHOWN: Kind[] = ['day', 'office', 'night', 'leave'];
+    const SHOWN: Kind[] = ['day', 'office', 'night', 'leave'];
   const selected = picked || (team.today.startsWith(month) ? team.today : `${month}-01`);
   // The chosen date, grouped by shift code so it reads as "who is on AM-9, who is on PM, who is on leave".
   const groups = new Map<string, { kind: Kind; note: string; names: string[] }>();
@@ -128,9 +131,10 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
   const ordered = [...groups.entries()].sort((a, b) => SHOWN.concat(['off', 'holiday']).indexOf(a[1].kind) - SHOWN.concat(['off', 'holiday']).indexOf(b[1].kind));
   const card = 'rounded-[22px] border border-black/[0.045] bg-white p-3 shadow-[0_2px_8px_rgba(0,0,0,0.025)] sm:p-5';
   return <>
+    <div className="flex gap-1 rounded-2xl bg-slate-100 p-1 text-sm font-semibold">{([['all', 'All'], ['staff', 'Staff'], ['doctor', 'Doctors']] as const).map(([key, name]) => <button key={key} onClick={() => { setGroup(key); setWho(''); }} className={`flex-1 rounded-xl px-3 py-1.5 ${group === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{name}</button>)}</div>
     <select value={who} onChange={(event) => setWho(event.target.value)} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium">
-      <option value="">Everyone in {company} ({team.people.length})</option>
-      {team.people.map((person) => <option key={person.id} value={person.id}>{person.name}{person.doctor ? ' (Doctor)' : ''}</option>)}
+      <option value="">Everyone in {company} ({pool.length})</option>
+      {pool.map((person) => <option key={person.id} value={person.id}>{person.name}{person.doctor ? ' (Doctor)' : ''}</option>)}
     </select>
     <section className={`${card} overflow-x-auto`}>
       <div className="min-w-[320px]">
@@ -138,16 +142,16 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
         <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
           {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} />)}
           {dates.map((date) => {
-            const found = counts(date), single = who ? cell(people[0], date) : null;
-            return <button key={date} onClick={() => setPicked(date)} className={`flex min-h-[64px] flex-col items-center gap-0.5 rounded-xl border p-1 text-left sm:min-h-[84px] sm:p-1.5 ${date === selected ? 'border-[#0b587b] bg-[#0b587b]/5 ring-2 ring-[#0b587b]/20' : date === team.today ? 'border-[#0b587b]/50' : 'border-slate-100'}`}>
+            const working = onDate(date).filter((row) => row.item.kind !== 'off' && row.item.kind !== 'holiday' && row.item.kind !== 'leave'), away = onDate(date).filter((row) => row.item.kind === 'leave'), holiday = onDate(date).some((row) => row.item.kind === 'holiday');
+            return <button key={date} onClick={() => setPicked(date)} className={`flex min-h-[64px] flex-col items-stretch gap-0.5 rounded-xl border p-1 text-left sm:min-h-[84px] sm:p-1.5 ${date === selected ? 'border-[#0b587b] bg-[#0b587b]/5 ring-2 ring-[#0b587b]/20' : date === team.today ? 'border-[#0b587b]/50' : 'border-slate-100'}`}>
               <span className={`self-start text-[11px] font-semibold ${date === team.today ? 'text-[#0b587b]' : 'text-slate-500'}`}>{Number(date.slice(8))}</span>
-              {who ? (single ? <span className={`w-full truncate rounded-md px-0.5 py-1 text-center text-[10px] font-bold sm:text-xs ${TONE[single.kind]}`}>{single.label}</span> : <span className="text-slate-200">·</span>)
-                : SHOWN.filter((kind) => found[kind]).map((kind) => <span key={kind} className={`w-full rounded-md px-0.5 text-center text-[10px] font-bold leading-4 sm:text-xs ${TONE[kind]}`}>{found[kind]}</span>)}
+              {holiday && !working.length && <span className={`rounded-md px-0.5 text-center text-[10px] font-bold ${TONE.holiday}`}>PH</span>}
+              {[...working, ...away].map((row) => <span key={row.person.id} title={`${row.person.name} · ${row.item.label}`} className={`truncate rounded px-0.5 text-[9px] font-semibold leading-4 sm:text-[11px] ${TONE[row.item.kind]}`}>{who ? row.item.label : short(row.person.name)}</span>)}
             </button>;
           })}
         </div>
       </div>
-      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 px-1 text-[11px] text-slate-500">{!who && <span>Numbers = people working:</span>}<span className="rounded bg-emerald-100 px-1.5 text-emerald-900">Day</span><span className="rounded bg-sky-100 px-1.5 text-sky-900">Office</span><span className="rounded bg-amber-100 px-1.5 text-amber-900">Night</span><span className="rounded bg-rose-100 px-1.5 text-rose-800">Leave</span></p>
+      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 px-1 text-[11px] text-slate-500">{!who && <span>Names shown by shift colour:</span>}<span className="rounded bg-emerald-100 px-1.5 text-emerald-900">Day</span><span className="rounded bg-sky-100 px-1.5 text-sky-900">Office</span><span className="rounded bg-amber-100 px-1.5 text-amber-900">Night</span><span className="rounded bg-rose-100 px-1.5 text-rose-800">Leave</span></p>
     </section>
     <section className={card}>
       <h3 className="text-sm font-semibold">{dayName(selected)}</h3>

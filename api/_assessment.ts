@@ -285,7 +285,9 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     const company = access.companies.includes(String(req.query.company)) ? String(req.query.company) : access.companies[0];
     const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,designation,department,join_date,holiday_group').eq('company', company).eq('status', 'Active').order('employee_code').limit(200);
     if (peopleError) throw peopleError;
-    const ids = (people || []).map((person: any) => person.id);
+    // The team view is for doctors, clinic assistants and admin klinikal; office and admin staff are not rostered here.
+    const team = (people || []).filter((person: any) => /\b(DR|DOCTOR)\b/i.test(person.designation || '') || /^OPERATION$/i.test(person.department || '') || /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(person.designation || ''));
+    const ids = team.map((person: any) => person.id);
     const [rosterRead, leaveRead] = ids.length ? await Promise.all([
       db.from('hr_roster').select('employee_id,work_date,shift,works').in('employee_id', ids).gte('work_date', start).lte('work_date', end).limit(8000),
       db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day').in('employee_id', ids).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(2000),
@@ -293,7 +295,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     if (rosterRead.error) throw rosterRead.error;
     if (leaveRead.error) throw leaveRead.error;
     const out: any[] = [];
-    for (const person of people || []) {
+    for (const person of team) {
       const doctor = /\b(DR|DOCTOR)\b/i.test(person.designation || '');
       const days = (rosterRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
       // Office staff without a duty roster: Monday to Friday, off on public holidays (as on their own roster). Doctors with no roster are left blank.
