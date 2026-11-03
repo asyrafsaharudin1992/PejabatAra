@@ -9,6 +9,7 @@ import { LEAVE_GROUPS } from './lib/leaveTypes';
 import { StaffProfilePrint, useStaffProfilePrint } from './StaffProfilePrint';
 import HRProjection from './HRProjection';
 import HRStaffLocation from './HRStaffLocation';
+import HRStaffContact from './HRStaffContact';
 
 // Office HR staff profiles: the employee master for leave, attendance and payroll.
 // The directory shows only names and jobs; a full profile (IC, address, bank, statutory
@@ -55,7 +56,7 @@ async function api(query: string, body?: unknown) {
 
 export function HRProfiles({ onError, pendingRequests = 0, onPendingChange = () => undefined, initialTab = 'list' }: { onError: (message: string) => void; pendingRequests?: number; onPendingChange?: (pending: number) => void; initialTab?: 'list' | 'projection' }) {
   // Staff records, profile requests, sign-in directory and monthly CA projection.
-  const [tab, setTab] = useState<'list' | 'requests' | 'directory' | 'projection'>(initialTab);
+  const [tab, setTab] = useState<'list' | 'requests' | 'directory' | 'contact' | 'projection'>(initialTab);
   const [employees, setEmployees] = useState<Summary[] | null>(null);
   const [notSetUp, setNotSetUp] = useState('');
   const [openId, setOpenId] = useState('');
@@ -134,8 +135,9 @@ export function HRProfiles({ onError, pendingRequests = 0, onPendingChange = () 
   ];
   const statusTone: Record<string, string> = { Active: 'bg-emerald-50 text-emerald-700', Inactive: 'bg-slate-100 text-slate-500' };
   const hero = <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff profiles</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Each staff member's personal, employment and pay details. Leave, attendance and payroll are worked out from these. IC and bank details stay hidden until you show them, and every change is logged.</p></div>{!notSetUp && <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b3d59] hover:bg-[#e9f6fb]"><UserPlus className="h-4 w-4" />Add staff</button>}</div></section>;
-  const tabBar = <div role="tablist" aria-label="Staff profiles" className="inline-flex max-w-full flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{([['list', 'Staff list'], ['requests', 'Profile requests'], ['directory', 'Staff location'], ['projection', 'Forecast']] as const).map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'requests' && pendingRequests > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{pendingRequests}</span>}</button>)}</div>;
+  const tabBar = <div role="tablist" aria-label="Staff profiles" className="inline-flex max-w-full flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{([['list', 'Staff list'], ['requests', 'Profile requests'], ['directory', 'Staff location'], ['contact', 'Contact staff'], ['projection', 'Forecast']] as const).map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'requests' && pendingRequests > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{pendingRequests}</span>}</button>)}</div>;
   if (tab === 'directory') return <div className="mx-auto max-w-[1500px] space-y-5">{hero}{tabBar}<HRStaffLocation people={employees} onOpen={setOpenId} /></div>;
+  if (tab === 'contact') return <div className="mx-auto max-w-[1500px] space-y-5">{hero}{tabBar}<HRStaffContact people={employees as Employee[] | null} /></div>;
   if (tab === 'projection') return <div className="mx-auto max-w-[1500px] space-y-5">{hero}{tabBar}<HRProjection onOpen={setOpenId} /></div>;
   if (tab === 'requests') return <div className="mx-auto max-w-[1500px] space-y-5">{hero}{tabBar}<HRProfileRequests onError={onError} onChanged={onPendingChange} /></div>;
 

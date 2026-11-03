@@ -325,3 +325,8 @@
 .hr-roster-table td, .hr-roster-legend span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .hr-roster-legend { display: flex; flex-wrap: wrap; gap: 1mm; margin-bottom: 3mm; font-size: 7pt; }
 .hr-roster-legend span { padding: .8mm 1.5mm; border: 1px solid #b7c5d3; border-radius: 1mm; font-weight: 700; }
+
+/* A payslip is printed on one A4 page. */
+@media print {
+  .payslip-print { zoom: 0.86; break-inside: avoid; page-break-inside: avoid; box-shadow: none; }
+}
