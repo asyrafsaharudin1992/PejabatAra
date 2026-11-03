@@ -122,7 +122,10 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
   const people = who ? pool.filter((person) => person.id === who) : pool;
   // A short name that still tells people apart (NUR / SITI / MUHAMMAD alone are not enough).
   const shortOf = (name: string) => { const words = name.trim().split(/\s+/); return /^(NUR|NURUL|SITI|MUHAMMAD|MOHAMAD|MOHD|AHMAD)$/i.test(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0]; };
-  const short = (name: string) => shortOf(name);
+  // If two people end up with the same short name, the second word is added for both so they can be told apart.
+  const taken = new Map<string, number>();
+  for (const person of team.people) taken.set(shortOf(person.name), (taken.get(shortOf(person.name)) || 0) + 1);
+  const short = (name: string) => (taken.get(shortOf(name)) || 0) > 1 ? name.trim().split(/\s+/).slice(0, 2).join(' ') : shortOf(name);
   const onDate = (date: string) => people.map((person) => ({ person, item: cell(person, date) })).filter((row): row is { person: Person; item: { label: string; kind: Kind; note: string } } => row.item !== null);
     const SHOWN: Kind[] = ['day', 'office', 'night', 'leave'];
   const selected = picked || (team.today.startsWith(month) ? team.today : `${month}-01`);
@@ -135,7 +138,7 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
     <div className="flex gap-1 rounded-2xl bg-slate-100 p-1 text-sm font-semibold">{([['all', 'All'], ['staff', 'Staff'], ['doctor', 'Doctors']] as const).map(([key, name]) => <button key={key} onClick={() => { setGroup(key); setWho(''); }} className={`flex-1 rounded-xl px-3 py-1.5 ${group === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{name}</button>)}</div>
     <select value={who} onChange={(event) => setWho(event.target.value)} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium">
       <option value="">Everyone in {company} ({pool.length})</option>
-      {pool.map((person) => <option key={person.id} value={person.id}>{person.name}{person.doctor ? ' (Doctor)' : ''}</option>)}
+      {pool.map((person) => <option key={person.id} value={person.id}>{short(person.name)}{person.doctor ? ' (Doctor)' : ''}</option>)}
     </select>
     <section className={`${card} overflow-x-auto`}>
       <div className="min-w-[320px]">
