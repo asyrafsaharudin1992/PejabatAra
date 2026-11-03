@@ -130,7 +130,7 @@ export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot'
     </section>}
 
     <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">Attendance / OT request</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">OT request</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
       {form && <div className="space-y-3">
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
         <div className="grid grid-cols-3 gap-3"><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">OT hours (hh:mm)</span><input type="time" value={form.otTime} onChange={(event) => setForm({ ...form, otTime: event.target.value })} className={field} /></label></div>
@@ -156,9 +156,9 @@ export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot'
     {message && <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{message}</p>}
     {tip && <section className="rounded-2xl bg-[#eef5ff] p-4 text-sm leading-6 text-[#0b2a4a]"><p className="font-semibold">So your iPhone does not ask every time</p><p className="mt-1">Tap <strong>aA</strong> on the left of the web address, then <strong>Website Settings</strong>, <strong>Location</strong> and choose <strong>Allow</strong>. You only need to do this once.</p><button onClick={() => { try { localStorage.setItem('ara_location_tip', '1'); } catch { /* storage not available */ } setTip(false); }} className="mt-2 text-sm font-semibold text-[#1f6feb]">Got it</button></section>}
     {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
-    {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send a request from the OT tab so it can be corrected.</p>}
+    {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send it from the OT request tab so it can be corrected.</p>}
 
-    {mode === 'clock' && <p className="px-1 text-xs text-slate-500">Forgot to clock, or worked overtime? Use the <strong>OT</strong> tab below to send a request.</p>}
+    {mode === 'clock' && <p className="px-1 text-xs text-slate-500">Forgot to clock, or worked overtime? Use the <strong>OT request</strong> tab below.</p>}
 
 
     <section className={card}>
