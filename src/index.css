@@ -326,7 +326,24 @@
 .hr-roster-legend { display: flex; flex-wrap: wrap; gap: 1mm; margin-bottom: 3mm; font-size: 7pt; }
 .hr-roster-legend span { padding: .8mm 1.5mm; border: 1px solid #b7c5d3; border-radius: 1mm; font-weight: 700; }
 
-/* A payslip is printed on one A4 page. */
+/* A payslip is printed from its own A4 document on one page; the app around it is hidden. */
+.payslip-doc { display: none; }
+@page payslip { size: A4 portrait; margin: 0; }
 @media print {
-  .payslip-print { zoom: 0.86; break-inside: avoid; page-break-inside: avoid; box-shadow: none; }
+  html:has(body.payslip-printing) { zoom: 1 !important; }
+  body.payslip-printing { background: white !important; margin: 0 !important; }
+  body.payslip-printing > *:not(.payslip-doc):not(style) { display: none !important; }
+  body.payslip-printing .payslip-doc { display: block; page: payslip; padding: 14mm 16mm; font: 10pt/1.4 Arial, Helvetica, sans-serif; color: #14233b; break-inside: avoid; }
+  .payslip-doc * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .payslip-doc header { display: flex; align-items: center; gap: 5mm; border-bottom: 1px solid #0b3d59; padding-bottom: 3mm; margin-bottom: 4mm; }
+  .payslip-doc header img { width: 20mm; height: 20mm; object-fit: contain; flex-shrink: 0; }
+  .payslip-doc header strong { display: block; font-size: 13pt; }
+  .payslip-doc header small { display: block; font-size: 8pt; color: #526477; }
+  .payslip-doc h1 { font-size: 13pt; margin: 0 0 2mm; }
+  .payslip-who { margin-bottom: 4mm; }
+  .payslip-doc section { border-top: 1px solid #b7c5d3; padding: 2mm 0; margin-bottom: 2mm; }
+  .payslip-line { display: flex; justify-content: space-between; padding: 0.9mm 0; }
+  .payslip-bold { font-weight: bold; }
+  .payslip-bank { margin-top: 3mm; }
+  .payslip-note { margin-top: 6mm; text-align: center; font-size: 8pt; color: #7a8896; }
 }

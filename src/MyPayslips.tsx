@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { payPeriod } from './lib/payrollRun';
@@ -27,6 +28,49 @@ function Pair({ label, value }: { label: string; value: number }) {
   return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{fmt(value)}</p></div>;
 }
 
+// Printing uses a separate A4 document (like the staff profile print) so the app's header and navigation never reach the paper, and it
+// always fits one page. The page margin is zero in the print rules; the white border is padding inside the document.
+function usePayslipPrint(active: boolean, title: string, onDone: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const previous = document.title;
+    document.title = title;
+    document.body.classList.add('payslip-printing');
+    const done = () => { document.body.classList.remove('payslip-printing'); document.title = previous; onDone(); };
+    window.addEventListener('afterprint', done, { once: true });
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.payslip-doc img'), (image) => image.decode().catch(() => undefined))]).then(() => { if (!cancelled) window.print(); });
+    }, 80);
+    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('payslip-printing'); document.title = previous; };
+  }, [active]);
+}
+
+function PayslipDocument({ slip }: { slip: Slip }) {
+  const company = COMPANY[slip.company] || { name: slip.company, address: '' };
+  const period = payPeriod(slip.year, slip.month);
+  const line = (label: string, value: number, minus = false, bold = false) => <div key={label} className={`payslip-line${bold ? ' payslip-bold' : ''}`}><span>{label}</span><span>{minus ? '-' : ''}{fmt(value)}</span></div>;
+  return <div className="payslip-doc">
+    <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><strong>{company.name}</strong><small>{company.address}</small></div></header>
+    <h1>Payslip · {MONTHS[slip.month - 1]} {slip.year}</h1>
+    <p className="payslip-who"><strong>{slip.name}</strong> ({slip.code})<br />{slip.designation || '—'}{slip.department ? ` · ${slip.department}` : ''}<br />Pay period: {longDate(period.from)} to {longDate(period.to)}</p>
+    <section>
+      {line('BASIC PAY', slip.basic)}
+      {slip.allowances.map((item) => line(item.name.toUpperCase(), item.amount))}
+      {slip.ot > 0 && line('OVERTIME', slip.ot)}{slip.restPh > 0 && line('REST DAY / PUBLIC HOLIDAY', slip.restPh)}
+      {line('EMPLOYEE EPF', slip.kwspEmployee, true)}{line('EMPLOYEE EIS', slip.eisEmployee, true)}{line('EMPLOYEE SOCSO', slip.socsoEmployee, true)}
+      {slip.skbbk > 0 && line('SKBBK', slip.skbbk, true)}{slip.pcb > 0 && line('MTD/PCB', slip.pcb, true)}
+    </section>
+    <section>
+      {line('GROSS WAGES', slip.gross, false, true)}{line('NETT WAGES', slip.net, false, true)}
+      {line('Employer EPF', slip.kwspEmployer)}{line('Employer EIS', slip.eisEmployer)}{line('Employer SOCSO', slip.socsoEmployer)}
+      {line('Pay so far this year', slip.ytdWages)}{line('PCB so far this year', slip.ytdPcb)}
+    </section>
+    <p className="payslip-bank">Salary credited to: BANK GIRO<br />Bank account: {slip.bankName || '—'}{slip.bankAccountEnd ? ` · •••• ${slip.bankAccountEnd}` : ''}<br />Paid on: 26 {MONTHS[slip.month - 1]} {slip.year}</p>
+    <p className="payslip-note">This is a system generated payslip and does not require signature.</p>
+  </div>;
+}
+
 // Opening, printing or sharing a payslip asks for the person's own AraOffice password each time, as Infotech does. The password is
 // checked by the server and is only kept in this box until it is sent.
 function PasswordPrompt({ title, note, busy, error, onSubmit, onCancel }: { title: string; note?: string; busy: boolean; error: string; onSubmit: (password: string) => void; onCancel: () => void }) {
@@ -47,6 +91,8 @@ export default function MyPayslips() {
   const [error, setError] = useState('');
   const [asking, setAsking] = useState<null | { kind: 'open'; item: Item } | { kind: 'print' } | { kind: 'pdf' }>(null);
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  usePayslipPrint(printing, slip ? `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` : 'Payslip', () => setPrinting(false));
   useEffect(() => { assessmentFetch('action=my_payslips').then((result: { payslips: Item[]; incentives?: Incentive[] }) => { setItems(result.payslips); setIncentives(result.incentives || []); }).catch((cause: Error) => { setError(cause.message); setItems([]); }); }, []);
   const post = (action: string, body: Record<string, unknown>) => assessmentFetch(`action=${action}`, { method: 'POST', body: JSON.stringify(body) });
   const answer = async (password: string) => {
@@ -54,7 +100,7 @@ export default function MyPayslips() {
     setBusy(true); setError('');
     try {
       if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setSlip(result.payslip); setAsking(null); }
-      else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); window.setTimeout(() => window.print(), 50); }
+      else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); setPrinting(true); }
       else if (slip) {
         // The PDF is locked with the same password. On a phone the share sheet offers WhatsApp; elsewhere the file is downloaded.
         const result = await post('my_payslip_pdf', { year: slip.year, month: slip.month, password });
@@ -71,6 +117,7 @@ export default function MyPayslips() {
     const company = COMPANY[slip.company] || { name: slip.company, address: '' };
     const period = payPeriod(slip.year, slip.month);
     return <div className="space-y-3">
+      {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
       <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
       {asking && asking.kind !== 'open' && <PasswordPrompt title={asking.kind === 'print' ? 'Enter your password to print' : 'Enter your password to get the PDF'} note={asking.kind === 'pdf' ? 'The PDF is locked with this same password, so anyone you send it to (for example on WhatsApp) needs it to open the file.' : undefined} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
       <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
