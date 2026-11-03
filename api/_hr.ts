@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync } from 'node:crypto';
-import { officeAccess } from './_office-db.js';
+import { branchId, officeAccess } from './_office-db.js';
 import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { hrCalendarAction } from './_hr-calendar.js';
@@ -352,6 +352,27 @@ export async function hrHandler(req: any, res: any) {
       if (error) throw error;
       await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { work_days: days }, changed_by: user.id });
       return res.status(200).json({ success: true, days });
+    }
+
+    // The WhatsApp message HR sends to staff (Contact staf): one template shared by every HR user, kept in the HR settings (text only, no numbers).
+    if (action === 'contact_message' || action === 'contact_message_save') {
+      const KEY = 'hr_contact_message', HR_BRANCH = 'AraOffice HR Private';
+      let branch: string | null;
+      try { branch = await branchId(db, HR_BRANCH, req.method === 'POST'); }
+      catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, HR_BRANCH, false); }
+      if (req.method === 'GET' && action === 'contact_message') {
+        if (!branch) return res.status(200).json({ message: '' });
+        const { data, error } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branch).eq('state_key', KEY).maybeSingle();
+        if (error) throw error;
+        return res.status(200).json({ message: String(data?.payload?.message || ''), updatedAt: data?.updated_at || null });
+      }
+      if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
+      const message = String(body.message ?? '').trim();
+      if (!message || message.length > 3000) throw fail(400, 'Write the message (up to 3000 characters).');
+      if (!branch) throw fail(500, 'The HR settings are not ready yet.');
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: KEY, payload: { message }, updated_by: user.id, updated_at: now }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ success: true });
     }
 
     // Last working day, set from the staffing forecast so the staff profile follows it. Status stays as it is.
