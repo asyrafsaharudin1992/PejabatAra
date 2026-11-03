@@ -276,7 +276,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
   }
 
   // The duty roster of a whole company for a month (everyone, doctors included), for the people HR gave company-wide calendar access.
-  if (req.method === 'GET' && action === 'roster_team') {
+  if (req.method === 'GET' && action === 'leave_roster_team') {
     const access = calendarAccessFor(me);
     if (access.scope !== 'companies') throw fail(403, 'You can see your own roster only.');
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today.slice(0, 7);

@@ -101,7 +101,7 @@ type Team = { today: string; people: Person[] };
 function TeamRoster({ company, month }: { company: string; month: string }) {
   const [team, setTeam] = useState<Team | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { setTeam(null); setError(''); assessmentFetch(`action=roster_team&company=${company}&month=${month}`).then((result) => setTeam(result)).catch((cause: Error) => setError(cause.message)); }, [company, month]);
+  useEffect(() => { setTeam(null); setError(''); assessmentFetch(`action=leave_roster_team&company=${company}&month=${month}`).then((result) => setTeam(result)).catch((cause: Error) => setError(cause.message)); }, [company, month]);
   if (error) return <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
   if (!team) return <p className="text-sm text-slate-500">Loading…</p>;
   const dates = Array.from({ length: new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
