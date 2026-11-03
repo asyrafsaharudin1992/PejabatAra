@@ -52,7 +52,7 @@ export function LocationHelp({ onClose, onRetry, kind = phoneKind(), app = homeS
   </div>;
 }
 
-export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot' }) {
+export default function MyAttendance({ mode = 'clock', isApprover = false }: { mode?: 'clock' | 'ot'; isApprover?: boolean }) {
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -121,8 +121,9 @@ export default function MyAttendance({ mode = 'clock' }: { mode?: 'clock' | 'ot'
   const next = state.nextKind;
   const dates = Array.from({ length: 15 }, (_, index) => addDay(state.today, -index));
   const requestSections = <>
-    {waiting.length > 0 && <section className={`${card} space-y-3`}>
+    {(waiting.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
       <h3 className="font-semibold">Approve OT <span className="text-xs font-normal text-slate-400">· waiting for your approval</span></h3>
+      {!waiting.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
       <ul className="divide-y divide-slate-100">{waiting.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
