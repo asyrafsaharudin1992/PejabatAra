@@ -1229,13 +1229,15 @@ export async function hrHandler(req: any, res: any) {
       if (peopleError) throw peopleError;
       const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row]));
       // Maybank2U's bank names; only MAYBANK, RHB and HONG LEONG are checked against a real file so far.
-      const KNOWN = ['MAYBANK', 'RHB', 'HONG LEONG'];
-      const bankName = (name: string) => { const n = String(name || '').toUpperCase(); if (/MAYBANK|MALAYAN BANKING/.test(n)) return 'MAYBANK'; if (/RHB/.test(n)) return 'RHB'; if (/HONG LEONG/.test(n)) return 'HONG LEONG'; return n.replace(/\(.*?\)/g, '').replace(/\b(BERHAD|BHD)\b/g, '').replace(/\s+/g, ' ').trim(); };
+      const KNOWN = ['MAYBANK', 'RHB', 'HONG LEONG', 'CIMB', 'AMBANK', 'BANK ISLAM'];
+      const bankName = (name: string) => { const n = String(name || '').toUpperCase(); if (/MAYBANK|MALAYAN BANKING/.test(n)) return 'MAYBANK'; if (/RHB/.test(n)) return 'RHB'; if (/HONG LEONG/.test(n)) return 'HONG LEONG'; if (/CIMB/.test(n)) return 'CIMB'; if (/AM ?BANK|ARAB.?MALAYSIAN/.test(n)) return 'AMBANK'; if (/BANK ISLAM/.test(n)) return 'BANK ISLAM'; return n.replace(/\(.*?\)/g, '').replace(/\b(BERHAD|BHD)\b/g, '').replace(/\s+/g, ' ').trim(); };
       const csv = (value: unknown) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
       const [vy, vm, vd] = valueDate.split('-');
       const dd = `${vd}${vm}${vy.slice(2)}`;
+      // As in Infotech's file: a six-digit batch number in the header; each row's reference is the date, the time and the first three digits of it.
+      const batch = String(Math.floor(100000 + Math.random() * 900000));
       const clock = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 19).replace(/:/g, '');
-      const lines = [['Employer Info :'], ['Crediting Date (eg. dd/MM/yyyy)', `${vd}/${vm}/${vy}`], ['Payment Reference', `MBPREF${dd}`], ['Payment Description', `MBPDEC${dd}`], ['Bulk Payment Type', 'Salary'], [''],
+      const lines = [['Employer Info :'], ['Crediting Date (eg. dd/MM/yyyy)', `${vd}/${vm}/${vy}`], ['Payment Reference', `MBPREF${batch}`], ['Payment Description', `MBPDEC${batch}`], ['Bulk Payment Type', 'Salary'], [''],
         ['Beneficiary Name', 'Beneficiary Bank', 'Beneficiary Account No', 'ID Type', 'ID Number', 'Payment Amount', 'Payment Reference', 'Payment Description']];
       const problems: string[] = []; let total = 0, count = 0;
       for (const person of (people || []).sort((a: any, b: any) => String(a.full_name).localeCompare(String(b.full_name)))) {
@@ -1247,7 +1249,7 @@ export async function hrHandler(req: any, res: any) {
         if (!KNOWN.includes(bank)) problems.push(`${person.full_name}: bank "${bank}" is not checked against a Maybank2U file yet`);
         const idType = ic.length === 12 ? 'NRIC' : 'PASSPORT', idNumber = ic.length === 12 ? ic : String(person.passport_no || '').trim();
         if (!idNumber) problems.push(`${person.full_name}: no IC or passport number`);
-        lines.push([person.full_name, bank, account, idType, idNumber, net.toFixed(2), `PRE${dd}${clock}777`, `PDC${dd}${clock}777`]);
+        lines.push([String(person.full_name).slice(0, 40).trim(), bank, account, idType, idNumber, net.toFixed(2), `PRE${dd}${clock}${batch.slice(0, 3)}`, `PDC${dd}${clock}${batch.slice(0, 3)}`]);
         total += net; count++;
       }
       const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
