@@ -121,7 +121,8 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
   const pool = team.people.filter((person) => group === 'all' || (group === 'doctor') === person.doctor);
   const people = who ? pool.filter((person) => person.id === who) : pool;
   // A short name that still tells people apart (NUR / SITI / MUHAMMAD alone are not enough).
-  const short = (name: string) => { const words = name.trim().split(/\s+/); return /^(NUR|NURUL|SITI|MUHAMMAD|MOHAMAD|MOHD|AHMAD)$/i.test(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0]; };
+  const shortOf = (name: string) => { const words = name.trim().split(/\s+/); return /^(NUR|NURUL|SITI|MUHAMMAD|MOHAMAD|MOHD|AHMAD)$/i.test(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0]; };
+  const short = (name: string) => shortOf(name);
   const onDate = (date: string) => people.map((person) => ({ person, item: cell(person, date) })).filter((row): row is { person: Person; item: { label: string; kind: Kind; note: string } } => row.item !== null);
     const SHOWN: Kind[] = ['day', 'office', 'night', 'leave'];
   const selected = picked || (team.today.startsWith(month) ? team.today : `${month}-01`);
@@ -146,19 +147,20 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
             return <button key={date} onClick={() => setPicked(date)} className={`flex min-h-[64px] flex-col items-stretch gap-0.5 rounded-xl border p-1 text-left sm:min-h-[84px] sm:p-1.5 ${date === selected ? 'border-[#0b587b] bg-[#0b587b]/5 ring-2 ring-[#0b587b]/20' : date === team.today ? 'border-[#0b587b]/50' : 'border-slate-100'}`}>
               <span className={`self-start text-[11px] font-semibold ${date === team.today ? 'text-[#0b587b]' : 'text-slate-500'}`}>{Number(date.slice(8))}</span>
               {holiday && !working.length && <span className={`rounded-md px-0.5 text-center text-[10px] font-bold ${TONE.holiday}`}>PH</span>}
-              {[...working, ...away].map((row) => <span key={row.person.id} title={`${row.person.name} · ${row.item.label}`} className={`truncate rounded px-0.5 text-[9px] font-semibold leading-4 sm:text-[11px] ${TONE[row.item.kind]}`}>{who ? row.item.label : short(row.person.name)}</span>)}
+              {who ? [...working, ...away].map((row) => <span key={row.person.id} className={`truncate rounded-md px-0.5 py-1 text-center text-[10px] font-bold sm:text-xs ${TONE[row.item.kind]}`}>{row.item.label}</span>)
+                : SHOWN.map((kind) => [...working, ...away].filter((row) => row.item.kind === kind)).filter((rows) => rows.length).map((rows) => <span key={rows[0].item.kind} className={`rounded-md px-0.5 text-center text-[10px] font-bold leading-4 sm:text-xs ${TONE[rows[0].item.kind]}`}>{rows.length}</span>)}
             </button>;
           })}
         </div>
       </div>
-      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 px-1 text-[11px] text-slate-500">{!who && <span>Names shown by shift colour:</span>}<span className="rounded bg-emerald-100 px-1.5 text-emerald-900">Day</span><span className="rounded bg-sky-100 px-1.5 text-sky-900">Office</span><span className="rounded bg-amber-100 px-1.5 text-amber-900">Night</span><span className="rounded bg-rose-100 px-1.5 text-rose-800">Leave</span></p>
+      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 px-1 text-[11px] text-slate-500">{!who && <span>Numbers = people working (tap a date for names):</span>}<span className="rounded bg-emerald-100 px-1.5 text-emerald-900">Day</span><span className="rounded bg-sky-100 px-1.5 text-sky-900">Office</span><span className="rounded bg-amber-100 px-1.5 text-amber-900">Night</span><span className="rounded bg-rose-100 px-1.5 text-rose-800">Leave</span></p>
     </section>
     <section className={card}>
       <h3 className="text-sm font-semibold">{dayName(selected)}</h3>
       {!ordered.length && <p className="mt-2 text-sm text-slate-500">No roster for this date.</p>}
       <div className="mt-3 space-y-3">{ordered.map(([label, group]) => <div key={label}>
         <p className="flex items-center gap-2 text-xs"><span className={`rounded-md px-1.5 py-0.5 font-bold ${TONE[group.kind]}`}>{label}</span><span className="text-slate-500">{group.note} · {group.names.length}</span></p>
-        <p className="mt-1 text-sm leading-6 text-slate-700">{group.names.join(', ')}</p>
+        <p className="mt-1 text-sm leading-6 text-slate-700">{group.names.map(short).join(', ')}</p>
       </div>)}</div>
     </section>
   </>;
