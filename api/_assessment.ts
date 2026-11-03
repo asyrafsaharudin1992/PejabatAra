@@ -7,6 +7,7 @@ import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_rev
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
+import { payslipPdf } from './_payslip-pdf.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
@@ -44,6 +45,20 @@ function ic4Matches(digits: string, stored: string | null) {
 }
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
+// The signed-in person proves it is them again with their own password. Wrong tries count towards the same lock as signing in.
+async function checkOwnPassword(db: any, staffId: string, password: string) {
+  const { data: row, error } = await db.from('assessment_staff').select('password_hash,failed_logins,locked_until').eq('id', staffId).single();
+  if (error) throw error;
+  if (row.locked_until && Date.parse(row.locked_until) > Date.now()) throw fail(429, `Too many wrong passwords. Try again in ${LOCK_MINUTES} minutes.`);
+  if (!row.password_hash) throw fail(400, 'Set your own password first (More > Settings), then open your payslip.');
+  if (!password || !ic4Matches(password, row.password_hash)) {
+    const failed = Number(row.failed_logins || 0) + 1;
+    await db.from('assessment_staff').update(failed >= MAX_FAILED_LOGINS ? { failed_logins: 0, locked_until: new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString() } : { failed_logins: failed }).eq('id', staffId);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    throw fail(400, 'That password is not correct.');
+  }
+  if (row.failed_logins) await db.from('assessment_staff').update({ failed_logins: 0 }).eq('id', staffId);
+}
 
 async function staffSession(db: any, req: any) {
   const token = String(req.headers['x-assessment-token'] || '');
@@ -489,25 +504,34 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
   // The staff member's own documents (a copy of the IC, a certificate...). They can add, open and remove what they added; HR sees them all.
   // The signed-in person's own payslips. Only a month HR has locked is shown, and only to the person it belongs to.
-  if (action === 'my_payslips' || action === 'my_payslip') {
+  // Opening one, and printing or sharing it, needs the person's own password again (as in Infotech): checked here, never trusted from the page.
+  if (action === 'my_payslips' || action === 'my_payslip' || action === 'my_payslip_pdf' || action === 'verify_password') {
     const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
     if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
     if (action === 'my_payslips') {
-      const { data, error } = await db.from('hr_payslips').select('year,month,result').eq('employee_id', me.id).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+      const { data, error } = await db.from('hr_payslips').select('year,month').eq('employee_id', me.id).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
       if (error) { if (error.code === '42P01') return res.status(200).json({ payslips: [] }); throw error; }
       const { data: incentive } = await db.from('hr_incentive_pay').select('claim_month,amount,paid_on,procedures').eq('employee_id', me.id).order('claim_month', { ascending: false }).limit(36);
-      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month, gross: Number(row.result?.gross || 0), net: Number(row.result?.net || 0) })), incentives: (incentive || []).map((row: any) => ({ claimMonth: row.claim_month, amount: Number(row.amount), paidOn: row.paid_on, procedures: row.procedures })) });
+      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month })), incentives: (incentive || []).map((row: any) => ({ claimMonth: row.claim_month, amount: Number(row.amount), paidOn: row.paid_on, procedures: Number(row.procedures || 0) })) });
     }
-    const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+    if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
+    const password = String(body.password || '');
+    await checkOwnPassword(db, staff.id, password);
+    if (action === 'verify_password') return res.status(200).json({ success: true });
+    const year = Math.round(Number(body.year)), month = Math.round(Number(body.month));
     const { data, error } = await db.from('hr_payslips').select('year,month,result,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
     if (error) throw error;
     if (!data) throw fail(404, 'That payslip is not available.');
     const r = data.result || {};
-    return res.status(200).json({ payslip: { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
+    const payslip = { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
       basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
       eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
-      bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) } });
+      bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) };
+    if (action === 'my_payslip') return res.status(200).json({ payslip });
+    // The PDF is locked with the same password, so a copy sent on WhatsApp or by e-mail cannot be opened without it.
+    const pdf = payslipPdf(payslip as any, password);
+    return res.status(200).json({ file: `Payslip_${me.employee_code}_${year}-${String(month).padStart(2, '0')}.pdf`, pdf: pdf.toString('base64') });
   }
 
   if (action.startsWith('my_document')) {

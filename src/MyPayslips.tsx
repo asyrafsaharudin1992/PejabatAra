@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, Printer } from 'lucide-react';
+import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { payPeriod } from './lib/payrollRun';
 
 // My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
-type Item = { year: number; month: number; gross: number; net: number };
+type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
 type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
 
@@ -27,18 +27,52 @@ function Pair({ label, value }: { label: string; value: number }) {
   return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{fmt(value)}</p></div>;
 }
 
+// Opening, printing or sharing a payslip asks for the person's own AraOffice password each time, as Infotech does. The password is
+// checked by the server and is only kept in this box until it is sent.
+function PasswordPrompt({ title, note, busy, error, onSubmit, onCancel }: { title: string; note?: string; busy: boolean; error: string; onSubmit: (password: string) => void; onCancel: () => void }) {
+  const [password, setPassword] = useState('');
+  return <form onSubmit={(event) => { event.preventDefault(); const value = password; setPassword(''); onSubmit(value); }} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.06)] print:hidden">
+    <p className="flex items-center gap-2 text-sm font-semibold text-[#14233b]"><Lock className="h-4 w-4 text-[#0b587b]" />{title}</p>
+    {note && <p className="text-xs leading-5 text-slate-500">{note}</p>}
+    <input type="password" autoFocus autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your AraOffice password" aria-label="Your AraOffice password" className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#0b587b]" />
+    {error && <p role="alert" className="text-xs text-rose-700">{error}</p>}
+    <div className="flex gap-2"><button type="submit" disabled={busy || !password} className="h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Checking…' : 'Continue'}</button><button type="button" onClick={onCancel} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Cancel</button></div>
+  </form>;
+}
+
 export default function MyPayslips() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [incentives, setIncentives] = useState<Incentive[]>([]);
   const [slip, setSlip] = useState<Slip | null>(null);
   const [error, setError] = useState('');
+  const [asking, setAsking] = useState<null | { kind: 'open'; item: Item } | { kind: 'print' } | { kind: 'pdf' }>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => { assessmentFetch('action=my_payslips').then((result: { payslips: Item[]; incentives?: Incentive[] }) => { setItems(result.payslips); setIncentives(result.incentives || []); }).catch((cause: Error) => { setError(cause.message); setItems([]); }); }, []);
-  const open = async (item: Item) => { setError(''); try { const result = await assessmentFetch(`action=my_payslip&year=${item.year}&month=${item.month}`); setSlip(result.payslip); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to open the payslip.'); } };
+  const post = (action: string, body: Record<string, unknown>) => assessmentFetch(`action=${action}`, { method: 'POST', body: JSON.stringify(body) });
+  const answer = async (password: string) => {
+    if (!asking) return;
+    setBusy(true); setError('');
+    try {
+      if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setSlip(result.payslip); setAsking(null); }
+      else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); window.setTimeout(() => window.print(), 50); }
+      else if (slip) {
+        // The PDF is locked with the same password. On a phone the share sheet offers WhatsApp; elsewhere the file is downloaded.
+        const result = await post('my_payslip_pdf', { year: slip.year, month: slip.month, password });
+        const bytes = Uint8Array.from(atob(result.pdf), (char) => char.charCodeAt(0));
+        const file = new File([bytes], result.file, { type: 'application/pdf' });
+        setAsking(null);
+        if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` }); } catch { /* the share sheet was closed */ } }
+        else { const link = document.createElement('a'); link.href = URL.createObjectURL(file); link.download = result.file; document.body.appendChild(link); link.click(); link.remove(); }
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'That did not work. Try again.'); }
+    finally { setBusy(false); }
+  };
   if (slip) {
     const company = COMPANY[slip.company] || { name: slip.company, address: '' };
     const period = payPeriod(slip.year, slip.month);
     return <div className="space-y-3">
-      <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><button type="button" onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-[#0b587b] shadow-sm"><Printer className="h-4 w-4" />Print</button></div>
+      <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
+      {asking && asking.kind !== 'open' && <PasswordPrompt title={asking.kind === 'print' ? 'Enter your password to print' : 'Enter your password to get the PDF'} note={asking.kind === 'pdf' ? 'The PDF is locked with this same password, so anyone you send it to (for example on WhatsApp) needs it to open the file.' : undefined} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
       <article className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
         <h2 className="text-base font-semibold text-[#3b5da8]">{slip.name} ({slip.code})</h2>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
@@ -73,9 +107,10 @@ export default function MyPayslips() {
   }
   if (items === null) return <p className="text-sm text-slate-500">Loading…</p>;
   return <div className="space-y-3">
-    {error && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+    {error && !asking && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+    {asking?.kind === 'open' && <PasswordPrompt title={`Enter your password to open ${MONTHS[asking.item.month - 1]} ${asking.item.year}`} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
     {incentives.map((item) => <div key={item.claimMonth} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.06)]"><span><strong className="block text-sm text-[#14233b]">Incentive · {MONTHS[Number(item.claimMonth.slice(5, 7)) - 1]} {item.claimMonth.slice(0, 4)} claims</strong><span className="text-xs text-slate-500">{item.procedures} approved {item.procedures === 1 ? 'entry' : 'entries'} · paid on {longDate(item.paidOn)} · no deductions</span></span><strong className="text-base tabular-nums text-[#1f8a4c]">RM {fmt(item.amount)}</strong></div>)}
     {!items.length ? <p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No payslips yet. A month appears here once HR has finished it.</p>
-      : items.map((item) => <button key={`${item.year}-${item.month}`} type="button" onClick={() => void open(item)} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-[0_8px_25px_rgba(20,35,59,0.06)] hover:bg-slate-50"><span><strong className="block text-sm text-[#14233b]">{MONTHS[item.month - 1]} {item.year}</strong><span className="text-xs text-slate-500">Net pay</span></span><strong className="text-base tabular-nums text-[#0b587b]">RM {fmt(item.net)}</strong></button>)}
+      : items.map((item) => <button key={`${item.year}-${item.month}`} type="button" onClick={() => { setError(''); setAsking({ kind: 'open', item }); }} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-[0_8px_25px_rgba(20,35,59,0.06)] hover:bg-slate-50"><span><strong className="block text-sm text-[#14233b]">{MONTHS[item.month - 1]} {item.year}</strong><span className="text-xs text-slate-500">Tap to open with your password</span></span><Lock className="h-4 w-4 text-slate-400" /></button>)}
   </div>;
 }
