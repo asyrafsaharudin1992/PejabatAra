@@ -155,6 +155,23 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to send to HR.'); }
     finally { setSaving(false); }
   };
+  // One button for the two steps: approving the rows that were ticked and sending the claim to HR.
+  const approveAndSend = async () => {
+    if (!approver.trim()) { onError('Enter your name to send to HR.'); return; }
+    if (claim.status !== 'approved' && claim.status !== 'submitted' && !window.confirm(`${claim.staffName} has not submitted this claim yet. Send ${monthLabel(claim.month)} to HR now? They will not be able to add more entries.`)) return;
+    setSaving(true);
+    try {
+      if (claim.status !== 'approved') {
+        const decided = await (await post({ action: 'incentive_decide', id: claim.id, decision: 'approve', approvedBy: approver.trim(), note: note.trim() })).json();
+        if (decided.error) throw new Error(decided.error);
+      }
+      const sent = await (await post({ action: 'incentive_submit_hr', id: claim.id, branch: claim.branch, month: claim.month, by: approver.trim() })).json();
+      if (sent.error) throw new Error(sent.error);
+      try { localStorage.setItem(APPROVER_KEY, approver.trim()); } catch { /* remembering the name is optional */ }
+      await onDecided();
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to send to HR.'); }
+    finally { setSaving(false); }
+  };
   const decide = async (decision: 'approve' | 'return') => {
     if (decision === 'return' && !note.trim()) { onError('Write a note telling the staff member what to fix.'); return; }
     if (decision === 'approve' && !approver.trim()) { onError('Enter your name for "Approved by".'); return; }
@@ -197,15 +214,14 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       </table>
     </section>
     <section className={`${card} space-y-4`}>
-      <h3 className="font-semibold">{open ? `Approve ${monthLabel(claim.month)}` : `${monthLabel(claim.month)} approved`}</h3>
-      {open && claim.status !== 'submitted' && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{claim.staffName} has not submitted this claim yet{claim.status === 'returned' ? ' (it was returned to fix)' : ''}. Approving it locks it, so they cannot add more entries.</p>}
+      <h3 className="font-semibold">{open ? `Send ${monthLabel(claim.month)} to HR` : `${monthLabel(claim.month)} approved`}</h3>
+      {open && claim.status !== 'submitted' && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{claim.staffName} has not submitted this claim yet{claim.status === 'returned' ? ' (it was returned to fix)' : ''}. Sending it locks it, so they cannot add more entries.</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        {(open || (claim.status === 'approved' && !claim.hrSubmittedAt)) && <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">{open ? 'Approved by' : 'Your name (sent by)'}</span><input value={approver} onChange={(event) => setApprover(event.target.value)} placeholder="Your name" className={input} /></label>}
+        {(open || (claim.status === 'approved' && !claim.hrSubmittedAt)) && <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">{open ? 'Your name (approved and sent by)' : 'Your name (sent by)'}</span><input value={approver} onChange={(event) => setApprover(event.target.value)} placeholder="Your name" className={input} /></label>}
         <label className="block"><span className="mb-2 block text-xs font-bold text-slate-700">Note to staff {open ? '(needed to return)' : '(why it is being returned)'}</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. 12/10 DXT entered twice" className={input} /></label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {open && <button onClick={() => void decide('approve')} disabled={saving || marking > 0 || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Check className="h-4 w-4" />Approve {monthLabel(claim.month)} · {rm(approved)}</button>}
-        {claim.status === 'approved' && !claim.hrSubmittedAt && <button onClick={() => void sendThisToHr()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Send className="h-4 w-4" />Send to HR</button>}
+        {(open || (claim.status === 'approved' && !claim.hrSubmittedAt)) && <button onClick={() => void approveAndSend()} disabled={saving || marking > 0 || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Send className="h-4 w-4" />Send to HR · {rm(approved)}</button>}
         {claim.hrSubmittedAt && <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${claim.hrReceivedAt ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}`}>{claim.hrReceivedAt ? `Received by HR ${new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}${claim.hrReceivedBy ? ` · ${claim.hrReceivedBy}` : ''}` : `Sent to HR ${new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB')}${claim.hrSubmittedBy ? ` · ${claim.hrSubmittedBy}` : ''}`}</span>}
         {!claim.hrReceivedAt && <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff</button>}
         {open && unchecked > 0 && <span className="text-xs text-amber-700">Check every row first ({unchecked} left).</span>}{marking > 0 && <span className="text-xs text-slate-500">Saving ticks…</span>}
