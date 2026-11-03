@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, History, MessageCircle, Search, Users } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import type { Employee } from './HRProfiles';
@@ -55,14 +55,20 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
     </div>
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <h3 className="flex items-center gap-2 text-sm font-semibold text-[#17364c]"><History size={16}/>Rekod mesej yang dibuka di WhatsApp</h3>
-      <p className="mt-1 text-xs text-slate-500">Tarikh, siapa yang menghantar dan kepada berapa orang. Klik satu baris untuk melihat mesej penuh dan senarai penerima. Nombor telefon tidak direkodkan.</p>
-      {log === null ? <p className="mt-3 text-sm text-slate-500">Memuatkan…</p> : !log.length ? <p className="mt-3 text-sm text-slate-500">Belum ada mesej direkodkan.</p> : <ul className="mt-3 divide-y divide-slate-100">{log.map((entry) => <li key={entry.id}>
-        <button type="button" onClick={() => setOpenLog(openLog === entry.id ? '' : entry.id)} aria-expanded={openLog === entry.id} className="flex w-full items-start gap-3 py-2.5 text-left hover:bg-slate-50">
-          <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-slate-700">{when(entry.at)} · {entry.recipients.length} staf{entry.by ? ` · ${entry.by.split('@')[0]}` : ''}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{entry.message.replace(/\s+/g, ' ').slice(0, 90)}{entry.message.length > 90 ? '…' : ''}</span></span>
-          {openLog === entry.id ? <ChevronUp size={16} className="mt-0.5 shrink-0 text-slate-400"/> : <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400"/>}
-        </button>
-        {openLog === entry.id && <div className="mb-3 space-y-2 rounded-xl bg-slate-50 p-3 text-xs"><p className="whitespace-pre-wrap leading-5 text-slate-700">{entry.message}</p><p className="text-slate-500"><strong>Penerima:</strong> {entry.recipients.map((r) => `${r.name}${r.code ? ` (${r.code})` : ''}`).join(', ')}</p></div>}
-      </li>)}</ul>}
+      <p className="mt-1 text-xs text-slate-500">Tarikh, siapa yang menghantar, templat yang digunakan dan bilangan staf. Klik satu baris untuk melihat mesej penuh. Nombor telefon tidak direkodkan.</p>
+      {log === null ? <p className="mt-3 text-sm text-slate-500">Memuatkan…</p> : !log.length ? <p className="mt-3 text-sm text-slate-500">Belum ada mesej direkodkan.</p> : <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs">
+        <thead><tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Tarikh</th><th className="pr-3">Dihantar oleh</th><th className="pr-3">Templat</th><th className="pr-2 text-right">Bil. staf</th><th className="w-6" /></tr></thead>
+        <tbody>{log.map((entry) => <Fragment key={entry.id}>
+          <tr onClick={() => setOpenLog(openLog === entry.id ? '' : entry.id)} aria-expanded={openLog === entry.id} className="cursor-pointer border-t border-slate-100 align-top hover:bg-slate-50">
+            <td className="whitespace-nowrap py-2.5 pr-3 font-medium text-slate-700">{when(entry.at)}</td>
+            <td className="pr-3 text-slate-600">{entry.by ? entry.by.split('@')[0] : '—'}</td>
+            <td className="max-w-[360px] pr-3 text-slate-500"><span className="block truncate">{entry.message.replace(/\s+/g, ' ').slice(0, 90)}{entry.message.length > 90 ? '…' : ''}</span></td>
+            <td className="pr-2 text-right font-semibold text-slate-700">{entry.recipients.length}</td>
+            <td>{openLog === entry.id ? <ChevronUp size={15} className="text-slate-400"/> : <ChevronDown size={15} className="text-slate-400"/>}</td>
+          </tr>
+          {openLog === entry.id && <tr className="bg-slate-50"><td colSpan={5} className="whitespace-pre-wrap px-3 py-3 leading-5 text-slate-700">{entry.message}</td></tr>}
+        </Fragment>)}</tbody>
+      </table></div>}
     </div>
   </section>;
 }
