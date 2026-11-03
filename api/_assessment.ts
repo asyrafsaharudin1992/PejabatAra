@@ -275,6 +275,46 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     return res.status(200).json({ month, start, end, group: access.label, scope: access.scope, notice: access.notice, items: (rows || []).map((row: any) => ({ name: names.get(row.employee_id)?.full_name || '', code: names.get(row.employee_id)?.employee_code || '', department: names.get(row.employee_id)?.department || '', company: names.get(row.employee_id)?.company || '', type: LEAVE_TYPES[row.leave_type]?.name || row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day, days: Number(row.days) })) });
   }
 
+  // The duty roster of a whole company for a month (everyone, doctors included), for the people HR gave company-wide calendar access.
+  if (req.method === 'GET' && action === 'roster_team') {
+    const access = calendarAccessFor(me);
+    if (access.scope !== 'companies') throw fail(403, 'You can see your own roster only.');
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today.slice(0, 7);
+    if (Number(month.slice(5, 7)) < 1 || Number(month.slice(5, 7)) > 12) throw fail(400, 'Choose a valid month.');
+    const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+    const company = access.companies.includes(String(req.query.company)) ? String(req.query.company) : access.companies[0];
+    const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,designation,department,join_date,holiday_group').eq('company', company).eq('status', 'Active').order('employee_code').limit(200);
+    if (peopleError) throw peopleError;
+    const ids = (people || []).map((person: any) => person.id);
+    const [rosterRead, leaveRead] = ids.length ? await Promise.all([
+      db.from('hr_roster').select('employee_id,work_date,shift,works').in('employee_id', ids).gte('work_date', start).lte('work_date', end).limit(8000),
+      db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day').in('employee_id', ids).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(2000),
+    ]) : [{ data: [], error: null }, { data: [], error: null }];
+    if (rosterRead.error) throw rosterRead.error;
+    if (leaveRead.error) throw leaveRead.error;
+    const out: any[] = [];
+    for (const person of people || []) {
+      const doctor = /\b(DR|DOCTOR)\b/i.test(person.designation || '');
+      const days = (rosterRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
+      // Office staff without a duty roster: Monday to Friday, off on public holidays (as on their own roster). Doctors with no roster are left blank.
+      if (!days.length && !doctor) {
+        const calendar = await rosterFor(db, person.id, start, end, person.holiday_group || '');
+        const usual = /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(person.designation || '') ? 'AM-5' : 'AM-6';
+        for (let day = 1; day <= Number(end.slice(8)); day++) {
+          const date = `${month}-${String(day).padStart(2, '0')}`;
+          if (date < String(person.join_date || '')) continue;
+          const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+          if (calendar[date] === false) days.push({ date, shift: 'PH', works: false });
+          else if (weekday >= 1 && weekday <= 5) days.push({ date, shift: usual, works: true });
+          else days.push({ date, shift: 'OFF', works: false });
+        }
+      }
+      out.push({ id: person.id, name: person.full_name, code: person.employee_code, designation: person.designation || '', doctor, days, leave: (leaveRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
+    }
+    out.sort((a, b) => Number(b.doctor) - Number(a.doctor) || a.code.localeCompare(b.code));
+    return res.status(200).json({ month, today, companies: access.companies, company, people: out });
+  }
+
   // The signed-in person's own duty roster for a month, with their approved leave, so they can see the dates they work.
   if (req.method === 'GET' && action === 'leave_roster') {
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today.slice(0, 7);
@@ -617,12 +657,14 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // Preview accounts see every assessment, including closed ones.
     if (!staff.can_preview) quizQuery = quizQuery.eq('active', true);
     const [selfResult, { data: quizzes, error: quizError }, { data: attempts, error: attemptError }] = await Promise.all([
-      db.from('hr_employees').select('id,designation').eq('assessment_staff_id', staff.id).maybeSingle().then((result: any) => result, () => ({ data: null })),
+      db.from('hr_employees').select('id,designation,company,department,leave_calendar_companies').eq('assessment_staff_id', staff.id).maybeSingle().then((result: any) => result, () => ({ data: null })),
       quizQuery,
       db.from('assessment_attempts').select('quiz_id,score,total,attempt_no,submitted_at').eq('staff_id', staff.id),
     ]);
     if (quizError || attemptError) throw quizError || attemptError;
     const self = selfResult?.data;
+    // The rosters of whole companies are for the people HR gave company-wide calendar access (KJ, SK or both); everyone else sees only their own.
+    const rosterCompanies: string[] = self ? (() => { const access = calendarAccessFor(self); return access.scope === 'companies' ? access.companies : []; })() : [];
     if (self) {
       designation = String(self.designation || '');
       try {
@@ -643,7 +685,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

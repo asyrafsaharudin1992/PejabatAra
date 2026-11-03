@@ -13,7 +13,7 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
 type View = 'home' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
@@ -249,7 +249,7 @@ export default function IndividualHub() {
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
   if (view === 'ot') return <Screen nav={phoneNav} title="OT request" onBack={() => setView('home')}><MyAttendance mode="ot" isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
-  if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster /></Screen>;
+  if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster companies={me?.staff.rosterCompanies || []} /></Screen>;
   if (view === 'payslip') return <Screen nav={phoneNav} title="Payslip" onBack={() => setView('home')}><MyPayslips /></Screen>;
   if (view === 'profile') return <Screen nav={phoneNav} title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
   if (view === 'settings') return <Screen nav={phoneNav} title="Settings" onBack={() => setView('home')}>

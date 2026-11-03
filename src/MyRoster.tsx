@@ -24,7 +24,9 @@ type Kind = 'day' | 'night' | 'office' | 'off' | 'leave' | 'holiday';
 const kindOf = (shift: string, works: boolean): Kind => !works ? (shift === 'PH' ? 'holiday' : 'off') : shift === 'PM' || shift === 'ASCL3' ? 'night' : shift === 'OH' || shift === 'AM-6' || shift === 'AM-5' ? 'office' : 'day';
 const TONE: Record<Kind, string> = { day: 'bg-emerald-100 text-emerald-900', night: 'bg-amber-100 text-amber-900', office: 'bg-sky-100 text-sky-900', off: 'bg-slate-100 text-slate-400', leave: 'bg-rose-100 text-rose-800', holiday: 'bg-violet-100 text-violet-800' };
 
-export default function MyRoster() {
+export default function MyRoster({ companies = [] }: { companies?: string[] }) {
+  // 'me' is the person's own roster; a company code opens everyone's roster for that company (only for people HR gave company-wide access).
+  const [scope, setScope] = useState('me');
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
@@ -48,16 +50,19 @@ export default function MyRoster() {
   const nav = 'grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
   const card = 'rounded-[22px] border border-black/[0.045] bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.025)] sm:p-6';
 
+  const teamView = scope !== 'me' && companies.includes(scope);
   return <div className="space-y-4">
+    {companies.length > 0 && <div className="flex gap-1 rounded-2xl bg-slate-100 p-1 text-sm font-semibold">{['me', ...companies].map((key) => <button key={key} onClick={() => setScope(key)} className={`flex-1 rounded-xl px-3 py-2 ${scope === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{key === 'me' ? 'My roster' : `${key} team`}</button>)}</div>}
     <div className="flex items-center gap-3">
       <button onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month" className={nav}><ChevronLeft className="h-4 w-4" /></button>
       <h2 className="min-w-[160px] text-center text-lg font-semibold">{monthName(month)}</h2>
       <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
       {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-auto text-sm font-semibold text-[#0b587b]">This month</button>}
     </div>
-    {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-    {!data && !error && <p className="text-sm text-slate-500">Loading…</p>}
-    {data && <>
+    {teamView && <TeamRoster company={scope} month={month} />}
+    {!teamView && error && <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
+    {!teamView && !data && !error && <p className="text-sm text-slate-500">Loading…</p>}
+    {!teamView && data && <>
       <section className="relative overflow-hidden rounded-[24px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-5 text-white shadow-[0_18px_40px_rgba(11,48,70,0.25)] sm:p-6">
         <i className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10" />
         <p className="relative text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Your next shift</p>
@@ -87,4 +92,45 @@ export default function MyRoster() {
       {!data.days.length && <p className="rounded-2xl bg-white p-4 text-sm leading-6 text-slate-600">There is no duty roster for you in {monthName(month)} yet. Until HR uploads it, your usual working days apply.</p>}
     </>}
   </div>;
+}
+
+type Person = { id: string; name: string; code: string; designation: string; doctor: boolean; days: Day[]; leave: Leave[] };
+type Team = { today: string; people: Person[] };
+
+// Everyone's roster for one company and month: a row per person, a column per date. Doctors are listed first.
+function TeamRoster({ company, month }: { company: string; month: string }) {
+  const [team, setTeam] = useState<Team | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { setTeam(null); setError(''); assessmentFetch(`action=roster_team&company=${company}&month=${month}`).then((result) => setTeam(result)).catch((cause: Error) => setError(cause.message)); }, [company, month]);
+  if (error) return <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>;
+  if (!team) return <p className="text-sm text-slate-500">Loading…</p>;
+  const dates = Array.from({ length: new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
+  const cell = (person: Person, date: string): { label: string; kind: Kind } | null => {
+    const leave = person.leave.find((item) => item.start <= date && item.end >= date);
+    if (leave) return { label: leave.type, kind: 'leave' };
+    const day = person.days.find((item) => item.date === date);
+    if (!day) return null;
+    const shift = newCode(day.shift);
+    return { label: shift, kind: kindOf(shift, day.works) };
+  };
+  const codes: string[] = [...new Set(team.people.flatMap((person) => dates.map((date) => cell(person, date))).filter(Boolean).map((item) => item!.label))];
+  const rows = (list: Person[]) => list.map((person) => <tr key={person.id} className="border-t border-slate-100">
+    <th className="sticky left-0 z-10 w-36 min-w-[9rem] bg-white px-2 py-1.5 text-left text-xs font-semibold text-slate-700"><span className="block truncate">{person.name}</span></th>
+    {dates.map((date) => { const item = cell(person, date); return <td key={date} className={`p-0.5 text-center ${date === team.today ? 'bg-[#0b587b]/5' : ''}`}>{item ? <span className={`block min-w-[30px] rounded px-0.5 py-1 text-[10px] font-bold ${TONE[item.kind]}`}>{item.label}</span> : <span className="text-slate-200">·</span>}</td>; })}
+  </tr>);
+  const doctors = team.people.filter((person) => person.doctor), others = team.people.filter((person) => !person.doctor);
+  return <>
+    <section className="overflow-x-auto rounded-[22px] border border-black/[0.045] bg-white p-2 shadow-[0_2px_8px_rgba(0,0,0,0.025)]">
+      <table className="border-collapse">
+        <thead><tr><th className="sticky left-0 z-10 bg-white px-2 py-1.5 text-left text-xs text-slate-400">{company} · {team.people.length} staff</th>{dates.map((date) => <th key={date} className={`px-0.5 pb-1 text-center text-[10px] font-semibold ${date === team.today ? 'text-[#0b587b]' : 'text-slate-400'}`}>{Number(date.slice(8))}<span className="block font-normal">{HEAD[(new Date(`${date}T00:00:00`).getDay() + 6) % 7][0]}</span></th>)}</tr></thead>
+        <tbody>
+          {doctors.length > 0 && <tr><td colSpan={dates.length + 1} className="sticky left-0 bg-slate-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Doctors</td></tr>}
+          {rows(doctors)}
+          {doctors.length > 0 && others.length > 0 && <tr><td colSpan={dates.length + 1} className="sticky left-0 bg-slate-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Staff</td></tr>}
+          {rows(others)}
+        </tbody>
+      </table>
+    </section>
+    {codes.length > 0 && <p className="px-1 text-xs leading-5 text-slate-500">{codes.map((code) => `${code}: ${code === 'AL' || code === 'ML' || code === 'EL' ? 'leave' : MEANING[code] || code}`).join(' · ')}</p>}
+  </>;
 }
