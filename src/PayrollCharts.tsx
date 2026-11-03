@@ -9,9 +9,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const label = (month: string) => `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(2, 4)}`;
 const COST: { key: string; name: string; color: string; on: boolean }[] = [
   { key: 'gross', name: 'Gross wages', color: '#0b87b8', on: true }, { key: 'net', name: 'Nett wages', color: '#d9622b', on: true }, { key: 'basic', name: 'Basic wages', color: '#e0457b', on: true },
-  { key: 'allowance', name: 'Allowance', color: '#e8b400', on: true }, { key: 'ot', name: 'OT amount', color: '#f0963c', on: true }, { key: 'pcb', name: 'MTD / PCB', color: '#6a1b9a', on: false },
-  { key: 'kwspEmployee', name: 'Employee EPF', color: '#8a6d00', on: false }, { key: 'kwspEmployer', name: 'Employer EPF', color: '#7a0f0f', on: false }, { key: 'socsoEmployee', name: 'Employee SOCSO', color: '#1a237e', on: false },
-  { key: 'socsoEmployer', name: 'Employer SOCSO', color: '#6b6b1a', on: false }, { key: 'eisEmployee', name: 'Employee EIS', color: '#1b8a6b', on: false }, { key: 'eisEmployer', name: 'Employer EIS', color: '#2e7d32', on: false },
+  { key: 'allowance', name: 'Allowance', color: '#e8b400', on: true }, { key: 'ot', name: 'OT amount', color: '#f0963c', on: true }, { key: 'pcb', name: 'MTD / PCB', color: '#6a1b9a', on: true },
+  { key: 'kwspEmployee', name: 'Employee EPF', color: '#8a6d00', on: true }, { key: 'kwspEmployer', name: 'Employer EPF', color: '#7a0f0f', on: true }, { key: 'socsoEmployee', name: 'Employee SOCSO', color: '#1a237e', on: true },
+  { key: 'socsoEmployer', name: 'Employer SOCSO', color: '#6b6b1a', on: true }, { key: 'eisEmployee', name: 'Employee EIS', color: '#1b8a6b', on: false }, { key: 'eisEmployer', name: 'Employer EIS', color: '#2e7d32', on: false },
 ];
 const niceMax = (value: number) => { if (value <= 0) return 1; const power = 10 ** Math.floor(Math.log10(value)); const step = [1, 2, 2.5, 5, 10].find((m) => m * power >= value)! * power; return step; };
 
