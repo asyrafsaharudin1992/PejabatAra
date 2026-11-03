@@ -254,6 +254,8 @@ export async function clinicalHandler(req: any, res: any) {
         const unchecked = (full.entries || []).filter((entry: any) => !entry.review).length;
         if (!(full.entries || []).length) throw fail(400, 'This claim has no entries.');
         if (unchecked) throw fail(409, `${unchecked} ${unchecked === 1 ? 'row has' : 'rows have'} not been checked yet. Tick ✓ or ✗ on every row first.`);
+        const unexplained = (full.entries || []).filter((entry: any) => entry.review === 'rejected' && !String(entry.reason || '').trim()).length;
+        if (unexplained) throw fail(409, `Write why for ${unexplained === 1 ? 'the row' : 'each of the ' + unexplained + ' rows'} not approved, so the staff member is told.`);
       }
       const note = text(body.note, 1000);
       if (body.decision === 'approve' && !approvedBy) throw fail(400, 'Enter your name for "Approved by".');

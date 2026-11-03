@@ -140,6 +140,7 @@ export default function IncentiveClaims() {
     {claim && <>
       {claim.status === 'submitted' && <p className="mt-5 flex gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><Clock3 className="mt-0.5 h-4 w-4 shrink-0" />Submitted. Waiting for your Clinical Admin to approve it.</p>}
       {claim.status === 'approved' && <p className="mt-5 flex gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>Approved by {claim.approvedBy}.{claim.adminNote ? ` Note: ${claim.adminNote}` : ''}</span></p>}
+      {claim.status === 'approved' && claim.entries.some((entry) => entry.review === 'rejected') && <p className="mt-3 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>{claim.entries.filter((entry) => entry.review === 'rejected').length} {claim.entries.filter((entry) => entry.review === 'rejected').length === 1 ? 'entry was' : 'entries were'} not approved.</strong> The reason is shown under each one below. The rest of your claim was sent to HR.</span></p>}
       {claim.status === 'returned' && <p className="mt-5 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><Undo2 className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Returned to fix:</strong> {claim.adminNote} Fix your entries, then submit again.</span></p>}
 
       {editable && <div className="mt-5"><AddEntry key={claim.month} claim={claim} onAdded={setClaim} onError={setError} /></div>}

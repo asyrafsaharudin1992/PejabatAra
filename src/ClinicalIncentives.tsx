@@ -158,6 +158,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
   // One button for the two steps: approving the rows that were ticked and sending the claim to HR.
   const approveAndSend = async () => {
     if (!approver.trim()) { onError('Enter your name to send to HR.'); return; }
+    if (entries.some((entry) => entry.review === 'rejected' && !entry.reason?.trim())) { onError('Write why for each row not approved, so the staff member is told.'); return; }
     if (claim.status !== 'approved' && claim.status !== 'submitted' && !window.confirm(`${claim.staffName} has not submitted this claim yet. Send ${monthLabel(claim.month)} to HR now? They will not be able to add more entries.`)) return;
     setSaving(true);
     try {
@@ -223,7 +224,8 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
       <div className="flex flex-wrap items-center gap-2">
         {(open || (claim.status === 'approved' && !claim.hrSubmittedAt)) && <button onClick={() => void approveAndSend()} disabled={saving || marking > 0 || unchecked > 0 || !entries.length} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-50"><Send className="h-4 w-4" />Send to HR · {rm(approved)}</button>}
         {claim.hrSubmittedAt && <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${claim.hrReceivedAt ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}`}>{claim.hrReceivedAt ? `Received by HR ${new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}${claim.hrReceivedBy ? ` · ${claim.hrReceivedBy}` : ''}` : `Sent to HR ${new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB')}${claim.hrSubmittedBy ? ` · ${claim.hrSubmittedBy}` : ''}`}</span>}
-        {!claim.hrReceivedAt && <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff</button>}
+        {!claim.hrReceivedAt && <button onClick={() => void decide('return')} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"><Undo2 className="h-4 w-4" />Return to staff for amendment</button>}
+        {open && rejectedCount > 0 && unchecked === 0 && <span className="text-xs text-rose-700">{rejectedCount} {rejectedCount === 1 ? 'row is' : 'rows are'} not approved: the staff will see your reasons and the rest goes to HR. To let them fix it first, use Return to staff for amendment.</span>}
         {open && unchecked > 0 && <span className="text-xs text-amber-700">Check every row first ({unchecked} left).</span>}{marking > 0 && <span className="text-xs text-slate-500">Saving ticks…</span>}
       </div>
     </section>
