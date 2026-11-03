@@ -78,7 +78,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
         <li>Clinical Admin checks each entry, ticks the approved ones and sends the claim to HR.</li>
         <li>The claim appears here. HR marks it <strong>Received</strong> once the paperwork is in hand.</li>
         <li>In <strong>Payroll → Incentive pay</strong>, HR confirms the received claims. The amounts are then fixed and staff can see them.</li>
-        <li>From the same place, HR downloads the Maybank file and the <strong>Finance summary</strong>. Incentive is paid on the <strong>16th of the next month</strong>, with no KWSP, PERKESO, EIS or PCB taken.</li>
+        <li>From the same place, HR downloads one <strong>Excel for Finance</strong> (names, bank and account, amounts, totals by company) and sends it to Finance for payment. Incentive is paid on the <strong>16th of the next month</strong>, with no KWSP, PERKESO, EIS or PCB taken.</li>
       </ol>
       <p className="mt-2 text-xs text-slate-400">Only entries that Clinical Admin ticked are counted. Returning a claim in Clinical Admin takes it off this list.</p>
     </section>}

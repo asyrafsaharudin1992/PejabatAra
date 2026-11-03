@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
-import { incentiveSummaryCsv } from './lib/incentiveSummary';
 import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 
 // Payroll room, built a piece at a time: it replaces Infotech's Info-Pay from the November 2026 pay run.
@@ -143,7 +142,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
 }
 
 // ---- Incentive pay: approved claims of a month, paid on the 16th of the next month, with no deductions ------------------------
-type IncentiveItem = { employeeId: string; code: string; name: string; company: string; linked: boolean; received: boolean; procedures: number; amount: number; confirmed: boolean; confirmedAmount: number | null };
+type IncentiveItem = { employeeId: string; code: string; name: string; company: string; bankName: string; bankAccount: string; linked: boolean; received: boolean; procedures: number; amount: number; confirmed: boolean; confirmedAmount: number | null };
 const claimMonths = () => { const out: string[] = []; const now = new Date(); for (let index = now.getFullYear() * 12 + now.getMonth(); index >= 2026 * 12 + 9; index--) out.push(`${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`); return out.length ? out : ['2026-10']; };
 const monthText = (month: string) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
 
@@ -178,10 +177,29 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
     setBusy(false);
   };
-  const financeSummary = () => {
-    const paid = (items || []).filter((item) => item.confirmed);
-    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([incentiveSummaryCsv(monthText(month), paidOn ? dmy(paidOn) : '16th', paid)], { type: 'text/csv' })); link.download = `Incentive_Summary_${month}.csv`; document.body.appendChild(link); link.click(); link.remove();
-    setNote(`Finance summary: ${paid.length} staff, only confirmed payments.`);
+  // One Excel for Finance: everyone HR has received (or already confirmed), by company, with bank details, so Finance can pay from it.
+  const forFinance = (items || []).filter((item) => item.linked && (item.confirmed || item.received) && (item.confirmed ? item.confirmedAmount || 0 : item.amount) > 0);
+  const financeSummary = async () => {
+    try {
+      const { default: writeExcelFile } = await import('write-excel-file/browser');
+      const head = { fontWeight: 'bold' as const, textColor: '#FFFFFF', backgroundColor: '#0B3D59', align: 'center' as const };
+      const cellOf = (value: string | number, bold = false) => ({ value, ...(bold ? { fontWeight: 'bold' as const } : {}) });
+      const num = (value: number, bold = false) => ({ value, format: '#,##0.00', align: 'right' as const, ...(bold ? { fontWeight: 'bold' as const } : {}) });
+      const amountOf = (item: IncentiveItem) => item.confirmed ? item.confirmedAmount || 0 : item.amount;
+      const rows: any[][] = [[cellOf(`Incentive pay: claims of ${monthText(month)}`, true)], [cellOf(`To be paid on ${paidOn ? dmy(paidOn) : '16th'}. No KWSP, PERKESO, EIS or PCB deducted.`)], [],
+        ['No.', 'Company', 'Staff code', 'Name', 'Bank', 'Account no.', 'Approved entries', 'Amount (RM)'].map((value) => ({ ...head, value }))];
+      let grand = 0, entries = 0, count = 0;
+      for (const company of ['KJ', 'SK']) {
+        const list = forFinance.filter((item) => item.company === company);
+        let subtotal = 0, subEntries = 0;
+        for (const item of list) { count++; subtotal += amountOf(item); subEntries += item.procedures; rows.push([cellOf(count), cellOf(company), cellOf(item.code), cellOf(item.name), cellOf(item.bankName), cellOf(item.bankAccount), cellOf(item.procedures), num(amountOf(item))]); }
+        rows.push([cellOf(''), cellOf(`${company} total`, true), cellOf(''), cellOf(''), cellOf(''), cellOf(''), cellOf(subEntries, true), num(subtotal, true)], []);
+        grand += subtotal; entries += subEntries;
+      }
+      rows.push([cellOf(''), cellOf('Grand total', true), cellOf(''), cellOf(''), cellOf(''), cellOf(''), cellOf(entries, true), num(grand, true)]);
+      await writeExcelFile([{ data: rows, sheet: 'Incentive', columns: [{ width: 6 }, { width: 10 }, { width: 13 }, { width: 42 }, { width: 18 }, { width: 20 }, { width: 16 }, { width: 14 }] }], { fontFamily: 'Arial', fontSize: 10 }).toFile(`Incentive_Finance_${month}.xlsx`);
+      setNote(`Finance Excel: ${count} staff.${forFinance.some((item) => !item.bankAccount) ? ' Some staff have no bank account in their profile.' : ''}`);
+    } catch { onError('Unable to create the Excel file.'); }
   };
   const total = (items || []).reduce((sum, item) => sum + (item.confirmed ? item.confirmedAmount || 0 : item.received ? item.amount : 0), 0);
   const cell = (value: number) => show ? fmt(value) : '••••';
@@ -191,7 +209,7 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
       <div><h3 className="font-semibold">Incentive pay</h3><p className="mt-0.5 text-xs text-slate-500">Approved claims that HR has received, paid on {paidOn ? dmy(paidOn) : 'the 16th of the next month'}. No KWSP, PERKESO, EIS or PCB is taken.</p></div>
       <div className="flex flex-wrap items-center gap-2">
         <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{months.map((m) => <option key={m} value={m}>Claims of {monthText(m)}</option>)}</select>
-        <button type="button" disabled={!(items || []).some((item) => item.confirmed)} onClick={financeSummary} title="Available once incentive payments are confirmed" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] disabled:opacity-40"><Download className="h-4 w-4" />Finance summary</button>
+        <button type="button" disabled={!forFinance.length} onClick={() => void financeSummary()} title="Available once HR has received at least one claim" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] disabled:opacity-40"><Download className="h-4 w-4" />Excel for Finance</button>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
       </div>
     </div>

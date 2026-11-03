@@ -1316,7 +1316,7 @@ export async function hrHandler(req: any, res: any) {
       const { data: claims, error: claimError } = await db.from('incentive_claims').select('staff_id,entries,hr_received_at').eq('month', month).not('hr_submitted_at', 'is', null);
       if (claimError) { if (claimError.code === '42703') throw fail(400, 'Incentive claims are not set up yet.'); throw claimError; }
       const staffIds = [...new Set((claims || []).map((row: any) => row.staff_id))];
-      const { data: people, error: peopleError } = staffIds.length ? await db.from('hr_employees').select('id,assessment_staff_id,employee_code,full_name,company').in('assessment_staff_id', staffIds) : { data: [], error: null };
+      const { data: people, error: peopleError } = staffIds.length ? await db.from('hr_employees').select('id,assessment_staff_id,employee_code,full_name,company,bank_name,bank_account').in('assessment_staff_id', staffIds) : { data: [], error: null };
       if (peopleError) throw peopleError;
       const personOf = new Map((people || []).map((row: any) => [row.assessment_staff_id, row]));
       const { data: paid, error: paidError } = await db.from('hr_incentive_pay').select('employee_id,amount,paid_on').eq('claim_month', month);
@@ -1329,7 +1329,7 @@ export async function hrHandler(req: any, res: any) {
         const approved = (Array.isArray(row.entries) ? row.entries : []).filter((entry: any) => entry?.review === 'approved');
         const amount = Math.round(approved.reduce((sum: number, entry: any) => sum + Number(entry.rm || 0), 0) * 100) / 100;
         const done: any = person ? paidOf.get(person.id) : null;
-        return { employeeId: person?.id || '', code: person?.employee_code || '', name: person?.full_name || '', company: person?.company || '', linked: Boolean(person), received: Boolean(row.hr_received_at), procedures: approved.length, amount, confirmed: Boolean(done), confirmedAmount: done ? Number(done.amount) : null };
+        return { employeeId: person?.id || '', code: person?.employee_code || '', name: person?.full_name || '', company: person?.company || '', bankName: person?.bank_name || '', bankAccount: person?.bank_account || '', linked: Boolean(person), received: Boolean(row.hr_received_at), procedures: approved.length, amount, confirmed: Boolean(done), confirmedAmount: done ? Number(done.amount) : null };
       }).sort((a: any, b: any) => a.code.localeCompare(b.code));
       if (req.method === 'GET') return res.status(200).json({ month, paidOn, items });
       if (req.method !== 'POST') throw fail(405, 'Method not allowed');
