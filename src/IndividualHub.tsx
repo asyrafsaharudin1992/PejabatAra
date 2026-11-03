@@ -1,5 +1,5 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
@@ -47,14 +47,14 @@ function forgetMe() { try { localStorage.removeItem(ME_KEY); } catch { /* storag
 // Phone home: a photo of the clinic, a greeting, one line picked at random each visit, and the icons in a white card, with a bar at the bottom.
 const HERO = HERO_PHOTO;
 const QUOTES = ['Every shift matters, every patient counts.', 'Care for your team the way you care for patients.', 'Small acts of kindness every day create a big difference.', 'Together, we make a difference every day.'];
-type PhoneItem = { label: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
+type PhoneItem = { label: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
 
 function PhoneTile({ item }: { key?: string; item: PhoneItem }) {
   const body = <>
     <span className={`relative grid h-[50px] w-[50px] place-items-center rounded-[16px] ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.5} />
       {item.soon && <span className="absolute -right-3 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}
-      {!!item.badge && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow">{item.badge}</span>}</span>
-    <strong className="mt-1.5 block w-full min-w-0 text-[12px] font-semibold leading-tight text-[#0b2a4a]">{item.label}</strong>
+      {!!item.badge && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow">{item.badge}</span>}{item.locked && <span aria-label="Password protected" className="absolute -bottom-1 -right-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#0b587b] text-white shadow ring-2 ring-white"><Lock className="h-2.5 w-2.5" strokeWidth={2.4} /></span>}</span>
+    <strong className="mt-1.5 block w-full min-w-0 text-[12px] font-semibold leading-tight text-[#0b2a4a]">{item.label}</strong>{item.locked && <span className="mt-0.5 block text-[9px] font-semibold leading-none text-[#0b587b]">Password protected</span>}
   </>;
   const base = 'flex min-w-0 flex-col items-center rounded-2xl px-0.5 py-2 text-center transition active:bg-slate-50';
   if (item.soon) return <div aria-disabled="true" className={`${base} opacity-80`}>{body}</div>;
@@ -261,7 +261,7 @@ export default function IndividualHub() {
 
   const name = me?.staff.name || '';
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
-  type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number };
+  type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
   const items: Item[] = [
     ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
@@ -270,14 +270,14 @@ export default function IndividualHub() {
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
-    { label: 'Payslip', desc: 'Your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip') },
+    { label: 'Payslip', desc: 'Password protected · your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip'), locked: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },
     { label: 'Assessment Room', desc: 'Periodic staff assessments', icon: ClipboardCheck, tone: 'bg-[#91d7ed]/40 text-[#0b3046]', href: '#office/assessment' },
     ...(me?.staff.preview ? [] : [{ label: 'Incentive Claims', desc: 'Record your procedures and claim your incentive', icon: Coins, tone: 'bg-[#ffd36b]/50 text-[#3b2a00]', href: '#office/incentives' } as Item]),
     { label: 'Settings', desc: 'Change your password, sign out', icon: Settings, tone: 'bg-slate-100 text-slate-600', onClick: () => setView('settings') },
   ];
-  const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge }));
+  const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge, locked: item.locked }));
   const facts: [string, string][] = profile ? [['Position', profile.position], ['Department', profile.department], ['Joined', dmy(profile.joinDate)]] : [];
 
   return <>
@@ -335,7 +335,7 @@ export default function IndividualHub() {
           <section className="min-w-0">
             <h2 className="mb-3 text-sm font-semibold">Your essentials</h2>
             <div className="grid auto-rows-fr gap-3 sm:grid-cols-2">{items.map(item => {
-              const body = <><span className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-[14px] ${item.tone}`}><item.icon className="h-5 w-5" strokeWidth={1.6} />{!!item.badge && <span aria-label={`${item.badge} waiting for approval`} className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">{item.badge}</span>}</span><span className="min-w-0 flex-1"><strong className="block text-sm font-semibold">{item.label}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{item.desc}</span></span>{item.soon ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-400">Soon</span> : <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />}</>;
+              const body = <><span className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-[14px] ${item.tone}`}><item.icon className="h-5 w-5" strokeWidth={1.6} />{!!item.badge && <span aria-label={`${item.badge} waiting for approval`} className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">{item.badge}</span>}{item.locked && <span aria-label="Password protected" className="absolute -bottom-1 -right-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#0b587b] text-white shadow ring-2 ring-white"><Lock className="h-2.5 w-2.5" strokeWidth={2.4} /></span>}</span><span className="min-w-0 flex-1"><strong className="block text-sm font-semibold">{item.label}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{item.desc}</span></span>{item.soon ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-400">Soon</span> : <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />}</>;
               const style = 'group flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white p-5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition hover:border-slate-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#0b587b]';
               if (item.soon) return <div key={item.label} aria-disabled="true" className="flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white/70 p-5 text-left">{body}</div>;
               return item.href ? <a key={item.label} href={item.href} className={style}>{body}</a> : <button key={item.label} type="button" onClick={item.onClick} className={style}>{body}</button>;

@@ -21,12 +21,10 @@ export function payslipPdf(slip: PayslipData, password: string): Buffer {
   const lines = 15 + slip.allowances.length + (slip.ot > 0 ? 1 : 0) + (slip.restPh > 0 ? 1 : 0) + (slip.skbbk > 0 ? 1 : 0) + (slip.pcb > 0 ? 1 : 0);
   const step = Math.min(6.5, 205 / lines);
   let y = 18;
-  // Letterhead: logo, company, and a note that the file is locked.
+  // Letterhead: logo and company.
   doc.addImage(ARA_LOGO_PNG, 'PNG', left, y - 4, 20, 20);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text(company.name, left + 25, y + 3);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90); doc.text(doc.splitTextToSize(company.address, right - left - 25), left + 25, y + 8.5); doc.setTextColor(0);
-  doc.setDrawColor(11, 88, 123); doc.setLineWidth(0.4); doc.roundedRect(right - 44, y - 4, 44, 6.5, 1.5, 1.5);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(11, 88, 123); doc.text('PASSWORD PROTECTED', right - 22, y, { align: 'center' }); doc.setTextColor(0); doc.setLineWidth(0.2);
   y += 26;
   const line = (label: string, value: string, bold = false) => { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(10); doc.text(label, left, y); doc.text(value, right, y, { align: 'right' }); y += step; };
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(`Payslip · ${MONTHS[slip.month - 1]} ${slip.year}`, left, y); y += 7;
