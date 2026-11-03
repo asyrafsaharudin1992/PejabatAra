@@ -46,6 +46,16 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
     // Keep a record (names and codes only) so HR can see what was sent and when.
     officeFetch('/api/status?resource=hr&action=contact_log_add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message.trim(), recipients: recipients.map((p) => ({ name: p.fullName, code: p.employeeCode })) }) }).then(() => loadLog()).catch(() => setError('Mesej dibuka di WhatsApp, tetapi rekodnya tidak dapat disimpan.'));
   };
+  // The same template sent by the same person on the same day is one row (the staff are added up), so repeated sends do not fill the table.
+  const day = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+  const rows = useMemo(() => {
+    const out: { id: string; at: string; by: string; message: string; staff: number; sends: number }[] = [];
+    for (const entry of log || []) {
+      const found = out.find((row) => row.by === entry.by && row.message === entry.message && day(row.at) === day(entry.at));
+      if (found) { found.staff += entry.recipients.length; found.sends += 1; } else out.push({ id: entry.id, at: entry.at, by: entry.by, message: entry.message, staff: entry.recipients.length, sends: 1 });
+    }
+    return out;
+  }, [log]);
   const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' });
   return <section className="space-y-4">
     <div className="rounded-2xl bg-white p-5 shadow-sm"><h3 className="flex items-center gap-2 text-lg font-semibold text-[#17364c]"><MessageCircle size={20}/>Contact staf</h3><p className="mt-1 text-sm text-slate-500">Pilih staf dan sediakan mesej WhatsApp. Setiap staf akan dibuka dalam tab berasingan untuk anda hantar.</p></div>
@@ -58,12 +68,12 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
       <p className="mt-1 text-xs text-slate-500">Tarikh, siapa yang menghantar, templat yang digunakan dan bilangan staf. Klik satu baris untuk melihat mesej penuh. Nombor telefon tidak direkodkan.</p>
       {log === null ? <p className="mt-3 text-sm text-slate-500">Memuatkan…</p> : !log.length ? <p className="mt-3 text-sm text-slate-500">Belum ada mesej direkodkan.</p> : <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs">
         <thead><tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Tarikh</th><th className="pr-3">Dihantar oleh</th><th className="pr-3">Templat</th><th className="pr-2 text-right">Bil. staf</th><th className="w-6" /></tr></thead>
-        <tbody>{log.map((entry) => <Fragment key={entry.id}>
+        <tbody>{rows.map((entry) => <Fragment key={entry.id}>
           <tr onClick={() => setOpenLog(openLog === entry.id ? '' : entry.id)} aria-expanded={openLog === entry.id} className="cursor-pointer border-t border-slate-100 align-top hover:bg-slate-50">
             <td className="whitespace-nowrap py-2.5 pr-3 font-medium text-slate-700">{when(entry.at)}</td>
             <td className="pr-3 text-slate-600">{entry.by ? entry.by.split('@')[0] : '—'}</td>
             <td className="max-w-[360px] pr-3 text-slate-500"><span className="block truncate">{entry.message.replace(/\s+/g, ' ').slice(0, 90)}{entry.message.length > 90 ? '…' : ''}</span></td>
-            <td className="pr-2 text-right font-semibold text-slate-700">{entry.recipients.length}</td>
+            <td className="pr-2 text-right font-semibold text-slate-700">{entry.staff}{entry.sends > 1 && <span className="block text-[10px] font-normal text-slate-400">{entry.sends} hantaran</span>}</td>
             <td>{openLog === entry.id ? <ChevronUp size={15} className="text-slate-400"/> : <ChevronDown size={15} className="text-slate-400"/>}</td>
           </tr>
           {openLog === entry.id && <tr className="bg-slate-50"><td colSpan={5} className="whitespace-pre-wrap px-3 py-3 leading-5 text-slate-700">{entry.message}</td></tr>}
