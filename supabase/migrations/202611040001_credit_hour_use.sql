@@ -1,6 +1,5 @@
--- Using annual leave credit in hours for a late arrival or an early leave (for example 3 hours of a credit day to come in at 12pm).
--- HR records it on the day; the hours come off the Annual Leave balance (8 hours = 1 day) and that day's start or end is moved by the hours,
--- so the person is not counted late or early. Read and written only by the API (RLS on, no policies).
+-- Credit hours for a late arrival or an early leave (for example 3 hours to come in at 12pm). A record only, as in Infotech: it does not come off
+-- the Annual Leave balance. HR records it on the day and that day's start or end is moved by the hours, so the person is not counted late or early. Read and written only by the API (RLS on, no policies).
 create table if not exists public.hr_credit_hour_use (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid not null references public.hr_employees(id) on delete cascade,

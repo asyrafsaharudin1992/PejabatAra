@@ -420,38 +420,31 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
   if (req.method === 'GET' && action === 'attendance_credit_info') {
     const id = text(req.query.id, 60), date = isDate(req.query.date) ? String(req.query.date) : today();
-    const [uses, balance] = await Promise.all([
-      db.from('hr_credit_hour_use').select('id,kind,hours,days,note,created_by').eq('employee_id', id).eq('work_date', date),
-      db.from('hr_leave_balances').select('balance').eq('employee_id', id).eq('leave_group', 'AL').eq('year', Number(date.slice(0, 4))).maybeSingle(),
+    const year = date.slice(0, 4);
+    const [uses, yearUses] = await Promise.all([
+      db.from('hr_credit_hour_use').select('id,kind,hours,note,created_by').eq('employee_id', id).eq('work_date', date),
+      db.from('hr_credit_hour_use').select('hours').eq('employee_id', id).gte('work_date', `${year}-01-01`).lte('work_date', `${year}-12-31`),
     ]);
     if (uses.error) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040001_credit_hour_use first.');
-    return res.status(200).json({ uses: uses.data || [], balance: balance.data ? Number(balance.data.balance) : null, hoursPerDay: CREDIT_HOURS_PER_DAY });
+    return res.status(200).json({ uses: uses.data || [], usedThisYear: (yearUses.data || []).reduce((sum: number, row: any) => sum + Number(row.hours), 0) });
   }
   if (req.method === 'POST' && action === 'attendance_credit_use_add') {
     const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : '', kind = body.kind === 'early' ? 'early' : 'late';
     const hours = Math.round(Number(body.hours) * 4) / 4;
     if (!id || !date) throw fail(400, 'Choose a person and a date.');
     if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12.');
-    const year = Number(date.slice(0, 4)), days = Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100;
-    const { data: balance, error: balanceError } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', id).eq('leave_group', 'AL').eq('year', year).maybeSingle();
-    if (balanceError) throw balanceError;
-    if (!balance) throw fail(400, `No ${year} Annual Leave balance for this person.`);
-    if (Number(balance.balance) + 0.001 < days) throw fail(400, `Only ${Number(balance.balance)} day(s) of Annual Leave left, and ${hours} hours is ${days} day(s).`);
-    const { error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days, note: text(body.note, 200), created_by: userLabel });
+    // Credit hours are a record only (as in Infotech): they do not come off the Annual Leave balance, so no part-days appear there.
+    const { error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: text(body.note, 200), created_by: userLabel });
     if (error) throw fail(error.code === '23505' ? 409 : 400, error.code === '23505' ? `Credit hours are already recorded for this ${kind === 'late' ? 'late arrival' : 'early leave'}. Remove it first to change it.` : error.message);
-    await db.from('hr_leave_balances').update({ taken: Number(balance.taken) + days, balance: Number(balance.balance) - days, updated_at: new Date().toISOString() }).eq('id', balance.id);
-    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h (${days} day) for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
+    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
   }
   if (req.method === 'POST' && action === 'attendance_credit_use_delete') {
     const useId = text(body.useId, 60);
     const { data: use } = await db.from('hr_credit_hour_use').select('id,employee_id,work_date,kind,hours,days').eq('id', useId).maybeSingle();
     if (!use) throw fail(404, 'That credit use was not found.');
-    const year = Number(String(use.work_date).slice(0, 4));
-    const { data: balance } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', use.employee_id).eq('leave_group', 'AL').eq('year', year).maybeSingle();
     const { error } = await db.from('hr_credit_hour_use').delete().eq('id', useId);
     if (error) throw error;
-    if (balance) await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(balance.taken) - Number(use.days)), balance: Number(balance.balance) + Number(use.days), updated_at: new Date().toISOString() }).eq('id', balance.id);
     await db.from('hr_audit').insert({ employee_id: use.employee_id, action: 'update', changes: { credit_hours_removed: `${use.hours} h on ${use.work_date}`, by: userLabel } });
     return res.status(200).json({ success: true });
   }
