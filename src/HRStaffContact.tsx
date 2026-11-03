@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageCircle, Search, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, History, MessageCircle, Search, Users } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import type { Employee } from './HRProfiles';
 
@@ -11,6 +11,11 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  type LogEntry = { id: string; at: string; by: string; message: string; recipients: { name: string; code: string }[] };
+  const [log, setLog] = useState<LogEntry[] | null>(null);
+  const [openLog, setOpenLog] = useState('');
+  const loadLog = () => officeFetch('/api/status?resource=hr&action=contact_log').then((response) => response.json()).then((result) => setLog(result.entries || [])).catch(() => setLog([]));
+  useEffect(() => { void loadLog(); }, []);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const active = useMemo(() => (people || []).filter(p => p.status === 'Active'), [people]);
   const shown = active.filter(p => `${p.fullName} ${p.employeeCode} ${p.company}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -38,12 +43,26 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
       const personalized = message.trim().replaceAll('{{name}}', p.fullName).replaceAll('{{signin}}', p.shortName || p.fullName.split(/\s+/)[0]).replaceAll('{{staffId}}', p.employeeCode);
       window.open(`https://wa.me/${p.phone.replace(/\D/g, '').replace(/^0/, '60')}?text=${encodeURIComponent(personalized)}`, '_blank', 'noopener,noreferrer');
     });
+    // Keep a record (names and codes only) so HR can see what was sent and when.
+    officeFetch('/api/status?resource=hr&action=contact_log_add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message.trim(), recipients: recipients.map((p) => ({ name: p.fullName, code: p.employeeCode })) }) }).then(() => loadLog()).catch(() => setError('Mesej dibuka di WhatsApp, tetapi rekodnya tidak dapat disimpan.'));
   };
+  const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' });
   return <section className="space-y-4">
     <div className="rounded-2xl bg-white p-5 shadow-sm"><h3 className="flex items-center gap-2 text-lg font-semibold text-[#17364c]"><MessageCircle size={20}/>Contact staf</h3><p className="mt-1 text-sm text-slate-500">Pilih staf dan sediakan mesej WhatsApp. Setiap staf akan dibuka dalam tab berasingan untuk anda hantar.</p></div>
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex items-center gap-2"><Search size={17}/><input aria-label="Cari staf untuk dihubungi" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari nama atau nombor staf…" className="h-10 flex-1 outline-none"/></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>{picked.size} dipilih</span><button onClick={()=>setPicked(new Set(shown.filter(p=>p.id&&p.phone).map(p=>p.id!)))} className="font-semibold text-sky-700">Pilih semua yang ada telefon</button></div><div className="mt-2 max-h-96 space-y-1 overflow-auto">{shown.map(p=><label key={p.id||p.employeeCode} className="flex cursor-pointer items-center gap-3 rounded-xl p-3 hover:bg-slate-50"><input type="checkbox" disabled={!p.phone||!p.id} checked={!!p.id&&picked.has(p.id)} onChange={()=>p.id&&toggle(p.id)}/><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{p.fullName}</span><span className="text-xs text-slate-500">{p.employeeCode} · {p.company}</span></span><span className="text-xs text-slate-400">{p.phone||'Tiada telefon'}</span></label>)}</div></div>
       <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"><label className="block text-sm font-semibold">Mesej<textarea value={message} onChange={e=>{setMessage(e.target.value);setSaved(false);}} rows={13} placeholder="Taip mesej untuk staf…" className="mt-2 w-full rounded-xl border border-slate-200 p-3 text-sm font-normal outline-none focus:border-sky-400"/></label><p className="text-xs text-slate-500">Mesej siap diisi dan disesuaikan untuk setiap staf. Penanda: {'{{name}}'}, {'{{signin}}'}, {'{{staffId}}'}.</p><div className="flex gap-2"><button onClick={() => void saveMessage()} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-[#0b587b] hover:bg-slate-50">{saved ? 'Templat disimpan untuk semua HR' : 'Simpan templat (untuk semua HR)'}</button><button onClick={()=>{setMessage(DEFAULT_MESSAGE);setSaved(false);}} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-600">Templat asal</button></div>{error && <p role="alert" className="text-xs text-rose-700">{error}</p>}<p className="text-xs text-slate-500"><Users size={14} className="mr-1 inline"/>{recipients.length} penerima ada nombor telefon</p><button onClick={send} disabled={!message.trim()||!recipients.length} className="w-full rounded-xl bg-[#25d366] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><MessageCircle size={16} className="mr-2 inline"/>Buka WhatsApp untuk {recipients.length} staf</button><p className="text-xs text-slate-400">WhatsApp memerlukan anda menekan Send bagi setiap perbualan.</p></div>
+    </div>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-[#17364c]"><History size={16}/>Rekod mesej yang dibuka di WhatsApp</h3>
+      <p className="mt-1 text-xs text-slate-500">Tarikh, siapa yang menghantar dan kepada berapa orang. Klik satu baris untuk melihat mesej penuh dan senarai penerima. Nombor telefon tidak direkodkan.</p>
+      {log === null ? <p className="mt-3 text-sm text-slate-500">Memuatkan…</p> : !log.length ? <p className="mt-3 text-sm text-slate-500">Belum ada mesej direkodkan.</p> : <ul className="mt-3 divide-y divide-slate-100">{log.map((entry) => <li key={entry.id}>
+        <button type="button" onClick={() => setOpenLog(openLog === entry.id ? '' : entry.id)} aria-expanded={openLog === entry.id} className="flex w-full items-start gap-3 py-2.5 text-left hover:bg-slate-50">
+          <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-slate-700">{when(entry.at)} · {entry.recipients.length} staf{entry.by ? ` · ${entry.by.split('@')[0]}` : ''}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{entry.message.replace(/\s+/g, ' ').slice(0, 90)}{entry.message.length > 90 ? '…' : ''}</span></span>
+          {openLog === entry.id ? <ChevronUp size={16} className="mt-0.5 shrink-0 text-slate-400"/> : <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400"/>}
+        </button>
+        {openLog === entry.id && <div className="mb-3 space-y-2 rounded-xl bg-slate-50 p-3 text-xs"><p className="whitespace-pre-wrap leading-5 text-slate-700">{entry.message}</p><p className="text-slate-500"><strong>Penerima:</strong> {entry.recipients.map((r) => `${r.name}${r.code ? ` (${r.code})` : ''}`).join(', ')}</p></div>}
+      </li>)}</ul>}
     </div>
   </section>;
 }

@@ -355,11 +355,28 @@ export async function hrHandler(req: any, res: any) {
     }
 
     // The WhatsApp message HR sends to staff (Contact staf): one template shared by every HR user, kept in the HR settings (text only, no numbers).
-    if (action === 'contact_message' || action === 'contact_message_save') {
-      const KEY = 'hr_contact_message', HR_BRANCH = 'AraOffice HR Private';
+    if (action === 'contact_message' || action === 'contact_message_save' || action === 'contact_log' || action === 'contact_log_add') {
+      const KEY = 'hr_contact_message', LOG_KEY = 'hr_contact_log', HR_BRANCH = 'AraOffice HR Private';
       let branch: string | null;
       try { branch = await branchId(db, HR_BRANCH, req.method === 'POST'); }
       catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, HR_BRANCH, false); }
+      // The record of messages sent from Contact staf: when, by whom, to whom (names and codes only, never phone numbers) and the text. Newest first, last 100.
+      if (action === 'contact_log' || action === 'contact_log_add') {
+        const read = branch ? await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', LOG_KEY).maybeSingle() : { data: null, error: null };
+        if (read.error) throw read.error;
+        const entries: any[] = Array.isArray(read.data?.payload?.entries) ? read.data.payload.entries : [];
+        if (action === 'contact_log') return res.status(200).json({ entries });
+        if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
+        const message = String(body.message ?? '').trim();
+        if (!message || message.length > 3000) throw fail(400, 'The message is empty or too long.');
+        if (!branch) throw fail(500, 'The HR settings are not ready yet.');
+        const recipients = (Array.isArray(body.recipients) ? body.recipients : []).slice(0, 300).map((r: any) => ({ name: text(r?.name, 120), code: text(r?.code, 30) })).filter((r: any) => r.name);
+        if (!recipients.length) throw fail(400, 'No recipients.');
+        const entry = { id: `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`, at: now, by: text((user as any)?.email, 120), message, recipients };
+        const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: LOG_KEY, payload: { entries: [entry, ...entries].slice(0, 100) }, updated_by: user.id, updated_at: now }, { onConflict: 'branch_id,state_key' });
+        if (error) throw error;
+        return res.status(200).json({ success: true });
+      }
       if (req.method === 'GET' && action === 'contact_message') {
         if (!branch) return res.status(200).json({ message: '' });
         const { data, error } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', branch).eq('state_key', KEY).maybeSingle();
