@@ -644,6 +644,20 @@ export async function hrHandler(req: any, res: any) {
       if ((count || 0) >= MAX_FILES * 3) throw fail(429, 'Too many files are waiting. Enter the leave first.');
       return res.status(200).json({ file: await storeLeaveFile(db, { employeeId: null, fileName: body.fileName, base64: body.data, uploadedBy: 'hr' }) });
     }
+    // HR adds a file (for example a medical certificate that arrived later) to a leave request that already exists. The file is uploaded first with `leave_attachment_upload`.
+    if (req.method === 'POST' && action === 'leave_attachment_add') {
+      const requestId = text(body.requestId, 60);
+      const ids: string[] = [...new Set<string>((Array.isArray(body.attachmentIds) ? body.attachmentIds : []).map((id: unknown) => text(id, 60)).filter(Boolean))];
+      if (!requestId || !ids.length) throw fail(400, 'Choose the file to add.');
+      const { data: request, error: requestError } = await db.from('hr_leave_requests').select('id,employee_id,leave_type,start_date').eq('id', requestId).maybeSingle();
+      if (requestError) throw requestError;
+      if (!request) throw fail(404, 'That leave request was not found.');
+      const { count } = await db.from('hr_leave_attachments').select('id', { count: 'exact', head: true }).eq('request_id', requestId);
+      if ((count || 0) + ids.length > MAX_FILES) throw fail(400, `A leave request can have up to ${MAX_FILES} files.`);
+      await attachLeaveFiles(db, requestId, request.employee_id, ids, true, 'hr');
+      await db.from('hr_audit').insert({ employee_id: request.employee_id, action: 'update', changes: { leave_file_added: `${request.leave_type} ${request.start_date}, ${ids.length} file(s)`, by: user?.email || 'HR' } });
+      return res.status(200).json({ success: true });
+    }
     // HR can open or download any leave file; the link works for one minute.
     if (req.method === 'GET' && action === 'leave_attachment_url') {
       const { data: file, error: fileError } = await db.from('hr_leave_attachments').select('*').eq('id', text(req.query.id, 60)).maybeSingle();

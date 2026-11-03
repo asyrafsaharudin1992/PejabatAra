@@ -5,7 +5,7 @@ import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
 import { HRLeaveReport } from './HRLeaveReport';
 import { HRLeaveApply } from './HRLeaveApply';
-import { AttachmentLinks } from './LeaveAttachments';
+import { AttachmentLinks, MAX_BYTES, MAX_FILES } from './LeaveAttachments';
 
 // Office HR: every leave request made from Individual Sign In, with where each one is in the two-level approval
 // (supervisor first, then the final approver). Read only: staff apply and approvers decide in Individual Sign In.
@@ -14,6 +14,35 @@ const LABEL: Record<Request['status'], string> = { pending: 'Waiting for supervi
 const TONE: Record<Request['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
 // One-minute link to a leave file for HR (view or download).
 const hrFileUrl = async (id: string, download: boolean) => { const response = await officeFetch(`/api/status?resource=hr&action=leave_attachment_url&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`); const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || 'Unable to open the file.'); return result.url as string; };
+const readBase64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(new Error('Unable to read the file.')); reader.readAsDataURL(file); });
+async function hrCall(query: string, body: unknown) {
+  const response = await officeFetch(`/api/status?resource=hr&${query}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const result = await response.json();
+  if (!response.ok || result.error) throw new Error(result.error || 'Something went wrong. Please try again.');
+  return result;
+}
+// "Add MC": HR adds a file to a leave request that already exists (for example a medical certificate that arrived after the leave was entered).
+function AddFile({ row, onAdded, onError }: { row: Request; onAdded: () => void; onError: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const room = MAX_FILES - (row.attachments?.length || 0);
+  if (room <= 0 || ['rejected', 'cancelled'].includes(row.status)) return null;
+  const choose = async (list: FileList | null) => {
+    if (!list?.length) return;
+    setBusy(true);
+    try {
+      const ids: string[] = [];
+      for (const file of Array.from(list).slice(0, room)) {
+        const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : '';
+        if (!['pdf', 'png', 'jpg', 'jpeg'].includes(ext)) { onError(`${file.name}: attach a PDF, PNG or JPG file.`); continue; }
+        if (file.size > MAX_BYTES) { onError(`${file.name}: the file must be smaller than 2 MB.`); continue; }
+        ids.push((await hrCall('action=leave_attachment_upload', { fileName: file.name, data: await readBase64(file) })).file.id);
+      }
+      if (ids.length) { await hrCall('action=leave_attachment_add', { requestId: row.id, attachmentIds: ids }); onAdded(); }
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to add the file.'); }
+    finally { setBusy(false); }
+  };
+  return <label className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-[#0b587b] hover:bg-slate-50">{busy ? 'Adding…' : (row.attachments?.length ? 'Add another file' : 'Add MC')}<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple disabled={busy} onChange={(event) => { void choose(event.target.files); event.target.value = ''; }} className="sr-only" /></label>;
+}
 const imported = (row: Request) => row.note.startsWith('Imported from Infotech');
 const dmy = (date: string) => date.split('-').reverse().join('/');
 const range = (r: Request) => r.start === r.end ? `${dmy(r.start)}${r.half ? ` (${r.half})` : ''}` : `${dmy(r.start)} – ${dmy(r.end)}`;
@@ -92,7 +121,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Leave</th><th className="py-2 pr-4 font-semibold">Dates</th><th className="py-2 pr-4 font-semibold">Days</th><th className="py-2 pr-4 font-semibold">Status</th><th className="py-2 pr-4 font-semibold">Supervisor</th><th className="py-2 pr-4 font-semibold">Backup officer</th><th className="py-2 pr-4 font-semibold">Final approver</th><th className="py-2 font-semibold"><span className="sr-only">Delete</span></th></tr></thead>
           <tbody>{visible.map((row) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3 pr-4"><p className="font-semibold">{row.applicant}</p><p className="text-xs text-slate-400">{row.company} · {row.code}</p></td>
-            <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}<AttachmentLinks items={row.attachments} getUrl={hrFileUrl} canDownload onError={onError} /></td>
+            <td className="py-3 pr-4"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.type}</span>{row.reason && <p className="mt-0.5 max-w-[220px] text-xs text-slate-500">{row.reason}</p>}<AttachmentLinks items={row.attachments} getUrl={hrFileUrl} canDownload onError={onError} /><AddFile row={row} onAdded={() => setRefresh((count) => count + 1)} onError={onError} /></td>
             <td className="py-3 pr-4 whitespace-nowrap text-[#0b587b]">{range(row)}</td>
             <td className="py-3 pr-4">{days(row.days)}</td>
             <td className="py-3 pr-4"><span className={`inline-block rounded-full px-3 py-1 text-[11px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>{imported(row) && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">From Infotech</span>}{row.note.startsWith('Entered by HR') && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-sky-500">Entered by HR</span>}</td>
