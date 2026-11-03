@@ -113,7 +113,7 @@ function TeamRoster({ company, month }: { company: string; month: string }) {
     const shift = newCode(day.shift);
     return { label: shift, kind: kindOf(shift, day.works) };
   };
-  const codes: string[] = [...new Set(team.people.flatMap((person) => dates.map((date) => cell(person, date))).filter(Boolean).map((item) => item!.label))];
+  const codes: string[] = Array.from(new Set<string>(team.people.flatMap((person) => dates.map((date) => cell(person, date)?.label || '')).filter((label) => label !== '')));
   const rows = (list: Person[]) => list.map((person) => <tr key={person.id} className="border-t border-slate-100">
     <th className="sticky left-0 z-10 w-36 min-w-[9rem] bg-white px-2 py-1.5 text-left text-xs font-semibold text-slate-700"><span className="block truncate">{person.name}</span></th>
     {dates.map((date) => { const item = cell(person, date); return <td key={date} className={`p-0.5 text-center ${date === team.today ? 'bg-[#0b587b]/5' : ''}`}>{item ? <span className={`block min-w-[30px] rounded px-0.5 py-1 text-[10px] font-bold ${TONE[item.kind]}`}>{item.label}</span> : <span className="text-slate-200">·</span>}</td>; })}
