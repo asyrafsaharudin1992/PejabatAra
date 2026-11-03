@@ -14,7 +14,7 @@ async function api(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
 }
-type Tab = 'today' | 'month' | 'ot' | 'requests' | 'late' | 'import' | 'places' | 'staff' | 'rules';
+type Tab = 'today' | 'month' | 'ot' | 'late' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; leave: string };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
 type Place = { id: string; name: string; company: string; latitude: number; longitude: number; radius: number; active: boolean };
@@ -22,7 +22,7 @@ type Person = { id: string; company: string; code: string; name: string; doctor:
 type Clock = { id: string; source: 'phone' | 'infotech' | 'hr' | 'request'; kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string };
 type TimeRow = { kind: 'staff' | 'doctor'; code: string; start: string; end: string };
 type OtRow = { id: string; company: string; code: string; name: string; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; dayOff: boolean; captured: number; status: '' | 'approved' | 'rejected'; approved: number; rate: number; note: string };
-type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorDecidedBy: string; supervisorNote: string; decidedBy: string; note: string; rate: number | null };
+type Req = { id: string; employeeId: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorDecidedBy: string; supervisorNote: string; decidedBy: string; note: string; rate: number | null };
 
 const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 const button = 'inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-50';
@@ -137,38 +137,34 @@ function Month({ onError }: { onError: (message: string) => void }) {
   </div>;
 }
 
-function Ot({ onError }: { onError: (message: string) => void }) {
+// OT is now asked for by staff (the Requests below). From the clocks we only raise an alert: extra time that nobody has asked for yet,
+// so HR can check whether the person did overtime and ask them to apply. Nothing is approved from here.
+function OtAlerts({ onError }: { onError: (message: string) => void }) {
   const [month, setMonth] = useState(monthOf(new Date()));
   const [rows, setRows] = useState<OtRow[] | null>(null);
-  const [draft, setDraft] = useState<Record<string, { rate: string; minutes: string; note: string }>>({});
-  const [busy, setBusy] = useState('');
-  const key = (row: OtRow) => `${row.id}|${row.date}`;
-  const load = () => { setRows(null); api(`action=attendance_ot&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); };
-  useEffect(load, [month]);
-  const value = (row: OtRow) => draft[key(row)] || { rate: String(row.rate || (row.dayOff ? 2 : 1.5)), minutes: String(row.status === 'approved' ? row.approved : row.captured), note: row.note };
-  const set = (row: OtRow, patch: Partial<{ rate: string; minutes: string; note: string }>) => setDraft({ ...draft, [key(row)]: { ...value(row), ...patch } });
-  const decide = async (row: OtRow, status: 'approved' | 'rejected') => { setBusy(key(row)); try { const v = value(row); const result = await api('action=attendance_ot_decide', { id: row.id, date: row.date, status, rate: Number(v.rate), minutes: Number(v.minutes), note: v.note }); if (result.error) throw new Error(result.error); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(''); } };
-  const waiting = (rows || []).filter((row) => !row.status).length;
-  return <div className="space-y-4">
-    <MonthBar month={month} setMonth={setMonth}>{rows && <span className="ml-auto text-sm text-slate-500">{waiting} waiting · {(rows || []).length - waiting} decided</span>}</MonthBar>
-    <section className={`${card} overflow-x-auto`}>
-      <p className="mb-3 text-sm text-slate-500">Extra time is captured automatically from the clocks: before the shift starts, after it ends, or a whole day worked on a day off. Not every extra hour is OT (for example staying back on personal matters), so you approve or reject each one and choose the rate. Doctors have no OT.</p>
-      {!rows ? <p className="text-sm text-slate-500">Loading…</p> : !rows.length ? <p className="text-sm text-slate-500">No extra time to decide on in {monthName(month)}.</p> : <table className="w-full min-w-[900px] text-sm">
-        <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Date</th><th className="pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">Clocks</th><th className="pr-3">Extra</th><th className="pr-3">Approve minutes</th><th className="pr-3">Rate</th><th /></tr></thead>
-        <tbody>{rows.map((row) => { const v = value(row); return <tr key={key(row)} className="border-t border-slate-100 align-top">
-          <td className="py-2.5 pr-3 font-medium">{dayName(row.date)}</td>
-          <td className="pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
-          <td className="pr-3 text-xs"><span className="font-mono font-bold text-[#0b587b]">{row.shift || 'Day off'}</span>{row.startTime && <span className="block text-slate-400">{row.startTime}–{row.endTime}</span>}</td>
-          <td className="pr-3">{row.inTime} → {row.outTime}</td>
-          <td className="pr-3 font-semibold">{hours(row.captured)}</td>
-          <td className="pr-3"><input value={v.minutes} onChange={(event) => set(row, { minutes: event.target.value })} inputMode="numeric" className={`${field} w-24`} aria-label="Minutes to approve" /></td>
-          <td className="pr-3"><select value={v.rate} onChange={(event) => set(row, { rate: event.target.value })} className={field} aria-label="OT rate"><option value="1">1.0</option><option value="1.5">1.5</option><option value="2">2.0</option><option value="3">3.0</option></select></td>
-          <td className="text-right">{row.status === 'approved' ? <span className="mr-2 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Approved {hours(row.approved)} · {row.rate}</span> : row.status === 'rejected' ? <span className="mr-2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">Rejected</span> : null}
-            <button onClick={() => void decide(row, 'approved')} disabled={busy === key(row)} className={ghost}>{row.status ? 'Change' : 'Approve'}</button> <button onClick={() => void decide(row, 'rejected')} disabled={busy === key(row)} className={ghost}>Reject</button></td>
-        </tr>; })}</tbody>
-      </table>}
-    </section>
-  </div>;
+  useEffect(() => {
+    let live = true; setRows(null);
+    Promise.all([api(`action=attendance_ot&month=${month}`), api('action=attendance_requests&status=all')]).then(([ot, requests]) => {
+      if (ot.error) throw new Error(ot.error);
+      const asked = new Set<string>(((requests.requests || []) as Req[]).filter((request) => request.status !== 'cancelled').map((request) => `${request.employeeId}|${request.date}`));
+      if (live) setRows((ot.rows as OtRow[]).filter((row) => !row.status && !asked.has(`${row.id}|${row.date}`)));
+    }).catch((cause: Error) => { if (live) { setRows([]); onError(cause.message); } });
+    return () => { live = false; };
+  }, [month]);
+  return <section className={`${card} space-y-3`}>
+    <MonthBar month={month} setMonth={setMonth}>{rows && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${rows.length ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{rows.length ? `${rows.length} possible OT without a request` : 'No unreported extra time'}</span>}</MonthBar>
+    <p className="text-sm text-slate-500">Alert only: these staff clocked extra time (before the shift, after it ended, or on a day off) but have not applied for OT. Check whether it was overtime and ask them to apply. Doctors have no OT.</p>
+    {!rows ? <p className="text-sm text-slate-500">Loading…</p> : rows.length > 0 && <table className="w-full min-w-[640px] text-sm">
+      <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Date</th><th className="pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">Clocks</th><th>Extra time</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={`${row.id}|${row.date}`} className="border-t border-slate-100">
+        <td className="py-2.5 pr-3 font-medium">{dayName(row.date)}</td>
+        <td className="pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
+        <td className="pr-3 text-xs"><span className="font-mono font-bold text-[#0b587b]">{row.shift || 'Day off'}</span></td>
+        <td className="pr-3">{row.inTime} → {row.outTime}</td>
+        <td className="font-semibold text-amber-700">{hours(row.captured)}</td>
+      </tr>)}</tbody>
+    </table>}
+  </section>;
 }
 
 function Requests({ onError }: { onError: (message: string) => void }) {
@@ -320,13 +316,12 @@ function Rules({ onError }: { onError: (message: string) => void }) {
 
 export function HRAttendance({ onError }: { onError: (message: string) => void }) {
   const [tab, setTab] = useState<Tab>('today');
-  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['requests', 'Requests'], ['late', 'Late'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
+  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['late', 'Late'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{tabs.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
-    {tab === 'ot' && <Ot onError={onError} />}
-    {tab === 'requests' && <Requests onError={onError} />}
+    {tab === 'ot' && <div className="space-y-5"><Requests onError={onError} /><OtAlerts onError={onError} /></div>}
     {tab === 'late' && <Late onError={onError} />}
     {tab === 'import' && <Import onError={onError} />}
     {tab === 'places' && <Places onError={onError} />}
