@@ -76,8 +76,8 @@ export async function buildDays(db: any, people: Employee[], from: string, to: s
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
-// The first day AraOffice (and the Infotech import) holds attendance for. Earlier days were never recorded here, so they show "No record" instead of absent.
-export const RECORDS_FROM = '2026-10-01';
+// The first day AraOffice (and the Infotech import, May 2026: Infotech has no duty roster before that) holds attendance for. Earlier days were never recorded here, so they show "No record" instead of absent.
+export const RECORDS_FROM = '2026-05-01';
 
 export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));
@@ -505,10 +505,11 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     for (const [date, set] of touched) { const { count } = await db.from('hr_attendance_clocks').delete({ count: 'exact' }).in('employee_id', [...set]).eq('device', `infotech:${date}`); removed += count || 0; }
     for (let i = 0; i < clocks.length; i += 300) { const { error } = await db.from('hr_attendance_clocks').insert(clocks.slice(i, i + 300)); if (error) throw error; }
     const sorted = [...dates].sort();
-    const { data: have } = await db.from('hr_roster').select('employee_id,work_date').gte('work_date', sorted[0]).lte('work_date', sorted[sorted.length - 1]).limit(20000);
-    const haveSet = new Set((have || []).map((r: any) => `${r.employee_id}|${r.work_date}`)); const seen = new Set<string>();
-    const rosterAdd = rosterWant.filter((r) => { const key = `${r.employee_id}|${r.work_date}`; if (haveSet.has(key) || seen.has(key)) return false; seen.add(key); return true; });
-    for (let i = 0; i < rosterAdd.length; i += 300) { const { error } = await db.from('hr_roster').insert(rosterAdd.slice(i, i + 300)); if (error) throw error; }
+    // A day that already has a roster row keeps it: only missing days are added (one row per person and day). The database ignores a clash instead of failing,
+    // so this does not depend on reading back every existing row (a read stops at 1,000 rows).
+    const seen = new Set<string>();
+    const rosterAdd = rosterWant.filter((r) => { const key = `${r.employee_id}|${r.work_date}`; if (seen.has(key)) return false; seen.add(key); return true; });
+    for (let i = 0; i < rosterAdd.length; i += 300) { const { error } = await db.from('hr_roster').upsert(rosterAdd.slice(i, i + 300), { onConflict: 'employee_id,work_date', ignoreDuplicates: true }); if (error) throw error; }
     return res.status(200).json({ success: true, from: sorted[0], to: sorted[sorted.length - 1], days: dates.size, people: new Set([...touched.values()].flatMap((set) => [...set])).size, added: clocks.length, replaced: removed, rosterAdded: rosterAdd.length, unknown: [...unknown] });
   }
 
