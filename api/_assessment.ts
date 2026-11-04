@@ -311,7 +311,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
           const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
           if (calendar[date] === false) days.push({ date, shift: 'PH', works: false });
           else if (weekday >= 1 && weekday <= 5) days.push({ date, shift: usual, works: true });
-          else days.push({ date, shift: 'OFF', works: false });
+          else days.push({ date, shift: 'REST', works: false });
         }
       }
       out.push({ id: person.id, name: person.full_name, code: person.employee_code, designation: person.designation || '', doctor, days, leave: (leaveRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
@@ -331,7 +331,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     ]);
     if (error) throw error;
     if (leaveError) throw leaveError;
-    // Admin Office and Admin Klinikal have no duty roster: a month with no roster rows at all is Monday to Friday, off on
+    // Admin Office and Admin Klinikal have no duty roster: a month with no roster rows at all is Monday to Friday, Saturday and Sunday are rest days (as in Infotech), off on
     // public holidays. Admin Klinikal (Admin Clinical at SK, Clinic Assistant Officer at KJ) work AM-5 (8AM - 5PM), the rest AM-6 (9AM - 6PM).
     const rows = (days || []).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
     // Office staff (not doctors or duty-roster operation staff) fill every day without a roster row with the usual pattern, so a few
@@ -347,7 +347,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
       const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
       if (calendar[date] === false) rows.push({ date, shift: 'PH', works: false });
       else if (weekday >= 1 && weekday <= 5) rows.push({ date, shift: usual, works: true });
-      else rows.push({ date, shift: 'OFF', works: false });
+      else rows.push({ date, shift: 'REST', works: false });
     }
     return res.status(200).json({ month, today, workDays, days: rows, leave: (leave || []).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
   }
