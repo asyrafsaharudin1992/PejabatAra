@@ -14,9 +14,10 @@ async function api(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
 }
-type Tab = 'today' | 'month' | 'ot' | 'late' | 'import' | 'places' | 'staff' | 'rules';
+type Tab = 'today' | 'month' | 'ot' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
-type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number };
+type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
+const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${minutes < 0 ? '-' : ''}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
 type Place = { id: string; name: string; company: string; latitude: number; longitude: number; radius: number; active: boolean };
 type Person = { id: string; company: string; code: string; name: string; doctor: boolean; mode: 'places' | 'anywhere'; placeIds: string[]; clockRequired: 'full' | 'in_only' | 'none'; defaultShift: string };
@@ -103,7 +104,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
                 <input value={add.note} onChange={(event) => setAdd({ ...add, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
                 <button onClick={() => void change(() => api('action=attendance_clock_add', { id: row.id, date, kind: add.kind, time: add.time, nextDay: add.nextDay, note: add.note }), row.id)} disabled={!add.time} className={button}>Add</button></div>
               <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
-                <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">Credit hours for {dayName(date)}</span>{credit && <span className="text-slate-500">{credit.usedThisYear} h used this year · a record only, not taken off Annual Leave</span>}</div>
+                <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">Credit hours for {dayName(date)}</span>{credit && credit.balanceMinutes !== null && <span className="font-semibold text-violet-700">Balance {hoursText(credit.balanceMinutes)}</span>}{credit && <span className="text-slate-500">{credit.usedThisYear} h used this year · not taken off Annual Leave</span>}</div>
                 {credit && credit.uses.length > 0 && <ul className="space-y-1">{credit.uses.map((use) => <li key={use.id} className="flex flex-wrap items-center gap-x-2"><span className="font-semibold text-violet-700">{use.hours} h</span> {use.kind === 'late' ? 'late arrival' : 'early leave'}{use.note && ` · ${use.note}`}<button onClick={() => void useCredit(() => api('action=attendance_credit_use_delete', { useId: use.id }), row.id)} className="ml-1 font-semibold text-rose-700 hover:underline">Remove</button></li>)}</ul>}
                 <div className="flex flex-wrap items-center gap-2">
                   <select value={useForm.kind} onChange={(event) => setUseForm({ ...useForm, kind: event.target.value as 'late' | 'early' })} aria-label="Late arrival or early leave" className={field}><option value="late">Came in late</option><option value="early">Left early</option></select>
@@ -328,15 +329,61 @@ function Rules({ onError }: { onError: (message: string) => void }) {
   </div>;
 }
 
+type CreditRow = { id: string; company: string; code: string; name: string; designation: string; minutes: number };
+type CreditEntry = { id: string; entry_date: string; minutes: number; kind: 'opening' | 'earn' | 'use' | 'adjust'; note: string; created_by: string };
+const KIND_LABEL: Record<CreditEntry['kind'], string> = { opening: 'Opening balance', earn: 'Earned', use: 'Used', adjust: 'Correction' };
+// Credit hours (Kredit Hrs): the hours each person has earned outside their shift and not used yet. Kept apart from Annual Leave.
+function CreditHours({ onError }: { onError: (message: string) => void }) {
+  const [rows, setRows] = useState<CreditRow[] | null>(null);
+  const [company, setCompany] = useState('');
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState('');
+  const [entries, setEntries] = useState<CreditEntry[] | null>(null);
+  const [form, setForm] = useState({ kind: 'earn' as 'earn' | 'plus' | 'minus', hours: '', date: todayKey(), note: '' });
+  const [busy, setBusy] = useState(false);
+  const load = () => api('action=credit_hours_list').then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
+  useEffect(() => { void load(); }, []);
+  const loadEntries = async (id: string) => { setEntries(null); try { const result = await api(`action=credit_hours_entries&id=${id}`); if (result.error) throw new Error(result.error); setEntries(result.entries); } catch (cause) { setEntries([]); onError(cause instanceof Error ? cause.message : 'Unable to load the entries.'); } };
+  const toggle = (id: string) => { if (open === id) return setOpen(''); setOpen(id); setForm({ kind: 'earn', hours: '', date: todayKey(), note: '' }); void loadEntries(id); };
+  const run = async (action: () => Promise<any>, id: string) => { setBusy(true); try { const result = await action(); if (result.error) throw new Error(result.error); await Promise.all([loadEntries(id), load()]); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); } };
+  const add = (id: string) => void run(async () => { const result = await api('action=credit_hours_add', { id, kind: form.kind === 'earn' ? 'earn' : 'adjust', minutes: Math.round(Number(form.hours) * 60) * (form.kind === 'minus' ? -1 : 1), date: form.date, note: form.note }); if (!result.error) setForm({ kind: 'earn', hours: '', date: todayKey(), note: '' }); return result; }, id);
+  const shown = (rows || []).filter((row) => (!company || row.company === company) && `${row.name} ${row.code}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const total = shown.reduce((sum, row) => sum + row.minutes, 0);
+  return <section className={`${card} space-y-4`}>
+    <div className="flex flex-wrap items-center gap-3"><div><h3 className="text-lg font-semibold">Credit hours</h3><p className="text-sm text-slate-500">Hours earned outside the shift (reset hours, a meeting, a talk) and not used yet. They are kept apart from Annual Leave. Use them from the Today tab for a late arrival or an early leave.</p></div>
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" className={`${field} ml-auto w-52`} aria-label="Search" />
+      <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className={field}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></div>
+    {!rows ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[640px] text-sm">
+      <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Balance</th><th /></tr></thead>
+      <tbody>{shown.map((row) => <>
+        <tr key={row.id} className="border-t border-slate-100"><td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code} · {row.designation}</p></td>
+          <td className={`pr-3 font-semibold ${row.minutes > 0 ? 'text-violet-700' : 'text-slate-400'}`}>{hoursText(row.minutes)}</td>
+          <td className="text-right"><button onClick={() => toggle(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Open'}</button></td></tr>
+        {open === row.id && <tr key={`${row.id}-open`}><td colSpan={3} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">
+          {!entries ? 'Loading…' : !entries.length ? <p>No entries yet.</p> : <ul className="space-y-1">{entries.map((entry) => <li key={entry.id} className="flex flex-wrap items-center gap-x-2"><span className="w-20 shrink-0 text-slate-500">{entry.entry_date}</span><span className={`w-20 shrink-0 font-semibold ${entry.minutes > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{entry.minutes > 0 ? '+' : ''}{hoursText(entry.minutes)}</span><span className="text-slate-500">{KIND_LABEL[entry.kind]}</span>{entry.note && <span>· {entry.note}</span>}{entry.kind !== 'use' && <button disabled={busy} onClick={() => void run(() => api('action=credit_hours_entry_delete', { entryId: entry.id }), row.id)} className="ml-1 font-semibold text-rose-700 hover:underline">Remove</button>}</li>)}</ul>}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3"><span className="font-semibold">Add</span>
+            <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as 'earn' | 'plus' | 'minus' })} aria-label="Type" className={field}><option value="earn">Hours earned</option><option value="plus">Correction: add</option><option value="minus">Correction: take off</option></select>
+            <input type="number" min="0.25" step="0.25" value={form.hours} onChange={(event) => setForm({ ...form, hours: event.target.value })} placeholder="Hours" aria-label="Hours" className={`${field} w-24`} />
+            <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} aria-label="Date" className={field} />
+            <input value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Why (e.g. meeting 17/4)" maxLength={200} aria-label="Reason" className={`${field} w-56`} />
+            <button disabled={busy || !(Number(form.hours) > 0)} onClick={() => add(row.id)} className={button}>Save</button></div>
+        </td></tr>}
+      </>)}</tbody>
+      <tfoot><tr className="border-t border-slate-200 text-xs font-semibold text-slate-600"><td className="py-2.5">{shown.length} staff</td><td colSpan={2}>Total {hoursText(total)}</td></tr></tfoot>
+    </table>}
+  </section>;
+}
+
 export function HRAttendance({ onError }: { onError: (message: string) => void }) {
   const [tab, setTab] = useState<Tab>('today');
-  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['late', 'Late'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
+  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{tabs.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
     {tab === 'ot' && <div className="space-y-5"><Requests onError={onError} /><OtAlerts onError={onError} /></div>}
     {tab === 'late' && <Late onError={onError} />}
+    {tab === 'credit' && <CreditHours onError={onError} />}
     {tab === 'import' && <Import onError={onError} />}
     {tab === 'places' && <Places onError={onError} />}
     {tab === 'staff' && <Staff onError={onError} />}

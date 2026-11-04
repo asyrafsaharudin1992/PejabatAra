@@ -13,6 +13,20 @@ import { NEW_CODE } from '../src/lib/shiftCodes.js';
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+// Credit hours balance in minutes: the sum of a person's movements. `ok` is false when the table is not set up yet.
+async function creditMinutes(db: any, ids?: string[]) {
+  const totals = new Map<string, number>(); let ok = true;
+  for (let from = 0; ; from += 1000) {
+    let query = db.from('hr_credit_hours').select('employee_id,minutes').order('created_at').range(from, from + 999);
+    if (ids) query = query.in('employee_id', ids);
+    const { data, error } = await query;
+    if (error) { ok = false; break; }
+    for (const row of data || []) totals.set(row.employee_id, (totals.get(row.employee_id) || 0) + Number(row.minutes));
+    if ((data || []).length < 1000) break;
+  }
+  return { totals, ok };
+}
+const hm = (minutes: number) => { const sign = minutes < 0 ? '-' : '', m = Math.abs(minutes); return `${sign}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
 const isTime = (value: unknown) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 const MIN = 60000, HOUR = 3600000;
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
@@ -230,7 +244,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const last = (recent || [])[0];
     const nextKind = last && last.kind === 'in' && Date.now() - Date.parse(last.clock_at) < 20 * HOUR ? 'out' : 'in';
     const mine = days.get(me.id) || [];
-    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full' };
+    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0 };
   };
 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
@@ -418,6 +432,47 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   }
 
   // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
+  // Credit hours balances: everyone's balance, one person's movements, adding earned hours (or a correction), and removing a wrong entry.
+  if (req.method === 'GET' && action === 'credit_hours_list') {
+    const { data: people, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation').eq('status', 'Active').order('company').order('employee_code').limit(300);
+    if (error) throw error;
+    const balance = await creditMinutes(db);
+    if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
+    return res.status(200).json({ rows: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', minutes: balance.totals.get(p.id) || 0 })) });
+  }
+  if (req.method === 'GET' && action === 'credit_hours_entries') {
+    const id = text(req.query.id, 60);
+    const { data, error } = await db.from('hr_credit_hours').select('id,entry_date,minutes,kind,note,created_by').eq('employee_id', id).order('entry_date', { ascending: false }).order('created_at', { ascending: false }).limit(60);
+    if (error) throw error;
+    return res.status(200).json({ entries: data || [] });
+  }
+  if (req.method === 'POST' && action === 'credit_hours_add') {
+    const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : today(), kind = body.kind === 'adjust' ? 'adjust' : 'earn';
+    const minutes = Math.round(Number(body.minutes));
+    if (!id) throw fail(400, 'Choose a person.');
+    if (!Number.isFinite(minutes) || minutes === 0 || Math.abs(minutes) > 6000) throw fail(400, 'Enter the hours as a number, for example 1 hour or 90 minutes.');
+    if (kind === 'earn' && minutes < 0) throw fail(400, 'Hours earned must be more than zero. Use a correction to take hours off.');
+    if (text(body.note, 200).length < 2) throw fail(400, 'Write why (for example: meeting 17/4, reset hours).');
+    const balance = await creditMinutes(db, [id]);
+    if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
+    if ((balance.totals.get(id) || 0) + minutes < 0) throw fail(400, `That would take the balance below zero (${hm(balance.totals.get(id) || 0)} now).`);
+    const { error } = await db.from('hr_credit_hours').insert({ employee_id: id, entry_date: date, minutes, kind, note: text(body.note, 200), created_by: userLabel });
+    if (error) throw error;
+    await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours: `${minutes > 0 ? '+' : ''}${hm(minutes)} (${kind}) on ${date}`, note: text(body.note, 200), by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
+  if (req.method === 'POST' && action === 'credit_hours_entry_delete') {
+    const entryId = text(body.entryId, 60);
+    const { data: entry } = await db.from('hr_credit_hours').select('id,employee_id,minutes,kind,entry_date,use_id').eq('id', entryId).maybeSingle();
+    if (!entry) throw fail(404, 'That entry was not found.');
+    if (entry.use_id) throw fail(400, 'This was taken when credit hours were used on a day. Remove it from that day on the Today tab.');
+    const balance = await creditMinutes(db, [entry.employee_id]);
+    if (Number(entry.minutes) > 0 && (balance.totals.get(entry.employee_id) || 0) - Number(entry.minutes) < 0) throw fail(400, 'Removing this would take the balance below zero.');
+    const { error } = await db.from('hr_credit_hours').delete().eq('id', entryId);
+    if (error) throw error;
+    await db.from('hr_audit').insert({ employee_id: entry.employee_id, action: 'update', changes: { credit_hours_entry_removed: `${hm(Number(entry.minutes))} (${entry.kind}) of ${entry.entry_date}`, by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
   if (req.method === 'GET' && action === 'attendance_credit_info') {
     const id = text(req.query.id, 60), date = isDate(req.query.date) ? String(req.query.date) : today();
     const year = date.slice(0, 4);
@@ -426,7 +481,8 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       db.from('hr_credit_hour_use').select('hours').eq('employee_id', id).gte('work_date', `${year}-01-01`).lte('work_date', `${year}-12-31`),
     ]);
     if (uses.error) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040001_credit_hour_use first.');
-    return res.status(200).json({ uses: uses.data || [], usedThisYear: (yearUses.data || []).reduce((sum: number, row: any) => sum + Number(row.hours), 0) });
+    const balance = await creditMinutes(db, [id]);
+    return res.status(200).json({ balanceMinutes: balance.ok ? (balance.totals.get(id) || 0) : null, uses: uses.data || [], usedThisYear: (yearUses.data || []).reduce((sum: number, row: any) => sum + Number(row.hours), 0) });
   }
   if (req.method === 'POST' && action === 'attendance_credit_use_add') {
     const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : '', kind = body.kind === 'early' ? 'early' : 'late';
@@ -434,8 +490,11 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (!id || !date) throw fail(400, 'Choose a person and a date.');
     if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12.');
     // Credit hours are a record only (as in Infotech): they do not come off the Annual Leave balance, so no part-days appear there.
-    const { error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: text(body.note, 200), created_by: userLabel });
+    const minutes = Math.round(hours * 60), balance = await creditMinutes(db, [id]);
+    if (balance.ok && (balance.totals.get(id) || 0) < minutes) throw fail(400, `Only ${hm(balance.totals.get(id) || 0)} of credit hours left, and ${hm(minutes)} was asked for.`);
+    const { data: inserted, error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: text(body.note, 200), created_by: userLabel }).select('id').single();
     if (error) throw fail(error.code === '23505' ? 409 : 400, error.code === '23505' ? `Credit hours are already recorded for this ${kind === 'late' ? 'late arrival' : 'early leave'}. Remove it first to change it.` : error.message);
+    if (balance.ok) await db.from('hr_credit_hours').insert({ employee_id: id, entry_date: date, minutes: -minutes, kind: 'use', note: `${kind === 'late' ? 'Came in late' : 'Left early'}${text(body.note, 150) ? ': ' + text(body.note, 150) : ''}`, use_id: inserted.id, created_by: userLabel });
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
   }
