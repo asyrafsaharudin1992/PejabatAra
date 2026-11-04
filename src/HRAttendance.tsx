@@ -69,7 +69,10 @@ function Today({ onError }: { onError: (message: string) => void }) {
   const [add, setAdd] = useState({ kind: 'in' as 'in' | 'out', time: '', nextDay: false, note: '' });
   const change = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadClocks(id); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const SOURCE = { phone: 'phone', infotech: 'from Infotech', hr: 'added by HR', request: 'from an approved request' } as const;
-  const shown = (rows || []).filter((row) => !company || row.company === company);
+  const inCompany = (rows || []).filter((row) => !company || row.company === company);
+  // A company with no record on this date gets one line instead of a "No record" row for every person.
+  const shown = inCompany.filter((row) => row.status !== 'no-record');
+  const noRecordFor = [...new Set(inCompany.filter((row) => row.status === 'no-record').map((row) => row.company))];
   const expected = shown.filter((row) => !['off', 'extra', 'no-times'].includes(row.status));
   const count = (...statuses: string[]) => expected.filter((row) => statuses.includes(row.status)).length;
   const chips: [string, number, string][] = [['Expected', expected.length, 'text-slate-700'], ['In', count('present', 'working', 'missing-out'), 'text-emerald-700'], ['Not in yet', count('not-in', 'upcoming'), 'text-amber-700'], ['Absent', count('absent'), 'text-rose-700'], ['Leave', count('leave'), 'text-violet-700'], ['Late', expected.filter((row) => row.lateCounted > 0).length, 'text-amber-700']];
@@ -82,6 +85,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
       <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className={`${field} ml-auto`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
     </section>
     <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">{chips.map(([label, value, tone]) => <div key={label} className={`${card} !p-4 text-center`}><p className={`text-2xl font-semibold ${tone}`}>{value}</p><p className="mt-1 text-xs text-slate-500">{label}</p></div>)}</div>
+    {noRecordFor.length > 0 && <p className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-600">No record for this date ({noRecordFor.join(' and ')}).</p>}
     <section className={`${card} overflow-x-auto`}>
       {!rows ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[760px] text-sm">
         <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">In</th><th className="pr-3">Out</th><th className="pr-3">Late</th><th className="pr-3">Status</th><th /></tr></thead>
@@ -123,7 +127,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
 
 function Month({ onError }: { onError: (message: string) => void }) {
   const [month, setMonth] = useState(monthOf(new Date()));
-  const [data, setData] = useState<{ rows: MonthRow[]; rules: { lateGrace: number; otMin: number } } | null>(null);
+  const [data, setData] = useState<{ rows: MonthRow[]; noRecord?: string[]; rules: { lateGrace: number; otMin: number } } | null>(null);
   useEffect(() => { setData(null); api(`action=attendance_month&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => { setData({ rows: [], rules: { lateGrace: 0, otMin: 0 } }); onError(cause.message); }); }, [month]);
   const csv = () => {
     if (!data) return;
@@ -134,6 +138,7 @@ function Month({ onError }: { onError: (message: string) => void }) {
   };
   return <div className="space-y-4">
     <MonthBar month={month} setMonth={setMonth}><button onClick={csv} disabled={!data?.rows.length} className={`${ghost} ml-auto`}><Download className="h-4 w-4" />Download CSV</button></MonthBar>
+    {data && (data.noRecord || []).length > 0 && <p className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-600">No record for this month ({(data.noRecord || []).join(' and ')}).</p>}
     <section className={`${card} overflow-x-auto`}>
       {!data ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[900px] text-sm">
         <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Expected</th><th className="pr-3 text-right">Present</th><th className="pr-3 text-right">Absent</th><th className="pr-3 text-right">Leave</th><th className="pr-3 text-right">Late</th><th className="pr-3 text-right">Worked</th><th className="pr-3 text-right">OT approved</th><th className="text-right">OT waiting</th></tr></thead>

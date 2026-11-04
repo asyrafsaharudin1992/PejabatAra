@@ -171,14 +171,14 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { m
         <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600"><ChevronRight className="h-4 w-4" /></button>
       </div>
       {!days ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : <ul className="mt-3 divide-y divide-slate-100">
-        {days.filter((day) => !['off', 'upcoming'].includes(day.status) || day.date === state.today).map((day) => <li key={day.date} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-sm">
+        {days.filter((day) => (!['off', 'upcoming', 'no-record'].includes(day.status) || day.date === state.today) && day.status !== 'no-record').map((day) => <li key={day.date} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-sm">
           <span className="w-24 shrink-0 font-medium">{dayName(day.date)}</span>
           <span className="w-14 shrink-0 font-mono text-xs font-bold text-[#0b587b]">{day.code ? newCode(day.code) : '—'}</span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-slate-600"><Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-300" />{day.inTime || '—'} → {day.outTime || '—'}{day.worked > 0 && <span className="text-slate-400"> · {hours(day.worked)}</span>}</span>
           {day.lateCounted > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Late {day.lateCounted} min</span>}
           {badge(day.status)}
         </li>)}
-        {!days.some((day) => !['off', 'upcoming'].includes(day.status)) && <li className="py-3 text-sm text-slate-500">Nothing recorded for {monthName(month)} yet.</li>}
+        {!days.some((day) => !['off', 'upcoming', 'no-record'].includes(day.status)) && <li className="py-3 text-sm text-slate-500">{days.length > 0 && days.every((day) => day.status === 'no-record') ? `No record for ${monthName(month)}.` : `Nothing recorded for ${monthName(month)} yet.`}</li>}
       </ul>}
     </section>
     <p className="px-1 text-xs leading-5 text-slate-400">Clock in and out using any browser, at your assigned workplace. Keep your sign-in details private. Arriving within the grace period is not late. If you forget to clock, send a request above.</p>

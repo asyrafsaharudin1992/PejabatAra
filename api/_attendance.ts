@@ -94,6 +94,8 @@ export async function buildDays(db: any, people: Employee[], from: string, to: s
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
 // The first day AraOffice (and the Infotech import, May 2026: Infotech has no duty roster before that) holds attendance for. Earlier days were never recorded here, so they show "No record" instead of absent.
 export const RECORDS_FROM = '2026-05-01';
+// SK has its duty roster from January 2026 (HR supplied Jan to Apr); KJ only from May, so KJ is "No record" before that.
+export const recordsFromFor = (company: string | null | undefined) => company === 'SK' ? '2026-01-01' : RECORDS_FROM;
 
 export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));
@@ -126,7 +128,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const shift = code ? shiftTimes(rules, code, doctor) : null;
       const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', creditHours: 0, leave: leaveRow?.leave_type || '' };
       // Before the records start there is nothing to judge: not absent, not expected. Approved leave is still shown.
-      if (date < RECORDS_FROM && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
+      if (date < recordsFromFor(person.company) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       if (!shift) {
         // A day off, a public holiday, or a code with no times set. A day worked anyway (a rest day) is captured as OT for HR to decide.
         const same = mine.filter((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date);
@@ -365,7 +367,9 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       const count = (status: string) => list.filter((day) => day.status === status).length;
       return { ...person(p), expected: list.filter((day) => day.start || day.status === 'leave').length, present: list.filter((day) => ['present', 'working', 'missing-out', 'exempt'].includes(day.status)).length, absent: count('absent'), leave: count('leave'), missingOut: count('missing-out'), lateDays: list.filter((day) => day.lateCounted > 0).length, lateMinutes: sum((day) => day.lateCounted), workedMinutes: sum((day) => day.worked), otApprovedMinutes: sum((day) => day.otStatus === 'approved' ? day.otApproved : 0), otWaitingMinutes: sum((day) => day.otCounted > 0 && !day.otStatus ? day.otCounted : 0), exempt: count('exempt') };
     }).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
-    return res.status(200).json({ month, rows, rules: { lateGrace: rules.lateGrace, otMin: rules.otMin } });
+    // Companies with nothing recorded for the whole month: the screen shows one "No record for this month" line instead of empty rows.
+    const noRecord = ['KJ', 'SK'].filter((company) => monthEnd(month) < recordsFromFor(company));
+    return res.status(200).json({ month, rows, noRecord, rules: { lateGrace: rules.lateGrace, otMin: rules.otMin } });
   }
 
   // Late pattern, for discipline reference: the days counted late in each of the last months.
