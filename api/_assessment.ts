@@ -207,14 +207,16 @@ export function leaveDays(start: string, end: string, half: string | null, workD
 const HOLIDAY_OFF_GROUPS = new Set(['SG-MNG', 'MLHL']);
 // The person's calendar between two dates: false for a public holiday of their holiday group, then the duty
 // roster on top (a roster day says whether they really work it). Dates not in the map use the usual weekdays.
+const LEAVE_ROSTER_CODES = new Set(['AL', 'ML', 'EL', 'UL', 'ULEL', 'HOSP', 'MARRG', 'HAJUMR', 'MATN']);
 export async function rosterFor(db: any, employeeId: string, from: string, to: string, holidayGroup = '') {
   const calendar: Record<string, boolean> = {};
   if (HOLIDAY_OFF_GROUPS.has(holidayGroup)) {
     const { data } = await db.from('hr_holidays').select('holiday_date').eq('group_code', holidayGroup).gte('holiday_date', from).lte('holiday_date', to).limit(400);
     for (const row of data || []) calendar[row.holiday_date] = false; // holiday tables not set up yet: no holidays
   }
-  const { data, error } = await db.from('hr_roster').select('work_date,works').eq('employee_id', employeeId).gte('work_date', from).lte('work_date', to).limit(1000);
-  if (!error) for (const row of data || []) calendar[row.work_date] = !!row.works; // roster table not set up yet: weekdays only
+  const { data, error } = await db.from('hr_roster').select('work_date,works,shift').eq('employee_id', employeeId).gte('work_date', from).lte('work_date', to).limit(1000);
+  // A day the roster already marks with a leave code (AL, ML and so on) is a working day that was pencilled in as leave, so the leave can still be applied for it.
+  if (!error) for (const row of data || []) calendar[row.work_date] = !!row.works || LEAVE_ROSTER_CODES.has(String(row.shift).toUpperCase()); // roster table not set up yet: weekdays only
   return calendar;
 }
 const requestRow = (r: any, extra: Record<string, unknown> = {}) => ({ id: r.id, type: r.leave_type, typeName: LEAVE_TYPES[r.leave_type]?.name || r.leave_type, group: r.leave_group, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, note: r.decision_note, decidedAt: r.decided_at, supervisorNote: r.supervisor_note || '', supervisorDecidedAt: r.supervisor_decided_at || null, twoLevel: !!r.final_approver_id, backupApproverId: r.backup_approver_id || null, createdAt: r.created_at, ...extra });
