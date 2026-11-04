@@ -87,7 +87,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
         <tbody>{shown.filter((row) => row.status !== 'off').map((row) => <>
           <tr key={row.id} className="border-t border-slate-100">
             <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
-            <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.shift}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
+            <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{newCode(row.shift)}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
             <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
             <td className="pr-3">{badge(row.status)}</td>
@@ -173,7 +173,7 @@ function OtAlerts({ onError }: { onError: (message: string) => void }) {
       <tbody>{rows.map((row) => <tr key={`${row.id}|${row.date}`} className="border-t border-slate-100">
         <td className="py-2.5 pr-3 font-medium">{dayName(row.date)}</td>
         <td className="pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
-        <td className="pr-3 text-xs"><span className="font-mono font-bold text-[#0b587b]">{row.shift || 'Day off'}</span></td>
+        <td className="pr-3 text-xs"><span className="font-mono font-bold text-[#0b587b]">{row.shift ? newCode(row.shift) : 'Day off'}</span></td>
         <td className="pr-3">{row.inTime} → {row.outTime}</td>
         <td className="font-semibold text-amber-700">{hours(row.captured)}</td>
       </tr>)}</tbody>

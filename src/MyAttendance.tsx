@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { newCode } from './lib/shiftCodes';
 import { ChevronLeft, ChevronRight, Clock3, LogIn, LogOut, MapPin } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
@@ -148,7 +149,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { m
     <section className="relative overflow-hidden rounded-[24px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-5 text-white shadow-[0_18px_40px_rgba(11,48,70,0.25)] sm:p-7">
       <i className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10" />
       <p className="relative text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Today · {dayName(state.today)}</p>
-      <p className="relative mt-2 text-xl font-semibold tracking-tight">{hasShift ? `${shift.code} · ${shift.startTime} – ${shift.endTime}` : shift.leave ? `On leave (${shift.leave})` : 'No shift today'}</p>
+      <p className="relative mt-2 text-xl font-semibold tracking-tight">{hasShift ? `${newCode(shift.code)} · ${shift.startTime} – ${shift.endTime}` : shift.leave ? `On leave (${shift.leave})` : 'No shift today'}</p>
       {state.recent.length > 0 && <p className="relative mt-1 text-sm text-white/75">Last clock: {state.recent[0].kind === 'in' ? 'in' : 'out'} at {timeOf(state.recent[0].at)}</p>}
       {state.required === 'none' && <p className="relative mt-4 rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/85">Clocking is optional for you. Your working days count even if you do not clock.</p>}<button onClick={() => void clock()} disabled={busy} className={`relative mt-5 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
       <p className="relative mt-3 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{state.mode === 'anywhere' ? 'You can clock from anywhere. Your location is still recorded.' : state.places.length ? `You can clock at: ${state.places.map((place) => place.name).join(', ')}.` : 'No clock place is set for you yet. Ask HR.'}</p>
@@ -171,7 +172,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { m
       {!days ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : <ul className="mt-3 divide-y divide-slate-100">
         {days.filter((day) => !['off', 'upcoming'].includes(day.status) || day.date === state.today).map((day) => <li key={day.date} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-sm">
           <span className="w-24 shrink-0 font-medium">{dayName(day.date)}</span>
-          <span className="w-14 shrink-0 font-mono text-xs font-bold text-[#0b587b]">{day.code || '—'}</span>
+          <span className="w-14 shrink-0 font-mono text-xs font-bold text-[#0b587b]">{day.code ? newCode(day.code) : '—'}</span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-slate-600"><Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-300" />{day.inTime || '—'} → {day.outTime || '—'}{day.worked > 0 && <span className="text-slate-400"> · {hours(day.worked)}</span>}</span>
           {day.lateCounted > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Late {day.lateCounted} min</span>}
           {badge(day.status)}
