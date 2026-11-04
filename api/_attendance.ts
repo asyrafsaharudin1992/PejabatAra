@@ -490,11 +490,13 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (!id || !date) throw fail(400, 'Choose a person and a date.');
     if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12.');
     // Credit hours are a record only (as in Infotech): they do not come off the Annual Leave balance, so no part-days appear there.
+    // `alreadyCounted`: the hours were already taken off in the Excel balance that was imported, so only the day is adjusted and the balance is left alone.
+    const alreadyCounted = body.alreadyCounted === true;
     const minutes = Math.round(hours * 60), balance = await creditMinutes(db, [id]);
-    if (balance.ok && (balance.totals.get(id) || 0) < minutes) throw fail(400, `Only ${hm(balance.totals.get(id) || 0)} of credit hours left, and ${hm(minutes)} was asked for.`);
+    if (!alreadyCounted && balance.ok && (balance.totals.get(id) || 0) < minutes) throw fail(400, `Only ${hm(balance.totals.get(id) || 0)} of credit hours left, and ${hm(minutes)} was asked for.`);
     const { data: inserted, error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: text(body.note, 200), created_by: userLabel }).select('id').single();
     if (error) throw fail(error.code === '23505' ? 409 : 400, error.code === '23505' ? `Credit hours are already recorded for this ${kind === 'late' ? 'late arrival' : 'early leave'}. Remove it first to change it.` : error.message);
-    if (balance.ok) await db.from('hr_credit_hours').insert({ employee_id: id, entry_date: date, minutes: -minutes, kind: 'use', note: `${kind === 'late' ? 'Came in late' : 'Left early'}${text(body.note, 150) ? ': ' + text(body.note, 150) : ''}`, use_id: inserted.id, created_by: userLabel });
+    if (balance.ok && !alreadyCounted) await db.from('hr_credit_hours').insert({ employee_id: id, entry_date: date, minutes: -minutes, kind: 'use', note: `${kind === 'late' ? 'Came in late' : 'Left early'}${text(body.note, 150) ? ': ' + text(body.note, 150) : ''}`, use_id: inserted.id, created_by: userLabel });
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
   }

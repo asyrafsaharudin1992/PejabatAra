@@ -59,13 +59,13 @@ function Today({ onError }: { onError: (message: string) => void }) {
   const [open, setOpen] = useState('');
   const [clocks, setClocks] = useState<Clock[] | null>(null);
   const [credit, setCredit] = useState<CreditInfo | null>(null);
-  const [useForm, setUseForm] = useState({ kind: 'late' as 'late' | 'early', hours: '', note: '' });
+  const [useForm, setUseForm] = useState({ kind: 'late' as 'late' | 'early', hours: '', note: '', counted: false });
   const load = () => { setRows(null); api(`action=attendance_daily&date=${date}`).then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); };
   useEffect(() => { setOpen(''); load(); }, [date]);
   const loadClocks = async (id: string) => { setClocks(null); try { const result = await api(`action=attendance_clocks&id=${id}&date=${date}`); setClocks(result.clocks); } catch (cause) { setClocks([]); onError(cause instanceof Error ? cause.message : 'Unable to load the clocks.'); } };
   const loadCredit = async (id: string) => { try { const result = await api(`action=attendance_credit_info&id=${id}&date=${date}`); if (result.error) throw new Error(result.error); setCredit(result); } catch { setCredit(null); } };
-  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setAdd({ kind: 'in', time: '', nextDay: false, note: '' }); setUseForm({ kind: 'late', hours: '', note: '' }); setCredit(null); void loadCredit(id); await loadClocks(id); };
-  const useCredit = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadCredit(id); setUseForm({ kind: 'late', hours: '', note: '' }); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
+  const details = async (id: string) => { if (open === id) return setOpen(''); setOpen(id); setAdd({ kind: 'in', time: '', nextDay: false, note: '' }); setUseForm({ kind: 'late', hours: '', note: '', counted: false }); setCredit(null); void loadCredit(id); await loadClocks(id); };
+  const useCredit = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadCredit(id); setUseForm({ kind: 'late', hours: '', note: '', counted: false }); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const [add, setAdd] = useState({ kind: 'in' as 'in' | 'out', time: '', nextDay: false, note: '' });
   const change = async (run: () => Promise<any>, id: string) => { try { const result = await run(); if (result.error) throw new Error(result.error); await loadClocks(id); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } };
   const SOURCE = { phone: 'phone', infotech: 'from Infotech', hr: 'added by HR', request: 'from an approved request' } as const;
@@ -110,7 +110,8 @@ function Today({ onError }: { onError: (message: string) => void }) {
                   <select value={useForm.kind} onChange={(event) => setUseForm({ ...useForm, kind: event.target.value as 'late' | 'early' })} aria-label="Late arrival or early leave" className={field}><option value="late">Came in late</option><option value="early">Left early</option></select>
                   <input type="number" min="0.25" max="12" step="0.25" value={useForm.hours} onChange={(event) => setUseForm({ ...useForm, hours: event.target.value })} placeholder="Hours" aria-label="Hours of credit" className={`${field} w-24`} />
                   <input value={useForm.note} onChange={(event) => setUseForm({ ...useForm, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
-                  <button onClick={() => void useCredit(() => api('action=attendance_credit_use_add', { id: row.id, date, kind: useForm.kind, hours: Number(useForm.hours), note: useForm.note }), row.id)} disabled={!(Number(useForm.hours) > 0)} className={button}>Record credit hours</button></div>
+                  <button onClick={() => void useCredit(() => api('action=attendance_credit_use_add', { id: row.id, date, kind: useForm.kind, hours: Number(useForm.hours), note: useForm.note, alreadyCounted: useForm.counted }), row.id)} disabled={!(Number(useForm.hours) > 0)} className={button}>Record credit hours</button></div>
+                <label className="flex items-center gap-1.5"><input type="checkbox" checked={useForm.counted} onChange={(event) => setUseForm({ ...useForm, counted: event.target.checked })} />Already taken off in the Excel balance (do not deduct again)</label>
               </div>
             </>}</td></tr>}
         </>)}</tbody>
