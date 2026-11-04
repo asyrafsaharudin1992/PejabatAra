@@ -299,12 +299,15 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
       const doctor = /\b(DR|DOCTOR)\b/i.test(person.designation || '');
       const days = (rosterRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
       // Office staff without a duty roster: Monday to Friday, off on public holidays (as on their own roster). Doctors with no roster are left blank.
-      if (!days.length && !doctor) {
+      // Admin klinikal fill the days without a row with the usual pattern; duty-roster staff only when the whole month has no roster.
+      const adminKlinikal = /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(person.designation || '');
+      if (!doctor && (adminKlinikal || !days.length)) {
+        const given = new Set(days.map((row: any) => row.date));
         const calendar = await rosterFor(db, person.id, start, end, person.holiday_group || '');
         const usual = /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(person.designation || '') ? 'AM-5' : 'AM-6';
         for (let day = 1; day <= Number(end.slice(8)); day++) {
           const date = `${month}-${String(day).padStart(2, '0')}`;
-          if (date < String(person.join_date || '')) continue;
+          if (given.has(date) || date < String(person.join_date || '')) continue;
           const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
           if (calendar[date] === false) days.push({ date, shift: 'PH', works: false });
           else if (weekday >= 1 && weekday <= 5) days.push({ date, shift: usual, works: true });
@@ -331,7 +334,10 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
     // Admin Office and Admin Klinikal have no duty roster: a month with no roster rows at all is Monday to Friday, off on
     // public holidays. Admin Klinikal (Admin Clinical at SK, Clinic Assistant Officer at KJ) work AM-5 (8AM - 5PM), the rest AM-6 (9AM - 6PM).
     const rows = (days || []).map((row: any) => ({ date: row.work_date, shift: row.shift, works: !!row.works }));
-    const hasRoster = rows.length > 0;
+    // Office staff (not doctors or duty-roster operation staff) fill every day without a roster row with the usual pattern, so a few
+    // rows (for example clocks imported from Infotech) do not leave the rest of the month blank.
+    const officeStaff = !/\b(DR|DOCTOR)\b/i.test(me.designation || '') && (!/^OPERATION$/i.test(me.department || '') || /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(me.designation || ''));
+    const hasRoster = rows.length > 0 && !officeStaff;
     const given = new Set(rows.map((row: any) => row.date));
     const calendar = await rosterFor(db, me.id, start, end, me.holiday_group || '');
     const usual = /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(me.designation || '') ? 'AM-5' : 'AM-6';
