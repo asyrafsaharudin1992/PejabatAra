@@ -111,7 +111,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
                   <input type="number" min="0.25" max="12" step="0.25" value={useForm.hours} onChange={(event) => setUseForm({ ...useForm, hours: event.target.value })} placeholder="Hours" aria-label="Hours of credit" className={`${field} w-24`} />
                   <input value={useForm.note} onChange={(event) => setUseForm({ ...useForm, note: event.target.value })} placeholder="Reason (optional)" maxLength={200} className={`${field} w-48`} aria-label="Reason" />
                   <button onClick={() => void useCredit(() => api('action=attendance_credit_use_add', { id: row.id, date, kind: useForm.kind, hours: Number(useForm.hours), note: useForm.note, alreadyCounted: useForm.counted }), row.id)} disabled={!(Number(useForm.hours) > 0)} className={button}>Record credit hours</button></div>
-                <label className="flex items-center gap-1.5"><input type="checkbox" checked={useForm.counted} onChange={(event) => setUseForm({ ...useForm, counted: event.target.checked })} />Already taken off in the Excel balance (do not deduct again)</label>
+                <label className="flex items-center gap-1.5"><input type="checkbox" checked={useForm.counted || date < '2026-11-04'} disabled={date < '2026-11-04'} onChange={(event) => setUseForm({ ...useForm, counted: event.target.checked })} />{date < '2026-11-04' ? 'Before 4 Nov: the balance is not touched' : 'Already taken off in the Excel balance (do not deduct again)'}</label>
               </div>
             </>}</td></tr>}
         </>)}</tbody>

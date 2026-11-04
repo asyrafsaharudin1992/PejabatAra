@@ -26,6 +26,8 @@ async function creditMinutes(db: any, ids?: string[]) {
   }
   return { totals, ok };
 }
+// The credit hours balance starts on this day (the Excel balance imported on 4 Nov 2026). A use dated before it only adjusts that day: it never touches the balance.
+export const CREDIT_BALANCE_FROM = '2026-11-04';
 const hm = (minutes: number) => { const sign = minutes < 0 ? '-' : '', m = Math.abs(minutes); return `${sign}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
 const isTime = (value: unknown) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 const MIN = 60000, HOUR = 3600000;
@@ -491,7 +493,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12.');
     // Credit hours are a record only (as in Infotech): they do not come off the Annual Leave balance, so no part-days appear there.
     // `alreadyCounted`: the hours were already taken off in the Excel balance that was imported, so only the day is adjusted and the balance is left alone.
-    const alreadyCounted = body.alreadyCounted === true;
+    const alreadyCounted = body.alreadyCounted === true || date < CREDIT_BALANCE_FROM;
     const minutes = Math.round(hours * 60), balance = await creditMinutes(db, [id]);
     if (!alreadyCounted && balance.ok && (balance.totals.get(id) || 0) < minutes) throw fail(400, `Only ${hm(balance.totals.get(id) || 0)} of credit hours left, and ${hm(minutes)} was asked for.`);
     const { data: inserted, error } = await db.from('hr_credit_hour_use').insert({ employee_id: id, work_date: date, kind, hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: text(body.note, 200), created_by: userLabel }).select('id').single();
