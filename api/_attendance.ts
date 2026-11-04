@@ -433,20 +433,20 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
 
   // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
   // Credit hours balances: everyone's balance, one person's movements, adding earned hours (or a correction), and removing a wrong entry.
-  if (req.method === 'GET' && action === 'credit_hours_list') {
+  if (req.method === 'GET' && action === 'attendance_credit_hours_list') {
     const { data: people, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation').eq('status', 'Active').order('company').order('employee_code').limit(300);
     if (error) throw error;
     const balance = await creditMinutes(db);
     if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
     return res.status(200).json({ rows: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', minutes: balance.totals.get(p.id) || 0 })) });
   }
-  if (req.method === 'GET' && action === 'credit_hours_entries') {
+  if (req.method === 'GET' && action === 'attendance_credit_hours_entries') {
     const id = text(req.query.id, 60);
     const { data, error } = await db.from('hr_credit_hours').select('id,entry_date,minutes,kind,note,created_by').eq('employee_id', id).order('entry_date', { ascending: false }).order('created_at', { ascending: false }).limit(60);
     if (error) throw error;
     return res.status(200).json({ entries: data || [] });
   }
-  if (req.method === 'POST' && action === 'credit_hours_add') {
+  if (req.method === 'POST' && action === 'attendance_credit_hours_add') {
     const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : today(), kind = body.kind === 'adjust' ? 'adjust' : 'earn';
     const minutes = Math.round(Number(body.minutes));
     if (!id) throw fail(400, 'Choose a person.');
@@ -461,7 +461,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours: `${minutes > 0 ? '+' : ''}${hm(minutes)} (${kind}) on ${date}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
   }
-  if (req.method === 'POST' && action === 'credit_hours_entry_delete') {
+  if (req.method === 'POST' && action === 'attendance_credit_hours_entry_delete') {
     const entryId = text(body.entryId, 60);
     const { data: entry } = await db.from('hr_credit_hours').select('id,employee_id,minutes,kind,entry_date,use_id').eq('id', entryId).maybeSingle();
     if (!entry) throw fail(404, 'That entry was not found.');
