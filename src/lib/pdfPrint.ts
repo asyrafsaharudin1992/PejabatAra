@@ -36,7 +36,7 @@ export async function printPdfAsImages(url: string) {
   const data = new Uint8Array(await response.arrayBuffer());
   const [pdfjs, worker] = await Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.js?url')]);
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await pdfjs.getDocument({ data, isEvalSupported: false }).promise;
 
   const root = document.createElement('div');
   root.className = 'pdf-print-root';

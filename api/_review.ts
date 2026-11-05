@@ -1,4 +1,4 @@
-import { branchId, officeAccess } from './_office-db.js';
+import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
@@ -277,6 +277,6 @@ export async function reviewHandler(req: any, res: any) {
   } catch (error: any) {
     // Before the migrations have been run the tables or columns do not exist yet.
     if (['PGRST205', '42P01', '42703', 'PGRST204'].includes(error?.code)) return res.status(503).json({ error: 'Performance Review is not set up yet: run supabase/migrations/202610280001_performance_reviews.sql and 202610280002_review_assignments.sql in Supabase.' });
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to complete this request.' });
+    return errorReply(res, error, 'Unable to complete this request.');
   }
 }

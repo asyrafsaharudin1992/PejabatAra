@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { activeAccount, currentDevice, deviceLockEnabled, hashSecret } from './_office-db.js';
+import { activeAccount, currentDevice, deviceLockEnabled, hashSecret, errorReply } from './_office-db.js';
 
 // Plato-style device registration. Served from /api/status?resource=devices
 // because the Vercel Hobby plan allows only 12 functions.
@@ -89,6 +89,6 @@ export async function devicesHandler(req: any, res: any) {
     }
     return res.status(405).json({ error: 'Method not allowed.' });
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to manage devices.' });
+    return errorReply(res, error, 'Unable to manage devices.');
   }
 }

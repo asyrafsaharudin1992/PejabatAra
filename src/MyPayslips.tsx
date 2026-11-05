@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { payPeriod } from './lib/payrollRun';
+import { downloadBlob } from './lib/downloadBlob';
 
 // My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
@@ -108,7 +109,7 @@ export default function MyPayslips() {
         const file = new File([bytes], result.file, { type: 'application/pdf' });
         setAsking(null);
         if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` }); } catch { /* the share sheet was closed */ } }
-        else { const link = document.createElement('a'); link.href = URL.createObjectURL(file); link.download = result.file; document.body.appendChild(link); link.click(); link.remove(); }
+        else downloadBlob([file], result.file, file.type);
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'That did not work. Try again.'); }
     finally { setBusy(false); }

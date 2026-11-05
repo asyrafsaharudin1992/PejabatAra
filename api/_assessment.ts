@@ -6,7 +6,7 @@ import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
-import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
+import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, RateChange, rateOn } from '../src/lib/incentiveCodes.js';
 
@@ -868,6 +868,6 @@ export async function assessmentHandler(req: any, res: any) {
     const action = text(req.query.action || body.action, 40);
     return ADMIN_ACTIONS.has(action) ? await adminAction(req, res, action, body) : await staffAction(req, res, action, body);
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to complete this request.' });
+    return errorReply(res, error, 'Unable to complete this request.');
   }
 }

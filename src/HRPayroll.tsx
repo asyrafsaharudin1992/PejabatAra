@@ -3,6 +3,7 @@ import { PayrollCharts } from './PayrollCharts';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
+import { downloadBlob } from './lib/downloadBlob';
 import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 
 // Payroll room, built a piece at a time: it replaces Infotech's Info-Pay from the November 2026 pay run.
@@ -91,9 +92,9 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   // The month's pay run as one sheet (like Infotech's Monthly Payroll Summary) for finance; the same figures as the table.
   const summary = () => {
     const head = ['Code', 'Name', 'Company', 'Basic', 'OT', 'Rest/PH', 'Allowances', 'Gross', 'KWSP employee', 'KWSP employer', 'PERKESO employee', 'PERKESO employer', 'EIS employee', 'EIS employer', 'SKBBK', 'HRDF', 'PCB', 'Total deductions', 'Net'];
-    const cell = (value: string | number) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+    const cell = (value: string | number) => { const raw = typeof value === 'string' && /^[=+\-@\t\r]/.test(value) ? `'${value}` : String(value); return /[",\n']/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw; };
     const lines = rows.filter(({ member }) => member.payslip || member.company).map(({ member, out }) => [member.employeeCode, member.fullName, member.company, out.basic, out.ot, out.restPh, out.allowances.reduce((sum, item) => sum + item.amount, 0), out.gross, out.kwspEmployee, out.kwspEmployer, out.socsoEmployee, out.socsoEmployer, out.eisEmployee, out.eisEmployer, out.skbbk, out.hrdf, out.pcb, out.deductions, out.net]);
-    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([[head, ...lines].map((row) => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv' })); link.download = `PayrollSummary_${year}-${String(month).padStart(2, '0')}.csv`; document.body.appendChild(link); link.click(); link.remove();
+    downloadBlob([[head, ...lines].map((row) => row.map(cell).join(',')).join('\r\n')], `PayrollSummary_${year}-${String(month).padStart(2, '0')}.csv`, 'text/csv');
   };
   const download = async (kind: 'bank' | 'epf' | 'socso' | 'epcb') => {
     setBusy('file'); setNote('');
@@ -102,8 +103,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
       const response = await officeFetch(url);
       const data = await response.json();
       if (data.error) throw new Error(data.error);
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(new Blob([kind === 'bank' ? data.csv : data.content], { type: 'text/plain' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
+      downloadBlob([kind === 'bank' ? data.csv : data.content], data.file, 'text/plain');
       setNote(`${data.file}: ${data.count} staff.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
     setBusy('');
@@ -180,7 +180,7 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
     setBusy(true); setNote('');
     try {
       const response = await officeFetch(`${API}&action=payroll_bank&claimMonth=${month}&company=${bankCompany}&valueDate=${paidOn}`); const data = await response.json(); if (data.error) throw new Error(data.error);
-      const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([data.csv], { type: 'text/plain' })); link.download = data.file; document.body.appendChild(link); link.click(); link.remove();
+      downloadBlob([data.csv], data.file, 'text/plain');
       setNote(`${data.file}: ${data.count} staff.${data.problems.length ? ` Check: ${data.problems.join('; ')}` : ''}`);
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the file.'); }
     setBusy(false);

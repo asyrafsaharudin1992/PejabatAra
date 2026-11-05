@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync } from 'node:crypto';
-import { branchId, officeAccess } from './_office-db.js';
+import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { LEAVE_TYPES, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { INCENTIVE_CODES } from '../src/lib/incentiveCodes.js';
@@ -1655,6 +1655,6 @@ export async function hrHandler(req: any, res: any) {
   } catch (error: any) {
     // Before the migration has been run the tables do not exist yet.
     if (['PGRST205', '42P01'].includes(error?.code)) return res.status(503).json({ error: 'Staff profiles are not set up yet: run supabase/migrations/202610160002_hr_employees.sql in Supabase.' });
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to complete this request.' });
+    return errorReply(res, error, 'Unable to complete this request.');
   }
 }

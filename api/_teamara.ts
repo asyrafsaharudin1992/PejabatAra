@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
 import { existsSync, readFileSync } from 'node:fs';
-import { officeAccess } from './_office-db.js';
+import { officeAccess, errorReply } from './_office-db.js';
 
 const spreadsheetId = () => process.env.TEAMARA_SHEET_ID || '1ZgsXMJ5us4aMJQsGGr40tE18Dw2r2Cx0qaW_euy_kOE';
 let cache: { at: number; members: TeamAraMember[]; family: Record<string, string>[]; vendors: Record<string, string>[] } | null = null;
@@ -74,7 +74,7 @@ export async function teamaraHandler(req: any, res: any) {
       return name === q || name.split(' ').includes(q) || name.includes(` ${q} `);
     });
     return res.status(200).json({ members, family: cache.family, vendors: cache.vendors, isAdmin, cachedAt: cache.at });
-  } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra data.' }); }
+  } catch (error: any) { return errorReply(res, error, 'Unable to load TeamAra data.'); }
 }
 
 // Card and birthday WhatsApp templates, plus the card template and birthday poster image paths. Everyone with TeamAra access reads them;
@@ -98,5 +98,5 @@ export async function teamaraMessagesHandler(req: any, res: any) {
     const { data, error } = await db.from('teamara_messages').select('key,body');
     if (error) throw error;
     return res.status(200).json({ messages: Object.fromEntries((data || []).map((row: any) => [row.key, row.body])) });
-  } catch (error: any) { return res.status(error.status || 400).json({ error: error.message || 'Unable to load TeamAra messages.' }); }
+  } catch (error: any) { return errorReply(res, error, 'Unable to load TeamAra messages.'); }
 }

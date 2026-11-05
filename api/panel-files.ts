@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db.js';
+import { officeAccess, errorReply } from './_office-db.js';
 import { folderId, listDriveFiles } from './_panel-drive.js';
 import { serviceCatalogHandler } from './_service-catalog.js';
 import { teamaraHandler, teamaraMessagesHandler } from './_teamara.js';
@@ -85,6 +85,6 @@ export default async function handler(req: any, res: any) {
     } else return res.status(400).json({ error: 'Unknown panel action.' });
     return res.status(200).json(await payload(db, true));
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to manage Panel Training.' });
+    return errorReply(res, error, 'Unable to manage Panel Training.');
   }
 }

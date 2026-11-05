@@ -135,3 +135,13 @@ export function workspaceHandler(resource) {
     } catch (error) { return res.status(error.status || 400).json({ error: error.message || 'Request failed.' }); }
   };
 }
+
+// The reply for an error caught at the end of a handler. An error raised on purpose (it carries a status, such as "Enter the amount")
+// is shown as written. Anything else (a database or server error) is logged here and the person sees a plain message, so table
+// names, constraint names and server settings are not shown on screen.
+export function errorReply(res, error, fallback = 'Unable to complete this request.') {
+  const status = Number(error?.status);
+  if (status >= 400 && status < 600) return res.status(status).json({ error: error.message || fallback });
+  console.error('[api]', error?.code || '', error?.message || error);
+  return res.status(500).json({ error: `${fallback} Please try again, and tell the system admin if it keeps happening.` });
+}

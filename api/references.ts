@@ -1,4 +1,4 @@
-import { branchId, officeAccess } from './_office-db.js';
+import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { listDriveFiles } from './_panel-drive.js';
 import { isHrReference } from '../src/lib/hrReferences.js';
@@ -153,6 +153,6 @@ export default async function handler(req: any, res: any) {
     const data = await save({ resources: [...kept, ...submitted], pendingMemos, driveSyncedAt: existing?.payload?.driveSyncedAt });
     return res.status(200).json({ payload: data.payload, pendingMemos: data.payload.pendingMemos || [], updatedAt: data.updated_at });
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to load shared references.' });
+    return errorReply(res, error, 'Unable to load shared references.');
   }
 }

@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db.js';
+import { officeAccess, errorReply } from './_office-db.js';
 import { announcementStaff } from './_announcements.js';
 
 const BRANCH_NAME = 'AraSpace Clinical Assistants';
@@ -148,6 +148,6 @@ export default async function handler(req: any, res: any) {
     if (formsScope) await removeUnusedFormFiles(db, existing?.payload, data.payload);
     return res.status(200).json({ payload: data.payload, updatedAt: data.updated_at });
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to save CA portal content.' });
+    return errorReply(res, error, 'Unable to save CA portal content.');
   }
 }

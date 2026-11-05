@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db.js';
+import { officeAccess, errorReply } from './_office-db.js';
 
 // Office Clinical Administration. Served from /api/status?resource=clinical
 // because the Vercel Hobby plan allows only 12 functions.
@@ -425,6 +425,6 @@ export async function clinicalHandler(req: any, res: any) {
 
     throw fail(405, 'Method not allowed.');
   } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || 'Unable to complete this request.' });
+    return errorReply(res, error, 'Unable to complete this request.');
   }
 }

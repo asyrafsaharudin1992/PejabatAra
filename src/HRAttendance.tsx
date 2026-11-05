@@ -1,5 +1,7 @@
 import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
+import { csvCell } from './lib/hrReportExport';
+import { downloadBlob } from './lib/downloadBlob';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { NEW_CODE, newCode } from './lib/shiftCodes';
@@ -133,8 +135,8 @@ function Month({ onError }: { onError: (message: string) => void }) {
     if (!data) return;
     const head = ['Company', 'Code', 'Name', 'Expected days', 'Present days', 'Absent days', 'Leave days', 'Late days', 'Late minutes', 'Worked hours', 'OT approved hours', 'OT waiting hours'];
     const lines = data.rows.map((row) => [row.company, row.code, row.name, row.expected, row.present, row.absent, row.leave, row.lateDays, row.lateMinutes, (row.workedMinutes / 60).toFixed(2), (row.otApprovedMinutes / 60).toFixed(2), (row.otWaitingMinutes / 60).toFixed(2)]);
-    const body = [head, ...lines].map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([body], { type: 'text/csv' })); link.download = `attendance-${month}.csv`; link.click(); URL.revokeObjectURL(link.href);
+    const body = [head, ...lines].map((line) => line.map(csvCell).join(',')).join('\n');
+    downloadBlob([body], `attendance-${month}.csv`, 'text/csv');
   };
   return <div className="space-y-4">
     <MonthBar month={month} setMonth={setMonth}><button onClick={csv} disabled={!data?.rows.length} className={`${ghost} ml-auto`}><Download className="h-4 w-4" />Download CSV</button></MonthBar>
