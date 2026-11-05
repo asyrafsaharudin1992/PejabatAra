@@ -61,7 +61,7 @@ function shiftTimes(rules: Rules, code: string, doctor: boolean) {
   return rules.times.get(`${doctor ? 'doctor' : 'staff'}|${key}`) || rules.times.get(`${doctor ? 'staff' : 'doctor'}|${key}`) || null;
 }
 
-export type Employee = { id: string; company: string; employee_code: string; full_name: string; designation: string; work_days: number[] | null; holiday_group: string | null; default_shift?: string | null; clock_required?: string | null };
+export type Employee = { id: string; company: string; employee_code: string; full_name: string; designation: string; work_days: number[] | null; holiday_group: string | null; default_shift?: string | null; clock_required?: string | null; join_date?: string | null; resign_date?: string | null };
 export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; creditHours: number; leave: string };
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
@@ -128,6 +128,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const leaveRow = (leave || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date);
       const shift = code ? shiftTimes(rules, code, doctor) : null;
       const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', creditHours: 0, leave: leaveRow?.leave_type || '' };
+      // Before the person joined and after the last working day nothing is expected: not absent. A clock or approved leave on such a day is still shown.
+      if (((person.join_date && date < person.join_date) || (person.resign_date && date > person.resign_date)) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       // Before the records start there is nothing to judge: not absent, not expected. Approved leave is still shown.
       if (date < recordsFromFor(person.company) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       if (!shift) {
@@ -178,7 +180,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
 }
 
 const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '' });
-const PERSON = 'id,company,employee_code,full_name,designation,work_days,holiday_group,default_shift,clock_required';
+const PERSON = 'id,company,employee_code,full_name,designation,work_days,holiday_group,default_shift,clock_required,join_date,resign_date';
 const minutesText = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', otMinutes: Number(row.ot_minutes || 0), otText: minutesText(Number(row.ot_minutes || 0)), reason: row.reason, remarks: row.remarks || '', status: row.status, supervisorDecidedBy: row.supervisor_decided_by || '', supervisorNote: row.supervisor_note || '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, rate: row.ot_multiplier === null || row.ot_multiplier === undefined ? null : Number(row.ot_multiplier), createdAt: row.created_at });
 
