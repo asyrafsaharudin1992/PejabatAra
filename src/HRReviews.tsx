@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Printer, Search, Send } from 'lucide-react';
 import { ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { AssistantDetail } from './AssistantReview';
+import { HRReviewSamples } from './HRReviewSamples';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRReviewReminders } from './HRReviewReminders';
@@ -17,7 +18,7 @@ type Person = { id: string; fullName: string; employeeCode: string; designation:
 const blankAssign = () => ({ formType: 'standard' as 'standard' | 'assistant', employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
 
 export function HRReviews({ onError, reportOnly = false }: { onError: (message: string) => void; reportOnly?: boolean }) {
-  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders'>(reportOnly ? 'reports' : 'assign');
+  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders' | 'samples'>(reportOnly ? 'reports' : 'assign');
   const [staff, setStaff] = useState<Person[]>([]);
   const [supervisors, setSupervisors] = useState<{ id: string; name: string; person?: string }[]>([]);
   const [assign, setAssign] = useState(blankAssign);
@@ -95,7 +96,8 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
-    {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report'], ['reminders', 'Reminder']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'reminders' && dueReminders > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{dueReminders}</span>}</button>)}</div>}
+    {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report'], ['reminders', 'Reminder'], ['samples', 'Review samples']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'reminders' && dueReminders > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{dueReminders}</span>}</button>)}</div>}
+    {tab === 'samples' && <HRReviewSamples />}
     {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
       onAssign={(item) => { setAssign({ formType: 'standard', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
       onView={(id) => { setSelected(id); setTab('reports'); window.scrollTo({ top: 0 }); }} />}
@@ -103,7 +105,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
       <h3 className="text-lg font-semibold">Assign a review</h3>
       <p className="text-sm text-slate-500">Choose who is reviewed, who does the review and for which period. It appears in that supervisor's Performance Review to fill in.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Form<select value={assign.formType} onChange={(event) => setAssign({ ...assign, formType: event.target.value as 'standard' | 'assistant' })} className={`${field} mt-1.5`}><option value="standard">Performance Assessment Review (4 areas, rated 1 to 4)</option><option value="assistant">Penilaian Bulanan Pembantu Klinik (19 items out of 100)</option></select></label>
+        <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Which review<select value={assign.formType} onChange={(event) => setAssign({ ...assign, formType: event.target.value as 'standard' | 'assistant' })} className={`${field} mt-1.5`}><option value="standard">Review 1 · Performance Assessment Review (4 areas, rated 1 to 4)</option><option value="assistant">Review 2 · Penilaian Bulanan Pembantu Klinik (19 items out of 100)</option></select></label>
         <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Staff to review<select value={assign.employeeId} onChange={(event) => setAssign({ ...assign, employeeId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose staff…</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.employeeCode}{person.designation ? ` · ${person.designation}` : ''}</option>)}</select></label>
         <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Supervisor (assessor)<select value={assign.assessorId} onChange={(event) => setAssign({ ...assign, assessorId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose supervisor…</option>{supervisors.map((person) => <option key={person.id} value={person.id}>{person.name}{person.person ? ` · ${person.person}` : ''}</option>)}</select></label>
         <label className="block text-sm font-semibold text-slate-600">Review<input list="hr-review-periods" value={assign.periodLabel} onChange={(event) => setAssign({ ...assign, periodLabel: event.target.value })} className={`${field} mt-1.5`} /><datalist id="hr-review-periods">{PERIODS.map((period) => <option key={period} value={period} />)}</datalist></label>
