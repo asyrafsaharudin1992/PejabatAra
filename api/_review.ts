@@ -70,7 +70,7 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
     // The clinic assistant form: 19 items marked out of 100 and a result for a contract locum or a probation.
     if (assigned.form_type === 'assistant') {
       const marks = Array.isArray(body.marks) ? body.marks.map(Number) : [];
-      if (marks.length !== ASSISTANT_ITEMS.length || marks.some((mark: number, index: number) => !Number.isInteger(mark) || mark < 0 || mark > ASSISTANT_ITEMS[index].max)) throw fail(400, 'Enter the marks for all 19 items (from 0 up to the full mark of each item).');
+      if (marks.length !== ASSISTANT_ITEMS.length || marks.some((mark: number, index: number) => !Number.isFinite(mark) || mark * 2 !== Math.round(mark * 2) || mark < 0 || mark > ASSISTANT_ITEMS[index].max)) throw fail(400, 'Enter the marks for all 19 items (from 0 up to the full mark of each item, in steps of 0.5).');
       const kind: AssistantKind = body.kind === 'probation' ? 'probation' : 'locum';
       const outcome = ASSISTANT_OUTCOMES[kind].find((option) => option.value === body.outcome);
       if (!outcome) throw fail(400, 'Choose the result of this review.');
@@ -82,7 +82,7 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
         status: 'submitted', submitted_at: nowAt, updated_at: nowAt, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
         // The list pages show the score on a 1 to 4 scale as a percentage (4.00 is 100%), so the 100 marks are kept as total / 25.
         total_score: Math.round(total / 25 * 100) / 100, overall: outcomeLabel(kind, outcome.value, term),
-        assistant: { marks, panels: text(body.panels, 300), kind, outcome: outcome.value, term, position: text(body.position, 120) },
+        assistant: { marks, panels: text(body.panels, 300), panelsNot: text(body.panelsNot, 300), kind, outcome: outcome.value, term, position: text(body.position, 120) },
       }).eq('id', id).eq('status', 'pending').select('*').single();
       if (saveError) throw saveError;
       return reviewFull(saved);
@@ -147,7 +147,7 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_reminders') {
@@ -231,6 +231,12 @@ export async function reviewHandler(req: any, res: any) {
       if (error) throw error;
       if (!data) throw fail(404, 'Reminder not found.');
       return res.status(200).json({ success: true });
+    }
+    // Review 2 assessments an Admin Klinikal marked "Not needed".
+    if (req.method === 'GET' && action === 'hr_skipped') {
+      const { data, error } = await db.from('hr_review_skips').select('stage,reason,skipped_by,skipped_at,staff:hr_employees!hr_review_skips_employee_id_fkey(full_name,employee_code,company)').order('skipped_at', { ascending: false }).limit(200);
+      if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ skipped: [] }); throw error; }
+      return res.status(200).json({ skipped: (data || []).map((row: any) => ({ name: row.staff?.full_name || '', code: row.staff?.employee_code || '', company: row.staff?.company || '', stage: row.stage, reason: row.reason, by: row.skipped_by, at: row.skipped_at })) });
     }
     if (req.method === 'GET' && action === 'hr_list') {
       const { data, error } = await db.from('hr_reviews').select(REVIEW_SUMMARY).order('created_at', { ascending: false }).limit(500);

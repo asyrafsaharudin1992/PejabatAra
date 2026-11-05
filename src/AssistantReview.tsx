@@ -12,6 +12,7 @@ const TOTAL_MAX = ASSISTANT_ITEMS.reduce((sum, item) => sum + item.max, 0);
 export function AssistantReviewForm({ review, assessorName, api, onDone, onCancel, onFailed }: { review: ReviewSummary; assessorName: string; api: (query: string, body?: unknown) => Promise<any>; onDone: (review: ReviewFull) => void; onCancel: () => void; onFailed: (cause: unknown, fallback: string) => void }) {
   const [marks, setMarks] = useState<string[]>(() => ASSISTANT_ITEMS.map(() => ''));
   const [panels, setPanels] = useState('');
+  const [panelsNot, setPanelsNot] = useState('');
   const [kind, setKind] = useState<AssistantKind>('locum');
   const [outcome, setOutcome] = useState('');
   const [term, setTerm] = useState('');
@@ -21,18 +22,18 @@ export function AssistantReviewForm({ review, assessorName, api, onDone, onCance
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const total = assistantTotal(marks.map((mark) => mark === '' ? null : Number(mark)));
-  const complete = marks.every((mark, index) => mark !== '' && Number.isInteger(Number(mark)) && Number(mark) >= 0 && Number(mark) <= ASSISTANT_ITEMS[index].max);
+  const complete = marks.every((mark, index) => mark !== '' && Number(mark) * 2 === Math.round(Number(mark) * 2) && Number(mark) >= 0 && Number(mark) <= ASSISTANT_ITEMS[index].max);
   const picked = ASSISTANT_OUTCOMES[kind].find((option) => option.value === outcome);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
-    if (!complete) { setError('Enter the marks for all 19 items (from 0 up to the full mark of each item).'); return; }
+    if (!complete) { setError('Enter the marks for all 19 items (from 0 up to the full mark of each item, in steps of 0.5).'); return; }
     if (!picked) { setError('Choose the result of this review.'); return; }
     if (picked.terms && !term) { setError('Choose the period for this result.'); return; }
     if (!signed) { setError('Tick the box to confirm and sign the review digitally.'); return; }
     setSaving(true);
     try {
-      const result = await api('action=submit', { id: review.id, marks: marks.map(Number), panels, kind, outcome, term: picked.terms ? term : '', assessorName: assessor, position, signed: true });
+      const result = await api('action=submit', { id: review.id, marks: marks.map(Number), panels, panelsNot, kind, outcome, term: picked.terms ? term : '', assessorName: assessor, position, signed: true });
       onDone(result.review);
     } catch (cause) { onFailed(cause, 'Unable to submit the review.'); }
     setSaving(false);
@@ -46,14 +47,14 @@ export function AssistantReviewForm({ review, assessorName, api, onDone, onCance
 
     <section className={card}>
       <h2 className="text-lg font-semibold">Marks for each item</h2>
-      <p className="mt-1 text-sm text-slate-500">Enter the marks obtained for every item, from 0 up to the full mark shown. The total is out of {TOTAL_MAX}.</p>
+      <p className="mt-1 text-sm text-slate-500">Enter the marks obtained for every item, from 0 up to the full mark shown (half marks such as 4.5 are fine). The total is out of {TOTAL_MAX}.</p>
       <ul className="mt-4 divide-y divide-slate-100">{ASSISTANT_ITEMS.map((item, index) => <li key={item.name} className="py-3.5">
         <div className="flex items-start gap-3">
           <span className="w-6 shrink-0 pt-1 text-sm font-semibold text-slate-400">{index + 1}</span>
           <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{item.name}</p><p className="text-xs text-slate-500">{item.note}</p></div>
-          <label className="flex shrink-0 items-center gap-2 text-sm"><input type="number" inputMode="numeric" min={0} max={item.max} step={1} required value={marks[index]} onChange={(event) => setMarks((current) => current.map((mark, at) => at === index ? event.target.value : mark))} aria-label={`Marks for ${item.name}`} className="h-10 w-16 rounded-xl border border-[#dce4ed] px-2 text-center text-sm font-semibold outline-none focus:border-[#0b587b]" /><span className="text-slate-400">/ {item.max}</span></label>
+          <label className="flex shrink-0 items-center gap-2 text-sm"><input type="number" inputMode="decimal" min={0} max={item.max} step={0.5} required value={marks[index]} onChange={(event) => setMarks((current) => current.map((mark, at) => at === index ? event.target.value : mark))} aria-label={`Marks for ${item.name}`} className="h-10 w-16 rounded-xl border border-[#dce4ed] px-2 text-center text-sm font-semibold outline-none focus:border-[#0b587b]" /><span className="text-slate-400">/ {item.max}</span></label>
         </div>
-        {index === ASSISTANT_PANEL_ITEM && <label className={`${label} mt-2 pl-9`}>Panels mastered<input value={panels} onChange={(event) => setPanels(event.target.value)} placeholder="e.g. AIA, Allianz, Medi365" className={`${field} mt-1.5`} /></label>}
+        {index === ASSISTANT_PANEL_ITEM && <div className="mt-2 grid gap-3 pl-9 sm:grid-cols-2"><label className={label}>Panels mastered<input value={panels} onChange={(event) => setPanels(event.target.value)} placeholder="e.g. AIA, Pmcare" className={`${field} mt-1.5`} /></label><label className={label}>Panels not yet mastered<input value={panelsNot} onChange={(event) => setPanelsNot(event.target.value)} className={`${field} mt-1.5`} /></label></div>}
       </li>)}</ul>
     </section>
 
@@ -90,7 +91,7 @@ export function AssistantDetail({ review }: { review: ReviewFull }) {
   return <div className="space-y-4">
     <div className="flex flex-wrap items-baseline justify-between gap-3 rounded-2xl bg-slate-50 p-4"><span className="text-3xl font-semibold tracking-tight">{assistantTotal(marks)}<span className="text-lg text-slate-400"> / {TOTAL_MAX}</span></span><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">{outcomeLabel(result.kind, result.outcome, result.term)}</span></div>
     <ul className="space-y-1">{ASSISTANT_ITEMS.map((item, index) => <li key={item.name} className="flex items-start justify-between gap-3 text-xs text-slate-600"><span>{index + 1}. {item.name}</span><span className="shrink-0 font-semibold text-slate-700">{marks[index]} / {item.max}</span></li>)}</ul>
-    {result.panels && <p className="text-sm"><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Panels mastered</span><br />{result.panels}</p>}
+    {(result.panels || result.panelsNot) && <p className="text-sm"><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Panels mastered</span><br />{result.panels || '—'}<br /><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Not yet mastered</span><br />{result.panelsNot || '—'}</p>}
   </div>;
 }
 
@@ -99,7 +100,7 @@ const branchOf = (code: string) => /^ARASK/i.test(code) ? 'Seri Kembangan' : 'Ka
 export function AssistantDocument({ review }: { review: ReviewFull }) {
   const result = review.assistant;
   const marks = result?.marks || [];
-  const rows = (from: number, to: number) => ASSISTANT_ITEMS.slice(from, to).map((item, offset) => <tr key={item.name}><td className="text-center">{from + offset + 1}</td><td>{item.name}</td><td>{item.note}{from + offset === ASSISTANT_PANEL_ITEM && result?.panels ? ` (${result.panels})` : ''}</td><td className="text-center">{item.max}</td><td className="text-center">{marks[from + offset] ?? ''}</td></tr>);
+  const rows = (from: number, to: number) => ASSISTANT_ITEMS.slice(from, to).map((item, offset) => <tr key={item.name}><td className="text-center">{from + offset + 1}</td><td>{item.name}</td><td>{item.note}{from + offset === ASSISTANT_PANEL_ITEM && (result?.panels || result?.panelsNot) ? ` (Mahir: ${result?.panels || '-'}; Belum mahir: ${result?.panelsNot || '-'})` : ''}</td><td className="text-center">{item.max}</td><td className="text-center">{marks[from + offset] ?? ''}</td></tr>);
   const head = <thead><tr><th>Bil</th><th>Elemen Penilaian Tugas</th><th>Penerangan Penilaian Tugas</th><th>Markah Penuh</th><th>Markah Diperoleh</th></tr></thead>;
   const cols = <colgroup><col style={{ width: '10mm' }} /><col style={{ width: '55mm' }} /><col style={{ width: '70mm' }} /><col style={{ width: '20mm' }} /><col style={{ width: '25mm' }} /></colgroup>;
   const box = (on: boolean) => <span className={`rv-mark${on ? ' rv-on' : ''}`} />;

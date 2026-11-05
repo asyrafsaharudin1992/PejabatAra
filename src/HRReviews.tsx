@@ -25,6 +25,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
   const [assigning, setAssigning] = useState(false);
   const [notice, setNotice] = useState('');
   const [printing, setPrinting] = useState(false);
+  const [skipped, setSkipped] = useState<{ name: string; code: string; company: string; stage: string; reason: string; by: string; at: string }[]>([]);
   const [list, setList] = useState<ReviewSummary[] | null>(null);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState('');
@@ -83,6 +84,8 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to delete.'); }
   };
 
+  useEffect(() => { if (tab === 'reports') reviewApi('action=hr_skipped').then((result) => setSkipped(result.skipped || [])).catch(() => setSkipped([])); }, [tab]);
+
   const saveHr = async () => {
     if (!review) return;
     setSaving(true); setSaved(false);
@@ -116,6 +119,8 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-end gap-3">{notice && <span className="mr-auto text-sm font-semibold text-emerald-700">{notice}</span>}<button onClick={() => void giveReview()} disabled={assigning || !assign.employeeId || !assign.assessorId} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50"><Send className="h-4 w-4" />{assigning ? 'Assigning…' : 'Assign review'}</button></div>
     </section>}
+    {tab === 'reports' && skipped.length > 0 && <details className={card}><summary className="cursor-pointer text-sm font-semibold">Assessments marked "Not needed" by Admin Klinikal ({skipped.length})</summary>
+      <ul className="mt-3 space-y-1 text-sm text-slate-600">{skipped.map((item) => <li key={`${item.code}|${item.stage}`}><strong>{item.name}</strong> <span className="text-xs text-slate-400">{item.company} · {item.code}</span> · {item.stage} assessment · skipped by {item.by || 'Admin Klinikal'} on {dmy(item.at.slice(0, 10))}{item.reason ? ` · ${item.reason}` : ''}</li>)}</ul></details>}
     {tab === 'reports' && <div id="review-panel-reports" role="tabpanel" aria-labelledby={reportOnly ? undefined : "review-tab-reports"} aria-label={reportOnly ? "Performance review reports" : undefined} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_480px]">
       <section className={card}>
         <label className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 text-[#60758c]"><Search className="h-4 w-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff, ID, department or assessor" className="h-11 w-full bg-transparent text-sm outline-none" /></label>

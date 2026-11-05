@@ -8,6 +8,7 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
+import { ASSISTANT_STAGES, assistantDueOn, type DueAssessment, type SkippedAssessment } from '../src/lib/assistantReview.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
@@ -252,10 +253,41 @@ const requestRow = (r: any, extra: Record<string, unknown> = {}) => ({ id: r.id,
 // Which decision is waiting on this person for the request, if any.
 const stageFor = (r: any, personId: string) => r.status === 'pending' && (r.approver_id === personId || r.backup_approver_id === personId) ? (r.approver_id === personId ? 'supervisor' : 'backup') : r.status === 'supervisor_approved' && r.final_approver_id === personId ? 'final' : '';
 
+// Review 2 for the clinic assistants of an Admin Klinikal's branch: what is due now (2 weeks after the start date in the HR profile, then the 1st, 2nd and 3rd month),
+// not yet done and not marked "Not needed". Staff only, still on probation, and started within the last four months.
+const isAdminKlinikal = (designation: string) => /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(designation || '');
+async function assistantDue(db: any, me: { id: string; company: string; designation: string }) {
+  if (!isAdminKlinikal(me.designation)) return { due: [] as DueAssessment[], skipped: [] as SkippedAssessment[] };
+  const today = malaysiaToday();
+  const earliest = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 - 4, Number(today.slice(8)))).toISOString().slice(0, 10);
+  const { data: people, error } = await db.from('hr_employees').select('id,full_name,employee_code,designation,join_date,confirm_date,resign_date').eq('company', me.company).eq('status', 'Active').gte('join_date', earliest).limit(300);
+  if (error) throw error;
+  const assistants = (people || []).filter((person: any) => /CLINIC ASSISTANT/i.test(person.designation || '') && !isAdminKlinikal(person.designation) && !person.resign_date && (!person.confirm_date || person.confirm_date > today));
+  if (!assistants.length) return { due: [], skipped: [] };
+  const ids = assistants.map((person: any) => person.id);
+  const [{ data: done }, skips] = await Promise.all([
+    db.from('hr_reviews').select('employee_id,period_end').eq('form_type', 'assistant').in('employee_id', ids),
+    db.from('hr_review_skips').select('employee_id,stage,reason,skipped_by,skipped_at').in('employee_id', ids),
+  ]);
+  if (skips.error && !['42P01', 'PGRST205'].includes(skips.error.code)) throw skips.error;
+  const finished = new Set((done || []).map((row: any) => `${row.employee_id}|${row.period_end}`));
+  const skippedRows: any[] = skips.data || [];
+  const skippedKeys = new Set(skippedRows.map((row) => `${row.employee_id}|${row.stage}`));
+  const due: DueAssessment[] = [];
+  for (const person of assistants) ASSISTANT_STAGES.forEach((stage, index) => {
+    const dueOn = assistantDueOn(person.join_date, index);
+    if (dueOn <= today && !finished.has(`${person.id}|${dueOn}`) && !skippedKeys.has(`${person.id}|${stage}`)) due.push({ employeeId: person.id, name: person.full_name, code: person.employee_code, joinDate: person.join_date, stage, dueOn });
+  });
+  const nameOf = new Map(assistants.map((person: any) => [person.id, person.full_name]));
+  // Only the latest stage that has come due is shown for each person (an older stage that was never done is no longer asked for).
+  const latest = [...new Map(due.sort((x, y) => x.dueOn.localeCompare(y.dueOn)).map((item) => [item.employeeId, item] as const)).values()];
+  return { due: latest.sort((x, y) => x.dueOn.localeCompare(y.dueOn)), skipped: skippedRows.map((row): SkippedAssessment => ({ employeeId: row.employee_id, name: String(nameOf.get(row.employee_id) || ''), stage: row.stage, reason: row.reason, by: row.skipped_by, at: row.skipped_at })) };
+}
+
 // Performance Review for the supervisors (CEO / CFO, CHRO, COO, CPO and each Clinical Admin), inside their own Individual Sign In.
 // HR assigns a review to a person; only that person sees and fills it in.
 async function reviewAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
-  const { data: me, error } = await db.from('hr_employees').select('id,full_name,designation').eq('assessment_staff_id', staff.id).maybeSingle();
+  const { data: me, error } = await db.from('hr_employees').select('id,full_name,designation,company').eq('assessment_staff_id', staff.id).maybeSingle();
   if (error) throw error;
   if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
   const myName = `${/DR RESIDENT|DOCTOR/i.test(me.designation || '') ? 'DR ' : ''}${me.full_name}`;
@@ -268,6 +300,35 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
   if (req.method === 'POST' && action === 'review_submit') {
     const review = await submitReview(db, body, (assigned) => assigned.assessor_employee_id === me.id, myName);
     return res.status(200).json({ review });
+  }
+  // Review 2 reminders for an Admin Klinikal: what is due, start one, mark one "Not needed", or undo that.
+  if (req.method === 'GET' && action === 'review_due') return res.status(200).json(await assistantDue(db, me));
+  if (req.method === 'POST' && ['review_start', 'review_skip', 'review_unskip'].includes(action)) {
+    const stage = text(body.stage, 20), employeeId = text(body.employeeId, 60);
+    if (!ASSISTANT_STAGES.includes(stage as any)) throw fail(400, 'Choose which assessment.');
+    if (action === 'review_unskip') {
+      const { data: target } = await db.from('hr_employees').select('company').eq('id', employeeId).maybeSingle();
+      if (!isAdminKlinikal(me.designation) || target?.company !== me.company) throw fail(403, 'This is not one of your branch staff.');
+      const { error: removeError } = await db.from('hr_review_skips').delete().eq('employee_id', employeeId).eq('stage', stage);
+      if (removeError) throw removeError;
+      return res.status(200).json({ success: true });
+    }
+    const { due } = await assistantDue(db, me);
+    const item = due.find((entry) => entry.employeeId === employeeId && entry.stage === stage);
+    if (!item) throw fail(409, 'This assessment is not due, or it has already been done or skipped.');
+    if (action === 'review_skip') {
+      const { error: skipError } = await db.from('hr_review_skips').insert({ employee_id: employeeId, stage, reason: text(body.reason, 300), skipped_by: myName, skipped_by_employee_id: me.id });
+      if (skipError) throw skipError;
+      return res.status(200).json({ success: true });
+    }
+    const { data: person, error: personError } = await db.from('hr_employees').select('id,full_name,employee_code,designation,department').eq('id', employeeId).maybeSingle();
+    if (personError) throw personError;
+    const { data: created, error: createError } = await db.from('hr_reviews').insert({
+      status: 'pending', form_type: 'assistant', employee_id: person.id, staff_name: person.full_name, employee_code: person.employee_code, position: person.designation || '', department: person.department || '',
+      assessor_employee_id: me.id, assessor_name: myName, period_label: stage === '2 weeks' ? 'First CA evaluation · 2 weeks' : 'Monthly CA evaluation', period_start: item.joinDate, period_end: item.dueOn, assign_remarks: 'Started by the Admin Klinikal.',
+    }).select(REVIEW_SUMMARY).single();
+    if (createError) throw createError;
+    return res.status(200).json({ review: reviewRow(created) });
   }
   throw fail(404, 'Unknown review action.');
 }
@@ -717,6 +778,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
           db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('assessor_employee_id', self.id).eq('status', 'pending'),
         ]);
         isApprover = (approverCount || 0) > 0; leaveWaiting = (first || 0) + (last || 0); reviewWaiting = reviews || 0;
+        // An Admin Klinikal also has the assessments that are due for the clinic assistants of the branch.
+        try { reviewWaiting += (await assistantDue(db, self)).due.length; } catch { /* the reminder is optional */ }
       } catch { /* leave or review tables not set up yet */ }
     }
     // The red number on the Announcements icon (only for the staff who must read them).

@@ -20,11 +20,11 @@ const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T
 const labelKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 export const isProbationAssessment = (label: string) => !/annual|appraisal|yearly|tahunan|\bPIP\b|follow.?up/i.test(label) && /probation|evaluation|assessment|performance|month|week|minggu|penilaian/i.test(label);
 export const isCaReviewPerson = (designation = '') => /^(CLINIC ASSISTANT(?:\s*\([^)]*\))?|PEMBANTU KLINIK)$/i.test(designation.trim());
+// A clinic assistant on probation is assessed 2 weeks after the start date in the HR profile, then in the 1st, 2nd and 3rd month (the same day of the month).
 export function probationEvaluationDates(joinDate: string): string[] {
   if (!validReminderDate(joinDate)) return [];
   const first = new Date(Date.parse(`${joinDate}T00:00:00Z`) + 14 * 86400000).toISOString().slice(0, 10);
-  const end = addReviewMonths(joinDate, 3);
-  return [first, addReviewMonths(first, 1), addReviewMonths(first, 2)].filter((date) => date <= end);
+  return [first, addReviewMonths(joinDate, 1), addReviewMonths(joinDate, 2), addReviewMonths(joinDate, 3)];
 }
 export function probationAssessmentAllowed(person: { joinDate: string | null; confirmDate?: string | null }, probation: string | undefined, due: string, today = malaysiaToday()): boolean {
   return Boolean(probation === 'probation' && person.joinDate && validReminderDate(person.joinDate) && due >= person.joinDate && due <= addReviewMonths(person.joinDate, 3) && (!person.confirmDate || validReminderDate(person.confirmDate) && person.confirmDate > today && due < person.confirmDate));
@@ -47,7 +47,7 @@ export function buildReviewReminders(people: ReminderPerson[], reviews: Reminder
   if (settings.automaticEnabled) for (const person of active.values()) {
     const milestones: { dueOn: string; periodLabel: string; key: string; previousLabels: string[]; interval: number; periodStart: string | null; notes: string }[] = [];
     if (person.joinDate && isCaReviewPerson(person.designation)) for (const [index, dueOn] of probationEvaluationDates(person.joinDate).entries()) {
-      if (probationAssessmentAllowed(person, person.probationStatus, dueOn, today)) milestones.push({ dueOn, periodLabel: index === 0 ? 'First CA evaluation · 2 weeks' : 'Monthly CA evaluation', key: 'ca-evaluation', previousLabels: index === 0 ? ['First evaluation', '2 Week', '2 Weeks'] : ['Monthly evaluation'], interval: 0, periodStart: person.joinDate, notes: 'Probation only: joining date + 14 days, then monthly, ending at 3 months from joining or earlier confirmation / probation exit.' });
+      if (probationAssessmentAllowed(person, person.probationStatus, dueOn, today)) milestones.push({ dueOn, periodLabel: index === 0 ? 'First CA evaluation · 2 weeks' : 'Monthly CA evaluation', key: 'ca-evaluation', previousLabels: index === 0 ? ['First evaluation', '2 Week', '2 Weeks'] : ['Monthly evaluation'], interval: 0, periodStart: person.joinDate, notes: 'Probation only: 2 weeks after joining, then the 1st, 2nd and 3rd month, ending earlier on confirmation / probation exit.' });
     }
     if (settings.recurringEnabled && person.confirmDate && validReminderDate(person.confirmDate) && person.confirmDate <= today) {
       const firstYear = Math.max(1, Number(today.slice(0, 4)) - Number(person.confirmDate.slice(0, 4)) - Math.ceil(settings.lookBackDays / 365) - 1);

@@ -4,6 +4,7 @@ import { AuthError, AuthShell, authButton, authInput, authLabel } from './Assess
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { AssistantReviewForm } from './AssistantReview';
+import { DueAssessment, SkippedAssessment } from './lib/assistantReview';
 import { AREAS, LEVELS, Ratings, ReviewSummary, areaScore, dmy, overallLabel, percentLabel, reviewApi, scoreTone, totalScore } from './lib/performanceReview';
 
 // Performance Review: a supervisor (CEO, CFO, COO, CPO, CHRO, Clinical Admin) fills in the
@@ -74,17 +75,41 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [thanks, setThanks] = useState<ReviewSummary | null>(null);
+  const [due, setDue] = useState<{ due: DueAssessment[]; skipped: SkippedAssessment[] }>({ due: [], skipped: [] });
+  const [dueBusy, setDueBusy] = useState(false);
 
   const failed = (cause: unknown, fallback: string) => { if ((cause as { status?: number }).status === 401) onSignedOut(); else setError(cause instanceof Error ? cause.message : fallback); };
   const load = async () => {
     try {
       const [waiting, finished] = await Promise.all([api('action=todo'), api('action=mine')]);
+      // Review 2 reminders (only the Admin Klinikal has any; other sign-ins have no such action).
+      api('action=due').then((result) => setDue({ due: result.due || [], skipped: result.skipped || [] })).catch(() => setDue({ due: [], skipped: [] }));
       setTodo(waiting.reviews); setDone(finished.reviews);
       setForm((current) => current.assessorName ? current : { ...current, assessorName: waiting.assessor || '' });
     } catch (cause) { setTodo([]); setDone([]); failed(cause, 'Unable to load your reviews.'); }
   };
   useEffect(() => { void load(); }, []);
 
+  const startDue = async (item: DueAssessment) => {
+    setDueBusy(true); setError('');
+    try { const result = await api('action=start', { employeeId: item.employeeId, stage: item.stage }); setOpen(result.review); setThanks(null); setSigned(false); window.scrollTo({ top: 0 }); void load(); }
+    catch (cause) { failed(cause, 'Unable to start this assessment.'); }
+    setDueBusy(false);
+  };
+  const skipDue = async (item: DueAssessment) => {
+    const reason = window.prompt(`Skip this assessment?\n\n${item.name}'s ${item.stage} assessment will be removed from your reminders. HR can still see that it was skipped.\n\nReason (optional):`);
+    if (reason === null) return;
+    setDueBusy(true); setError('');
+    try { await api('action=skip', { employeeId: item.employeeId, stage: item.stage, reason }); await load(); }
+    catch (cause) { failed(cause, 'Unable to skip this assessment.'); }
+    setDueBusy(false);
+  };
+  const undoSkip = async (item: SkippedAssessment) => {
+    setDueBusy(true); setError('');
+    try { await api('action=unskip', { employeeId: item.employeeId, stage: item.stage }); await load(); }
+    catch (cause) { failed(cause, 'Unable to undo.'); }
+    setDueBusy(false);
+  };
   const set = (patch: Partial<ReturnType<typeof blank>>) => setForm((current) => ({ ...current, ...patch }));
   const score = totalScore(form.ratings);
   const [signed, setSigned] = useState(false);
@@ -122,6 +147,17 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
         <h2 className="mt-3 text-xl font-semibold">Review submitted for {thanks.staffName}</h2>
         <p className="mt-2 text-sm text-slate-500">{thanks.formType === 'assistant' ? <>Jumlah markah <strong className="text-[#14233b]">{percentLabel(thanks.totalScore)}</strong> · {thanks.overall}.</> : <>Total score <strong className="text-[#14233b]">{thanks.totalScore?.toFixed(2)}</strong> ({percentLabel(thanks.totalScore)}) · {thanks.overall}.</>} Office HR can now see it.</p>
         <button onClick={() => { setThanks(null); setView('todo'); }} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white hover:bg-[#0a4c6a]"><Plus className="h-4 w-4" />Back to my reviews</button>
+      </section>}
+
+      {!thanks && !open && view === 'todo' && (due.due.length > 0 || due.skipped.length > 0) && <section className={card}>
+        <h2 className="text-lg font-semibold">Due now · Penilaian Bulanan Pembantu Klinik</h2>
+        <p className="mt-1 text-sm text-slate-500">Clinic assistants on probation, 2 weeks after they start and in their 1st, 2nd and 3rd month. You can start these yourself; HR does not need to assign them.</p>
+        {due.due.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">Nothing is due.</p> : <ul className="mt-3 divide-y divide-slate-100">{due.due.map((item) => <li key={`${item.employeeId}|${item.stage}`} className="flex flex-wrap items-center gap-3 py-3">
+          <div className="min-w-0 flex-1"><p className="truncate font-semibold">{item.name}</p><p className="truncate text-xs text-slate-500"><span className="font-mono">{item.code}</span> · {item.stage} assessment · due {dmy(item.dueOn)} · started {dmy(item.joinDate)}</p></div>
+          <button disabled={dueBusy} onClick={() => void startDue(item)} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-4 py-2 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50"><ClipboardCheck className="h-4 w-4" />Start assessment</button>
+          <button disabled={dueBusy} onClick={() => void skipDue(item)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Not needed</button>
+        </li>)}</ul>}
+        {due.skipped.length > 0 && <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3">{due.skipped.map((item) => <li key={`${item.employeeId}|${item.stage}`} className="flex flex-wrap items-center gap-2 text-xs text-slate-400"><span>{item.name} · {item.stage}: skipped by {item.by || 'Admin Klinikal'} on {dmy(item.at.slice(0, 10))}{item.reason ? ` (${item.reason})` : ''}.</span><button disabled={dueBusy} onClick={() => void undoSkip(item)} className="font-semibold text-[#0b587b] hover:underline">Undo</button></li>)}</ul>}
       </section>}
 
       {!thanks && !open && view === 'todo' && <section className={card}>
