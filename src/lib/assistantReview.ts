@@ -26,7 +26,7 @@ const RAW_ITEMS: Omit<AssistantItem, 'points'>[] = [
 export const ASSISTANT_ITEMS: AssistantItem[] = RAW_ITEMS.map((item) => ({ ...item, points: item.note.split(' · ') }));
 export const ASSISTANT_PANEL_ITEM = ASSISTANT_ITEMS.length - 1;   // the last item asks which panels the person has mastered
 export type AssistantKind = 'locum' | 'probation';
-export type AssistantOutcome = { value: string; label: string; terms?: string[] };
+export type AssistantOutcome = { value: string; label: string; terms?: string[]; customUnit?: string; allowDate?: boolean };
 export const ASSISTANT_OUTCOMES: Record<AssistantKind, AssistantOutcome[]> = {
   locum: [
     { value: 'cemerlang', label: 'Cemerlang dan tamat tempoh', terms: ['1 minggu', '2 minggu', '4 minggu'] },
@@ -35,14 +35,14 @@ export const ASSISTANT_OUTCOMES: Record<AssistantKind, AssistantOutcome[]> = {
     { value: 'tamat_kontrak', label: 'Tamat kontrak' },
   ],
   probation: [
-    { value: 'tamat_percubaan', label: 'Menamatkan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'] },
-    { value: 'teruskan_percubaan', label: 'Meneruskan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'] },
-    { value: 'tamat_perkhidmatan', label: 'Menamatkan perkhidmatan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'] },
+    { value: 'tamat_percubaan', label: 'Menamatkan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan', allowDate: true },
+    { value: 'teruskan_percubaan', label: 'Meneruskan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan' },
+    { value: 'tamat_perkhidmatan', label: 'Menamatkan perkhidmatan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan' },
   ],
 };
 export type AssistantResult = { marks: number[]; panels: string; panelsNot?: string; kind: AssistantKind; outcome: string; term: string; position?: string };
 export const assistantTotal = (marks: (number | null)[]) => marks.reduce<number>((sum, mark) => sum + (Number(mark) || 0), 0);
-export const outcomeLabel = (kind: AssistantKind, value: string, term: string) => { const item = ASSISTANT_OUTCOMES[kind].find((option) => option.value === value); return item ? `${item.label}${term ? ` (${term})` : ''}` : ''; };
+export const outcomeLabel = (kind: AssistantKind, value: string, term: string) => { const item = ASSISTANT_OUTCOMES[kind].find((option) => option.value === value); return item ? `${item.label}${term ? ` (${termText(term)})` : ''}` : ''; };
 
 // When Review 2 is due: 2 weeks after the start date in the HR profile (the start of probation), then the 1st, 2nd and 3rd month.
 export const ASSISTANT_STAGES = ['2 weeks', '1st month', '2nd month', '3rd month'] as const;
@@ -60,3 +60,7 @@ export type SkippedAssessment = { employeeId: string; name: string; stage: strin
 export const ASSISTANT_COMPANY = { name: 'HSO Healthcare Sdn Bhd', registration: '202201004242 (1449939-U)', tin: 'C29715204010', address: ['H-7-1, Jalan PP25, Putra Walk Block H', 'Taman Pinggiran Putra, Seri Kembangan', 'Selangor'], email: 'hr@hsohealthcare.com', phone: '+60182194344' };
 // Which assessment a review is, from the due date it was started for ("2 month" as written on the paper form).
 export const ASSISTANT_STAGE_PRINT = ['2 weeks', '1 month', '2 month', '3 month'];
+
+// A period is one of the listed choices, a number of months typed in ("5 bulan") or, for ending probation at once, a date ("pada 2026-11-20").
+export const isValidTerm = (outcome: AssistantOutcome, term: string) => Boolean(outcome.terms?.includes(term)) || Boolean(outcome.customUnit && /^[1-9]\d? bulan$/.test(term)) || Boolean(outcome.allowDate && /^pada \d{4}-\d{2}-\d{2}$/.test(term));
+export const termText = (term: string) => term.startsWith('pada ') ? `pada ${term.slice(5).split('-').reverse().join('/')}` : term;

@@ -1,6 +1,6 @@
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
-import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
+import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, isValidTerm, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
 // Performance Review, served from /api/status?resource=review (the Vercel Hobby plan allows
@@ -83,7 +83,7 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
       const outcome = ASSISTANT_OUTCOMES[kind].find((option) => option.value === body.outcome);
       if (!outcome) throw fail(400, 'Choose the result of this review.');
       const term = outcome.terms ? text(body.term, 40) : '';
-      if (outcome.terms && !term) throw fail(400, 'Choose the period for this result.');
+      if (outcome.terms && !isValidTerm(outcome, term)) throw fail(400, 'Choose the period for this result (a listed period, a number of months, or a date).');
       const total = assistantTotal(marks);
       const nowAt = new Date().toISOString();
       const { data: saved, error: saveError } = await db.from('hr_reviews').update({

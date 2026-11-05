@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { card } from './AssessmentStaff';
-import { ASSISTANT_COMPANY, ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, ASSISTANT_PANEL_ITEM, ASSISTANT_STAGE_PRINT, AssistantKind, assistantDueOn, assistantTotal, outcomeLabel } from './lib/assistantReview';
+import { ASSISTANT_COMPANY, ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, ASSISTANT_PANEL_ITEM, ASSISTANT_STAGE_PRINT, AssistantKind, assistantDueOn, assistantTotal, outcomeLabel, termText } from './lib/assistantReview';
 import { ReviewFull, ReviewSummary, dmy } from './lib/performanceReview';
 
 // The monthly assessment for clinic assistants (Penilaian Bulanan Pembantu Klinik): the supervisor's form, how HR reads it, and the printed sheet.
@@ -68,7 +68,11 @@ export function AssistantReviewForm({ review, assessorName, initial, api, onDone
       <div className="inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">{([['locum', 'Prestasi lokum kontrak'], ['probation', 'Pekerja tetap percubaan']] as const).map(([value, text]) => <button type="button" key={value} onClick={() => { setKind(value); setOutcome(''); setTerm(''); }} className={`rounded-lg px-4 py-2 text-sm font-semibold ${kind === value ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{text}</button>)}</div>
       <ul className="space-y-2">{ASSISTANT_OUTCOMES[kind].map((option) => <li key={option.value} className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm">
         <label className="flex flex-1 cursor-pointer items-center gap-2 font-medium"><input type="radio" name="outcome" checked={outcome === option.value} onChange={() => { setOutcome(option.value); setTerm(''); }} className="h-4 w-4" />{option.label}</label>
-        {option.terms && outcome === option.value && <select value={term} onChange={(event) => setTerm(event.target.value)} aria-label="Period" className="h-10 rounded-xl border border-[#dce4ed] bg-white px-3 text-sm"><option value="">Period…</option>{option.terms.map((item) => <option key={item}>{item}</option>)}</select>}
+        {option.terms && outcome === option.value && <div className="flex flex-wrap items-center gap-2">
+          <select value={option.terms.includes(term) ? term : ''} onChange={(event) => setTerm(event.target.value)} aria-label="Period" className="h-10 rounded-xl border border-[#dce4ed] bg-white px-3 text-sm"><option value="">Period…</option>{option.terms.map((item) => <option key={item}>{item}</option>)}</select>
+          {option.customUnit && <><span className="text-xs text-slate-400">/</span><label className="inline-flex items-center gap-1 text-sm"><input type="number" min={1} max={99} step={1} value={/^[1-9]\d? bulan$/.test(term) && !option.terms.includes(term) ? term.split(' ')[0] : ''} onChange={(event) => setTerm(event.target.value ? `${event.target.value} ${option.customUnit}` : '')} aria-label="Other number of months" className="h-10 w-16 rounded-xl border border-[#dce4ed] px-2 text-center text-sm" />{option.customUnit}</label></>}
+          {option.allowDate && <><span className="text-xs font-bold text-slate-500">ATAU pada</span><input type="date" value={term.startsWith('pada ') ? term.slice(5) : ''} onChange={(event) => setTerm(event.target.value ? `pada ${event.target.value}` : '')} aria-label="Date" className="h-10 rounded-xl border border-[#dce4ed] bg-white px-3 text-sm" /></>}
+        </div>}
       </li>)}</ul>
     </section>
 
@@ -129,7 +133,15 @@ export function AssistantDocument({ review }: { review: ReviewFull }) {
   });
   const field = (name: string, value: string) => <p style={{ display: 'flex', gap: '2mm', borderBottom: '0.2mm solid #000', padding: '0.2mm 0', fontSize: '8pt' }}><span style={{ width: '42mm', fontWeight: 400 }}>{name}</span><span style={{ fontWeight: 700 }}>: {value}</span></p>;
   const footer = (page: number) => <p style={{ textAlign: 'center', marginTop: '2mm', fontSize: '7pt' }}>Page {page} of 3</p>;
-  const term = (option: { value: string; terms?: string[] }, mine: boolean, fallback: string, blankLabel: string) => option.terms ? <span> (<>{option.terms.map((item, at) => <span key={item}>{at ? ' / ' : ''}{mine && result?.term === item ? <strong style={{ border: '0.3mm solid #000', borderRadius: '3mm', padding: '0 1.2mm' }}>{item.replace(' ', '')}</strong> : item.replace(' ', '')}</span>)}{blankLabel ? ` / _____ ${blankLabel}` : ''}</>) </span> : null;
+  // The period of an outcome as on the paper form: the listed choices, "___ bulan" for another number, and for ending probation at once "ATAU pada ____".
+  const term = (option: { value: string; terms?: string[]; customUnit?: string; allowDate?: boolean }, mine: boolean) => {
+    if (!option.terms) return null;
+    const chosen = mine ? result?.term || '' : '';
+    const ring = (text: string) => <strong style={{ border: '0.3mm solid #000', borderRadius: '3mm', padding: '0 1.2mm' }}>{text}</strong>;
+    const custom = option.customUnit && /^[1-9]\d? bulan$/.test(chosen) && !option.terms.includes(chosen) ? chosen.split(' ')[0] : '';
+    const picked = chosen.startsWith('pada ') ? chosen.slice(5).split('-').reverse().join('/') : '';
+    return <span> ({option.terms.map((item, at) => <span key={item}>{at ? ' / ' : ''}{chosen === item ? ring(item.replace(' ', '')) : item.replace(' ', '')}</span>)}{option.customUnit ? <> / {custom ? ring(`${custom} ${option.customUnit}`) : `_____ ${option.customUnit}`}</> : null}){option.allowDate ? <> ATAU pada {picked ? ring(picked) : '__________'}</> : null}</span>;
+  };
   const box = (on: boolean) => <span className={`rv-check${on ? ' rv-on' : ''}`} />;
   return <div className="rv-print">
     <section className="rv-page">
@@ -148,9 +160,9 @@ export function AssistantDocument({ review }: { review: ReviewFull }) {
       <Letterhead page={3} />
       <p style={{ marginTop: '8mm' }}><strong>Jumlah Markah (%)</strong> : <strong style={{ borderBottom: '0.3mm solid #000', padding: '0 8mm' }}>{marks.length ? `${assistantTotal(marks)}%` : ''}</strong></p>
       <p style={{ marginTop: '6mm', fontWeight: 700 }}>Prestasi Lokum Kontrak:</p>
-      {ASSISTANT_OUTCOMES.locum.map((option) => <p key={option.value} style={{ margin: '1mm 0' }}>{box(kind === 'locum' && result?.outcome === option.value)} {option.label}{term(option, kind === 'locum' && result?.outcome === option.value, '', '')}</p>)}
+      {ASSISTANT_OUTCOMES.locum.map((option) => <p key={option.value} style={{ margin: '1mm 0' }}>{box(kind === 'locum' && result?.outcome === option.value)} {option.label}{term(option, kind === 'locum' && result?.outcome === option.value)}</p>)}
       <p style={{ marginTop: '5mm', fontWeight: 700 }}>Prestasi Pekerja Tetap Percubaan:</p>
-      {ASSISTANT_OUTCOMES.probation.map((option) => <p key={option.value} style={{ margin: '1mm 0' }}>{box(kind === 'probation' && result?.outcome === option.value)} {option.label}{term(option, kind === 'probation' && result?.outcome === option.value, '', 'bulan')}</p>)}
+      {ASSISTANT_OUTCOMES.probation.map((option) => <p key={option.value} style={{ margin: '1mm 0' }}>{box(kind === 'probation' && result?.outcome === option.value)} {option.label}{term(option, kind === 'probation' && result?.outcome === option.value)}</p>)}
       <div style={{ marginTop: '14mm' }}>
         <p style={{ display: 'flex', gap: '2mm', padding: '1mm 0' }}><span style={{ width: '32mm' }}>Tandatangan Penilai</span><span>: {review.submittedAt ? <span style={{ fontStyle: 'italic' }}>Ditandatangani secara digital</span> : ''}</span></p>
         <p style={{ display: 'flex', gap: '2mm', padding: '1mm 0' }}><span style={{ width: '32mm' }}>Nama Penilai</span><span style={{ fontWeight: 700 }}>: {review.assessorName}</span></p>
