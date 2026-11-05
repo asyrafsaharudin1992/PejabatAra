@@ -37,7 +37,7 @@ const decode = (row: any) => ({
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
   joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
   payroll: row.payroll_settings || {}, basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
-  workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveCalendarCompanies: row.leave_calendar_companies || [], leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
+  workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : /\b(DR|DOCTOR)\b/i.test(row.designation || '') ? [] : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveCalendarCompanies: row.leave_calendar_companies || [], leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
 });
 
 // Turns a profile sent by the page into a database row, checking each field.

@@ -275,7 +275,8 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
 async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date,designation').eq('assessment_staff_id', staff.id).maybeSingle();
   if (meError) throw meError;
-  const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : [1, 2, 3, 4, 5, 6];
+  // Leave is counted on the roster; where there is none a doctor who follows the doctor roster counts Monday to Friday.
+  const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : /\b(DR|DOCTOR)\b/i.test(me?.designation || '') ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6];
   if (!me) throw fail(400, 'Your sign-in is not linked to your staff record yet. Ask HR.');
   const today = malaysiaToday();
 
@@ -341,7 +342,8 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
           const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
           if (calendar[date] === false) days.push({ date, shift: 'PH', works: false });
           else if (weekday >= 1 && weekday <= 5) days.push({ date, shift: usual, works: true });
-          else days.push({ date, shift: 'REST', works: false });
+          // Office staff and admin klinikal: Saturday is the Off day, Sunday the Rest day.
+          else days.push({ date, shift: weekday === 6 ? 'OFF' : 'REST', works: false });
         }
       }
       out.push({ id: person.id, name: person.full_name, code: person.employee_code, designation: person.designation || '', doctor, days, leave: (leaveRead.data || []).filter((row: any) => row.employee_id === person.id).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
@@ -377,7 +379,7 @@ async function leaveAction(req: any, res: any, db: any, staff: { id: string }, a
       const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
       if (calendar[date] === false) rows.push({ date, shift: 'PH', works: false });
       else if (weekday >= 1 && weekday <= 5) rows.push({ date, shift: usual, works: true });
-      else rows.push({ date, shift: 'REST', works: false });
+      else rows.push({ date, shift: weekday === 6 ? 'OFF' : 'REST', works: false });
     }
     return res.status(200).json({ month, today, workDays, days: rows, leave: (leave || []).map((row: any) => ({ type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day })) });
   }

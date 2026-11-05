@@ -112,7 +112,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
     const doctor = isDoctor(person.designation);
     const required = person.clock_required || 'full';
     const mine = clocksOf.get(person.id) || [];
-    const workDays = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : [1, 2, 3, 4, 5, 6];
+    // A doctor with no usual weekdays follows the doctor roster only: without a roster row nothing is expected.
+    const workDays = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : /\b(DR|DOCTOR)\b/i.test(person.designation || '') ? [] : [1, 2, 3, 4, 5, 6];
     const push = (day: Day) => {
       const decision = decided.get(`${person.id}|${day.date}`);
       if (decision && day.otCounted > 0) { day.otStatus = decision.status; day.otApproved = decision.approved_minutes; day.otRate = Number(decision.multiplier); day.otNote = decision.note || ''; }
