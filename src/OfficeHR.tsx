@@ -1,11 +1,12 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, Link2, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
+import { HRMisc } from './HRMisc';
 import { HRReviews } from './HRReviews';
 import { HRAttendance } from './HRAttendance';
 import { HRRoster } from './HRRoster';
@@ -22,7 +23,7 @@ const PayrollCharts = lazy(() => import('./PayrollCharts').then((module) => ({ d
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos';
+type View = 'home' | 'profiles' | 'reviews' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos' | 'misc';
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
@@ -33,9 +34,10 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'payroll', label: 'Payroll', note: 'Monthly pay & payslips', icon: Banknote, tone: 'text-[#f59e0b]' },
   { id: 'memos', label: 'Memo/Guide', note: 'Memos and guides from HR', icon: BookOpen, tone: 'text-[#70d8fa]' },
+  { id: 'misc', label: 'Miscellaneous', note: 'Links, posters and notes', icon: Link2, tone: 'text-[#70d8fa]' },
   { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
+const TITLES: Record<View, string> = { misc: 'Miscellaneous', home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -151,6 +153,7 @@ export default function OfficeHR() {
         {view === 'attendance' && <HRAttendance onError={setError} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
         {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
+        {view === 'misc' && <HRMisc onError={setError} />}
         {view === 'reports' && <HRReports onError={setError} />}
       </main>
     </div>

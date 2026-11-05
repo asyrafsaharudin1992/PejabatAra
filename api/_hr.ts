@@ -513,6 +513,67 @@ export async function hrHandler(req: any, res: any) {
       if (saveError) throw saveError;
       return res.status(200).json({ success: true });
     }
+    // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
+    if (req.method === 'GET' && action === 'misc_list') {
+      const { data, error } = await db.from('hr_misc_items').select('id,kind,title,url,body,file_name,content_type,size_bytes,created_by,created_at,updated_at').order('created_at', { ascending: false }).limit(500);
+      if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ items: [], notSetUp: true }); throw error; }
+      return res.status(200).json({ items: (data || []).map((row: any) => ({ id: row.id, kind: row.kind, title: row.title, url: row.url, body: row.body, fileName: row.file_name, contentType: row.content_type, sizeBytes: row.size_bytes, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at })) });
+    }
+    // A link or a note: add one, or change one that exists.
+    if (req.method === 'POST' && action === 'misc_save') {
+      const kind = body.kind === 'note' ? 'note' : 'link';
+      const title = text(body.title, 120);
+      if (!title) throw fail(400, 'Enter a title.');
+      const url = kind === 'link' ? text(body.url, 600) : '';
+      // Only web addresses: anything else (such as javascript:) could run code when the link is clicked.
+      if (kind === 'link' && !/^https?:\/\/[^\s]+$/i.test(url)) throw fail(400, 'Enter the link starting with https:// or http://.');
+      const row = { kind, title, url, body: text(body.body, 5000), updated_at: now };
+      const id = text(body.id, 60);
+      const { error } = id
+        ? await db.from('hr_misc_items').update(row).eq('id', id).eq('kind', kind)
+        : await db.from('hr_misc_items').insert({ ...row, created_by: text(user.email || user.id, 120) });
+      if (error) throw error;
+      return res.status(200).json({ success: true });
+    }
+    // A poster: an image (PNG, JPG or WebP, up to 3 MB) kept in private storage.
+    if (req.method === 'POST' && action === 'misc_poster_upload') {
+      const title = text(body.title, 120);
+      if (!title) throw fail(400, 'Enter a title for the poster.');
+      const fileName = String(body.fileName ?? '').replace(/[\\/\u0000-\u001f]/g, '').trim().slice(0, 100);
+      const data = String(body.base64 ?? '').replace(/^data:[^,]*,/, '');
+      if (!data || data.length > Math.ceil(3 * 1024 * 1024 * 4 / 3) + 8) throw fail(400, 'The poster must be smaller than 3 MB. Reduce the image size and try again.');
+      const buffer = Buffer.from(data, 'base64');
+      const png = buffer.length > 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+      const jpg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+      const webp = buffer.length > 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+      if (!buffer.length || buffer.length > 3 * 1024 * 1024) throw fail(400, 'The poster must be smaller than 3 MB. Reduce the image size and try again.');
+      if (!png && !jpg && !webp) throw fail(400, 'The poster must be a PNG, JPG or WebP image.');
+      const contentType = png ? 'image/png' : jpg ? 'image/jpeg' : 'image/webp';
+      const path = `posters/${randomBytes(16).toString('hex')}.${png ? 'png' : jpg ? 'jpg' : 'webp'}`;
+      const { error: uploadError } = await db.storage.from('hr-misc').upload(path, buffer, { contentType, upsert: false });
+      if (uploadError) throw uploadError;
+      const { error } = await db.from('hr_misc_items').insert({ kind: 'poster', title, body: text(body.body, 2000), file_path: path, file_name: fileName || title, content_type: contentType, size_bytes: buffer.length, created_by: text(user.email || user.id, 120) });
+      if (error) { await db.storage.from('hr-misc').remove([path]); throw error; }
+      return res.status(200).json({ success: true });
+    }
+    // The poster itself, sent to the page so it can be shown, downloaded or shared (the share sheet needs the file).
+    if (req.method === 'GET' && action === 'misc_poster_get') {
+      const { data: row, error } = await db.from('hr_misc_items').select('file_path,file_name,content_type').eq('id', text(req.query.id, 60)).eq('kind', 'poster').maybeSingle();
+      if (error) throw error;
+      if (!row) throw fail(404, 'Poster not found.');
+      const { data: file, error: downloadError } = await db.storage.from('hr-misc').download(row.file_path);
+      if (downloadError || !file) throw fail(404, 'The poster file could not be found.');
+      return res.status(200).json({ fileName: row.file_name, contentType: row.content_type, base64: Buffer.from(await file.arrayBuffer()).toString('base64') });
+    }
+    if (req.method === 'POST' && action === 'misc_delete') {
+      const { data: row, error } = await db.from('hr_misc_items').select('id,kind,file_path').eq('id', text(body.id, 60)).maybeSingle();
+      if (error) throw error;
+      if (!row) throw fail(404, 'Not found.');
+      if (row.file_path) await db.storage.from('hr-misc').remove([row.file_path]);
+      const { error: deleteError } = await db.from('hr_misc_items').delete().eq('id', row.id);
+      if (deleteError) throw deleteError;
+      return res.status(200).json({ success: true });
+    }
     // HR marks sent incentive claims as received (or undoes it).
     if (req.method === 'POST' && (action === 'incentive_receive' || action === 'incentive_unreceive')) {
       const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map((id: unknown) => text(id, 60)).filter(Boolean).slice(0, 500);
