@@ -97,13 +97,13 @@ export function AssistantDetail({ review }: { review: ReviewFull }) {
 
 // The printed sheet, laid out like the paper form (three pages: items 1 to 10, items 11 to 19, then the total, the result and the signature).
 const branchOf = (code: string) => /^ARASK/i.test(code) ? 'Klinik ARA 24 Jam Seri Kembangan' : 'Klinik ARA 24 Jam Kajang';
-const cell = { border: '0.25mm solid #000', padding: '0.8mm 1.2mm', verticalAlign: 'middle' as const };
+const cell = { border: '0.25mm solid #000', padding: '0.4mm 1mm', verticalAlign: 'middle' as const, lineHeight: 1.15 };
 
 function Letterhead({ page }: { page: number }) {
   const co = ASSISTANT_COMPANY;
   return <div className="rv-letterhead" style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
-    <div style={{ flexDirection: 'row', alignItems: 'center', gap: '3mm' }}><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><strong>Klinik ARA 24 Jam</strong></div>
-    <div style={{ textAlign: 'right', fontSize: '7.5pt', lineHeight: 1.3 }}><strong style={{ fontSize: '9pt' }}>{co.name}</strong><span>{co.registration}</span><span>TIN: {co.tin}</span>{co.address.map((line) => <span key={line}>{line}</span>)}<span>{co.email} · {co.phone}</span></div>
+    <div style={{ flexDirection: 'row', alignItems: 'center', gap: '3mm' }}><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" style={{ width: '11mm', height: '11mm' }} /><strong>Klinik ARA 24 Jam</strong></div>
+    <div style={{ textAlign: 'right', fontSize: '7pt', lineHeight: 1.2 }}><strong style={{ fontSize: '9pt' }}>{co.name}</strong><span>{co.registration}</span><span>TIN: {co.tin}</span>{co.address.map((line) => <span key={line}>{line}</span>)}<span>{co.email} · {co.phone}</span></div>
     <span style={{ display: 'none' }}>{page}</span>
   </div>;
 }
@@ -121,21 +121,21 @@ export function AssistantDocument({ review }: { review: ReviewFull }) {
     const index = from + offset;
     return item.points.map((point, at) => <tr key={`${item.name}-${at}`}>
       {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textAlign: 'center' }}>{index + 1}</td>}
-      {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textTransform: 'uppercase', fontSize: '7.5pt' }}>{item.name}</td>}
-      <td style={{ ...cell, fontSize: '7.5pt' }}>{point}{index === lastIndex && at === 1 && result?.panels ? <><br /><strong>{result.panels}</strong></> : null}{index === lastIndex && at === 2 && result?.panelsNot ? <><br /><strong>{result.panelsNot}</strong></> : null}</td>
+      {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textTransform: 'uppercase', fontSize: '7pt' }}>{item.name}</td>}
+      <td style={{ ...cell, fontSize: '7pt' }}>{point}{index === lastIndex && at === 1 && result?.panels ? <><br /><strong>{result.panels}</strong></> : null}{index === lastIndex && at === 2 && result?.panelsNot ? <><br /><strong>{result.panelsNot}</strong></> : null}</td>
       {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textAlign: 'center' }}>{item.max}</td>}
-      {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textAlign: 'center', fontWeight: 700, fontSize: '10pt' }}>{marks[index] ?? ''}</td>}
+      {at === 0 && <td rowSpan={item.points.length} style={{ ...cell, textAlign: 'center', fontWeight: 700, fontSize: '9pt' }}>{marks[index] ?? ''}</td>}
     </tr>);
   });
-  const field = (name: string, value: string) => <p style={{ display: 'flex', gap: '2mm', borderBottom: '0.2mm solid #000', padding: '0.5mm 0' }}><span style={{ width: '42mm', fontWeight: 400 }}>{name}</span><span style={{ fontWeight: 700 }}>: {value}</span></p>;
-  const footer = (page: number) => <p style={{ textAlign: 'center', marginTop: '4mm', fontSize: '8pt' }}>Page {page} of 3</p>;
+  const field = (name: string, value: string) => <p style={{ display: 'flex', gap: '2mm', borderBottom: '0.2mm solid #000', padding: '0.2mm 0', fontSize: '8pt' }}><span style={{ width: '42mm', fontWeight: 400 }}>{name}</span><span style={{ fontWeight: 700 }}>: {value}</span></p>;
+  const footer = (page: number) => <p style={{ textAlign: 'center', marginTop: '2mm', fontSize: '7pt' }}>Page {page} of 3</p>;
   const term = (option: { value: string; terms?: string[] }, mine: boolean, fallback: string, blankLabel: string) => option.terms ? <span> (<>{option.terms.map((item, at) => <span key={item}>{at ? ' / ' : ''}{mine && result?.term === item ? <strong style={{ border: '0.3mm solid #000', borderRadius: '3mm', padding: '0 1.2mm' }}>{item.replace(' ', '')}</strong> : item.replace(' ', '')}</span>)}{blankLabel ? ` / _____ ${blankLabel}` : ''}</>) </span> : null;
   const box = (on: boolean) => <span className={`rv-check${on ? ' rv-on' : ''}`} />;
   return <div className="rv-print">
     <section className="rv-page">
       <Letterhead page={1} />
-      <p style={{ marginTop: '2mm', fontWeight: 700, fontSize: '10pt' }}>PENILAIAN BULANAN PEMBANTU KLINIK</p>
-      <div style={{ margin: '1mm 0 2mm' }}>{field('Nama Pekerja', review.staffName)}{field('Tarikh Mula Lapor Diri', dmy(review.periodStart))}{field('Cawangan', branchOf(review.employeeCode))}{field('Tarikh Penilaian', `${dated}${stage !== undefined ? ` (${ASSISTANT_STAGE_PRINT[stage]})` : ''}`)}</div>
+      <p style={{ marginTop: '1mm', fontWeight: 700, fontSize: '9.5pt' }}>PENILAIAN BULANAN PEMBANTU KLINIK</p>
+      <div style={{ margin: '0.5mm 0 1.5mm' }}>{field('Nama Pekerja', review.staffName)}{field('Tarikh Mula Lapor Diri', dmy(review.periodStart))}{field('Cawangan', branchOf(review.employeeCode))}{field('Tarikh Penilaian', `${dated}${stage !== undefined ? ` (${ASSISTANT_STAGE_PRINT[stage]})` : ''}`)}</div>
       <table className="rv-table" style={{ tableLayout: 'fixed' }}>{cols}{head}<tbody>{rows(0, 10)}</tbody></table>
       {footer(1)}
     </section>
