@@ -120,6 +120,10 @@ export default function OfficeHR() {
   const [error, setError] = useState('');
   const [profileTab, setProfileTab] = useState<'list' | 'projection'>('list');
   const [pendingRequests, setPendingRequests] = useState(0);
+  // Everything waiting for HR (red numbers on the menu), refreshed when the menu changes and every few minutes.
+  const [waiting, setWaiting] = useState<{ leave: number; reviews: number; incentive: number; attendanceOt: number; attendanceMissed: number }>({ leave: 0, reviews: 0, incentive: 0, attendanceOt: 0, attendanceMissed: 0 });
+  const loadWaiting = () => officeFetch('/api/status?resource=hr&action=hr_badges').then((response) => response.json()).then((result) => { if (!result.error) setWaiting(result); }).catch(() => undefined);
+  useEffect(() => { void loadWaiting(); const timer = window.setInterval(() => void loadWaiting(), 180000); return () => window.clearInterval(timer); }, [view]);
   // The number on Staff Profiles: staff change requests waiting for HR.
   useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
@@ -133,7 +137,7 @@ export default function OfficeHR() {
   };
 
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar badges={{ profiles: pendingRequests }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
+    <Sidebar badges={{ profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
     <div className="min-h-screen lg:pl-[300px]">
       <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
@@ -150,7 +154,7 @@ export default function OfficeHR() {
         {view === 'incentives' && <HRIncentives onError={setError} />}
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
-        {view === 'attendance' && <HRAttendance onError={setError} />}
+        {view === 'attendance' && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
         {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
         {view === 'misc' && <HRMisc onError={setError} />}

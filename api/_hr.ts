@@ -529,6 +529,19 @@ export async function hrHandler(req: any, res: any) {
       if (saveError) throw saveError;
       return res.status(200).json({ success: true });
     }
+    // The red numbers on the HR menu: what is waiting for HR to decide or receive. A part whose table or column is not set up yet counts as zero.
+    if (req.method === 'GET' && action === 'hr_badges') {
+      const count = async (work: () => PromiseLike<{ count: number | null; error: any }>) => { try { const { count: total, error } = await work(); return error ? 0 : total || 0; } catch { return 0; } };
+      const [leave, reviews, doctorClaims, claimsToReceive, requestsWaiting] = await Promise.all([
+        count(() => db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'supervisor_approved')),
+        count(() => db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('status', 'submitted').is('hr_received_on', null)),
+        count(() => db.from('incentive_claims').select('id', { count: 'exact', head: true }).eq('form', 'doctor').eq('status', 'submitted')),
+        count(() => db.from('incentive_claims').select('id', { count: 'exact', head: true }).not('hr_submitted_at', 'is', null).is('hr_received_at', null)),
+        db.from('hr_attendance_requests').select('reason').eq('status', 'supervisor_approved').limit(500).then((result: any) => result.error ? [] : result.data || [], () => []),
+      ]);
+      const missed = (requestsWaiting as any[]).filter((row) => /^forgot to clock/i.test(String(row.reason || '').trim())).length;
+      return res.status(200).json({ leave, reviews, incentive: doctorClaims + claimsToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
+    }
     // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
     if (req.method === 'GET' && action === 'misc_list') {
       const { data, error } = await db.from('hr_misc_items').select('id,kind,title,url,body,file_name,content_type,size_bytes,created_by,created_at,updated_at,due_on,done').order('created_at', { ascending: false }).limit(500);

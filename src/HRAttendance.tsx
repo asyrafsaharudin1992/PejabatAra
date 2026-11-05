@@ -1,3 +1,4 @@
+import { isMissedClock } from './lib/attendanceRequests';
 import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
 import { csvCell } from './lib/hrReportExport';
@@ -16,7 +17,7 @@ async function api(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
 }
-type Tab = 'today' | 'month' | 'ot' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
+type Tab = 'today' | 'month' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
 type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
 const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${minutes < 0 ? '-' : ''}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
@@ -190,18 +191,20 @@ function OtAlerts({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
-function Requests({ onError }: { onError: (message: string) => void }) {
+function Requests({ onError, kind }: { onError: (message: string) => void; kind: 'ot' | 'missed' }) {
   const [all, setAll] = useState(false);
   const [requests, setRequests] = useState<Req[] | null>(null);
   const [busy, setBusy] = useState('');
+  // This tab shows only the requests that belong to it: a missed clock (forgot to clock in or out), or OT / a rest-day request.
+  const shown = requests && requests.filter((request) => isMissedClock(request.reason) === (kind === 'missed'));
   const [rates, setRates] = useState<Record<string, string>>({});
   const load = () => { setRequests(null); api(`action=attendance_requests&status=${all ? 'all' : 'pending'}`).then((result) => { if (result.error) throw new Error(result.error); setRequests(result.requests); }).catch((cause: Error) => { setRequests([]); onError(cause.message); }); };
   useEffect(load, [all]);
   const decide = async (request: Req, decision: 'approved' | 'rejected') => { setBusy(request.id); try { const result = await api('action=attendance_request_decide', { id: request.id, decision, rate: Number(rates[request.id] || 1.5) }); if (result.error) throw new Error(result.error); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(''); } };
   const stage = (request: Req) => request.status === 'pending' ? 'Waiting for supervisor' : request.status === 'supervisor_approved' ? (request.supervisorDecidedBy ? `Supervisor approved (${request.supervisorDecidedBy}) · waiting for HR` : 'Waiting for HR') : request.status === 'approved' ? `Approved · ${request.decidedBy}${request.rate ? ` · OT ${request.rate}x` : ''}` : request.status === 'cancelled' ? 'Cancelled by staff' : `Rejected · ${request.decidedBy}`;
   return <section className={`${card} space-y-3`}>
-    <div className="flex flex-wrap items-center gap-3"><p className="flex-1 text-sm text-slate-500">Staff ask for a missed clock to be added and/or for OT hours. The supervisor approves first, then HR confirms here: confirming adds the clock and the OT (at the rate you choose) that Payroll uses. HR can also decide while the supervisor is still pending.</p><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} />Show decided too</label></div>
-    {!requests ? <p className="text-sm text-slate-500">Loading…</p> : !requests.length ? <p className="text-sm text-slate-500">{all ? 'No requests yet.' : 'Nothing waiting.'}</p> : <ul className="divide-y divide-slate-100">{requests.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
+    <div className="flex flex-wrap items-center gap-3"><p className="flex-1 text-sm text-slate-500">{kind === 'missed' ? 'Staff ask for a clock they forgot (in or out) to be added.' : 'Staff ask for OT hours or for work on a rest day.'} The supervisor approves first, then HR confirms here: confirming adds the clock and the OT (at the rate you choose) that Payroll uses. HR can also decide while the supervisor is still pending.</p><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} />Show decided too</label></div>
+    {!shown ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{all ? 'No requests yet.' : 'Nothing waiting.'}</p> : <ul className="divide-y divide-slate-100">{shown.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
       <div className="min-w-0 flex-1"><p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {[request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${request.otText}`].filter(Boolean).join(' · ')}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>{request.supervisorNote && <p className="mt-0.5 text-xs text-slate-400">Supervisor: {request.supervisorNote}</p>}</div>
       {['pending', 'supervisor_approved'].includes(request.status) ? <><span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">{stage(request)}</span>{request.otMinutes > 0 && <select aria-label={`OT rate for ${request.name}`} value={rates[request.id] || '1.5'} onChange={(event) => setRates({ ...rates, [request.id]: event.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="1">OT 1.0x</option><option value="1.5">OT 1.5x</option><option value="2">OT 2.0x</option><option value="3">OT 3.0x</option></select>}<button onClick={() => void decide(request, 'approved')} disabled={busy === request.id} className={button}>Confirm</button><button onClick={() => void decide(request, 'rejected')} disabled={busy === request.id} className={ghost}>Reject</button></> : <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{stage(request)}</span>}
     </li>)}</ul>}
@@ -382,14 +385,15 @@ function CreditHours({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
-export function HRAttendance({ onError }: { onError: (message: string) => void }) {
+export function HRAttendance({ onError, badges = {} }: { onError: (message: string) => void; badges?: { ot?: number; missed?: number } }) {
   const [tab, setTab] = useState<Tab>('today');
-  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
+  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['missed', 'Missed clock'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{tabs.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}</div>
+    <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{tabs.map(([key, label]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{(key === 'ot' ? badges.ot : key === 'missed' ? badges.missed : 0) ? <span className="ml-2 inline-grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{key === 'ot' ? badges.ot : badges.missed}</span> : null}</button>)}</div>
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
-    {tab === 'ot' && <div className="space-y-5"><Requests onError={onError} /><OtAlerts onError={onError} /></div>}
+    {tab === 'ot' && <div className="space-y-5"><Requests onError={onError} kind="ot" /><OtAlerts onError={onError} /></div>}
+    {tab === 'missed' && <Requests onError={onError} kind="missed" />}
     {tab === 'late' && <Late onError={onError} />}
     {tab === 'credit' && <CreditHours onError={onError} />}
     {tab === 'import' && <Import onError={onError} />}

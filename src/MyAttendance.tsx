@@ -1,3 +1,4 @@
+import { isMissedClock, MISSED_REASONS, OT_REASONS } from './lib/attendanceRequests';
 import { useEffect, useRef, useState } from 'react';
 import { newCode } from './lib/shiftCodes';
 import { ChevronLeft, ChevronRight, Clock3, LogIn, LogOut, MapPin } from 'lucide-react';
@@ -11,7 +12,7 @@ type Day = { date: string; code: string; startTime: string; endTime: string; inT
 type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
 type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
-const REASONS = ['Forgot to clock in', 'Forgot to clock out', 'Overtime', 'Worked on rest day / public holiday', 'Other'];
+
 const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${request.otText}`].filter(Boolean).join(' · ');
 
 const DEVICE_KEY = 'ara_clock_device';
@@ -121,30 +122,37 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { m
   const shift = state.shift; const hasShift = !!shift.startTime;
   const next = state.nextKind;
   const dates = Array.from({ length: 15 }, (_, index) => addDay(state.today, -index));
-  const requestSections = <>
-    {(waiting.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
-      <h3 className="font-semibold">Approve OT <span className="text-xs font-normal text-slate-400">· waiting for your approval</span></h3>
-      {!waiting.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
-      <ul className="divide-y divide-slate-100">{waiting.map((request) => <li key={request.id} className="py-3 text-sm">
+  // The request screens: OT (overtime, rest day) and Missed clock (forgot to clock in or out). A request shows under the one its reason belongs to.
+  const requestSections = (kind: 'ot' | 'missed') => {
+    const missed = kind === 'missed';
+    const reasons = missed ? MISSED_REASONS : OT_REASONS;
+    const mineHere = mine.filter((request) => isMissedClock(request.reason) === missed);
+    const waitingHere = waiting.filter((request) => isMissedClock(request.reason) === missed);
+    return <>
+    {(waitingHere.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
+      <h3 className="font-semibold">{missed ? 'Approve missed clock' : 'Approve OT'} <span className="text-xs font-normal text-slate-400">· waiting for your approval</span></h3>
+      {!waitingHere.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
+      <ul className="divide-y divide-slate-100">{waitingHere.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
       </li>)}</ul>
     </section>}
 
     <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">Apply OT</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: REASONS[1], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">New request</button>}</div>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
       {form && <div className="space-y-3">
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
         <div className="grid grid-cols-3 gap-3"><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">OT hours (hh:mm)</span><input type="time" value={form.otTime} onChange={(event) => setForm({ ...form, otTime: event.target.value })} className={field} /></label></div>
-        <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={REASONS.includes(form.reason) ? form.reason : 'Other'} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
+        <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={reasons.includes(form.reason) ? form.reason : reasons[0]} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Remarks (optional)</span><input value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} maxLength={500} className={field} /></label>
-        <p className="text-xs text-slate-400">Fill only what you need: the clock time you missed, the OT hours you worked, or both. Your supervisor approves first, then HR confirms.</p>
+        <p className="text-xs text-slate-400">{missed ? 'Enter the clock time you missed.' : 'Fill only what you need: the OT hours you worked, or the times of the day.'} Your supervisor approves first, then HR confirms.</p>
         <div className="flex flex-wrap gap-2"><button onClick={() => void send(false)} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => void send(true)} disabled={busy} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-[#0b587b] disabled:opacity-60">Save draft</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Close</button></div>
       </div>}
-      {mine.length > 0 && <ul className="divide-y divide-slate-100">{mine.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
+      {mineHere.length > 0 && <ul className="divide-y divide-slate-100">{mineHere.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
     </section>
   </>;
-  if (mode === 'ot') return <div className="space-y-4">{requestSections}</div>;
+  };
+  if (mode === 'ot') return <div className="space-y-4">{requestSections('ot')}</div>;
   return <div className="space-y-4">
     <section className="relative overflow-hidden rounded-[24px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-5 text-white shadow-[0_18px_40px_rgba(11,48,70,0.25)] sm:p-7">
       <i className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10" />
@@ -161,7 +169,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { m
     {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
     {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send it from the OT request tab so it can be corrected.</p>}
 
-    {mode === 'clock' && <p className="px-1 text-xs text-slate-500">Forgot to clock, or worked overtime? Use the <strong>OT request</strong> tab below.</p>}
+    {mode === 'clock' && requestSections('missed')}
+    {mode === 'clock' && <p className="px-1 text-xs text-slate-500">Worked overtime? Use the <strong>OT request</strong> tab.</p>}
 
 
     <section className={card}>
