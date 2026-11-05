@@ -55,15 +55,23 @@ async function personNames(db: any) {
 
 export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at,form_type';
 export const reviewRow = (r: any) => ({ formType: r.form_type === 'assistant' ? 'assistant' : 'standard', id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
-export const reviewFull = (r: any) => ({ ...reviewRow(r), assistant: r.assistant || {}, ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
+export const reviewFull = (r: any) => ({ ...reviewRow(r), editCount: Array.isArray(r.edit_log) ? r.edit_log.length : 0, lastEditedAt: Array.isArray(r.edit_log) && r.edit_log.length ? r.edit_log[r.edit_log.length - 1].at : null, assistant: r.assistant || {}, ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
 
 // Submits a review (the supervisor's digital signature). `allow` says whether the review is this person's to fill in.
 export async function submitReview(db: any, body: any, allow: (assigned: any) => boolean, myName: string) {
     const id = text(body.id, 60);
-    const { data: assigned, error: readError } = await db.from('hr_reviews').select('id,status,assessor_id,assessor_employee_id,assessor_name,form_type').eq('id', id).maybeSingle();
+    const { data: assigned, error: readError } = await db.from('hr_reviews').select('*').eq('id', id).maybeSingle();
     if (readError) throw readError;
     if (!assigned) throw fail(404, 'This review was not found. It may have been cancelled by HR.');
-    if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
+    // `edit` re-submits a review the supervisor already submitted: only on the day it was submitted (Malaysian time) and before HR has received it.
+    const editing = body.edit === true;
+    if (editing) {
+      if (assigned.status !== 'submitted') throw fail(409, 'Only a submitted review can be edited.');
+      if (!assigned.submitted_at || new Date(assigned.submitted_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }) !== malaysiaToday()) throw fail(409, 'A review can only be edited on the day it was submitted.');
+      if (assigned.hr_received_on) throw fail(409, 'HR has already received this review, so it can no longer be edited.');
+    } else if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
+    // What the review said before this edit, kept with who edited it and when.
+    const trail = editing ? { edit_log: [...(Array.isArray(assigned.edit_log) ? assigned.edit_log : []), { at: new Date().toISOString(), by: myName, before: { total_score: assigned.total_score, overall: assigned.overall, ratings: assigned.ratings, assistant: assigned.assistant, improvement: assigned.improvement, training: assigned.training, employee_comments: assigned.employee_comments, pip: assigned.pip, pip_remarks: assigned.pip_remarks, pip_start: assigned.pip_start, hod_name: assigned.hod_name, assessor_name: assigned.assessor_name } }] } : {};
     if (!allow(assigned)) throw fail(403, 'This review is not assigned to you.');
     // Submitting is the supervisor's digital signature, so they must confirm it.
     if (body.signed !== true) throw fail(400, 'Confirm the review and sign it before submitting.');
@@ -79,11 +87,11 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
       const total = assistantTotal(marks);
       const nowAt = new Date().toISOString();
       const { data: saved, error: saveError } = await db.from('hr_reviews').update({
-        status: 'submitted', submitted_at: nowAt, updated_at: nowAt, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
+        status: 'submitted', ...(editing ? {} : { submitted_at: nowAt }), ...trail, updated_at: nowAt, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
         // The list pages show the score on a 1 to 4 scale as a percentage (4.00 is 100%), so the 100 marks are kept as total / 25.
         total_score: Math.round(total / 25 * 100) / 100, overall: outcomeLabel(kind, outcome.value, term),
         assistant: { marks, panels: text(body.panels, 300), panelsNot: text(body.panelsNot, 300), kind, outcome: outcome.value, term, position: text(body.position, 120) },
-      }).eq('id', id).eq('status', 'pending').select('*').single();
+      }).eq('id', id).eq('status', editing ? 'submitted' : 'pending').select('*').single();
       if (saveError) throw saveError;
       return reviewFull(saved);
     }
@@ -101,11 +109,11 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
     const pip = body.pip === 'required' ? 'required' : 'not_required';
     const now = new Date().toISOString();
     const { data, error } = await db.from('hr_reviews').update({
-      status: 'submitted', submitted_at: now, updated_at: now, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
+      status: 'submitted', ...(editing ? {} : { submitted_at: now }), ...trail, updated_at: now, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
       ratings, total_score: score, overall: overall(score),
       improvement: text(body.improvement, 3000), training: text(body.training, 3000), employee_comments: text(body.employeeComments, 3000),
       pip, pip_remarks: pip === 'required' ? text(body.pipRemarks, 3000) : '', pip_start: pip === 'required' && isDate(body.pipStart) ? body.pipStart : null, hod_name: text(body.hodName, 160),
-    }).eq('id', id).eq('status', 'pending').select('*').single();
+    }).eq('id', id).eq('status', editing ? 'submitted' : 'pending').select('*').single();
     if (error) throw error;
     return reviewFull(data);
 }
@@ -118,7 +126,7 @@ export async function reviewHandler(req: any, res: any) {
     const action = text(req.query.action || body.action, 40);
 
     // ---- Supervisors: what is waiting for them, their submitted reviews, and the form.
-    if (['todo', 'mine', 'submit', 'get'].includes(action)) {
+    if (['todo', 'mine', 'submit', 'edit', 'get'].includes(action)) {
       const { db, user, profile } = await officeAccess(req, false, REVIEWER_OFFICES, true);
       const isAdmin = profile.role === 'super_admin';
       const { data: me } = await db.from('profiles').select('full_name').eq('id', user.id).maybeSingle();
@@ -147,8 +155,8 @@ export async function reviewHandler(req: any, res: any) {
         if (!data) throw fail(404, 'This review was not found.');
         return res.status(200).json({ review: reviewFull(data) });
       }
-      if (req.method === 'POST' && action === 'submit') {
-        const review = await submitReview(db, body, (assigned) => isAdmin || assigned.assessor_id === user.id, myName);
+      if (req.method === 'POST' && (action === 'submit' || action === 'edit')) {
+        const review = await submitReview(db, { ...body, edit: action === 'edit' }, (assigned) => isAdmin || assigned.assessor_id === user.id, myName);
         return res.status(200).json({ review });
       }
       throw fail(405, 'Method not allowed.');

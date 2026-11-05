@@ -9,15 +9,15 @@ const field = 'w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 
 const label = 'block text-sm font-semibold text-slate-600';
 const TOTAL_MAX = ASSISTANT_ITEMS.reduce((sum, item) => sum + item.max, 0);
 
-export function AssistantReviewForm({ review, assessorName, api, onDone, onCancel, onFailed }: { review: ReviewSummary; assessorName: string; api: (query: string, body?: unknown) => Promise<any>; onDone: (review: ReviewFull) => void; onCancel: () => void; onFailed: (cause: unknown, fallback: string) => void }) {
-  const [marks, setMarks] = useState<string[]>(() => ASSISTANT_ITEMS.map(() => ''));
-  const [panels, setPanels] = useState('');
-  const [panelsNot, setPanelsNot] = useState('');
-  const [kind, setKind] = useState<AssistantKind>('locum');
-  const [outcome, setOutcome] = useState('');
-  const [term, setTerm] = useState('');
-  const [assessor, setAssessor] = useState(assessorName);
-  const [position, setPosition] = useState('');
+export function AssistantReviewForm({ review, assessorName, initial, api, onDone, onCancel, onFailed }: { key?: string; review: ReviewSummary; assessorName: string; initial?: ReviewFull | null; api: (query: string, body?: unknown) => Promise<any>; onDone: (review: ReviewFull) => void; onCancel: () => void; onFailed: (cause: unknown, fallback: string) => void }) {
+  const [marks, setMarks] = useState<string[]>(() => ASSISTANT_ITEMS.map((_, index) => initial?.assistant?.marks?.[index] !== undefined ? String(initial.assistant.marks[index]) : ''));
+  const [panels, setPanels] = useState(initial?.assistant?.panels || '');
+  const [panelsNot, setPanelsNot] = useState(initial?.assistant?.panelsNot || '');
+  const [kind, setKind] = useState<AssistantKind>(initial?.assistant?.kind || 'locum');
+  const [outcome, setOutcome] = useState(initial?.assistant?.outcome || '');
+  const [term, setTerm] = useState(initial?.assistant?.term || '');
+  const [assessor, setAssessor] = useState(initial?.assessorName || assessorName);
+  const [position, setPosition] = useState(initial?.assistant?.position || '');
   const [signed, setSigned] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -33,7 +33,7 @@ export function AssistantReviewForm({ review, assessorName, api, onDone, onCance
     if (!signed) { setError('Tick the box to confirm and sign the review digitally.'); return; }
     setSaving(true);
     try {
-      const result = await api('action=submit', { id: review.id, marks: marks.map(Number), panels, panelsNot, kind, outcome, term: picked.terms ? term : '', assessorName: assessor, position, signed: true });
+      const result = await api(initial ? 'action=edit' : 'action=submit', { id: review.id, marks: marks.map(Number), panels, panelsNot, kind, outcome, term: picked.terms ? term : '', assessorName: assessor, position, signed: true });
       onDone(result.review);
     } catch (cause) { onFailed(cause, 'Unable to submit the review.'); }
     setSaving(false);
@@ -79,7 +79,7 @@ export function AssistantReviewForm({ review, assessorName, api, onDone, onCance
     </section>
 
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-    <div className="flex justify-end"><button disabled={saving || !complete || !picked || !signed} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-6 py-3.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{saving ? 'Submitting…' : 'Submit review'}</button></div>
+    <div className="flex justify-end"><button disabled={saving || !complete || !picked || !signed} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-6 py-3.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{saving ? 'Saving…' : initial ? 'Save changes' : 'Submit review'}</button></div>
   </form>;
 }
 

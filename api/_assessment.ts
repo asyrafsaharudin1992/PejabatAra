@@ -309,8 +309,8 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
     if (!data) throw fail(404, 'This review was not found.');
     return res.status(200).json({ review: reviewFull(data) });
   }
-  if (req.method === 'POST' && action === 'review_submit') {
-    const review = await submitReview(db, body, (assigned) => assigned.assessor_employee_id === me.id, myName);
+  if (req.method === 'POST' && (action === 'review_submit' || action === 'review_edit')) {
+    const review = await submitReview(db, { ...body, edit: action === 'review_edit' }, (assigned) => assigned.assessor_employee_id === me.id, myName);
     return res.status(200).json({ review });
   }
   // Review 2 reminders for an Admin Klinikal: what is due, start one, mark one "Not needed", or undo that.

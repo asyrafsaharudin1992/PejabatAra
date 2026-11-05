@@ -79,6 +79,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
   const [due, setDue] = useState<{ due: DueAssessment[]; skipped: SkippedAssessment[] }>({ due: [], skipped: [] });
   const [dueBusy, setDueBusy] = useState(false);
   const [copy, setCopy] = useState<ReviewFull | null>(null);
+  const [editFull, setEditFull] = useState<ReviewFull | null>(null);
   useReviewPrint(Boolean(copy), `Performance Review - ${copy?.staffName || ''} - ${copy?.periodLabel || ''}`, () => setCopy(null));
 
   const failed = (cause: unknown, fallback: string) => { if ((cause as { status?: number }).status === 401) onSignedOut(); else setError(cause instanceof Error ? cause.message : fallback); };
@@ -98,6 +99,18 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
     setError('');
     try { const result = await api(`action=get&id=${encodeURIComponent(review.id)}`); setCopy(result.review); }
     catch (cause) { failed(cause, 'Unable to open this review.'); }
+  };
+  // A submitted review can be edited on the day it was submitted, until HR has received it.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+  const canEdit = (review: ReviewSummary) => Boolean(review.submittedAt) && new Date(review.submittedAt!).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }) === today && !review.hrReceivedOn;
+  const startEdit = async (review: ReviewSummary) => {
+    setError('');
+    try {
+      const result = await api(`action=get&id=${encodeURIComponent(review.id)}`);
+      const full: ReviewFull = result.review;
+      setEditFull(full); setOpen(review); setThanks(null); setSigned(false); window.scrollTo({ top: 0 });
+      if (review.formType !== 'assistant') setForm({ ...blank(), assessorName: full.assessorName || '', ratings: full.ratings as Ratings, improvement: full.improvement || '', training: full.training || '', employeeComments: full.employeeComments || '', pip: full.pip === 'required' ? 'required' : 'not_required', pipRemarks: full.pipRemarks || '', pipStart: full.pipStart || '', hodName: full.hodName || '' });
+    } catch (cause) { failed(cause, 'Unable to open this review.'); }
   };
   const startDue = async (item: DueAssessment) => {
     setDueBusy(true); setError('');
@@ -122,7 +135,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
   const set = (patch: Partial<ReturnType<typeof blank>>) => setForm((current) => ({ ...current, ...patch }));
   const score = totalScore(form.ratings);
   const [signed, setSigned] = useState(false);
-  const start = (review: ReviewSummary) => { setOpen(review); setThanks(null); setError(''); setSigned(false); setForm({ ...blank(), assessorName: review.assessorName || '' }); window.scrollTo({ top: 0 }); };
+  const start = (review: ReviewSummary) => { setEditFull(null); setOpen(review); setThanks(null); setError(''); setSigned(false); setForm({ ...blank(), assessorName: review.assessorName || '' }); window.scrollTo({ top: 0 }); };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -132,8 +145,8 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
     if (!signed) { setError('Tick the box to confirm and sign the review digitally.'); return; }
     setSaving(true);
     try {
-      const result = await api('action=submit', { ...form, id: open.id, signed: true });
-      setThanks(result.review); setOpen(null);
+      const result = await api(editFull ? 'action=edit' : 'action=submit', { ...form, id: open.id, signed: true });
+      setThanks(result.review); setOpen(null); setEditFull(null);
       void load();
     } catch (cause) { failed(cause, 'Unable to submit the review.'); }
     setSaving(false);
@@ -185,10 +198,11 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreTone(review.totalScore)}`}>{review.totalScore?.toFixed(2)} · {percentLabel(review.totalScore)} · {review.overall?.replace(' Expectations', '')}</span>
           <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${review.hrReceivedOn ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{review.hrReceivedOn ? 'Received by HR' : 'With HR'}</span>
           <button type="button" onClick={() => void saveCopy(review)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileDown className="h-3.5 w-3.5" />Save PDF</button>
+          {canEdit(review) && <button type="button" onClick={() => void startEdit(review)} className="inline-flex items-center gap-1.5 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-sky-100">Edit</button>}
         </li>)}</ul>}
       </section>}
 
-      {!thanks && open && open.formType === 'assistant' && <AssistantReviewForm review={open} assessorName={form.assessorName} api={api} onCancel={() => setOpen(null)} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); void load(); }} />}
+      {!thanks && open && open.formType === 'assistant' && <AssistantReviewForm key={`${open.id}-${editFull ? 'edit' : 'new'}`} review={open} assessorName={form.assessorName} initial={editFull} api={api} onCancel={() => { setOpen(null); setEditFull(null); }} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); setEditFull(null); void load(); }} />}
       {!thanks && open && open.formType !== 'assistant' && <form onSubmit={submit} className="space-y-6">
         <section className={card}>
           <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">Staff being reviewed</h2><button type="button" onClick={() => setOpen(null)} className="text-sm font-semibold text-slate-500 hover:text-[#0b587b]">Back to list</button></div>
