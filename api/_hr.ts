@@ -373,13 +373,13 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, days });
     }
 
-    // The WhatsApp message HR sends to staff (Contact staf): one template shared by every HR user, kept in the HR settings (text only, no numbers).
+    // The WhatsApp message HR sends to staff (Contact staff): one template shared by every HR user, kept in the HR settings (text only, no numbers).
     if (action === 'contact_message' || action === 'contact_message_save' || action === 'contact_log' || action === 'contact_log_add') {
       const KEY = 'hr_contact_message', LOG_KEY = 'hr_contact_log', HR_BRANCH = 'AraOffice HR Private';
       let branch: string | null;
       try { branch = await branchId(db, HR_BRANCH, req.method === 'POST'); }
       catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, HR_BRANCH, false); }
-      // The record of messages sent from Contact staf: when, by whom, to whom (names and codes only, never phone numbers) and the text. Newest first, last 100.
+      // The record of messages sent from Contact staff: when, by whom, to whom (names and codes only, never phone numbers) and the text. Newest first, last 100.
       if (action === 'contact_log' || action === 'contact_log_add') {
         const read = branch ? await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', LOG_KEY).maybeSingle() : { data: null, error: null };
         if (read.error) throw read.error;
