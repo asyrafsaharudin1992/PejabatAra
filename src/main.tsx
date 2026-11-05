@@ -10,11 +10,12 @@ const syncPhoneScale = () => document.documentElement.classList.toggle('compact-
 syncPhoneScale(); window.addEventListener('hashchange', syncPhoneScale);
 // Split desktop + phone preview, only when running locally with `npm run dev` (not part of the live build).
 const DevShell = import.meta.env.DEV ? lazy(() => import('./DevPhoneView.tsx')) : null;
+const AttendanceDemo = import.meta.env.DEV && new URLSearchParams(window.location.search).has('attendanceDemo') ? lazy(() => import('./DevAttendanceDemo.tsx')) : null;
 const LocationDemo = import.meta.env.DEV && new URLSearchParams(window.location.search).has('locationDemo') ? lazy(() => import('./DevLocationDemo.tsx')) : null;
 const app = <OfficeLobby />;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {LocationDemo ? <Suspense fallback={null}><LocationDemo /></Suspense> : DevShell ? <Suspense fallback={null}><DevShell>{app}</DevShell></Suspense> : app}
+    {AttendanceDemo ? <Suspense fallback={null}><AttendanceDemo /></Suspense> : LocationDemo ? <Suspense fallback={null}><LocationDemo /></Suspense> : DevShell ? <Suspense fallback={null}><DevShell>{app}</DevShell></Suspense> : app}
   </StrictMode>,
 );
