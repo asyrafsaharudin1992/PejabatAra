@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Upload, Printer } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { newCode } from './lib/shiftCodes';
+import { ROSTER_NOTICE, showsRosterNotice } from './lib/rosterNotice';
 import { Pager, usePaged } from './Pager';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { usePrintSheet } from './IncentiveSheet';
@@ -145,6 +146,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
       <footer>{(codes === 'original' ? OLD_CODES : [...(group === 'doctors' ? DOCTOR_CODES : STAFF_CODES), ...OTHER_CODES]).map(([code, label]) => <span key={`${code}-${label}`}><b>{code}</b>: {label}</span>)}<span>· = No roster</span></footer>
     </div></PrintPage>)}</PrintPortal>}
 
+    {showsRosterNotice(month) && <p className="rounded-2xl bg-amber-50 p-3 text-sm leading-6 text-amber-900">{ROSTER_NOTICE}</p>}
     <section className={`${card} space-y-4`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">

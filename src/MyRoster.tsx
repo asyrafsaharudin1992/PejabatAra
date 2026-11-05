@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { newCode } from './lib/shiftCodes';
+import { ROSTER_NOTICE, showsRosterNotice } from './lib/rosterNotice';
 
 // My roster inside Individual Sign In: the signed-in person's own duty roster for a month, as a calendar and a list,
 // with their approved leave on top. Other people's rosters are not shown here.
@@ -59,6 +60,7 @@ export default function MyRoster({ companies = [] }: { companies?: string[] }) {
       <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
       {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-auto text-sm font-semibold text-[#0b587b]">This month</button>}
     </div>
+    {showsRosterNotice(month) && <p className="rounded-2xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">{ROSTER_NOTICE}</p>}
     {teamView && <TeamRoster company={scope} month={month} />}
     {!teamView && error && <p className="rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
     {!teamView && !data && !error && <p className="text-sm text-slate-500">Loading…</p>}
