@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Send, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
-import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE, IncentiveForm } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
 import { PrintPage, PrintPortal } from './PrintPortal';
 
@@ -11,7 +11,7 @@ import { PrintPage, PrintPortal } from './PrintPortal';
 // Refresh is pressed; nothing polls.
 const API = '/api/status?resource=clinical';
 const APPROVER_KEY = 'ara_incentive_approver';
-export type Claim = { hrSubmittedAt?: string | null; hrSubmittedBy?: string; hrReceivedAt?: string | null; hrReceivedBy?: string; id: string; month: string; branch: string; staffName: string; staffCode: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
+export type Claim = { form?: IncentiveForm; approver?: string; hrSubmittedAt?: string | null; hrSubmittedBy?: string; hrReceivedAt?: string | null; hrReceivedBy?: string; id: string; month: string; branch: string; staffName: string; staffCode: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
 
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 7);
 const shiftMonth = (month: string, by: number) => { const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 + by; return `${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`; };
@@ -203,7 +203,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
           const rejected = entry.review === 'rejected';
           return <Fragment key={entry.id}><tr className={rejected ? 'bg-rose-50/40 text-slate-400' : entry.review === 'approved' ? 'bg-emerald-50/30' : ''}>
             <td className={`whitespace-nowrap py-2.5 pr-3 ${rejected ? 'line-through' : ''}`}>{dmy(entry.date)}</td><td className={`pr-3 ${rejected ? 'line-through' : ''}`}>{entry.patient || '—'}</td><td className={`pr-3 font-mono text-xs ${rejected ? 'line-through' : ''}`}>{entry.clinicId || '—'}</td><td className="pr-3 text-xs">{entry.outstanding || ''}</td>
-            <td className={`pr-3 ${rejected ? 'line-through' : ''}`}><span className="font-mono text-xs font-bold text-[#0b587b]">{entry.code}</span> <span className="text-xs text-slate-500">{codeName(entry.code)}</span></td>
+            <td className={`pr-3 ${rejected ? 'line-through' : ''}`}><span className="font-mono text-xs font-bold text-[#0b587b]">{entry.code}</span> <span className="text-xs text-slate-500">{codeName(entry.code, entry.form)}</span></td>
             <td className={`pr-3 text-right font-semibold ${rejected ? 'line-through' : ''}`}>{entry.rm.toFixed(2)}</td>
             <td className="whitespace-nowrap py-1.5 text-center">{open
               ? <span className="inline-flex gap-1">{markButton(entry, 'approved')}{markButton(entry, 'rejected')}</span>

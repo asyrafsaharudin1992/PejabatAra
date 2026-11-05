@@ -19,6 +19,7 @@ const claimMonths = () => { const months: string[] = []; for (let month = thisMo
 export function HRIncentives({ onError, embedded = false }: { onError: (message: string) => void; embedded?: boolean }) {
   const [month, setMonth] = useState(() => { const start = new Date().getDate() <= 10 ? shiftMonth(thisMonth(), -1) : thisMonth(); return start < '2026-10' ? '2026-10' : start; });
   const [branch, setBranch] = useState('');
+  const [kind, setKind] = useState('');
   const [name, setName] = useState('');
   const [claims, setClaims] = useState<Claim[] | null>(null);
   const [notSetUp, setNotSetUp] = useState(false);
@@ -40,10 +41,10 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
 
   const branches = [...new Set((claims || []).map((claim) => claim.branch))].sort();
   const words = name.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = (claims || []).filter((claim) => (!branch || claim.branch === branch) && (!state || (state === 'received' ? !!claim.hrReceivedAt : !claim.hrReceivedAt)) && words.every((word) => `${claim.staffName} ${claim.staffCode}`.toLowerCase().includes(word)))
+  const shown = (claims || []).filter((claim) => (!branch || claim.branch === branch) && (!kind || (kind === 'doctor' ? claim.form === 'doctor' : claim.form !== 'doctor')) && (!state || (state === 'received' ? !!claim.hrReceivedAt : !claim.hrReceivedAt)) && words.every((word) => `${claim.staffName} ${claim.staffCode}`.toLowerCase().includes(word)))
     .sort((a, b) => b.month.localeCompare(a.month) || a.branch.localeCompare(b.branch) || a.staffName.localeCompare(b.staffName));
   const entries = shown.flatMap((claim) => claim.entries);
-  const waiting = shown.filter((claim) => !claim.hrReceivedAt);
+  const waiting = shown.filter((claim) => !claim.hrReceivedAt && claim.hrSubmittedAt);
   // Marks claims received (or undoes it) and shows the result straight away.
   const mark = async (ids: string[], receive: boolean) => {
     if (receive && ids.length > 1 && !window.confirm(`Mark ${ids.length} claims as received by HR?`)) return;
@@ -58,6 +59,20 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
     } catch (cause) { const message = cause instanceof Error ? cause.message : 'Unable to save.'; setProblem(message); onError(message); }
     finally { setBusy(false); }
   };
+  // Dr Syafiq (or Dr Asyraf for Dr Syafiq's own claim) approves or returns a doctor claim.
+  const decide = async (claim: Claim, decision: 'approve' | 'return') => {
+    let note = '';
+    if (decision === 'return') { note = (window.prompt(`Why is this claim returned to ${claim.staffName}?`) || '').trim(); if (!note) return; }
+    else if (!window.confirm(`Approve ${claim.staffName}'s ${monthLabel(claim.month)} claim (${rm(claimTotal(claim.entries))}) as ${claim.approver}?`)) return;
+    setBusy(true); setProblem('');
+    try {
+      const response = await officeFetch('/api/status?resource=hr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'incentive_doctor_decide', id: claim.id, decision, as: claim.approver, note }) });
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      load();
+    } catch (cause) { const message = cause instanceof Error ? cause.message : 'Unable to save.'; setProblem(message); onError(message); }
+    finally { setBusy(false); }
+  };
   const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm';
   const sent = (claim: Claim) => claim.hrSubmittedAt ? new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB') : '';
 
@@ -67,6 +82,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} min-w-[200px] flex-1`} />
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{claimMonths().map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select>
       <select value={state} onChange={(event) => setState(event.target.value)} aria-label="Status" className={field}><option value="">All</option><option value="waiting">Not received yet</option><option value="received">Received</option></select>
+      <select value={kind} onChange={(event) => setKind(event.target.value)} aria-label="Type" className={field}><option value="">All types</option><option value="staff">CA</option><option value="doctor">Doctor</option></select>
       <select value={branch} onChange={(event) => setBranch(event.target.value)} aria-label="Branch" className={field}><option value="">All branches</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select>
       <button onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Incentive flow</button>
       <button onClick={() => setRatesOpen(!ratesOpen)} aria-expanded={ratesOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Settings className="h-3.5 w-3.5" />Incentive rates</button>
@@ -98,15 +114,17 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Month</th><th className="py-2 pr-4 text-right font-semibold">Entries</th><th className="py-2 pr-4 text-right font-semibold">Claimed (RM)</th><th className="py-2 pr-4 text-right font-semibold">Approved (RM)</th><th className="py-2 pr-4 font-semibold">Approved by</th><th className="py-2 pr-4 font-semibold">Sent to HR</th><th className="py-2 font-semibold">HR</th></tr></thead>
           <tbody>{shown.map((claim) => <Fragment key={claim.id}>
             <tr onClick={() => setOpenId(openId === claim.id ? '' : claim.id)} className="cursor-pointer border-b border-slate-50 hover:bg-[#f4fafd]">
-              <td className="py-3 pr-4"><p className="flex items-center gap-1.5 font-semibold"><ChevronDown className={`h-4 w-4 text-slate-300 transition ${openId === claim.id ? 'rotate-180' : ''}`} />{claim.staffName}</p><p className="ml-5 text-xs text-slate-400">{claim.branch} · {claim.staffCode}</p></td>
+              <td className="py-3 pr-4"><p className="flex items-center gap-1.5 font-semibold"><ChevronDown className={`h-4 w-4 text-slate-300 transition ${openId === claim.id ? 'rotate-180' : ''}`} />{claim.staffName}</p><p className="ml-5 text-xs text-slate-400">{claim.branch} · {claim.staffCode}{claim.form === 'doctor' && <span className="ml-1.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">Doctor</span>}</p></td>
               <td className="py-3 pr-4">{monthLabel(claim.month)}</td><td className="py-3 pr-4 text-right">{claim.entries.length}</td><td className="py-3 pr-4 text-right">{claimTotal(claim.entries).toFixed(2)}</td><td className="py-3 pr-4 text-right font-semibold text-emerald-700">{approvedTotal(claim.entries).toFixed(2)}</td>
               <td className="py-3 pr-4 text-xs text-slate-600">{claim.approvedBy}</td><td className="py-3 text-xs text-slate-600">{sent(claim)}{claim.hrSubmittedBy ? <span className="block text-slate-400">by {claim.hrSubmittedBy}</span> : null}</td>
-              <td className="py-3 pr-4 text-xs" onClick={(event) => event.stopPropagation()}>{claim.hrReceivedAt
+              <td className="py-3 pr-4 text-xs" onClick={(event) => event.stopPropagation()}>{!claim.hrSubmittedAt
+                ? <span><span className="inline-block rounded-full bg-amber-50 px-2.5 py-1 font-bold text-amber-800">Waiting for {claim.approver || 'approval'}</span><span className="mt-1 flex gap-1.5"><button onClick={() => void decide(claim, 'approve')} disabled={busy} className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">Approve</button><button onClick={() => void decide(claim, 'return')} disabled={busy} className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50">Return</button></span></span>
+                : claim.hrReceivedAt
                 ? <span><span className="inline-block rounded-full bg-teal-50 px-2.5 py-1 font-bold text-teal-700">Received {new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}</span>{claim.hrReceivedBy && <span className="block text-slate-400">by {claim.hrReceivedBy}</span>}<button onClick={() => void mark([claim.id], false)} disabled={busy} className="mt-1 inline-flex items-center gap-1 text-slate-400 hover:text-rose-600 disabled:opacity-50"><Undo2 className="h-3 w-3" />Undo</button></span>
                 : <button onClick={() => void mark([claim.id], true)} disabled={busy} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">Mark received</button>}</td>
             </tr>
             {openId === claim.id && <tr><td colSpan={8} className="bg-slate-50/60 px-4 py-3"><table className="w-full text-xs"><thead className="text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="py-1 text-left">Date</th><th className="text-left">Patient</th><th className="text-left">Code</th><th className="text-right">RM</th><th className="text-right">Clinic check</th></tr></thead>
-              <tbody>{claim.entries.map((entry) => <tr key={entry.id} className={entry.review === 'rejected' ? 'text-slate-400 line-through' : ''}><td className="py-1">{dmy(entry.date)}</td><td>{entry.patient || '—'}</td><td><span className="font-mono font-bold text-[#0b587b]">{entry.code}</span> {codeName(entry.code)}</td><td className="text-right">{entry.rm.toFixed(2)}</td><td className="text-right no-underline">{entry.review === 'approved' ? '✓ Approved' : entry.review === 'rejected' ? '✗ Not approved' : ''}</td></tr>)}</tbody></table>
+              <tbody>{claim.entries.map((entry) => <tr key={entry.id} className={entry.review === 'rejected' ? 'text-slate-400 line-through' : ''}><td className="py-1">{dmy(entry.date)}</td><td>{entry.patient || '—'}</td><td><span className="font-mono font-bold text-[#0b587b]">{entry.code}</span> {codeName(entry.code, entry.form)}</td><td className="text-right">{entry.rm.toFixed(2)}</td><td className="text-right no-underline">{entry.review === 'approved' ? '✓ Approved' : entry.review === 'rejected' ? '✗ Not approved' : ''}</td></tr>)}</tbody></table>
               {claim.adminNote && <p className="mt-2 text-xs text-slate-500">Clinical Admin note: {claim.adminNote}</p>}</td></tr>}
           </Fragment>)}</tbody>
         </table>}

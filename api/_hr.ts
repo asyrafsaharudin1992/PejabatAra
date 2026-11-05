@@ -2,7 +2,7 @@ import { randomBytes, scryptSync } from 'node:crypto';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { LEAVE_TYPES, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
-import { INCENTIVE_CODES } from '../src/lib/incentiveCodes.js';
+import { codesOf } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
@@ -449,26 +449,38 @@ export async function hrHandler(req: any, res: any) {
     if (req.method === 'GET' && action === 'incentives') {
       const month = text(req.query.month, 7);
       if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
-      let query = db.from('incentive_claims').select('id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by,assessment_staff(name,staff_code)').not('hr_submitted_at', 'is', null);
-      if (month !== 'all') query = query.eq('month', month);
-      const { data, error } = await query.order('month', { ascending: false }).order('hr_submitted_at', { ascending: false });
+      // Claims sent to HR, plus doctor claims waiting for Dr Syafiq's approval (they come straight to HR). The form column is new: without it there are no doctor claims.
+      const columns = 'id,staff_id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by,assessment_staff(name,staff_code)';
+      const read = async (withForm: boolean) => {
+        let query = db.from('incentive_claims').select(withForm ? `${columns},form` : columns);
+        query = withForm ? query.or('hr_submitted_at.not.is.null,and(form.eq.doctor,status.eq.submitted)') : query.not('hr_submitted_at', 'is', null);
+        if (month !== 'all') query = query.eq('month', month);
+        return await query.order('month', { ascending: false }).order('submitted_at', { ascending: false });
+      };
+      let { data, error } = await read(true);
+      if (error?.code === '42703') ({ data, error } = await read(false));
       if (error?.code === '42703') return res.status(200).json({ claims: [], notSetUp: true });
       if (error) throw error;
-      return res.status(200).json({ claims: (data || []).map((row: any) => ({ id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+      // Who approves a doctor claim still waiting: Dr Syafiq, except Dr Syafiq's own claim (Dr Asyraf).
+      const waitingStaff = (data || []).filter((row: any) => row.form === 'doctor' && row.status === 'submitted').map((row: any) => row.staff_id);
+      const owners = new Map<string, string>();
+      if (waitingStaff.length) { const { data: people } = await db.from('hr_employees').select('employee_code,assessment_staff_id').in('assessment_staff_id', waitingStaff); (people || []).forEach((person: any) => owners.set(person.assessment_staff_id, person.employee_code)); }
+      return res.status(200).json({ claims: (data || []).map((row: any) => ({ approver: row.form === 'doctor' && row.status === 'submitted' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
     }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
     // HR sets a new rate for one or more codes from the 1st of a month (this month or later). Entries already added keep the rate they were saved with.
     if (req.method === 'POST' && action === 'incentive_rate_set') {
       const wanted: string[] = [...new Set<string>((Array.isArray(body.codes) ? body.codes : [body.code]).map((item: unknown) => text(item, 10)).filter(Boolean))].slice(0, 60);
-      const codes = wanted.map((item) => INCENTIVE_CODES.find((code) => code.code === item));
+      const form = body.form === 'doctor' ? 'doctor' : 'staff';
+      const codes = wanted.map((item) => codesOf(form).find((code) => code.code === item));
       if (!codes.length || codes.some((code) => !code || code.ownAmount)) throw fail(400, 'Choose codes that have a fixed rate.');
       const rate = Math.round(Number(body.rate) * 100) / 100;
       if (!Number.isFinite(rate) || rate <= 0 || rate > 2000) throw fail(400, 'Enter the new rate in RM (more than 0, up to 2000).');
       const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
       if (!isDate(body.effectiveFrom) || !body.effectiveFrom.endsWith('-01') || body.effectiveFrom.slice(0, 7) < today.slice(0, 7)) throw fail(400, 'Choose the month the new rate starts, this month or later.');
-      const { error } = await db.from('hr_incentive_rates').upsert(codes.map((code) => ({ code: code!.code, rate, effective_from: body.effectiveFrom, set_by: text(user.email || user.id, 120) })), { onConflict: 'code,effective_from' });
-      if (error?.code === '42P01' || error?.code === 'PGRST205') throw fail(503, 'Rate changes are not set up yet. System Admin needs to run the latest database migration first.');
+      const { error } = await db.from('hr_incentive_rates').upsert(codes.map((code) => ({ form, code: code!.code, rate, effective_from: body.effectiveFrom, set_by: text(user.email || user.id, 120) })), { onConflict: 'form,code,effective_from' });
+      if (['42P01', 'PGRST205', '42703', '42P10'].includes(error?.code)) throw fail(503, 'Rate changes are not set up yet. System Admin needs to run the latest database migration first.');
       if (error) throw error;
       return res.status(200).json({ success: true, updated: codes.length });
     }
@@ -477,6 +489,28 @@ export async function hrHandler(req: any, res: any) {
       const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
       const { error } = await db.from('hr_incentive_rates').delete().eq('id', text(body.id, 60)).gt('effective_from', today);
       if (error) throw error;
+      return res.status(200).json({ success: true });
+    }
+    // Doctor claims are approved here, not by Clinical Admin: Dr Syafiq approves every doctor's claim, and Dr Asyraf approves Dr Syafiq's own.
+    // An approved claim joins the claims sent to HR (ready to be marked Received); a returned one goes back to the doctor with the reason.
+    if (req.method === 'POST' && action === 'incentive_doctor_decide') {
+      const { data: claim, error } = await db.from('incentive_claims').select('id,status,form,entries,staff_id').eq('id', text(body.id, 60)).maybeSingle();
+      if (error) throw error;
+      if (!claim || claim.form !== 'doctor') throw fail(404, 'Claim not found.');
+      if (claim.status !== 'submitted') throw fail(409, 'This claim is not waiting for approval.');
+      const { data: owner } = await db.from('hr_employees').select('employee_code').eq('assessment_staff_id', claim.staff_id).maybeSingle();
+      const approver = owner?.employee_code === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq';
+      if (text(body.as, 40) !== approver) throw fail(403, `This claim is approved by ${approver}.`);
+      const note = text(body.note, 300);
+      if (body.decision === 'return') {
+        if (!note) throw fail(400, 'Say why the claim is returned.');
+        const { error: saveError } = await db.from('incentive_claims').update({ status: 'returned', admin_note: note, approved_by: '', decided_at: now, updated_at: now }).eq('id', claim.id);
+        if (saveError) throw saveError;
+        return res.status(200).json({ success: true });
+      }
+      const entries = (claim.entries || []).map((entry: any) => ({ ...entry, review: 'approved', reason: '' }));
+      const { error: saveError } = await db.from('incentive_claims').update({ status: 'approved', entries, admin_note: note, approved_by: approver, decided_at: now, hr_submitted_at: now, hr_submitted_by: approver, updated_at: now }).eq('id', claim.id);
+      if (saveError) throw saveError;
       return res.status(200).json({ success: true });
     }
     // HR marks sent incentive claims as received (or undoes it).

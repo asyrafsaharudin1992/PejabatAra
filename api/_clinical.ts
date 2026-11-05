@@ -124,6 +124,14 @@ async function overview(db: any, scope: Branch[]) {
 
 // One month of what the branch's Clinical Admin did: the daily checklists, ad hoc tasks
 // finished, monthly tasks ticked and deliveries received. Read only, loaded per month.
+// A doctor claim (form column; before its migration there are none).
+async function isDoctorClaim(db: any, id: string) {
+  const { data, error } = await db.from('incentive_claims').select('form').eq('id', id).maybeSingle();
+  if (error?.code === '42703') return false;
+  if (error) throw error;
+  return data?.form === 'doctor';
+}
+
 async function history(db: any, branch: Branch, month: string) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
   const first = `${month}-01`;
@@ -202,10 +210,12 @@ export async function clinicalHandler(req: any, res: any) {
       const month = text(req.query.month, 7);
       if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
       // hr_submitted_at is new: until its migration is run the claims are read without it.
-      const read = async (columns: string) => { let query = db.from('incentive_claims').select(columns).in('branch', names); if (month !== 'all') query = query.eq('month', month); return await query.order('month', { ascending: false }).order('submitted_at', { ascending: true, nullsFirst: false }); };
+      // Doctor claims are not Clinical Admin's: they go straight to HR. The form column is new, so without it every claim is a staff claim.
+      const read = async (columns: string, staffOnly: boolean) => { let query = db.from('incentive_claims').select(columns).in('branch', names); if (staffOnly) query = query.neq('form', 'doctor'); if (month !== 'all') query = query.eq('month', month); return await query.order('month', { ascending: false }).order('submitted_at', { ascending: true, nullsFirst: false }); };
       const base = 'id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,assessment_staff(name,staff_code)';
-      let result: any = await read(`${base},hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by`);
-      if (result.error?.code === '42703') result = await read(base);
+      let result: any = await read(`${base},hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by`, true);
+      if (result.error?.code === '42703') result = await read(`${base},hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by`, false);
+      if (result.error?.code === '42703') result = await read(base, false);
       const { data, error } = result;
       if (error) throw error;
       return res.status(200).json({ claims: (data || []).map((row: any) => ({ hrSubmittedAt: row.hr_submitted_at || null, hrSubmittedBy: row.hr_submitted_by || '', hrReceivedAt: row.hr_received_at || null, hrReceivedBy: row.hr_received_by || '', id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
@@ -218,6 +228,7 @@ export async function clinicalHandler(req: any, res: any) {
       const { data: claim, error } = await db.from('incentive_claims').select('id,branch,status,entries').eq('id', text(body.id)).maybeSingle();
       if (error) throw error;
       if (!claim || !scope.some((branch) => branch.name === claim.branch)) throw fail(404, 'Claim not found.');
+      if (await isDoctorClaim(db, claim.id)) throw fail(403, 'Doctor claims are approved in HR, not here.');
       if (claim.status === 'approved') throw fail(409, 'This claim is already approved. Return it first to change an entry.');
       const entryId = text(body.entryId, 60);
       const review = body.review === 'approved' || body.review === 'rejected' ? body.review : null;
@@ -240,6 +251,7 @@ export async function clinicalHandler(req: any, res: any) {
       const { data: claim, error } = await db.from('incentive_claims').select('id,branch,status').eq('id', text(body.id)).maybeSingle();
       if (error) throw error;
       if (!claim || !scope.some((branch) => branch.name === claim.branch)) throw fail(404, 'Claim not found.');
+      if (await isDoctorClaim(db, claim.id)) throw fail(403, 'Doctor claims are approved in HR, not here.');
       // A claim can be approved before the staff member submits it; an approved claim can only be returned.
       if (body.decision === 'return') {
         // Once HR has received a claim it is no longer Clinical Admin's to take back (before the migration there is no such column).

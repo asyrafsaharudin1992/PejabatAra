@@ -3,12 +3,12 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, FileDown, FileText, LogOu
 import { assessmentFetch, PageShell, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
 import { PrintPortal } from './PrintPortal';
-import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
 // phones like the Assessment Room (same session), add each procedure as they do it,
 // and submit the month's claim for their Clinical Admin to approve.
-type Claim = { month: string; branch: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
+type Claim = { form?: IncentiveForm; month: string; branch: string; entries: IncentiveEntry[]; status: IncentiveStatus; adminNote: string; approvedBy: string; submittedAt: string | null; decidedAt: string | null };
 type History = { month: string; status: IncentiveStatus; total: number; count: number }[];
 
 const FIRST_MONTH = '2026-10';
@@ -35,17 +35,19 @@ function AddEntry({ claim, rates, onAdded, onError }: { key?: string; claim: Cla
   const [clinicId, setClinicId] = useState('');
   const [outstanding, setOutstanding] = useState('');
   const [amount, setAmount] = useState('');
+  const [commission, setCommission] = useState('');
+  const doctor = claim.form === 'doctor';
   const [saving, setSaving] = useState(false);
-  const chosen = INCENTIVE_CODES.find((item) => item.code === code);
-  const procedure = !chosen || /^(\d|L)/.test(chosen.code);
+  const chosen = codesOf(claim.form).find((item) => item.code === code);
+  const procedure = doctor || !chosen || /^(\d|L)/.test(chosen.code);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); onError('');
     try {
-      const result = await assessmentFetch('action=incentive_add', { method: 'POST', body: JSON.stringify({ month: claim.month, branch: claim.branch, entry: { date, code, patient, clinicId, outstanding, rm: amount } }) });
+      const result = await assessmentFetch('action=incentive_add', { method: 'POST', body: JSON.stringify({ month: claim.month, branch: claim.branch, entry: { date, code, patient, clinicId, outstanding, rm: amount, commission } }) });
       onAdded(result.claim);
       // Keep the date and code: staff often add several of the same in a row.
-      setPatient(''); setClinicId(''); setOutstanding(''); setAmount('');
+      setPatient(''); setClinicId(''); setOutstanding(''); setAmount(''); setCommission('');
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to add.'); }
     finally { setSaving(false); }
   };
@@ -56,13 +58,14 @@ function AddEntry({ claim, rates, onAdded, onError }: { key?: string; claim: Cla
       <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Code incentive</span>
         <select required value={code} onChange={(event) => setCode(event.target.value)} className={field}>
           <option value="">Choose…</option>
-          {INCENTIVE_GROUPS.map((group) => <optgroup key={group} label={group}>{INCENTIVE_CODES.filter((item) => item.group === group).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${rateOn(item.code, date, rates)})`}</option>)}</optgroup>)}
+          {groupsOf(claim.form).map((group) => <optgroup key={group} label={group}>{codesOf(claim.form).filter((item) => item.group === group).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${rateOn(item.code, date, rates, claim.form)})`}</option>)}</optgroup>)}
         </select>
       </label>
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Date</span><input required type="date" min={`${claim.month}-01`} max={lastDay} value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label>
       {chosen?.ownAmount && <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Amount (RM)</span><input required type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} className={field} /></label>}
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Patient name{procedure ? '' : ' (optional)'}</span><input required={procedure} value={patient} onChange={(event) => setPatient(event.target.value)} className={field} /></label>
-      <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Patient clinic ID{procedure ? '' : ' (optional)'}</span><input required={procedure} value={clinicId} onChange={(event) => setClinicId(event.target.value)} className={`${field} font-mono`} /></label>
+      <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">{doctor ? 'Patient I/C / passport (optional)' : `Patient clinic ID${procedure ? '' : ' (optional)'}`}</span><input required={procedure && !doctor} value={clinicId} onChange={(event) => setClinicId(event.target.value)} className={`${field} font-mono`} /></label>
+      {doctor && <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Sales commission (RM, optional)</span><input type="number" inputMode="decimal" min="0" step="0.01" value={commission} onChange={(event) => setCommission(event.target.value)} className={field} /></label>}
       <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Outstanding payment (optional)</span><input value={outstanding} onChange={(event) => setOutstanding(event.target.value)} placeholder="e.g. RM 20 belum bayar" className={field} /></label>
     </div>
     <button disabled={saving} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-semibold text-white hover:bg-[#083a55] disabled:opacity-60"><Plus className="h-4 w-4" />{saving ? 'Adding…' : 'Add to claim'}</button>
@@ -77,7 +80,7 @@ function ViewForm({ claim, onClose }: { claim: SheetClaim; onClose: () => void }
   return <div className="fixed inset-0 z-[80] overflow-y-auto bg-slate-900/70 p-3 backdrop-blur-sm sm:p-6" onClick={onClose}>
     <div className="mx-auto max-w-[1180px]" onClick={(event) => event.stopPropagation()}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <p className="mr-auto text-sm font-semibold text-white">{monthLabel(claim.month)} · Staff incentives form</p>
+        <p className="mr-auto text-sm font-semibold text-white">{monthLabel(claim.month)} · {claim.form === 'doctor' ? 'Doctor' : 'Staff'} incentives form</p>
         <button onClick={() => setPrinting('pdf')} className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]"><FileDown className="h-4 w-4" />Save PDF</button>
         <button onClick={() => setPrinting('print')} className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-[#edf9fe]"><Printer className="h-4 w-4" />Print</button>
         <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-white hover:bg-white/25" aria-label="Close"><X className="h-5 w-5" /></button>
@@ -117,7 +120,7 @@ export default function IncentiveClaims() {
     finally { setBusy(false); }
   };
   const submit = async () => {
-    if (!claim || !window.confirm(`Submit your ${monthLabel(month)} claim (${rm(claimTotal(claim.entries))})? You cannot change it after this unless your Clinical Admin returns it.`)) return;
+    if (!claim || !window.confirm(`Submit your ${monthLabel(month)} claim (${rm(claimTotal(claim.entries))})? You cannot change it after this unless ${claim.form === 'doctor' ? 'it is returned to you' : 'your Clinical Admin returns it'}.`)) return;
     if (await act('incentive_submit', {})) void load();
   };
   const signOut = async () => {
@@ -139,7 +142,7 @@ export default function IncentiveClaims() {
     {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
     {!claim && !error && <p className="mt-6 text-sm text-slate-500">Loading your claim…</p>}
     {claim && <>
-      {claim.status === 'submitted' && <p className="mt-5 flex gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><Clock3 className="mt-0.5 h-4 w-4 shrink-0" />Submitted. Waiting for your Clinical Admin to approve it.</p>}
+      {claim.status === 'submitted' && <p className="mt-5 flex gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><Clock3 className="mt-0.5 h-4 w-4 shrink-0" />{claim.form === 'doctor' ? 'Submitted. Waiting for HR approval (Dr Syafiq).' : 'Submitted. Waiting for your Clinical Admin to approve it.'}</p>}
       {claim.status === 'approved' && <p className="mt-5 flex gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>Approved by {claim.approvedBy}.{claim.adminNote ? ` Note: ${claim.adminNote}` : ''}</span></p>}
       {claim.status === 'approved' && claim.entries.some((entry) => entry.review === 'rejected') && <p className="mt-3 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>{claim.entries.filter((entry) => entry.review === 'rejected').length} {claim.entries.filter((entry) => entry.review === 'rejected').length === 1 ? 'entry was' : 'entries were'} not approved.</strong> The reason is shown under each one below. The rest of your claim was sent to HR.</span></p>}
       {claim.status === 'returned' && <p className="mt-5 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><Undo2 className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Returned to fix:</strong> {claim.adminNote} Fix your entries, then submit again.</span></p>}
@@ -151,7 +154,7 @@ export default function IncentiveClaims() {
         {!claim.entries.length ? <p className="mt-4 text-sm text-slate-500">No entries yet. Add each procedure after you perform it.</p>
           : <ul className="mt-4 divide-y divide-slate-100">{claim.entries.map((entry) => <li key={entry.id} className="flex items-start gap-3 py-3">
             <span className="w-12 shrink-0 font-mono text-xs font-bold text-[#0b587b]">{entry.code}</span>
-            <div className={`min-w-0 flex-1 ${entry.review === 'rejected' ? 'opacity-60' : ''}`}><p className="text-sm font-semibold">{codeName(entry.code)}{entry.review === 'rejected' && <span className="ml-2 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">Not approved</span>}{entry.review === 'approved' && <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Approved</span>}</p>{entry.review === 'rejected' && entry.reason && <p className="mt-0.5 text-xs font-semibold text-rose-700">Not approved: {entry.reason}</p>}<p className="mt-0.5 text-xs text-slate-500">{dmy(entry.date)}{entry.patient ? ` · ${entry.patient}` : ''}{entry.clinicId ? ` · ${entry.clinicId}` : ''}{entry.outstanding ? ` · Outstanding: ${entry.outstanding}` : ''}</p></div>
+            <div className={`min-w-0 flex-1 ${entry.review === 'rejected' ? 'opacity-60' : ''}`}><p className="text-sm font-semibold">{codeName(entry.code, entry.form)}{entry.review === 'rejected' && <span className="ml-2 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">Not approved</span>}{entry.review === 'approved' && <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Approved</span>}</p>{entry.review === 'rejected' && entry.reason && <p className="mt-0.5 text-xs font-semibold text-rose-700">Not approved: {entry.reason}</p>}<p className="mt-0.5 text-xs text-slate-500">{dmy(entry.date)}{entry.patient ? ` · ${entry.patient}` : ''}{entry.clinicId ? ` · ${entry.clinicId}` : ''}{entry.outstanding ? ` · Outstanding: ${entry.outstanding}` : ''}</p></div>
             <span className="shrink-0 text-sm font-semibold">{rm(entry.rm)}</span>
             {editable && <button onClick={() => { if (window.confirm(`Remove ${entry.code} on ${dmy(entry.date)}?`)) void act('incentive_remove', { id: entry.id }); }} disabled={busy} className="-mr-1 rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove entry"><Trash2 className="h-4 w-4" /></button>}
           </li>)}</ul>}

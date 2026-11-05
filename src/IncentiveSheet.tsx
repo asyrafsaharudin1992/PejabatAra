@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { approvedTotal, claimTotal, dmy, IncentiveEntry, IncentiveStatus } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, dmy, IncentiveEntry, IncentiveStatus, IncentiveForm } from './lib/incentiveCodes';
 import { PrintPage } from './PrintPortal';
 
 // The memo's STAFF INCENTIVES sheet, shared by the staff page (View form) and the Clinical
 // Admin page (Print / Save PDF), with the print helpers both use.
-export type SheetClaim = { month: string; branch: string; staffName: string; entries: IncentiveEntry[]; status: IncentiveStatus; approvedBy: string };
+export type SheetClaim = { form?: IncentiveForm; month: string; branch: string; staffName: string; entries: IncentiveEntry[]; status: IncentiveStatus; approvedBy: string };
 
 // Prints (or saves as PDF) whatever is rendered into the .cv-print portal while `active` is set.
 // The browser names a saved PDF after the page title, so the title is swapped while printing.
@@ -53,17 +53,18 @@ const cell = 'border border-black px-[1.5mm] py-[0.8mm]';
 
 function SheetTop({ claim, page }: { claim: SheetClaim; page?: string }) {
   return <>
-    <div className="flex items-center gap-[4mm]"><img src="/forms/ara-logo.jpg" alt="" className="h-[16mm] w-[16mm] object-contain" /><div className="flex-1"><p className="text-[13pt] font-bold">KLINIK ARA 24 JAM</p><p className="text-[13pt] font-bold">STAFF INCENTIVES</p></div>{page && <p className="self-start text-[8pt]">{page}</p>}</div>
-    <div className="mt-[3mm] flex gap-[10mm] font-bold"><span>Staff name: <span className="font-normal">{claim.staffName}</span></span><span>Month: <span className="font-normal">{claim.month.slice(5, 7)}</span></span><span>Year: <span className="font-normal">{claim.month.slice(0, 4)}</span></span><span>Branch: <span className="font-normal">{claim.branch}</span></span></div>
+    <div className="flex items-center gap-[4mm]"><img src="/forms/ara-logo.jpg" alt="" className="h-[16mm] w-[16mm] object-contain" /><div className="flex-1"><p className="text-[13pt] font-bold">KLINIK ARA 24 JAM</p><p className="text-[13pt] font-bold">{claim.form === 'doctor' ? 'DOCTOR INCENTIVES' : 'STAFF INCENTIVES'}</p></div>{page && <p className="self-start text-[8pt]">{page}</p>}</div>
+    <div className="mt-[3mm] flex gap-[10mm] font-bold"><span>{claim.form === 'doctor' ? 'Doctor' : 'Staff'} name: <span className="font-normal">{claim.staffName}</span></span><span>Month: <span className="font-normal">{claim.month.slice(5, 7)}</span></span><span>Year: <span className="font-normal">{claim.month.slice(0, 4)}</span></span><span>Branch: <span className="font-normal">{claim.branch}</span></span></div>
   </>;
 }
 
 function SheetTable({ claim, entries, last }: { claim: SheetClaim; entries: IncentiveEntry[]; last: boolean }) {
+  const doctor = claim.form === 'doctor';
   return <>
-    <table className="mt-[3mm] w-full border-collapse"><thead><tr className="font-bold"><th className={cell}>Date</th><th className={cell}>Patient name/Details</th><th className={cell}>Patient clinic ID</th><th className={cell}>Outstanding payment</th><th className={cell}>Code Incentive</th><th className={cell}>RM</th><th className={cell}>Approved ( / )</th></tr></thead>
-      <tbody>{entries.map((entry) => <tr key={entry.id}><td className={`${cell} whitespace-nowrap`}>{dmy(entry.date)}</td><td className={cell}>{entry.patient}</td><td className={cell}>{entry.clinicId}</td><td className={cell}>{entry.outstanding}</td><td className={`${cell} text-center`}>{entry.code}</td><td className={`${cell} text-right`}>{entry.rm.toFixed(2)}</td><td className={`${cell} text-center`}>{entry.review === 'rejected' ? '✗' : entry.review === 'approved' ? '✓' : ''}</td></tr>)}</tbody>
-      {last && <tfoot><tr className="font-bold"><td colSpan={5} className={`${cell} text-right`}>Total Claimed Incentives</td><td className={`${cell} text-right`}>{claimTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>
-        {claim.entries.some((entry) => entry.review) && <tr className="font-bold"><td colSpan={5} className={`${cell} text-right`}>Total Approved Incentives</td><td className={`${cell} text-right`}>{approvedTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>}</tfoot>}
+    <table className="mt-[3mm] w-full border-collapse"><thead><tr className="font-bold"><th className={cell}>Date</th><th className={cell}>{doctor ? 'Patient name' : 'Patient name/Details'}</th><th className={cell}>{doctor ? 'I/C / passport' : 'Patient clinic ID'}</th><th className={cell}>Outstanding payment</th>{doctor && <th className={cell}>Sales commission</th>}<th className={cell}>Code Incentive</th><th className={cell}>RM</th><th className={cell}>Approved ( / )</th></tr></thead>
+      <tbody>{entries.map((entry) => <tr key={entry.id}><td className={`${cell} whitespace-nowrap`}>{dmy(entry.date)}</td><td className={cell}>{entry.patient}</td><td className={cell}>{entry.clinicId}</td><td className={cell}>{entry.outstanding}</td>{doctor && <td className={`${cell} text-right`}>{entry.commission === undefined ? '' : entry.commission.toFixed(2)}</td>}<td className={`${cell} text-center`}>{entry.code}</td><td className={`${cell} text-right`}>{entry.rm.toFixed(2)}</td><td className={`${cell} text-center`}>{entry.review === 'rejected' ? '✗' : entry.review === 'approved' ? '✓' : ''}</td></tr>)}</tbody>
+      {last && <tfoot><tr className="font-bold"><td colSpan={doctor ? 6 : 5} className={`${cell} text-right`}>Total Claimed Incentives</td><td className={`${cell} text-right`}>{claimTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>
+        {claim.entries.some((entry) => entry.review) && <tr className="font-bold"><td colSpan={doctor ? 6 : 5} className={`${cell} text-right`}>Total Approved Incentives</td><td className={`${cell} text-right`}>{approvedTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>}</tfoot>}
     </table>
     {last && <div className="mt-[4mm] flex gap-[40mm] font-bold"><span>Prepared by: <span className="font-normal">{claim.staffName}</span></span><span>Approved by: <span className="font-normal">{claim.status === 'approved' ? claim.approvedBy : ''}</span></span></div>}
   </>;

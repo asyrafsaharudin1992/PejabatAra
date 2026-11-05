@@ -8,7 +8,7 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
-import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, RateChange, rateOn } from '../src/lib/incentiveCodes.js';
+import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
 // Vercel Hobby plan allows only 12 functions.
@@ -93,8 +93,8 @@ function cleanQuestions(value: unknown) {
 // cannot be inflated from the browser.
 const FIRST_CLAIM_MONTH = '2026-10';
 const malaysiaToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
-const decodeClaim = (row: any, staff: { branch: string }, month: string) => ({
-  month, branch: row?.branch || INCENTIVE_BRANCHES[staff.branch] || '', entries: row?.entries || [], status: row?.status || 'draft',
+const decodeClaim = (row: any, staff: { branch: string }, month: string, form: IncentiveForm = 'staff') => ({
+  form, month, branch: row?.branch || INCENTIVE_BRANCHES[staff.branch] || '', entries: row?.entries || [], status: row?.status || 'draft',
   adminNote: row?.admin_note || '', approvedBy: row?.approved_by || '', submittedAt: row?.submitted_at || null, decidedAt: row?.decided_at || null,
 });
 
@@ -104,11 +104,19 @@ function claimMonth(value: unknown) {
   return month;
 }
 
+// Doctors (a doctor designation in the HR profile) use the doctor incentive form; everyone else uses the staff form.
+export async function incentiveFormOf(db: any, staffId: string): Promise<IncentiveForm> {
+  const { data } = await db.from('hr_employees').select('designation').eq('assessment_staff_id', staffId).maybeSingle();
+  return /\b(DR|DOCTOR)\b/i.test(data?.designation || '') ? 'doctor' : 'staff';
+}
+
 // The rate changes HR has set. Before the migration has run there are none, so the memo's rates apply.
 export async function incentiveRateChanges(db: any): Promise<RateChange[]> {
-  const { data, error } = await db.from('hr_incentive_rates').select('id,code,rate,effective_from,set_by').order('effective_from', { ascending: true });
+  let { data, error } = await db.from('hr_incentive_rates').select('id,form,code,rate,effective_from,set_by').order('effective_from', { ascending: true });
+  // Before the form column exists every change belongs to the staff form.
+  if (error?.code === '42703') ({ data, error } = await db.from('hr_incentive_rates').select('id,code,rate,effective_from,set_by').order('effective_from', { ascending: true }));
   if (error) { if (error.code === '42P01' || error.code === 'PGRST205') return []; throw error; }
-  return (data || []).map((row: any) => ({ id: row.id, code: row.code, rate: Number(row.rate), effectiveFrom: row.effective_from, setBy: row.set_by }));
+  return (data || []).map((row: any) => ({ id: row.id, form: row.form || 'staff', code: row.code, rate: Number(row.rate), effectiveFrom: row.effective_from, setBy: row.set_by }));
 }
 
 async function editableClaim(db: any, staffId: string, month: string) {
@@ -122,20 +130,28 @@ async function saveClaim(db: any, staffId: string, month: string, existing: any,
   const now = new Date().toISOString();
   const { data, error } = existing
     ? await db.from('incentive_claims').update({ ...patch, updated_at: now }).eq('id', existing.id).select('*').single()
-    : await db.from('incentive_claims').insert({ staff_id: staffId, month, ...patch }).select('*').single();
+    : await db.from('incentive_claims').insert({ staff_id: staffId, month, form: await incentiveFormOf(db, staffId), ...patch }).select('*').single();
+  if (error?.code === '42703' && !existing) {
+    // The form column is new: until its migration is run a claim is saved without it.
+    const retry = await db.from('incentive_claims').insert({ staff_id: staffId, month, ...patch }).select('*').single();
+    if (retry.error) throw retry.error;
+    return retry.data;
+  }
   if (error) throw error;
   return data;
 }
 
 async function incentiveAction(req: any, res: any, db: any, staff: { id: string; branch: string; can_preview: boolean }, action: string, body: any) {
+  const formNow = await incentiveFormOf(db, staff.id);
   if (req.method === 'GET' && action === 'incentive') {
     const month = claimMonth(req.query.month || malaysiaToday().slice(0, 7));
     const { data, error } = await db.from('incentive_claims').select('month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at').eq('staff_id', staff.id).order('month', { ascending: false });
     if (error) throw error;
     const row = (data || []).find((claim: any) => claim.month === month);
     return res.status(200).json({
-      claim: decodeClaim(row, staff, month),
+      claim: decodeClaim(row, staff, month, formNow),
       history: (data || []).map((claim: any) => ({ month: claim.month, status: claim.status, total: claimTotal(claim.entries || []), count: (claim.entries || []).length })),
+      form: formNow,
       rates: await incentiveRateChanges(db),
     });
   }
@@ -146,30 +162,34 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
   if (req.method === 'POST' && action === 'incentive_add') {
     const existing = await editableClaim(db, staff.id, month);
     const entry = body.entry || {};
-    const code = INCENTIVE_CODES.find((item) => item.code === entry.code);
+    const form = formNow;
+    const code = codesOf(form).find((item) => item.code === entry.code);
     if (!code) throw fail(400, 'Choose an incentive code.');
     const date = text(entry.date, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month || date > malaysiaToday()) throw fail(400, 'The date must be in the claim month and not in the future.');
     const clinicId = text(entry.clinicId, 40);
     const patient = text(entry.patient, 120);
-    // Procedures are done on a patient; the other incentives (A–I) are not.
-    if (/^(\d|L)/.test(code.code) && (!patient || !clinicId)) throw fail(400, 'Enter the patient name and clinic ID.');
-    const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : rateOn(code.code, date, await incentiveRateChanges(db));
+    // Staff procedures are done on a patient and the other incentives (A–I) are not; on the doctor form every line needs the patient's name.
+    if (form === 'doctor' ? !patient : /^(\d|L)/.test(code.code) && (!patient || !clinicId)) throw fail(400, form === 'doctor' ? 'Enter the patient name.' : 'Enter the patient name and clinic ID.');
+    const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : rateOn(code.code, date, await incentiveRateChanges(db), form);
     if (!Number.isFinite(rm) || rm <= 0 || rm > 2000) throw fail(400, 'Enter the amount (RM) for this incentive.');
-    const next: IncentiveEntry = { id: randomUUID(), date, patient, clinicId, outstanding: text(entry.outstanding, 60), code: code.code, rm };
+    // The doctor form has a Sales commission column (RM typed by the doctor, shown on the form and not part of the incentive total).
+    const commission = form === 'doctor' && String(entry.commission ?? '').trim() !== '' ? Math.round(Number(entry.commission) * 100) / 100 : undefined;
+    if (commission !== undefined && (!Number.isFinite(commission) || commission < 0 || commission > 100000)) throw fail(400, 'Enter the sales commission in RM, or leave it empty.');
+    const next: IncentiveEntry = { id: randomUUID(), date, patient, clinicId, outstanding: text(entry.outstanding, 60), code: code.code, rm, ...(form === 'doctor' ? { form: 'doctor' as const } : {}), ...(commission !== undefined ? { commission } : {}) };
     const entries = [...(existing?.entries || []), next].sort((a: IncentiveEntry, b: IncentiveEntry) => a.date.localeCompare(b.date));
     if (entries.length > 500) throw fail(400, 'A claim can hold up to 500 entries.');
     // The branch is set from the first entry, so the Clinical Admin sees the claim while it is still being filled in.
     const claimBranch = branch || existing?.branch || INCENTIVE_BRANCHES[staff.branch] || '';
     const saved = await saveClaim(db, staff.id, month, existing, { entries, branch: claimBranch });
-    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month, formNow) });
   }
 
   if (req.method === 'POST' && action === 'incentive_remove') {
     const existing = await editableClaim(db, staff.id, month);
     if (!existing) throw fail(404, 'Entry not found.');
     const saved = await saveClaim(db, staff.id, month, existing, { entries: (existing.entries || []).filter((entry: IncentiveEntry) => entry.id !== text(body.id, 60)) });
-    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month, formNow) });
   }
 
   if (req.method === 'POST' && action === 'incentive_submit') {
@@ -178,7 +198,7 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
     const claimBranch = branch || existing.branch || INCENTIVE_BRANCHES[staff.branch];
     if (!claimBranch) throw fail(400, 'Choose your branch before submitting.');
     const saved = await saveClaim(db, staff.id, month, existing, { branch: claimBranch, status: 'submitted', submitted_at: new Date().toISOString() });
-    return res.status(200).json({ claim: decodeClaim(saved, staff, month) });
+    return res.status(200).json({ claim: decodeClaim(saved, staff, month, formNow) });
   }
   throw fail(405, 'Method not allowed.');
 }
