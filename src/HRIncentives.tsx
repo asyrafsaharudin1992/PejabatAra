@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState } from 'react';
-import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, ScrollText, Undo2 } from 'lucide-react';
+import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, ScrollText, Settings, Undo2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { approvedTotal, claimTotal, codeName, dmy, monthLabel, rm } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { Claim, MonthSummary } from './ClinicalIncentives';
+import { HRIncentiveRates } from './HRIncentiveRates';
 
 // Office HR: the staff incentive claims that Clinical Admin has approved and sent to HR, by month. Read only:
 // Clinical Admin checks and approves each claim, and returning one there takes it back from this list.
@@ -27,6 +28,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const [flowOpen, setFlowOpen] = useState(false);
+  const [ratesOpen, setRatesOpen] = useState(false);
   const [printing, setPrinting] = useState<'' | 'print' | 'pdf'>('');
   const load = () => {
     setClaims(null);
@@ -67,10 +69,12 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
       <select value={state} onChange={(event) => setState(event.target.value)} aria-label="Status" className={field}><option value="">All</option><option value="waiting">Not received yet</option><option value="received">Received</option></select>
       <select value={branch} onChange={(event) => setBranch(event.target.value)} aria-label="Branch" className={field}><option value="">All branches</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select>
       <button onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Incentive flow</button>
+      <button onClick={() => setRatesOpen(!ratesOpen)} aria-expanded={ratesOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Settings className="h-3.5 w-3.5" />Incentive rates</button>
       <button onClick={load} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button>
       <button onClick={() => setPrinting('pdf')} disabled={!shown.length} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({shown.length})</button>
       <button onClick={() => setPrinting('print')} disabled={!shown.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" />Print all</button>
     </section>
+    {ratesOpen && <HRIncentiveRates onError={onError} />}
     {flowOpen && <section className={card}>
       <h3 className="font-semibold">How incentives reach payment</h3>
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-slate-600">

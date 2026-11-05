@@ -8,7 +8,7 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
-import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry } from '../src/lib/incentiveCodes.js';
+import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, RateChange, rateOn } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
 // Vercel Hobby plan allows only 12 functions.
@@ -104,6 +104,13 @@ function claimMonth(value: unknown) {
   return month;
 }
 
+// The rate changes HR has set. Before the migration has run there are none, so the memo's rates apply.
+export async function incentiveRateChanges(db: any): Promise<RateChange[]> {
+  const { data, error } = await db.from('hr_incentive_rates').select('id,code,rate,effective_from,set_by').order('effective_from', { ascending: true });
+  if (error) { if (error.code === '42P01' || error.code === 'PGRST205') return []; throw error; }
+  return (data || []).map((row: any) => ({ id: row.id, code: row.code, rate: Number(row.rate), effectiveFrom: row.effective_from, setBy: row.set_by }));
+}
+
 async function editableClaim(db: any, staffId: string, month: string) {
   const { data, error } = await db.from('incentive_claims').select('*').eq('staff_id', staffId).eq('month', month).maybeSingle();
   if (error) throw error;
@@ -129,6 +136,7 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
     return res.status(200).json({
       claim: decodeClaim(row, staff, month),
       history: (data || []).map((claim: any) => ({ month: claim.month, status: claim.status, total: claimTotal(claim.entries || []), count: (claim.entries || []).length })),
+      rates: await incentiveRateChanges(db),
     });
   }
   if (staff.can_preview) throw fail(403, 'Preview accounts cannot make claims.');
@@ -146,7 +154,7 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
     const patient = text(entry.patient, 120);
     // Procedures are done on a patient; the other incentives (A–I) are not.
     if (/^(\d|L)/.test(code.code) && (!patient || !clinicId)) throw fail(400, 'Enter the patient name and clinic ID.');
-    const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : code.rate;
+    const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : rateOn(code.code, date, await incentiveRateChanges(db));
     if (!Number.isFinite(rm) || rm <= 0 || rm > 2000) throw fail(400, 'Enter the amount (RM) for this incentive.');
     const next: IncentiveEntry = { id: randomUUID(), date, patient, clinicId, outstanding: text(entry.outstanding, 60), code: code.code, rm };
     const entries = [...(existing?.entries || []), next].sort((a: IncentiveEntry, b: IncentiveEntry) => a.date.localeCompare(b.date));

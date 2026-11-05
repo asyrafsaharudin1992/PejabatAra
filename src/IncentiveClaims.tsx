@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, FileDown, FileText, LogOu
 import { assessmentFetch, PageShell, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
 import { PrintPortal } from './PrintPortal';
-import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
 // phones like the Assessment Room (same session), add each procedure as they do it,
@@ -27,7 +27,7 @@ function claimMonths() {
 
 const field = 'h-11 w-full rounded-xl border-0 bg-[#f4f6fa] px-3 text-sm outline-none focus:ring-4 focus:ring-[#0b587b]/10';
 
-function AddEntry({ claim, onAdded, onError }: { key?: string; claim: Claim; onAdded: (claim: Claim) => void; onError: (message: string) => void }) {
+function AddEntry({ claim, rates, onAdded, onError }: { key?: string; claim: Claim; rates: RateChange[]; onAdded: (claim: Claim) => void; onError: (message: string) => void }) {
   const lastDay = claim.month === todayKL().slice(0, 7) ? todayKL() : `${claim.month}-${new Date(Number(claim.month.slice(0, 4)), Number(claim.month.slice(5, 7)), 0).getDate()}`;
   const [date, setDate] = useState(lastDay);
   const [code, setCode] = useState('');
@@ -56,7 +56,7 @@ function AddEntry({ claim, onAdded, onError }: { key?: string; claim: Claim; onA
       <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Code incentive</span>
         <select required value={code} onChange={(event) => setCode(event.target.value)} className={field}>
           <option value="">Choose…</option>
-          {INCENTIVE_GROUPS.map((group) => <optgroup key={group} label={group}>{INCENTIVE_CODES.filter((item) => item.group === group).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${item.rate})`}</option>)}</optgroup>)}
+          {INCENTIVE_GROUPS.map((group) => <optgroup key={group} label={group}>{INCENTIVE_CODES.filter((item) => item.group === group).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${rateOn(item.code, date, rates)})`}</option>)}</optgroup>)}
         </select>
       </label>
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Date</span><input required type="date" min={`${claim.month}-01`} max={lastDay} value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label>
@@ -95,6 +95,7 @@ export default function IncentiveClaims() {
   const [month, setMonth] = useState(todayKL().slice(0, 7));
   const [claim, setClaim] = useState<Claim | null>(null);
   const [history, setHistory] = useState<History>([]);
+  const [rates, setRates] = useState<RateChange[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -104,7 +105,7 @@ export default function IncentiveClaims() {
     setError('');
     try {
       const [profile, result] = await Promise.all([me ? Promise.resolve({ staff: me }) : assessmentFetch('action=me'), assessmentFetch(`action=incentive&month=${month}`)]);
-      setMe(profile.staff); setClaim(result.claim); setHistory(result.history);
+      setMe(profile.staff); setClaim(result.claim); setHistory(result.history); setRates(result.rates || []);
     } catch (cause: any) { if (cause.status === 401) setSignedIn(false); else setError(cause.message); }
   };
   useEffect(() => { if (signedIn) { setClaim(null); void load(); } }, [signedIn, month]);
@@ -143,7 +144,7 @@ export default function IncentiveClaims() {
       {claim.status === 'approved' && claim.entries.some((entry) => entry.review === 'rejected') && <p className="mt-3 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>{claim.entries.filter((entry) => entry.review === 'rejected').length} {claim.entries.filter((entry) => entry.review === 'rejected').length === 1 ? 'entry was' : 'entries were'} not approved.</strong> The reason is shown under each one below. The rest of your claim was sent to HR.</span></p>}
       {claim.status === 'returned' && <p className="mt-5 flex gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><Undo2 className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Returned to fix:</strong> {claim.adminNote} Fix your entries, then submit again.</span></p>}
 
-      {editable && <div className="mt-5"><AddEntry key={claim.month} claim={claim} onAdded={setClaim} onError={setError} /></div>}
+      {editable && <div className="mt-5"><AddEntry key={claim.month} claim={claim} rates={rates} onAdded={setClaim} onError={setError} /></div>}
 
       <section className="mt-5 rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">{monthLabel(claim.month)} claim</h2><span className="flex items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[claim.status]}`}>{STATUS_LABEL[claim.status]}</span>{claim.entries.length > 0 && <button onClick={() => setViewing(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileText className="h-3.5 w-3.5" />View form</button>}</span></div>

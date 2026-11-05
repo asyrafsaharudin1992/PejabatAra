@@ -1,7 +1,8 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { branchId, officeAccess } from './_office-db.js';
-import { LEAVE_TYPES, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
+import { LEAVE_TYPES, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
+import { INCENTIVE_CODES } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
@@ -454,6 +455,28 @@ export async function hrHandler(req: any, res: any) {
       if (error?.code === '42703') return res.status(200).json({ claims: [], notSetUp: true });
       if (error) throw error;
       return res.status(200).json({ claims: (data || []).map((row: any) => ({ id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+    }
+    // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
+    if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
+    // HR sets a new rate for a code from a date. Entries already added keep the rate they were saved with, so the date cannot be in the past.
+    if (req.method === 'POST' && action === 'incentive_rate_set') {
+      const code = INCENTIVE_CODES.find((item) => item.code === text(body.code, 10));
+      if (!code || code.ownAmount) throw fail(400, 'Choose a code that has a fixed rate.');
+      const rate = Math.round(Number(body.rate) * 100) / 100;
+      if (!Number.isFinite(rate) || rate <= 0 || rate > 2000) throw fail(400, 'Enter the new rate in RM (more than 0, up to 2000).');
+      const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+      if (!isDate(body.effectiveFrom) || body.effectiveFrom < today) throw fail(400, 'Choose a start date from today onwards.');
+      const { error } = await db.from('hr_incentive_rates').upsert({ code: code.code, rate, effective_from: body.effectiveFrom, set_by: text(user.email || user.id, 120) }, { onConflict: 'code,effective_from' });
+      if (error?.code === '42P01' || error?.code === 'PGRST205') throw fail(503, 'Rate changes are not set up yet. System Admin needs to run the latest database migration first.');
+      if (error) throw error;
+      return res.status(200).json({ success: true });
+    }
+    // HR cancels a change that has not started yet.
+    if (req.method === 'POST' && action === 'incentive_rate_delete') {
+      const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+      const { error } = await db.from('hr_incentive_rates').delete().eq('id', text(body.id, 60)).gt('effective_from', today);
+      if (error) throw error;
+      return res.status(200).json({ success: true });
     }
     // HR marks sent incentive claims as received (or undoes it).
     if (req.method === 'POST' && (action === 'incentive_receive' || action === 'incentive_unreceive')) {

@@ -34,6 +34,14 @@ export const INCENTIVE_CODES: IncentiveCode[] = [
   { code: 'I', name: 'Special Program Allowance - Other Committee Role', rate: 50, group: INCENTIVE_GROUPS[2] },
 ];
 
+// A rate HR has changed: `code` is paid at `rate` for procedures dated `effectiveFrom` or later (until a later change).
+export type RateChange = { id?: string; code: string; rate: number; effectiveFrom: string; setBy?: string };
+export function rateOn(code: string, date: string, changes: RateChange[]): number {
+  const base = INCENTIVE_CODES.find((item) => item.code === code)?.rate ?? 0;
+  const latest = changes.filter((change) => change.code === code && change.effectiveFrom <= date).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
+  return latest ? latest.rate : base;
+}
+
 // Staff branch codes (Assessment Room) and the clinic branches the Clinical Admin works on.
 export const INCENTIVE_BRANCHES: Record<string, string> = { KJ: 'Kajang', SK: 'Seri Kembangan' };
 
