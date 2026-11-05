@@ -170,7 +170,6 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send it from <strong>Forgot to clock?</strong> below so it can be corrected.</p>}
 
     {mode === 'clock' && requestSections('missed')}
-    {mode === 'clock' && <p className="px-1 text-xs text-slate-500">Worked overtime? Use the <strong>OT request</strong> tab.</p>}
 
 
     <section className={card}>
