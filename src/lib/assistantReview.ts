@@ -1,7 +1,8 @@
 // The monthly assessment for clinic assistants ("Penilaian Bulanan Pembantu Klinik"): 19 items marked out of 100 in all, then a result for a
 // contract locum or for a permanent staff member on probation. Shared by the page, the printed form and the server.
-export type AssistantItem = { name: string; note: string; max: number };
-export const ASSISTANT_ITEMS: AssistantItem[] = [
+export type AssistantItem = { name: string; note: string; points: string[]; max: number };
+// `note` holds the sub-points of an item joined by " · "; they are shown as separate lines, like the paper form.
+const RAW_ITEMS: Omit<AssistantItem, 'points'>[] = [
   { name: 'Cara Pendaftaran Tunai Pesakit', note: 'Mahir dalam proses pendaftaran pesakit dan memastikan maklumat pesakit diperoleh dengan tepat. · Memahami cara pendaftaran pesakit menggunakan pembaca kad pintar (smartcard reader). · Memahami konsep semakan cek panel sebelum pesakit menerima rawatan, bagi memastikan baki pesakit dan aspek-aspek lain dipastikan dengan betul.', max: 5 },
   { name: 'Buffer & Petty Cash', note: 'Faham konsep buffer & petty cash.', max: 5 },
   { name: 'Cara Dispensikan Ubat', note: 'Memahami cara untuk memberikan ubat (dispensasi) dengan betul. · Mengetahui lokasi penyimpanan setiap ubat di rak yang ditetapkan. · Memberikan ubat kepada pesakit dengan cara yang lancar dan tidak kekok.', max: 5 },
@@ -18,10 +19,11 @@ export const ASSISTANT_ITEMS: AssistantItem[] = [
   { name: 'Cara Penyediaan ECG', note: 'Memahami dan berkemampuan untuk melaksanakan penanggalan aksesori ECG daripada pesakit sebelum menjalankan prosedur. · Berupaya melaksanakan prosedur ECG dengan tepat dan efisien. · Melaksanakan prosedur ECG dengan cekap dan yakin di hadapan pesakit.', max: 5 },
   { name: 'Cara Penyediaan Suction', note: 'Berpengalaman dalam melaksanakan prosedur suction mengikut langkah-langkah yang betul serta menguruskan proses dengan efektif.', max: 5 },
   { name: 'Cara Membancuh Syrup Oseltamivir', note: 'Berpengalaman dalam cara bancuhan syrup simplex mengikut dos yang betul dalam ml dan mencairkannya dengan Oseltamivir 75mg.', max: 6 },
-  { name: 'Cara Penerangan Bancuhan dan Cara Penggunaan Ubat Antibiotik Kepada Pesakit', note: 'Boleh menerangkan kepada pesakit cara bancuh ubat antibiotik dengan jelas: (1) menjelaskan dos yang perlu diambil serta mengingatkan mereka untuk menghabiskan ubat dalam tempoh 5 hari; (2) untuk syrup curam, tambahkan air sedikit demi sedikit sehingga mencapai garis pada botol dan goncang hingga larut sebelum digunakan; (3) selepas bancuhan atau pengambilan ubat, pastikan ia disimpan dalam peti ais.', max: 5 },
+  { name: 'Cara Penerangan Bancuhan dan Cara Penggunaan Ubat Antibiotik Kepada Pesakit', note: 'Boleh menerangkan kepada pesakit cara bancuh ubat antibiotik dengan jelas: · 1. Menjelaskan kepada pesakit dos yang perlu diambil serta mengingatkan mereka untuk menghabiskan ubat dalam tempoh 5 hari. · 2. Untuk syrup curam, tambahkan air sedikit demi sedikit sehingga mencapai garis pada botol dan goncang hingga larut sebelum digunakan. · 3. Selepas bancuhan atau pengambilan ubat, pastikan ia disimpan dalam peti ais.', max: 5 },
   { name: 'Konsep Deposit Foreigner Sebelum Pendaftaran', note: 'Mengetahui konsep pembayaran deposit pesakit asing sebanyak RM50. · Berpengalaman dalam memberikan resit deposit dengan betul.', max: 5 },
   { name: 'Tuntutan Panel', note: 'Mengetahui cara untuk membuat semakan panel pesakit melalui laman web. · Nyatakan panel yang mahir (semasa) dalam bidang tersebut. · Nyatakan panel yang belum mahir atau belum menguruskan dalam bidang tersebut.', max: 6 },
 ];
+export const ASSISTANT_ITEMS: AssistantItem[] = RAW_ITEMS.map((item) => ({ ...item, points: item.note.split(' · ') }));
 export const ASSISTANT_PANEL_ITEM = ASSISTANT_ITEMS.length - 1;   // the last item asks which panels the person has mastered
 export type AssistantKind = 'locum' | 'probation';
 export type AssistantOutcome = { value: string; label: string; terms?: string[] };
@@ -53,3 +55,8 @@ export function assistantDueOn(joinDate: string, stage: number): string {
 }
 export type DueAssessment = { employeeId: string; name: string; code: string; joinDate: string; stage: string; dueOn: string };
 export type SkippedAssessment = { employeeId: string; name: string; stage: string; reason: string; by: string; at: string };
+
+// The company details printed at the top of the form.
+export const ASSISTANT_COMPANY = { name: 'HSO Healthcare Sdn Bhd', registration: '202201004242 (1449939-U)', tin: 'C29715204010', address: ['H-7-1, Jalan PP25, Putra Walk Block H', 'Taman Pinggiran Putra, Seri Kembangan', 'Selangor'], email: 'hr@hsohealthcare.com', phone: '+60182194344' };
+// Which assessment a review is, from the due date it was started for ("2 month" as written on the paper form).
+export const ASSISTANT_STAGE_PRINT = ['2 weeks', '1 month', '2 month', '3 month'];
