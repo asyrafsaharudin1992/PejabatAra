@@ -82,8 +82,9 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
       const kind: AssistantKind = body.kind === 'probation' ? 'probation' : 'locum';
       const outcome = ASSISTANT_OUTCOMES[kind].find((option) => option.value === body.outcome);
       if (!outcome) throw fail(400, 'Choose the result of this review.');
-      const term = outcome.terms ? text(body.term, 40) : '';
-      if (outcome.terms && !isValidTerm(outcome, term)) throw fail(400, 'Choose the period for this result (a listed period, a number of months, or a date).');
+      const needsTerm = Boolean(outcome.terms || outcome.dateOnly);
+      const term = needsTerm ? text(body.term, 40) : '';
+      if (needsTerm && !isValidTerm(outcome, term)) throw fail(400, outcome.dateOnly ? 'Choose the date the probation ends.' : 'Choose the period for this result (a listed period or a number of months).');
       const total = assistantTotal(marks);
       const nowAt = new Date().toISOString();
       const { data: saved, error: saveError } = await db.from('hr_reviews').update({

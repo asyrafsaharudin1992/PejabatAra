@@ -29,11 +29,11 @@ export function AssistantReviewForm({ review, assessorName, initial, api, onDone
     event.preventDefault(); setError('');
     if (!complete) { setError('Enter the marks for all 19 items (from 0 up to the full mark of each item, in steps of 0.5).'); return; }
     if (!picked) { setError('Choose the result of this review.'); return; }
-    if (picked.terms && !term) { setError('Choose the period for this result.'); return; }
+    if ((picked.terms || picked.dateOnly) && !term) { setError(picked.dateOnly ? 'Choose the date the probation ends.' : 'Choose the period for this result.'); return; }
     if (!signed) { setError('Tick the box to confirm and sign the review digitally.'); return; }
     setSaving(true);
     try {
-      const result = await api(initial ? 'action=edit' : 'action=submit', { id: review.id, marks: marks.map(Number), panels, panelsNot, kind, outcome, term: picked.terms ? term : '', assessorName: assessor, position, signed: true });
+      const result = await api(initial ? 'action=edit' : 'action=submit', { id: review.id, marks: marks.map(Number), panels, panelsNot, kind, outcome, term: picked.terms || picked.dateOnly ? term : '', assessorName: assessor, position, signed: true });
       onDone(result.review);
     } catch (cause) { onFailed(cause, 'Unable to submit the review.'); }
     setSaving(false);
@@ -67,7 +67,8 @@ export function AssistantReviewForm({ review, assessorName, initial, api, onDone
       <h2 className="text-lg font-semibold">Result</h2>
       <div className="inline-flex rounded-xl bg-[#f1f5f7] p-1 ring-1 ring-[#dce4ed]">{([['locum', 'Prestasi lokum kontrak'], ['probation', 'Pekerja tetap percubaan']] as const).map(([value, text]) => <button type="button" key={value} onClick={() => { setKind(value); setOutcome(''); setTerm(''); }} className={`rounded-lg px-4 py-2 text-sm font-semibold ${kind === value ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{text}</button>)}</div>
       <ul className="space-y-2">{ASSISTANT_OUTCOMES[kind].map((option) => <li key={option.value} className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm">
-        <label className="flex flex-1 cursor-pointer items-center gap-2 font-medium"><input type="radio" name="outcome" checked={outcome === option.value} onChange={() => { setOutcome(option.value); setTerm(''); }} className="h-4 w-4" />{option.label}</label>
+        <label className="flex flex-1 cursor-pointer items-center gap-2 font-medium"><input type="radio" name="outcome" checked={outcome === option.value} onChange={() => { setOutcome(option.value); setTerm(''); }} className="h-4 w-4" />{option.label}{option.dateOnly ? ' pada' : ''}</label>
+        {option.dateOnly && outcome === option.value && <input type="date" value={term.startsWith('pada ') ? term.slice(5) : ''} onChange={(event) => setTerm(event.target.value ? `pada ${event.target.value}` : '')} aria-label="Date the probation ends" className="h-10 rounded-xl border border-[#dce4ed] bg-white px-3 text-sm" />}
         {option.terms && outcome === option.value && <div className="flex flex-wrap items-center gap-2">
           <select value={option.terms.includes(term) ? term : ''} onChange={(event) => setTerm(event.target.value)} aria-label="Period" className="h-10 rounded-xl border border-[#dce4ed] bg-white px-3 text-sm"><option value="">Period…</option>{option.terms.map((item) => <option key={item}>{item}</option>)}</select>
           {option.customUnit && <><span className="text-xs text-slate-400">/</span><label className="inline-flex items-center gap-1 text-sm"><input type="number" min={1} max={99} step={1} value={/^[1-9]\d? bulan$/.test(term) && !option.terms.includes(term) ? term.split(' ')[0] : ''} onChange={(event) => setTerm(event.target.value ? `${event.target.value} ${option.customUnit}` : '')} aria-label="Other number of months" className="h-10 w-16 rounded-xl border border-[#dce4ed] px-2 text-center text-sm" />{option.customUnit}</label></>}
@@ -134,9 +135,10 @@ export function AssistantDocument({ review }: { review: ReviewFull }) {
   const field = (name: string, value: string) => <p style={{ display: 'flex', gap: '2mm', borderBottom: '0.2mm solid #000', padding: '0.2mm 0', fontSize: '8pt' }}><span style={{ width: '42mm', fontWeight: 400 }}>{name}</span><span style={{ fontWeight: 700 }}>: {value}</span></p>;
   const footer = (page: number) => <p style={{ textAlign: 'center', marginTop: '2mm', fontSize: '7pt' }}>Page {page} of 3</p>;
   // The period of an outcome as on the paper form: the listed choices, "___ bulan" for another number, and for ending probation at once "ATAU pada ____".
-  const term = (option: { value: string; terms?: string[]; customUnit?: string; allowDate?: boolean }, mine: boolean) => {
-    if (!option.terms) return null;
+  const term = (option: { value: string; terms?: string[]; customUnit?: string; allowDate?: boolean; dateOnly?: boolean }, mine: boolean) => {
     const chosen = mine ? result?.term || '' : '';
+    if (option.dateOnly) { const date = chosen.startsWith('pada ') ? chosen.slice(5).split('-').reverse().join('/') : ''; return <span> pada {date ? <strong style={{ borderBottom: '0.3mm solid #000', padding: '0 4mm' }}>{date}</strong> : '__________'}</span>; }
+    if (!option.terms) return null;
     const ring = (text: string) => <strong style={{ border: '0.3mm solid #000', borderRadius: '3mm', padding: '0 1.2mm' }}>{text}</strong>;
     const custom = option.customUnit && /^[1-9]\d? bulan$/.test(chosen) && !option.terms.includes(chosen) ? chosen.split(' ')[0] : '';
     const picked = chosen.startsWith('pada ') ? chosen.slice(5).split('-').reverse().join('/') : '';

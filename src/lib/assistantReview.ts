@@ -26,7 +26,7 @@ const RAW_ITEMS: Omit<AssistantItem, 'points'>[] = [
 export const ASSISTANT_ITEMS: AssistantItem[] = RAW_ITEMS.map((item) => ({ ...item, points: item.note.split(' · ') }));
 export const ASSISTANT_PANEL_ITEM = ASSISTANT_ITEMS.length - 1;   // the last item asks which panels the person has mastered
 export type AssistantKind = 'locum' | 'probation';
-export type AssistantOutcome = { value: string; label: string; terms?: string[]; customUnit?: string; allowDate?: boolean };
+export type AssistantOutcome = { value: string; label: string; terms?: string[]; customUnit?: string; allowDate?: boolean; dateOnly?: boolean };
 export const ASSISTANT_OUTCOMES: Record<AssistantKind, AssistantOutcome[]> = {
   locum: [
     { value: 'cemerlang', label: 'Cemerlang dan tamat tempoh', terms: ['1 minggu', '2 minggu', '4 minggu'] },
@@ -35,7 +35,7 @@ export const ASSISTANT_OUTCOMES: Record<AssistantKind, AssistantOutcome[]> = {
     { value: 'tamat_kontrak', label: 'Tamat kontrak' },
   ],
   probation: [
-    { value: 'tamat_percubaan', label: 'Menamatkan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan', allowDate: true },
+    { value: 'tamat_percubaan', label: 'Menamatkan tempoh percubaan', dateOnly: true },
     { value: 'teruskan_percubaan', label: 'Meneruskan tempoh percubaan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan' },
     { value: 'tamat_perkhidmatan', label: 'Menamatkan perkhidmatan dalam tempoh', terms: ['1 bulan', '2 bulan', '3 bulan'], customUnit: 'bulan' },
   ],
@@ -61,6 +61,6 @@ export const ASSISTANT_COMPANY = { name: 'HSO Healthcare Sdn Bhd', registration:
 // Which assessment a review is, from the due date it was started for ("2 month" as written on the paper form).
 export const ASSISTANT_STAGE_PRINT = ['2 weeks', '1 month', '2 month', '3 month'];
 
-// A period is one of the listed choices, a number of months typed in ("5 bulan") or, for ending probation at once, a date ("pada 2026-11-20").
-export const isValidTerm = (outcome: AssistantOutcome, term: string) => Boolean(outcome.terms?.includes(term)) || Boolean(outcome.customUnit && /^[1-9]\d? bulan$/.test(term)) || Boolean(outcome.allowDate && /^pada \d{4}-\d{2}-\d{2}$/.test(term));
+// A period is one of the listed choices or a number of months typed in ("5 bulan"). Ending probation has no months: it takes a date ("pada 2026-11-20").
+export const isValidTerm = (outcome: AssistantOutcome, term: string) => Boolean(outcome.dateOnly && /^pada \d{4}-\d{2}-\d{2}$/.test(term)) || Boolean(outcome.terms?.includes(term)) || Boolean(outcome.customUnit && /^[1-9]\d? bulan$/.test(term)) || Boolean(outcome.allowDate && /^pada \d{4}-\d{2}-\d{2}$/.test(term));
 export const termText = (term: string) => term.startsWith('pada ') ? `pada ${term.slice(5).split('-').reverse().join('/')}` : term;
