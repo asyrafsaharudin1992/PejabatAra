@@ -3,7 +3,7 @@ import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
-import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewRow, submitReview } from './_review.js';
+import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewFull, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
@@ -256,7 +256,7 @@ const stageFor = (r: any, personId: string) => r.status === 'pending' && (r.appr
 // Review 2 for the clinic assistants of an Admin Klinikal's branch: what is due now (2 weeks after the start date in the HR profile, then the 1st, 2nd and 3rd month),
 // not yet done and not marked "Not needed". Staff only, still on probation, and started within the last four months.
 const isAdminKlinikal = (designation: string) => /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(designation || '');
-async function assistantDue(db: any, me: { id: string; company: string; designation: string }) {
+export async function assistantDue(db: any, me: { id: string; company: string; designation: string }) {
   if (!isAdminKlinikal(me.designation)) return { due: [] as DueAssessment[], skipped: [] as SkippedAssessment[] };
   const today = malaysiaToday();
   const earliest = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 - 4, Number(today.slice(8)))).toISOString().slice(0, 10);
@@ -274,10 +274,15 @@ async function assistantDue(db: any, me: { id: string; company: string; designat
   const skippedRows: any[] = skips.data || [];
   const skippedKeys = new Set(skippedRows.map((row) => `${row.employee_id}|${row.stage}`));
   const due: DueAssessment[] = [];
-  for (const person of assistants) ASSISTANT_STAGES.forEach((stage, index) => {
-    const dueOn = assistantDueOn(person.join_date, index);
-    if (dueOn <= today && !finished.has(`${person.id}|${dueOn}`) && !skippedKeys.has(`${person.id}|${stage}`)) due.push({ employeeId: person.id, name: person.full_name, code: person.employee_code, joinDate: person.join_date, stage, dueOn });
-  });
+  for (const person of assistants) {
+    // A stage that was started, done or marked "Not needed" also settles the stages before it (they are no longer asked for).
+    const handled = ASSISTANT_STAGES.map((stage, index) => finished.has(`${person.id}|${assistantDueOn(person.join_date, index)}`) || skippedKeys.has(`${person.id}|${stage}`));
+    const settled = handled.lastIndexOf(true);
+    ASSISTANT_STAGES.forEach((stage, index) => {
+      const dueOn = assistantDueOn(person.join_date, index);
+      if (index > settled && dueOn <= today) due.push({ employeeId: person.id, name: person.full_name, code: person.employee_code, joinDate: person.join_date, stage, dueOn });
+    });
+  }
   const nameOf = new Map(assistants.map((person: any) => [person.id, person.full_name]));
   // Only the latest stage that has come due is shown for each person (an older stage that was never done is no longer asked for).
   const latest = [...new Map(due.sort((x, y) => x.dueOn.localeCompare(y.dueOn)).map((item) => [item.employeeId, item] as const)).values()];
@@ -296,6 +301,13 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
     const { data, error: listError } = await db.from('hr_reviews').select(REVIEW_SUMMARY).eq('status', waiting ? 'pending' : 'submitted').eq('assessor_employee_id', me.id).order(waiting ? 'created_at' : 'submitted_at', { ascending: false }).limit(200);
     if (listError) throw listError;
     return res.status(200).json({ reviews: (data || []).map(reviewRow), assessor: myName });
+  }
+  // The full review, for saving or printing a copy of one this person has submitted.
+  if (req.method === 'GET' && action === 'review_get') {
+    const { data, error: getError } = await db.from('hr_reviews').select('*').eq('id', text(req.query.id, 60)).eq('assessor_employee_id', me.id).eq('status', 'submitted').maybeSingle();
+    if (getError) throw getError;
+    if (!data) throw fail(404, 'This review was not found.');
+    return res.status(200).json({ review: reviewFull(data) });
   }
   if (req.method === 'POST' && action === 'review_submit') {
     const review = await submitReview(db, body, (assigned) => assigned.assessor_employee_id === me.id, myName);

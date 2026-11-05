@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, LogOut, Plus } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, LogOut, Plus } from 'lucide-react';
 import { AuthError, AuthShell, authButton, authInput, authLabel } from './AssessmentRoom';
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 import { AssistantReviewForm } from './AssistantReview';
+import { ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { DueAssessment, SkippedAssessment } from './lib/assistantReview';
-import { AREAS, LEVELS, Ratings, ReviewSummary, areaScore, dmy, overallLabel, percentLabel, reviewApi, scoreTone, totalScore } from './lib/performanceReview';
+import { AREAS, LEVELS, Ratings, ReviewFull, ReviewSummary, areaScore, dmy, overallLabel, percentLabel, reviewApi, scoreTone, totalScore } from './lib/performanceReview';
 
 // Performance Review: a supervisor (CEO, CFO, COO, CPO, CHRO, Clinical Admin) fills in the
 // monthly review of a staff member. Opened from the sign-in page like the Assessment Room and
@@ -77,6 +78,8 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
   const [thanks, setThanks] = useState<ReviewSummary | null>(null);
   const [due, setDue] = useState<{ due: DueAssessment[]; skipped: SkippedAssessment[] }>({ due: [], skipped: [] });
   const [dueBusy, setDueBusy] = useState(false);
+  const [copy, setCopy] = useState<ReviewFull | null>(null);
+  useReviewPrint(Boolean(copy), `Performance Review - ${copy?.staffName || ''} - ${copy?.periodLabel || ''}`, () => setCopy(null));
 
   const failed = (cause: unknown, fallback: string) => { if ((cause as { status?: number }).status === 401) onSignedOut(); else setError(cause instanceof Error ? cause.message : fallback); };
   const load = async () => {
@@ -90,6 +93,12 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
   };
   useEffect(() => { void load(); }, []);
 
+  // Opens the browser's print box for a review already submitted, where it can be saved as a PDF.
+  const saveCopy = async (review: ReviewSummary) => {
+    setError('');
+    try { const result = await api(`action=get&id=${encodeURIComponent(review.id)}`); setCopy(result.review); }
+    catch (cause) { failed(cause, 'Unable to open this review.'); }
+  };
   const startDue = async (item: DueAssessment) => {
     setDueBusy(true); setError('');
     try { const result = await api('action=start', { employeeId: item.employeeId, stage: item.stage }); setOpen(result.review); setThanks(null); setSigned(false); window.scrollTo({ top: 0 }); void load(); }
@@ -140,6 +149,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
         </div>
       </section>
 
+      {copy && <ReviewSheet review={copy} />}
       {error && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
 
       {thanks && <section className={`${card} text-center`}>
@@ -174,6 +184,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
           <div className="min-w-0 flex-1"><p className="truncate font-semibold">{review.staffName}</p><p className="truncate text-xs text-slate-500">{[review.position, review.department].filter(Boolean).join(' · ') || '—'} · {review.periodLabel || 'Review'} · {dmy((review.submittedAt || review.createdAt).slice(0, 10))}</p></div>
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreTone(review.totalScore)}`}>{review.totalScore?.toFixed(2)} · {percentLabel(review.totalScore)} · {review.overall?.replace(' Expectations', '')}</span>
           <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${review.hrReceivedOn ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{review.hrReceivedOn ? 'Received by HR' : 'With HR'}</span>
+          <button type="button" onClick={() => void saveCopy(review)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileDown className="h-3.5 w-3.5" />Save PDF</button>
         </li>)}</ul>}
       </section>}
 

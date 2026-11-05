@@ -118,7 +118,7 @@ export async function reviewHandler(req: any, res: any) {
     const action = text(req.query.action || body.action, 40);
 
     // ---- Supervisors: what is waiting for them, their submitted reviews, and the form.
-    if (['todo', 'mine', 'submit'].includes(action)) {
+    if (['todo', 'mine', 'submit', 'get'].includes(action)) {
       const { db, user, profile } = await officeAccess(req, false, REVIEWER_OFFICES, true);
       const isAdmin = profile.role === 'super_admin';
       const { data: me } = await db.from('profiles').select('full_name').eq('id', user.id).maybeSingle();
@@ -138,6 +138,14 @@ export async function reviewHandler(req: any, res: any) {
         const { data, error } = await query;
         if (error) throw error;
         return res.status(200).json({ reviews: (data || []).map(reviewRow), assessor: myName });
+      }
+      if (req.method === 'GET' && action === 'get') {
+        let query = db.from('hr_reviews').select('*').eq('id', text(req.query.id, 60)).eq('status', 'submitted');
+        if (!isAdmin) query = query.eq('assessor_id', user.id);
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        if (!data) throw fail(404, 'This review was not found.');
+        return res.status(200).json({ review: reviewFull(data) });
       }
       if (req.method === 'POST' && action === 'submit') {
         const review = await submitReview(db, body, (assigned) => isAdmin || assigned.assessor_id === user.id, myName);
