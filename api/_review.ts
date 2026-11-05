@@ -1,5 +1,6 @@
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
+import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
 // Performance Review, served from /api/status?resource=review (the Vercel Hobby plan allows
@@ -52,20 +53,40 @@ async function personNames(db: any) {
   };
 }
 
-export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at';
-export const reviewRow = (r: any) => ({ id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
-export const reviewFull = (r: any) => ({ ...reviewRow(r), ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
+export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at,form_type';
+export const reviewRow = (r: any) => ({ formType: r.form_type === 'assistant' ? 'assistant' : 'standard', id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
+export const reviewFull = (r: any) => ({ ...reviewRow(r), assistant: r.assistant || {}, ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
 
 // Submits a review (the supervisor's digital signature). `allow` says whether the review is this person's to fill in.
 export async function submitReview(db: any, body: any, allow: (assigned: any) => boolean, myName: string) {
     const id = text(body.id, 60);
-    const { data: assigned, error: readError } = await db.from('hr_reviews').select('id,status,assessor_id,assessor_employee_id,assessor_name').eq('id', id).maybeSingle();
+    const { data: assigned, error: readError } = await db.from('hr_reviews').select('id,status,assessor_id,assessor_employee_id,assessor_name,form_type').eq('id', id).maybeSingle();
     if (readError) throw readError;
     if (!assigned) throw fail(404, 'This review was not found. It may have been cancelled by HR.');
     if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
     if (!allow(assigned)) throw fail(403, 'This review is not assigned to you.');
     // Submitting is the supervisor's digital signature, so they must confirm it.
     if (body.signed !== true) throw fail(400, 'Confirm the review and sign it before submitting.');
+    // The clinic assistant form: 19 items marked out of 100 and a result for a contract locum or a probation.
+    if (assigned.form_type === 'assistant') {
+      const marks = Array.isArray(body.marks) ? body.marks.map(Number) : [];
+      if (marks.length !== ASSISTANT_ITEMS.length || marks.some((mark: number, index: number) => !Number.isInteger(mark) || mark < 0 || mark > ASSISTANT_ITEMS[index].max)) throw fail(400, 'Enter the marks for all 19 items (from 0 up to the full mark of each item).');
+      const kind: AssistantKind = body.kind === 'probation' ? 'probation' : 'locum';
+      const outcome = ASSISTANT_OUTCOMES[kind].find((option) => option.value === body.outcome);
+      if (!outcome) throw fail(400, 'Choose the result of this review.');
+      const term = outcome.terms ? text(body.term, 40) : '';
+      if (outcome.terms && !term) throw fail(400, 'Choose the period for this result.');
+      const total = assistantTotal(marks);
+      const nowAt = new Date().toISOString();
+      const { data: saved, error: saveError } = await db.from('hr_reviews').update({
+        status: 'submitted', submitted_at: nowAt, updated_at: nowAt, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
+        // The list pages show the score on a 1 to 4 scale as a percentage (4.00 is 100%), so the 100 marks are kept as total / 25.
+        total_score: Math.round(total / 25 * 100) / 100, overall: outcomeLabel(kind, outcome.value, term),
+        assistant: { marks, panels: text(body.panels, 300), kind, outcome: outcome.value, term, position: text(body.position, 120) },
+      }).eq('id', id).eq('status', 'pending').select('*').single();
+      if (saveError) throw saveError;
+      return reviewFull(saved);
+    }
     // Every criterion (four in each area) is rated 1 to 4. An area scores the average of its
     // criteria and the total weighs the areas by the form's percentages.
     const ratings: Record<string, number[]> = {};
@@ -248,7 +269,7 @@ export async function reviewHandler(req: any, res: any) {
         status: 'pending', employee_id: member.id, staff_name: member.full_name, employee_code: member.employee_code, position: member.designation || '', department: member.department || '',
         assessor_employee_id: assessor.id, assessor_name: `${/DR RESIDENT|DOCTOR/i.test(assessor.designation || '') ? 'DR ' : ''}${assessor.full_name}`, assigned_by: user.id,
         period_label: text(body.periodLabel, 40), period_start: isDate(body.periodStart) ? body.periodStart : null, period_end: isDate(body.periodEnd) ? body.periodEnd : null,
-        assign_remarks: text(body.remarks, 2000),
+        assign_remarks: text(body.remarks, 2000), form_type: body.formType === 'assistant' ? 'assistant' : 'standard',
       }).select('*').single();
       if (error) throw error;
       return res.status(200).json({ review: reviewFull(data) });

@@ -1,4 +1,5 @@
 import { officeFetch } from './officeApi';
+import type { AssistantResult } from './assistantReview';
 
 // The monthly Performance Assessment Review form: four areas, each rated 1 to 4 and
 // weighted. The server works the score out again, so this is only for the live total.
@@ -36,8 +37,8 @@ export function totalScore(ratings: Ratings) {
 export const percentOf = (score: number | null) => score === null ? null : Math.round(score * 2500) / 100;
 export const percentLabel = (score: number | null) => { const value = percentOf(score); return value === null ? '—' : `${value.toFixed(2).replace(/\.?0+$/, '')}%`; };
 
-export type ReviewSummary = { id: string; status: 'pending' | 'submitted'; staffName: string; employeeCode: string; position: string; department: string; assessorName: string; periodLabel: string; periodStart: string | null; periodEnd: string | null; assignRemarks: string; totalScore: number | null; overall: string | null; pip: 'required' | 'not_required'; hrReceivedOn: string | null; createdAt: string; submittedAt: string | null };
-export type ReviewFull = ReviewSummary & { ratings: Record<string, number[]>; improvement: string; training: string; employeeComments: string; pipRemarks: string; pipStart: string | null; hodName: string; hrReceivedBy: string; hrRemarks: string };
+export type ReviewSummary = { formType?: 'standard' | 'assistant'; id: string; status: 'pending' | 'submitted'; staffName: string; employeeCode: string; position: string; department: string; assessorName: string; periodLabel: string; periodStart: string | null; periodEnd: string | null; assignRemarks: string; totalScore: number | null; overall: string | null; pip: 'required' | 'not_required'; hrReceivedOn: string | null; createdAt: string; submittedAt: string | null };
+export type ReviewFull = ReviewSummary & { assistant?: AssistantResult; submittedAt?: string | null; ratings: Record<string, number[]>; improvement: string; training: string; employeeComments: string; pipRemarks: string; pipStart: string | null; hodName: string; hrReceivedBy: string; hrRemarks: string };
 
 export async function reviewApi(query: string, body?: unknown) {
   const response = await officeFetch(`/api/status?resource=review&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});

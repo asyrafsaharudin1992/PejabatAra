@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Printer, Search, Send } from 'lucide-react';
 import { ReviewSheet, useReviewPrint } from './ReviewSheet';
+import { AssistantDetail } from './AssistantReview';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRReviewReminders } from './HRReviewReminders';
@@ -13,7 +14,7 @@ import { AREAS, LEVELS, ReviewFull, ReviewSummary, dmy, percentLabel, reviewApi,
 const field = 'w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 
 type Person = { id: string; fullName: string; employeeCode: string; designation: string; department: string; status: string; company: string };
-const blankAssign = () => ({ employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
+const blankAssign = () => ({ formType: 'standard' as 'standard' | 'assistant', employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
 
 export function HRReviews({ onError, reportOnly = false }: { onError: (message: string) => void; reportOnly?: boolean }) {
   const [tab, setTab] = useState<'assign' | 'reports' | 'reminders'>(reportOnly ? 'reports' : 'assign');
@@ -65,7 +66,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
     try {
       const result = await reviewApi('action=hr_assign', assign);
       setNotice(`Review assigned: ${result.review.staffName} to ${result.review.assessorName}.`);
-      setAssign({ ...blankAssign(), assessorId: assign.assessorId, periodLabel: assign.periodLabel, periodStart: assign.periodStart, periodEnd: assign.periodEnd });
+      setAssign({ ...blankAssign(), formType: assign.formType, assessorId: assign.assessorId, periodLabel: assign.periodLabel, periodStart: assign.periodStart, periodEnd: assign.periodEnd });
       await reload(); await loadReminders();
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to assign the review.'); }
     setAssigning(false);
@@ -96,12 +97,13 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
     {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report'], ['reminders', 'Reminder']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'reminders' && dueReminders > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{dueReminders}</span>}</button>)}</div>}
     {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
-      onAssign={(item) => { setAssign({ employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
+      onAssign={(item) => { setAssign({ formType: 'standard', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
       onView={(id) => { setSelected(id); setTab('reports'); window.scrollTo({ top: 0 }); }} />}
     {tab === 'assign' && <section id="review-panel-assign" role="tabpanel" aria-labelledby="review-tab-assign" className={card}>
       <h3 className="text-lg font-semibold">Assign a review</h3>
       <p className="text-sm text-slate-500">Choose who is reviewed, who does the review and for which period. It appears in that supervisor's Performance Review to fill in.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Form<select value={assign.formType} onChange={(event) => setAssign({ ...assign, formType: event.target.value as 'standard' | 'assistant' })} className={`${field} mt-1.5`}><option value="standard">Performance Assessment Review (4 areas, rated 1 to 4)</option><option value="assistant">Penilaian Bulanan Pembantu Klinik (19 items out of 100)</option></select></label>
         <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Staff to review<select value={assign.employeeId} onChange={(event) => setAssign({ ...assign, employeeId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose staff…</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.employeeCode}{person.designation ? ` · ${person.designation}` : ''}</option>)}</select></label>
         <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Supervisor (assessor)<select value={assign.assessorId} onChange={(event) => setAssign({ ...assign, assessorId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose supervisor…</option>{supervisors.map((person) => <option key={person.id} value={person.id}>{person.name}{person.person ? ` · ${person.person}` : ''}</option>)}</select></label>
         <label className="block text-sm font-semibold text-slate-600">Review<input list="hr-review-periods" value={assign.periodLabel} onChange={(event) => setAssign({ ...assign, periodLabel: event.target.value })} className={`${field} mt-1.5`} /><datalist id="hr-review-periods">{PERIODS.map((period) => <option key={period} value={period} />)}</datalist></label>
@@ -132,6 +134,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
           <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0b9aca]">{review.periodLabel || 'Review'} · {dmy(review.periodStart)} – {dmy(review.periodEnd)}</p><h3 className="mt-1 text-xl font-semibold">{review.staffName}</h3><p className="text-sm text-slate-500">{[review.employeeCode, review.position, review.department].filter(Boolean).join(' · ') || '—'}</p><p className="mt-1 text-sm text-slate-600">Assessor: <strong className="text-[#14233b]">{review.assessorName || '—'}</strong>{review.hodName && <> · Head of department: <strong className="text-[#14233b]">{review.hodName}</strong></>}</p></div>
           <div className="flex flex-wrap items-center justify-end gap-2">{deletable(review) ? <button onClick={() => void deleteReview()} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete review</button> : <span className="mr-auto text-xs text-slate-400">Can only be deleted on the day it was submitted.</span>}<button onClick={() => setPrinting(true)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-[#0b587b] hover:bg-[#edf9fe]"><Printer className="h-4 w-4" />Print form</button></div>
           {printing && <ReviewSheet review={review} />}
+          {review.formType === 'assistant' ? <AssistantDetail review={review} /> : <>
           <div className="flex items-baseline justify-between gap-3 rounded-2xl bg-slate-50 p-4"><span className="flex items-baseline gap-3"><span className="text-3xl font-semibold tracking-tight">{review.totalScore?.toFixed(2)}</span><span className="text-xl font-semibold text-[#0b587b]">{percentLabel(review.totalScore)}</span></span><span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreTone(review.totalScore)}`}>{review.overall}</span></div>
           <div className="space-y-4">{AREAS.map((area) => { const levels = review.ratings[area.key] || []; const average = levels.length === 4 ? levels.reduce((sum, value) => sum + value, 0) / 4 : null; return <div key={area.key}>
             <div className="flex items-baseline justify-between gap-3 text-sm"><span className="font-semibold">{area.label} <span className="text-xs font-normal text-slate-400">{area.weight}%</span></span><span className="font-semibold">{average === null ? '—' : `${average.toFixed(2)} · ${((area.weight * average) / 4).toFixed(2).replace(/\.?0+$/, '')} of ${area.weight}%`}</span></div>
@@ -139,6 +142,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
           </div>; })}</div>
           {[['Areas for improvement', review.improvement], ['Trainings required / development measures', review.training], ['Employee comments / feedback', review.employeeComments]].map(([title, body]) => <div key={title}><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{title}</p><p className="mt-1 whitespace-pre-wrap text-sm">{body || '—'}</p></div>)}
           <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Performance Improvement Plan</p>{review.pip === 'required' ? <p className="mt-1 whitespace-pre-wrap rounded-2xl bg-rose-50 p-3 text-sm text-rose-800"><strong>Required</strong>{review.pipStart && <> · from {dmy(review.pipStart)}</>}{review.pipRemarks && <><br />{review.pipRemarks}</>}</p> : <p className="mt-1 text-sm">Not required</p>}</div>
+          </>}
           <div className="space-y-3 border-t border-slate-100 pt-5">
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">For Human Resource use</p>
             <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm font-semibold text-slate-600">Received on<input type="date" value={hr.receivedOn} onChange={(event) => setHr({ ...hr, receivedOn: event.target.value })} className={`${field} mt-1.5`} /></label><label className="block text-sm font-semibold text-slate-600">Received by<input value={hr.receivedBy} onChange={(event) => setHr({ ...hr, receivedBy: event.target.value })} className={`${field} mt-1.5`} /></label></div>

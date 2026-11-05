@@ -3,6 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, LogOut, Plus } fr
 import { AuthError, AuthShell, authButton, authInput, authLabel } from './AssessmentRoom';
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
+import { AssistantReviewForm } from './AssistantReview';
 import { AREAS, LEVELS, Ratings, ReviewSummary, areaScore, dmy, overallLabel, percentLabel, reviewApi, scoreTone, totalScore } from './lib/performanceReview';
 
 // Performance Review: a supervisor (CEO, CFO, COO, CPO, CHRO, Clinical Admin) fills in the
@@ -119,7 +120,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
       {thanks && <section className={`${card} text-center`}>
         <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
         <h2 className="mt-3 text-xl font-semibold">Review submitted for {thanks.staffName}</h2>
-        <p className="mt-2 text-sm text-slate-500">Total score <strong className="text-[#14233b]">{thanks.totalScore?.toFixed(2)}</strong> ({percentLabel(thanks.totalScore)}) · {thanks.overall}. Office HR can now see it.</p>
+        <p className="mt-2 text-sm text-slate-500">{thanks.formType === 'assistant' ? <>Jumlah markah <strong className="text-[#14233b]">{percentLabel(thanks.totalScore)}</strong> · {thanks.overall}.</> : <>Total score <strong className="text-[#14233b]">{thanks.totalScore?.toFixed(2)}</strong> ({percentLabel(thanks.totalScore)}) · {thanks.overall}.</>} Office HR can now see it.</p>
         <button onClick={() => { setThanks(null); setView('todo'); }} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white hover:bg-[#0a4c6a]"><Plus className="h-4 w-4" />Back to my reviews</button>
       </section>}
 
@@ -140,7 +141,8 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
         </li>)}</ul>}
       </section>}
 
-      {!thanks && open && <form onSubmit={submit} className="space-y-6">
+      {!thanks && open && open.formType === 'assistant' && <AssistantReviewForm review={open} assessorName={form.assessorName} api={api} onCancel={() => setOpen(null)} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); void load(); }} />}
+      {!thanks && open && open.formType !== 'assistant' && <form onSubmit={submit} className="space-y-6">
         <section className={card}>
           <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">Staff being reviewed</h2><button type="button" onClick={() => setOpen(null)} className="text-sm font-semibold text-slate-500 hover:text-[#0b587b]">Back to list</button></div>
           <div className="mt-4 rounded-2xl bg-[#f4fafd] p-4"><p className="text-lg font-semibold">{open.staffName}</p><p className="mt-1 text-sm text-slate-600"><span className="font-mono">{open.employeeCode}</span> · {[open.position, open.department].filter(Boolean).join(' · ') || '—'}</p><p className="mt-1 text-sm text-slate-600">{open.periodLabel || 'Review'}{open.periodStart ? ` · period ${dmy(open.periodStart)} – ${dmy(open.periodEnd)}` : ''}</p>{open.assignRemarks && <p className="mt-2 rounded-xl bg-white p-3 text-sm text-slate-700"><strong>Note from HR:</strong> {open.assignRemarks}</p>}</div>
