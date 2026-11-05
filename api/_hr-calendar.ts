@@ -78,7 +78,11 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     const reviews = (reviewResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, label: r.period_label, due: r.period_end, status: r.status }));
     const config: CalendarConfig = storedConfig(configRow?.payload);
     const states: Record<string, CalendarOccurrence> = stateRow?.payload?.states || {};
-    return res.status(200).json({ ...buildHrCalendar(month, people, config, states, reviews), people: people.map(({ birthday, ...safe }) => safe), config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });
+    // Notes from HR > Miscellaneous that have a due date in this month (until they are marked done). Without that page's table there are none.
+    const built = buildHrCalendar(month, people, config, states, reviews);
+    const noteResult = await db.from('hr_misc_items').select('id,title,body,due_on,done').eq('kind', 'note').gte('due_on', `${month}-01`).lte('due_on', `${month}-31`).limit(200);
+    for (const note of noteResult.error ? [] : (noteResult.data || [])) built.events.push({ id: `note:${note.id}`, title: `Note: ${note.title}`, category: 'other', date: note.due_on, start: note.due_on, employeeId: '', person: '', company: '', notes: String(note.body || '').slice(0, 300), source: 'manual', state: note.done ? 'done' : 'open' });
+    return res.status(200).json({ ...built, people: people.map(({ birthday, ...safe }) => safe), config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });
   }
   if (req.method !== 'POST' || !branch) throw fail(405, 'Method not allowed.');
   if (['calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation'].includes(action)) {

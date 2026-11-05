@@ -515,28 +515,37 @@ export async function hrHandler(req: any, res: any) {
     }
     // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
     if (req.method === 'GET' && action === 'misc_list') {
-      const { data, error } = await db.from('hr_misc_items').select('id,kind,title,url,body,file_name,content_type,size_bytes,created_by,created_at,updated_at').order('created_at', { ascending: false }).limit(500);
+      const { data, error } = await db.from('hr_misc_items').select('id,kind,title,url,body,file_name,content_type,size_bytes,created_by,created_at,updated_at,due_on,done').order('created_at', { ascending: false }).limit(500);
       if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ items: [], notSetUp: true }); throw error; }
-      return res.status(200).json({ items: (data || []).map((row: any) => ({ id: row.id, kind: row.kind, title: row.title, url: row.url, body: row.body, fileName: row.file_name, contentType: row.content_type, sizeBytes: row.size_bytes, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at })) });
+      return res.status(200).json({ items: (data || []).map((row: any) => ({ id: row.id, kind: row.kind, title: row.title, url: row.url, body: row.body, fileName: row.file_name, contentType: row.content_type, sizeBytes: row.size_bytes, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at, dueOn: row.due_on || null, done: Boolean(row.done) })) });
     }
-    // A link or a note: add one, or change one that exists.
+    // A link, a print link or a note: add one, or change one that exists. A note can have a due date (it then shows on the HR calendar).
     if (req.method === 'POST' && action === 'misc_save') {
-      const kind = body.kind === 'note' ? 'note' : 'link';
+      const kind = ['note', 'print'].includes(body.kind) ? String(body.kind) : 'link';
       const title = text(body.title, 120);
       if (!title) throw fail(400, 'Enter a title.');
-      const url = kind === 'link' ? text(body.url, 600) : '';
+      const url = kind === 'note' ? '' : text(body.url, 600);
       // Only web addresses: anything else (such as javascript:) could run code when the link is clicked.
-      if (kind === 'link' && !/^https?:\/\/[^\s]+$/i.test(url)) throw fail(400, 'Enter the link starting with https:// or http://.');
-      const row = { kind, title, url, body: text(body.body, 5000), updated_at: now };
+      if (kind !== 'note' && !/^https?:\/\/[^\s]+$/i.test(url)) throw fail(400, 'Enter the link starting with https:// or http://.');
+      const dueOn = kind === 'note' && body.dueOn ? String(body.dueOn) : null;
+      if (dueOn && !isDate(dueOn)) throw fail(400, 'Choose a valid due date.');
+      const row = { kind, title, url, body: text(body.body, 5000), due_on: dueOn, updated_at: now };
       const id = text(body.id, 60);
       const { error } = id
         ? await db.from('hr_misc_items').update(row).eq('id', id).eq('kind', kind)
         : await db.from('hr_misc_items').insert({ ...row, created_by: text(user.email || user.id, 120) });
+      if (error) { if (error.code === '42703' || error.code === '23514') throw fail(503, 'This part is not set up yet. System Admin needs to run the latest database migration first.'); throw error; }
+      return res.status(200).json({ success: true });
+    }
+    // A note done (or not done): a done note leaves the HR calendar.
+    if (req.method === 'POST' && action === 'misc_note_done') {
+      const { error } = await db.from('hr_misc_items').update({ done: body.done === true, updated_at: now }).eq('id', text(body.id, 60)).eq('kind', 'note');
       if (error) throw error;
       return res.status(200).json({ success: true });
     }
-    // A poster: an image (PNG, JPG or WebP, up to 3 MB) kept in private storage.
+    // A poster (an image) or a file to print (a PDF or an image), up to 3 MB, kept in private storage.
     if (req.method === 'POST' && action === 'misc_poster_upload') {
+      const fileKind = body.kind === 'print' ? 'print' : 'poster';
       const title = text(body.title, 120);
       if (!title) throw fail(400, 'Enter a title for the poster.');
       const fileName = String(body.fileName ?? '').replace(/[\\/\u0000-\u001f]/g, '').trim().slice(0, 100);
@@ -547,18 +556,19 @@ export async function hrHandler(req: any, res: any) {
       const jpg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
       const webp = buffer.length > 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
       if (!buffer.length || buffer.length > 3 * 1024 * 1024) throw fail(400, 'The poster must be smaller than 3 MB. Reduce the image size and try again.');
-      if (!png && !jpg && !webp) throw fail(400, 'The poster must be a PNG, JPG or WebP image.');
-      const contentType = png ? 'image/png' : jpg ? 'image/jpeg' : 'image/webp';
-      const path = `posters/${randomBytes(16).toString('hex')}.${png ? 'png' : jpg ? 'jpg' : 'webp'}`;
+      const pdf = fileKind === 'print' && buffer.length > 4 && buffer.toString('ascii', 0, 4) === '%PDF';
+      if (!png && !jpg && !webp && !pdf) throw fail(400, fileKind === 'print' ? 'The file must be a PDF, PNG, JPG or WebP.' : 'The poster must be a PNG, JPG or WebP image.');
+      const contentType = pdf ? 'application/pdf' : png ? 'image/png' : jpg ? 'image/jpeg' : 'image/webp';
+      const path = `${fileKind === 'print' ? 'print' : 'posters'}/${randomBytes(16).toString('hex')}.${pdf ? 'pdf' : png ? 'png' : jpg ? 'jpg' : 'webp'}`;
       const { error: uploadError } = await db.storage.from('hr-misc').upload(path, buffer, { contentType, upsert: false });
       if (uploadError) throw uploadError;
-      const { error } = await db.from('hr_misc_items').insert({ kind: 'poster', title, body: text(body.body, 2000), file_path: path, file_name: fileName || title, content_type: contentType, size_bytes: buffer.length, created_by: text(user.email || user.id, 120) });
+      const { error } = await db.from('hr_misc_items').insert({ kind: fileKind, title, body: text(body.body, 2000), file_path: path, file_name: fileName || title, content_type: contentType, size_bytes: buffer.length, created_by: text(user.email || user.id, 120) });
       if (error) { await db.storage.from('hr-misc').remove([path]); throw error; }
       return res.status(200).json({ success: true });
     }
     // The poster itself, sent to the page so it can be shown, downloaded or shared (the share sheet needs the file).
     if (req.method === 'GET' && action === 'misc_poster_get') {
-      const { data: row, error } = await db.from('hr_misc_items').select('file_path,file_name,content_type').eq('id', text(req.query.id, 60)).eq('kind', 'poster').maybeSingle();
+      const { data: row, error } = await db.from('hr_misc_items').select('file_path,file_name,content_type').eq('id', text(req.query.id, 60)).in('kind', ['poster', 'print']).maybeSingle();
       if (error) throw error;
       if (!row) throw fail(404, 'Poster not found.');
       const { data: file, error: downloadError } = await db.storage.from('hr-misc').download(row.file_path);
