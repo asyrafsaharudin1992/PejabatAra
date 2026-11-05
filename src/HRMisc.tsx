@@ -51,7 +51,7 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [edit, setEdit] = useState<{ id?: string; kind: 'link' | 'note' | 'print'; title: string; url: string; body: string; dueOn: string } | null>(null);
-  const [upload, setUpload] = useState<{ kind: 'poster' | 'print'; title: string; body: string; file: File | null } | null>(null);
+  const [upload, setUpload] = useState<{ id?: string; kind: 'poster' | 'print'; title: string; body: string; file: File | null } | null>(null);
   const load = () => call('action=misc_list').then((result) => { setItems(result.items); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setItems([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
 
@@ -68,10 +68,15 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
   };
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!upload?.file) { onError('Choose the file.'); return; }
-    if (upload.file.size > MAX_FILE) { onError('The file must be smaller than 3 MB. Reduce its size and try again.'); return; }
+    if (!upload) return;
+    // A new file is needed when adding; when editing it is only needed to replace the old one.
+    if (!upload.file && !upload.id) { onError('Choose the file.'); return; }
+    if (upload.file && upload.file.size > MAX_FILE) { onError('The file must be smaller than 3 MB. Reduce its size and try again.'); return; }
     const file = upload.file, current = upload;
-    if (await run(async () => call('action=misc_poster_upload', { kind: current.kind, title: current.title, body: current.body, fileName: file.name, base64: await toBase64(file) }), 'Added.')) setUpload(null);
+    const work = async () => current.id
+      ? call('action=misc_file_update', { id: current.id, title: current.title, body: current.body, ...(file ? { fileName: file.name, base64: await toBase64(file) } : {}) })
+      : call('action=misc_poster_upload', { kind: current.kind, title: current.title, body: current.body, fileName: file!.name, base64: await toBase64(file!) });
+    if (await run(work, current.id ? 'Saved.' : 'Added.')) setUpload(null);
   };
   const remove = (item: Item) => { if (window.confirm(`Delete "${item.title}"?`)) void run(() => call('action=misc_delete', { id: item.id }), 'Deleted.'); };
   const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); setNotice('Copied.'); } catch { onError('Unable to copy. Select the text and copy it instead.'); } };
@@ -112,7 +117,7 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
 
       {current.kind === 'poster' && (of('poster').length === 0 ? <Empty text="No posters yet." /> : <>
         <p className="text-sm text-slate-500">On a phone, Share to WhatsApp opens the share sheet with the image. On a computer the image is saved and WhatsApp opens with the message, so you attach the image yourself.</p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{of('poster').map((item) => <FileCard key={item.id} item={item} busy={busy} onDelete={() => remove(item)} onError={onError} onNotice={setNotice} mode="share" />)}</div></>)}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{of('poster').map((item) => <FileCard key={item.id} item={item} busy={busy} onEdit={() => setUpload({ id: item.id, kind: item.kind === 'print' ? 'print' : 'poster', title: item.title, body: item.body, file: null })} onDelete={() => remove(item)} onError={onError} onNotice={setNotice} mode="share" />)}</div></>)}
 
       {current.kind === 'note' && (of('note').length === 0 ? <Empty text="No notes yet." /> : <ul className="space-y-3">{of('note').map((item) => { const left = item.dueOn ? daysUntil(item.dueOn) : null; const state = item.done ? 'done' : left === null ? '' : left < 0 ? 'overdue' : left === 0 ? 'today' : left <= 7 ? 'soon' : 'later'; const tone = state === 'overdue' ? 'bg-rose-50 text-rose-700' : state === 'today' || state === 'soon' ? 'bg-amber-50 text-amber-800' : state === 'done' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'; return <li key={item.id} className={`rounded-2xl p-4 ${item.done ? 'bg-slate-50/60' : 'bg-slate-50'}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -126,7 +131,7 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
         <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{item.body || '—'}</p>
       </li>; })}</ul>)}
 
-      {current.kind === 'print' && (of('print').length === 0 ? <Empty text="Nothing to print yet. Add a form or file HR prints often." /> : <div className="grid gap-4 sm:grid-cols-2">{of('print').map((item) => item.fileName ? <FileCard key={item.id} item={item} busy={busy} onDelete={() => remove(item)} onError={onError} onNotice={setNotice} mode="print" /> : <div key={item.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+      {current.kind === 'print' && (of('print').length === 0 ? <Empty text="Nothing to print yet. Add a form or file HR prints often." /> : <div className="grid gap-4 sm:grid-cols-2">{of('print').map((item) => item.fileName ? <FileCard key={item.id} item={item} busy={busy} onEdit={() => setUpload({ id: item.id, kind: item.kind === 'print' ? 'print' : 'poster', title: item.title, body: item.body, file: null })} onDelete={() => remove(item)} onError={onError} onNotice={setNotice} mode="print" /> : <div key={item.id} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
         <p className="flex items-center gap-2 font-semibold"><Link2 className="h-4 w-4 text-violet-500" />{item.title}</p><p className="mt-1 truncate text-xs text-slate-500">{item.url}</p>{item.body && <p className="mt-1 text-xs text-slate-500">{item.body}</p>}
         <div className="mt-3 flex flex-wrap gap-2"><a href={item.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"><Printer className="h-3.5 w-3.5" />Open to print</a>
           <button onClick={() => setEdit({ id: item.id, kind: 'print', title: item.title, url: item.url, body: item.body, dueOn: '' })} className={button} aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></button>
@@ -143,12 +148,12 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
         <div className="flex justify-end"><button disabled={busy} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button></div>
       </form>
     </Dialog>}
-    {upload && <Dialog title={upload.kind === 'poster' ? 'Add poster' : 'Add file to print'} onClose={() => setUpload(null)}>
+    {upload && <Dialog title={`${upload.id ? 'Edit' : 'Add'} ${upload.kind === 'poster' ? 'poster' : 'file to print'}`} onClose={() => setUpload(null)}>
       <form onSubmit={send} className="space-y-3">
         <label className="block text-sm font-semibold text-slate-600">Title<input required value={upload.title} onChange={(event) => setUpload({ ...upload, title: event.target.value })} maxLength={120} className={`${field} mt-1.5`} /></label>
         <label className="block text-sm font-semibold text-slate-600">{upload.kind === 'poster' ? 'Message sent with it on WhatsApp (optional)' : 'Note (optional)'}<textarea rows={3} value={upload.body} onChange={(event) => setUpload({ ...upload, body: event.target.value })} maxLength={2000} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#0b587b]" /></label>
-        <label className="block text-sm font-semibold text-slate-600">{upload.kind === 'poster' ? 'Image (PNG, JPG or WebP, up to 3 MB)' : 'File (PDF, PNG, JPG or WebP, up to 3 MB)'}<input required type="file" accept={upload.kind === 'poster' ? 'image/png,image/jpeg,image/webp' : 'application/pdf,image/png,image/jpeg,image/webp'} onChange={(event: ChangeEvent<HTMLInputElement>) => setUpload({ ...upload, file: event.target.files?.[0] || null })} className="mt-1.5 block w-full text-sm" /></label>
-        <div className="flex justify-end"><button disabled={busy} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy ? 'Uploading…' : 'Add'}</button></div>
+        <label className="block text-sm font-semibold text-slate-600">{upload.kind === 'poster' ? 'Image (PNG, JPG or WebP, up to 3 MB)' : 'File (PDF, PNG, JPG or WebP, up to 3 MB)'}{upload.id && <span className="block text-xs font-normal text-slate-400">Leave empty to keep the current file.</span>}<input required={!upload.id} type="file" accept={upload.kind === 'poster' ? 'image/png,image/jpeg,image/webp' : 'application/pdf,image/png,image/jpeg,image/webp'} onChange={(event: ChangeEvent<HTMLInputElement>) => setUpload({ ...upload, file: event.target.files?.[0] || null })} className="mt-1.5 block w-full text-sm" /></label>
+        <div className="flex justify-end"><button disabled={busy} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{busy ? 'Saving…' : upload.id ? 'Save' : 'Add'}</button></div>
       </form>
     </Dialog>}
   </div>;
@@ -167,7 +172,7 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
 }
 
 // A poster or a file to print. The file is fetched when the card appears (an image is shown) and freed when it goes away.
-function FileCard({ item, busy, onDelete, onError, onNotice, mode }: { key?: string; item: Item; busy: boolean; onDelete: () => void; onError: (message: string) => void; onNotice: (message: string) => void; mode: 'share' | 'print' }) {
+function FileCard({ item, busy, onEdit, onDelete, onError, onNotice, mode }: { key?: string; item: Item; busy: boolean; onEdit: () => void; onDelete: () => void; onError: (message: string) => void; onNotice: (message: string) => void; mode: 'share' | 'print' }) {
   const [file, setFile] = useState<File | null>(null);
   const [src, setSrc] = useState('');
   const image = item.contentType.startsWith('image/');
@@ -195,6 +200,7 @@ function FileCard({ item, busy, onDelete, onError, onNotice, mode }: { key?: str
           ? <button onClick={() => void share()} disabled={!file} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><MessageCircle className="h-3.5 w-3.5" />Share to WhatsApp</button>
           : <button onClick={() => file && printFile(file)} disabled={!file} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"><Printer className="h-3.5 w-3.5" />Print</button>}
         <button onClick={() => file && downloadBlob([file], file.name, file.type)} disabled={!file} className={button}><FileDown className="h-3.5 w-3.5" />Save</button>
+        <button onClick={onEdit} className={button} aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></button>
         <button onClick={onDelete} disabled={busy} className="rounded-lg p-2 text-rose-600 hover:bg-rose-50" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
       </div>
     </div>

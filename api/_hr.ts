@@ -276,6 +276,22 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   });
   return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, baseMonth, comparison, staff };
 }
+// A poster (an image) or a file to print (a PDF or an image) from the page: checked by its first bytes, up to 3 MB. Returns what to store.
+function readMiscFile(body: any, fileKind: 'poster' | 'print') {
+  const fileName = String(body.fileName ?? '').replace(/[\\/\u0000-\u001f]/g, '').trim().slice(0, 100);
+  const data = String(body.base64 ?? '').replace(/^data:[^,]*,/, '');
+  if (!data || data.length > Math.ceil(3 * 1024 * 1024 * 4 / 3) + 8) throw fail(400, 'The file must be smaller than 3 MB. Reduce its size and try again.');
+  const buffer = Buffer.from(data, 'base64');
+  const png = buffer.length > 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+  const jpg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const webp = buffer.length > 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+  const pdf = fileKind === 'print' && buffer.length > 4 && buffer.toString('ascii', 0, 4) === '%PDF';
+  if (!buffer.length || buffer.length > 3 * 1024 * 1024) throw fail(400, 'The file must be smaller than 3 MB. Reduce its size and try again.');
+  if (!png && !jpg && !webp && !pdf) throw fail(400, fileKind === 'print' ? 'The file must be a PDF, PNG, JPG or WebP.' : 'The poster must be a PNG, JPG or WebP image.');
+  const ext = pdf ? 'pdf' : png ? 'png' : jpg ? 'jpg' : 'webp';
+  return { fileName, buffer, contentType: pdf ? 'application/pdf' : png ? 'image/png' : jpg ? 'image/jpeg' : 'image/webp', path: `${fileKind === 'print' ? 'print' : 'posters'}/${randomBytes(16).toString('hex')}.${ext}` };
+}
+
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -548,22 +564,32 @@ export async function hrHandler(req: any, res: any) {
       const fileKind = body.kind === 'print' ? 'print' : 'poster';
       const title = text(body.title, 120);
       if (!title) throw fail(400, 'Enter a title for the poster.');
-      const fileName = String(body.fileName ?? '').replace(/[\\/\u0000-\u001f]/g, '').trim().slice(0, 100);
-      const data = String(body.base64 ?? '').replace(/^data:[^,]*,/, '');
-      if (!data || data.length > Math.ceil(3 * 1024 * 1024 * 4 / 3) + 8) throw fail(400, 'The poster must be smaller than 3 MB. Reduce the image size and try again.');
-      const buffer = Buffer.from(data, 'base64');
-      const png = buffer.length > 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
-      const jpg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-      const webp = buffer.length > 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
-      if (!buffer.length || buffer.length > 3 * 1024 * 1024) throw fail(400, 'The poster must be smaller than 3 MB. Reduce the image size and try again.');
-      const pdf = fileKind === 'print' && buffer.length > 4 && buffer.toString('ascii', 0, 4) === '%PDF';
-      if (!png && !jpg && !webp && !pdf) throw fail(400, fileKind === 'print' ? 'The file must be a PDF, PNG, JPG or WebP.' : 'The poster must be a PNG, JPG or WebP image.');
-      const contentType = pdf ? 'application/pdf' : png ? 'image/png' : jpg ? 'image/jpeg' : 'image/webp';
-      const path = `${fileKind === 'print' ? 'print' : 'posters'}/${randomBytes(16).toString('hex')}.${pdf ? 'pdf' : png ? 'png' : jpg ? 'jpg' : 'webp'}`;
+      const { fileName, buffer, contentType, path } = readMiscFile(body, fileKind);
       const { error: uploadError } = await db.storage.from('hr-misc').upload(path, buffer, { contentType, upsert: false });
       if (uploadError) throw uploadError;
       const { error } = await db.from('hr_misc_items').insert({ kind: fileKind, title, body: text(body.body, 2000), file_path: path, file_name: fileName || title, content_type: contentType, size_bytes: buffer.length, created_by: text(user.email || user.id, 120) });
       if (error) { await db.storage.from('hr-misc').remove([path]); throw error; }
+      return res.status(200).json({ success: true });
+    }
+    // Edit a poster or a file to print: its title and message, and optionally a new file in place of the old one.
+    if (req.method === 'POST' && action === 'misc_file_update') {
+      const { data: row, error } = await db.from('hr_misc_items').select('id,kind,file_path').eq('id', text(body.id, 60)).in('kind', ['poster', 'print']).maybeSingle();
+      if (error) throw error;
+      if (!row) throw fail(404, 'Not found.');
+      const title = text(body.title, 120);
+      if (!title) throw fail(400, 'Enter a title.');
+      const patch: Record<string, unknown> = { title, body: text(body.body, 2000), updated_at: now };
+      let newPath = '';
+      if (body.base64) {
+        const file = readMiscFile(body, row.kind);
+        const { error: uploadError } = await db.storage.from('hr-misc').upload(file.path, file.buffer, { contentType: file.contentType, upsert: false });
+        if (uploadError) throw uploadError;
+        newPath = file.path;
+        Object.assign(patch, { file_path: file.path, file_name: file.fileName || title, content_type: file.contentType, size_bytes: file.buffer.length });
+      }
+      const { error: saveError } = await db.from('hr_misc_items').update(patch).eq('id', row.id);
+      if (saveError) { if (newPath) await db.storage.from('hr-misc').remove([newPath]); throw saveError; }
+      if (newPath && row.file_path) await db.storage.from('hr-misc').remove([row.file_path]);
       return res.status(200).json({ success: true });
     }
     // The poster itself, sent to the page so it can be shown, downloaded or shared (the share sheet needs the file).
