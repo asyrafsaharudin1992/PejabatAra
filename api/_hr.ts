@@ -458,18 +458,19 @@ export async function hrHandler(req: any, res: any) {
     }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
-    // HR sets a new rate for a code from the 1st of a month (this month or later). Entries already added keep the rate they were saved with.
+    // HR sets a new rate for one or more codes from the 1st of a month (this month or later). Entries already added keep the rate they were saved with.
     if (req.method === 'POST' && action === 'incentive_rate_set') {
-      const code = INCENTIVE_CODES.find((item) => item.code === text(body.code, 10));
-      if (!code || code.ownAmount) throw fail(400, 'Choose a code that has a fixed rate.');
+      const wanted: string[] = [...new Set<string>((Array.isArray(body.codes) ? body.codes : [body.code]).map((item: unknown) => text(item, 10)).filter(Boolean))].slice(0, 60);
+      const codes = wanted.map((item) => INCENTIVE_CODES.find((code) => code.code === item));
+      if (!codes.length || codes.some((code) => !code || code.ownAmount)) throw fail(400, 'Choose codes that have a fixed rate.');
       const rate = Math.round(Number(body.rate) * 100) / 100;
       if (!Number.isFinite(rate) || rate <= 0 || rate > 2000) throw fail(400, 'Enter the new rate in RM (more than 0, up to 2000).');
       const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
       if (!isDate(body.effectiveFrom) || !body.effectiveFrom.endsWith('-01') || body.effectiveFrom.slice(0, 7) < today.slice(0, 7)) throw fail(400, 'Choose the month the new rate starts, this month or later.');
-      const { error } = await db.from('hr_incentive_rates').upsert({ code: code.code, rate, effective_from: body.effectiveFrom, set_by: text(user.email || user.id, 120) }, { onConflict: 'code,effective_from' });
+      const { error } = await db.from('hr_incentive_rates').upsert(codes.map((code) => ({ code: code!.code, rate, effective_from: body.effectiveFrom, set_by: text(user.email || user.id, 120) })), { onConflict: 'code,effective_from' });
       if (error?.code === '42P01' || error?.code === 'PGRST205') throw fail(503, 'Rate changes are not set up yet. System Admin needs to run the latest database migration first.');
       if (error) throw error;
-      return res.status(200).json({ success: true });
+      return res.status(200).json({ success: true, updated: codes.length });
     }
     // HR cancels a change that has not started yet.
     if (req.method === 'POST' && action === 'incentive_rate_delete') {
