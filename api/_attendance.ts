@@ -333,15 +333,27 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     if (cancelError) throw cancelError;
     return res.status(200).json({ success: true });
   }
+  // HR officers decide in their Individual Sign In too: the requests a supervisor has approved (waiting for HR) are listed after the ones waiting for their own approval.
+  const isHr = /\bHR\b|HUMAN RESOURCE|CHRO/i.test(String(me.designation || ''));
   if (req.method === 'GET' && action === 'attendance_request_approvals') {
-    const { data, error: listError } = await db.from('hr_attendance_requests').select('*').eq('approver_id', me.id).eq('status', 'pending').order('created_at').limit(50);
-    if (listError) throw listError;
-    const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
+    const [{ data: mineRows, error: listError }, hrRows] = await Promise.all([
+      db.from('hr_attendance_requests').select('*').eq('approver_id', me.id).eq('status', 'pending').order('created_at').limit(50),
+      isHr ? db.from('hr_attendance_requests').select('*').eq('status', 'supervisor_approved').order('created_at').limit(50) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (listError || hrRows.error) throw listError || hrRows.error;
+    const seen = new Set<string>();
+    const rows = [...(mineRows || []).map((row: any) => ({ row, stage: 'supervisor' })), ...(hrRows.data || []).map((row: any) => ({ row, stage: 'hr' }))].filter(({ row }) => !seen.has(row.id) && seen.add(row.id));
+    const ids = [...new Set(rows.map(({ row }) => row.employee_id))];
     const { data: people } = ids.length ? await db.from('hr_employees').select('id,full_name').in('id', ids) : { data: [] };
-    return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, new Map((people || []).map((p: any) => [p.id, p.full_name])))) });
+    const names = new Map<string, string>((people || []).map((p: any) => [p.id, p.full_name] as [string, string]));
+    return res.status(200).json({ requests: rows.map(({ row, stage }) => ({ ...requestRow(row, names), stage })) });
   }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
-    await supervisorDecide(db, text(body.id, 60), String(body.decision), text(body.note, 300), me.full_name, me.id);
+    const id = text(body.id, 60);
+    const waiting = await readRequest(db, id);
+    // A request a supervisor has approved is waiting for HR: an HR officer confirms it here (OT at the chosen rate, or the forgotten clock).
+    if (waiting.status === 'supervisor_approved' && isHr) await hrDecide(db, id, String(body.decision), text(body.note, 300), me.full_name, Number(body.rate) || 1.5, body.minutes);
+    else await supervisorDecide(db, id, String(body.decision), text(body.note, 300), me.full_name, me.id);
     return res.status(200).json({ success: true });
   }
   throw fail(404, 'Unknown attendance action.');

@@ -10,7 +10,7 @@ import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 // sees the requests waiting for them here.
 type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; leave: string };
 type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
-type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string };
+type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr' };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
 const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${request.otText}`].filter(Boolean).join(' · ');
@@ -112,9 +112,10 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     try { await assessmentFetch('action=attendance_request_cancel', { method: 'POST', body: JSON.stringify({ id }) }); loadRequests(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to cancel.'); } finally { setBusy(false); }
   };
+  const [rates, setRates] = useState<Record<string, string>>({});
   const decide = async (id: string, decision: 'approved' | 'rejected') => {
     setBusy(true); setError('');
-    try { await assessmentFetch('action=attendance_request_decide', { method: 'POST', body: JSON.stringify({ id, decision }) }); loadRequests(); }
+    try { await assessmentFetch('action=attendance_request_decide', { method: 'POST', body: JSON.stringify({ id, decision, rate: Number(rates[id] || 1.5) }) }); loadRequests(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
   };
 
@@ -134,6 +135,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
       {!waitingHere.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
       <ul className="divide-y divide-slate-100">{waitingHere.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
+        {request.stage === 'hr' && <p className="mt-1 inline-block rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700">Supervisor approved · waiting for HR</p>}
+        {request.stage === 'hr' && request.otMinutes > 0 && <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">OT rate<select value={rates[request.id] || '1.5'} onChange={(event) => setRates({ ...rates, [request.id]: event.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option><option value="3">3.0x</option></select></label>}
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
       </li>)}</ul>
     </section>}
