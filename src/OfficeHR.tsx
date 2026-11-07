@@ -65,7 +65,7 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { b
       </div>
       <div className="mx-1 mt-5 h-px bg-white/10" />
       <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id || (item.id === 'leave' && view === 'leaveTypes') ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
-        <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.tone}`} strokeWidth={1.8} />{item.label}
+        <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.tone}`} strokeWidth={1.8} /><span className="min-w-0 text-left">{item.label}</span>
         <span className="ml-auto flex items-center gap-2">
           {!!badges[item.id] && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{badges[item.id]}</span>}
           {item.soon ? <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${view === item.id ? 'bg-slate-100 text-slate-500' : 'bg-white/10 text-[#9bb5c7]'}`}>Soon</span> : <ChevronRight className="h-4 w-4 opacity-45" />}
