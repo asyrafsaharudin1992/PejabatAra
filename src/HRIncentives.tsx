@@ -17,7 +17,7 @@ const RECEIVER_KEY = 'ara_incentive_hr_receiver';
 const claimMonths = () => { const months: string[] = []; for (let month = thisMonth(); month >= '2026-10'; month = shiftMonth(month, -1)) months.push(month); return months.length ? months : ['2026-10']; };
 
 export function HRIncentives({ onError, embedded = false }: { onError: (message: string) => void; embedded?: boolean }) {
-  const [month, setMonth] = useState(() => { const start = new Date().getDate() <= 10 ? shiftMonth(thisMonth(), -1) : thisMonth(); return start < '2026-10' ? '2026-10' : start; });
+  const [month, setMonth] = useState('all');
   const [branch, setBranch] = useState('');
   const [kind, setKind] = useState('');
   const [name, setName] = useState('');
