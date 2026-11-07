@@ -21,7 +21,7 @@ async function hrCall(query: string, body: unknown) {
   if (!response.ok || result.error) throw new Error(result.error || 'Something went wrong. Please try again.');
   return result;
 }
-// "Add MC": HR adds a file to a leave request that already exists (for example a medical certificate that arrived after the leave was entered).
+// "Add MC" (medical leave) or "Add document" (other leave): HR adds a file to a leave request that already exists (for example a medical certificate that arrived after the leave was entered).
 function AddFile({ row, onAdded, onError }: { row: Request; onAdded: () => void; onError: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const room = MAX_FILES - (row.attachments?.length || 0);
@@ -41,7 +41,7 @@ function AddFile({ row, onAdded, onError }: { row: Request; onAdded: () => void;
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to add the file.'); }
     finally { setBusy(false); }
   };
-  return <label className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-[#0b587b] hover:bg-slate-50">{busy ? 'Adding…' : (row.attachments?.length ? 'Add another file' : 'Add MC')}<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple disabled={busy} onChange={(event) => { void choose(event.target.files); event.target.value = ''; }} className="sr-only" /></label>;
+  return <label className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-[#0b587b] hover:bg-slate-50">{busy ? 'Adding…' : (row.attachments?.length ? 'Add another file' : row.type === 'ML' ? 'Add MC' : 'Add document')}<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple disabled={busy} onChange={(event) => { void choose(event.target.files); event.target.value = ''; }} className="sr-only" /></label>;
 }
 const imported = (row: Request) => row.note.startsWith('Imported from Infotech');
 const dmy = (date: string) => date.split('-').reverse().join('/');
