@@ -461,7 +461,7 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, updated: ids.length });
     }
 
-    // Staff incentive claims that Clinical Admin has approved and sent to HR (read only).
+    // Staff incentive claims that Clinical Admin has approved and sent to HR (read only), plus claims already submitted and still waiting with Clinical Admin (or Dr Syafiq for doctors) so HR can see what is coming.
     if (req.method === 'GET' && action === 'incentives') {
       const month = text(req.query.month, 7);
       if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
@@ -469,7 +469,7 @@ export async function hrHandler(req: any, res: any) {
       const columns = 'id,staff_id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by,assessment_staff(name,staff_code)';
       const read = async (withForm: boolean) => {
         let query = db.from('incentive_claims').select(withForm ? `${columns},form` : columns);
-        query = withForm ? query.or('hr_submitted_at.not.is.null,and(form.eq.doctor,status.eq.submitted)') : query.not('hr_submitted_at', 'is', null);
+        query = withForm ? query.or('hr_submitted_at.not.is.null,status.eq.submitted') : query.not('hr_submitted_at', 'is', null);
         if (month !== 'all') query = query.eq('month', month);
         return await query.order('month', { ascending: false }).order('submitted_at', { ascending: false });
       };
@@ -481,7 +481,7 @@ export async function hrHandler(req: any, res: any) {
       const waitingStaff = (data || []).filter((row: any) => row.form === 'doctor' && row.status === 'submitted').map((row: any) => row.staff_id);
       const owners = new Map<string, string>();
       if (waitingStaff.length) { const { data: people } = await db.from('hr_employees').select('employee_code,assessment_staff_id').in('assessment_staff_id', waitingStaff); (people || []).forEach((person: any) => owners.set(person.assessment_staff_id, person.employee_code)); }
-      return res.status(200).json({ claims: (data || []).map((row: any) => ({ approver: row.form === 'doctor' && row.status === 'submitted' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+      return res.status(200).json({ claims: (data || []).map((row: any) => ({ approver: row.status === 'submitted' && !row.hr_submitted_at ? (row.form === 'doctor' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : 'Clinical Admin') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
     }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
