@@ -469,7 +469,7 @@ export async function hrHandler(req: any, res: any) {
       const columns = 'id,staff_id,month,branch,entries,status,admin_note,approved_by,submitted_at,decided_at,hr_submitted_at,hr_submitted_by,hr_received_at,hr_received_by,assessment_staff(name,staff_code)';
       const read = async (withForm: boolean) => {
         let query = db.from('incentive_claims').select(withForm ? `${columns},form` : columns);
-        query = withForm ? query.or('hr_submitted_at.not.is.null,status.eq.submitted') : query.not('hr_submitted_at', 'is', null);
+        query = withForm ? query.or('hr_submitted_at.not.is.null,status.in.(submitted,draft,returned)') : query.not('hr_submitted_at', 'is', null);
         if (month !== 'all') query = query.eq('month', month);
         return await query.order('month', { ascending: false }).order('submitted_at', { ascending: false });
       };
@@ -477,6 +477,8 @@ export async function hrHandler(req: any, res: any) {
       if (error?.code === '42703') ({ data, error } = await read(false));
       if (error?.code === '42703') return res.status(200).json({ claims: [], notSetUp: true });
       if (error) throw error;
+      // Drafts and returned claims are shown so HR sees what is being filled in; an empty draft is not worth listing.
+      data = (data || []).filter((row: any) => row.hr_submitted_at || row.status === 'submitted' || (row.entries || []).length > 0);
       // Who approves a doctor claim still waiting: Dr Syafiq, except Dr Syafiq's own claim (Dr Asyraf).
       const waitingStaff = (data || []).filter((row: any) => row.form === 'doctor' && row.status === 'submitted').map((row: any) => row.staff_id);
       const owners = new Map<string, string>();
