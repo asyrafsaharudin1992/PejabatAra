@@ -1,7 +1,8 @@
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
+import { shrinkPoster } from './ManagedServices';
 import { card } from './AssessmentStaff';
 
 // Office HR > Miscellaneous: four cards. Important links, posters HR shares on WhatsApp, notes (optionally with a due date that shows on the HR calendar) and
@@ -71,11 +72,20 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
     if (!upload) return;
     // A new file is needed when adding; when editing it is only needed to replace the old one.
     if (!upload.file && !upload.id) { onError('Choose the file.'); return; }
-    if (upload.file && upload.file.size > MAX_FILE) { onError('The file must be smaller than 3 MB. Reduce its size and try again.'); return; }
     const file = upload.file, current = upload;
-    const work = async () => current.id
-      ? call('action=misc_file_update', { id: current.id, title: current.title, body: current.body, ...(file ? { fileName: file.name, base64: await toBase64(file) } : {}) })
-      : call('action=misc_poster_upload', { kind: current.kind, title: current.title, body: current.body, fileName: file!.name, base64: await toBase64(file!) });
+    // Images are shrunk first (longest side 1600px) so every card loads fast; PDFs go as they are.
+    const prepared = async (chosen: File) => {
+      if (!chosen.type.startsWith('image/')) return { fileName: chosen.name, base64: await toBase64(chosen), size: chosen.size };
+      const small = await shrinkPoster(chosen, 1600, 0.85);
+      return { fileName: small.name, base64: `data:${small.type};base64,${small.base64}`, size: small.size };
+    };
+    const work = async () => {
+      const sent = file ? await prepared(file) : null;
+      if (sent && sent.size > MAX_FILE) throw new Error('The file must be smaller than 3 MB. Reduce its size and try again.');
+      return current.id
+        ? call('action=misc_file_update', { id: current.id, title: current.title, body: current.body, ...(sent ? { fileName: sent.fileName, base64: sent.base64 } : {}) })
+        : call('action=misc_poster_upload', { kind: current.kind, title: current.title, body: current.body, fileName: sent!.fileName, base64: sent!.base64 });
+    };
     if (await run(work, current.id ? 'Saved.' : 'Added.')) setUpload(null);
   };
   const remove = (item: Item) => { if (window.confirm(`Delete "${item.title}"?`)) void run(() => call('action=misc_delete', { id: item.id }), 'Deleted.'); };
@@ -176,12 +186,22 @@ function FileCard({ item, busy, onEdit, onDelete, onError, onNotice, mode }: { k
   const [file, setFile] = useState<File | null>(null);
   const [src, setSrc] = useState('');
   const image = item.contentType.startsWith('image/');
+  const box = useRef<HTMLDivElement>(null);
+  const [seen, setSeen] = useState(false);
+  // The file is only fetched once the card scrolls into view.
   useEffect(() => {
+    if (!box.current || seen) return;
+    const watcher = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { setSeen(true); watcher.disconnect(); } }, { rootMargin: '200px' });
+    watcher.observe(box.current);
+    return () => watcher.disconnect();
+  }, [seen]);
+  useEffect(() => {
+    if (!seen) return;
     let url = '';
     let live = true;
     call(`action=misc_poster_get&id=${item.id}`).then((result) => { if (!live) return; const loaded = fileOf(result.base64, result.fileName, result.contentType); setFile(loaded); if (loaded.type.startsWith('image/')) { url = URL.createObjectURL(loaded); setSrc(url); } }).catch((cause: Error) => { if (live) onError(cause.message); });
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
-  }, [item.id]);
+  }, [item.id, seen]);
   const share = async () => {
     if (!file) return;
     const message = item.body || item.title;
@@ -193,7 +213,7 @@ function FileCard({ item, busy, onEdit, onDelete, onError, onNotice, mode }: { k
     onNotice('The poster was saved to your computer. Attach it in the WhatsApp chat that opened.');
   };
   return <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-    <div className="grid aspect-[4/5] place-items-center bg-slate-50">{image ? (src ? <img src={src} alt={item.title} className="h-full w-full object-contain" /> : <p className="text-xs text-slate-400">Loading…</p>) : <div className="text-center text-slate-400"><FileDown className="mx-auto h-10 w-10" /><p className="mt-2 text-xs">PDF</p></div>}</div>
+    <div ref={box} className="grid aspect-[4/5] place-items-center bg-slate-50">{image ? (src ? <img src={src} alt={item.title} className="h-full w-full object-contain" /> : <p className="text-xs text-slate-400">Loading…</p>) : <div className="text-center text-slate-400"><FileDown className="mx-auto h-10 w-10" /><p className="mt-2 text-xs">PDF</p></div>}</div>
     <div className="space-y-2 p-3"><p className="truncate font-semibold">{item.title}</p>{item.body && mode === 'print' && <p className="text-xs text-slate-500">{item.body}</p>}
       <div className="flex flex-wrap gap-2">
         {mode === 'share'
