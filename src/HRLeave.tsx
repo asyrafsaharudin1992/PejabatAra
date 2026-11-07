@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, ScrollText, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
+import { shrinkAttachment } from './lib/shrinkImage';
 import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
 import { HRLeaveReport } from './HRLeaveReport';
@@ -14,7 +15,6 @@ const LABEL: Record<Request['status'], string> = { pending: 'Waiting for supervi
 const TONE: Record<Request['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
 // One-minute link to a leave file for HR (view or download).
 const hrFileUrl = async (id: string, download: boolean) => { const response = await officeFetch(`/api/status?resource=hr&action=leave_attachment_url&id=${encodeURIComponent(id)}${download ? '&download=1' : ''}`); const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || 'Unable to open the file.'); return result.url as string; };
-const readBase64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(new Error('Unable to read the file.')); reader.readAsDataURL(file); });
 async function hrCall(query: string, body: unknown) {
   const response = await officeFetch(`/api/status?resource=hr&${query}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
@@ -34,8 +34,9 @@ function AddFile({ row, onAdded, onError }: { row: Request; onAdded: () => void;
       for (const file of Array.from(list).slice(0, room)) {
         const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : '';
         if (!['pdf', 'png', 'jpg', 'jpeg'].includes(ext)) { onError(`${file.name}: attach a PDF, PNG or JPG file.`); continue; }
-        if (file.size > MAX_BYTES) { onError(`${file.name}: the file must be smaller than 2 MB.`); continue; }
-        ids.push((await hrCall('action=leave_attachment_upload', { fileName: file.name, data: await readBase64(file) })).file.id);
+        const ready = await shrinkAttachment(file);
+        if (ready.size > MAX_BYTES) { onError(`${file.name}: the file must be smaller than 2 MB.`); continue; }
+        ids.push((await hrCall('action=leave_attachment_upload', { fileName: ready.name, data: ready.base64 })).file.id);
       }
       if (ids.length) { await hrCall('action=leave_attachment_add', { requestId: row.id, attachmentIds: ids }); onAdded(); }
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to add the file.'); }

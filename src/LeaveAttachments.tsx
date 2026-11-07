@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileText, Paperclip, X } from 'lucide-react';
+import { shrinkAttachment } from './lib/shrinkImage';
 
 // Files attached to leave (a medical certificate and the like): choosing and uploading them, and opening them later through a
 // link that expires after a minute. The same pieces are used by staff, approvers and HR.
@@ -9,7 +10,6 @@ export const MAX_BYTES = 2 * 1024 * 1024;
 export const ATTACHMENT_REQUIRED_FOR = new Set(['ML']);   // only medical leave must have a file
 const OK_EXT = ['pdf', 'png', 'jpg', 'jpeg'];
 const kb = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-const readBase64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.onerror = () => reject(new Error('Unable to read the file.')); reader.readAsDataURL(file); });
 
 // Opens a file: a new tab to view it, or a download. `getUrl` asks the server for the one-minute link.
 export async function openLeaveFile(getUrl: (id: string, download: boolean) => Promise<string>, id: string, download: boolean) {
@@ -33,8 +33,9 @@ export function AttachmentPicker({ files, onChange, upload, required, onError, l
       for (const file of chosen) {
         const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : '';
         if (!OK_EXT.includes(ext)) { onError(`${file.name}: attach a PDF, PNG or JPG file.`); continue; }
-        if (file.size > MAX_BYTES) { onError(`${file.name}: the file must be smaller than 2 MB.`); continue; }
-        added.push(await upload(file.name, await readBase64(file)));
+        const ready = await shrinkAttachment(file);
+        if (ready.size > MAX_BYTES) { onError(`${file.name}: the file must be smaller than 2 MB.`); continue; }
+        added.push(await upload(ready.name, ready.base64));
       }
       if (added.length) onChange([...files, ...added]);
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to upload the file.'); }

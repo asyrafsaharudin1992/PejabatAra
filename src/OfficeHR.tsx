@@ -120,10 +120,15 @@ export default function OfficeHR() {
   const [error, setError] = useState('');
   const [profileTab, setProfileTab] = useState<'list' | 'projection'>('list');
   const [pendingRequests, setPendingRequests] = useState(0);
-  // Everything waiting for HR (red numbers on the menu), refreshed when the menu changes and every few minutes.
+  // Everything waiting for HR (red numbers on the menu), refreshed when the menu changes and when the tab comes back into view (no timer).
   const [waiting, setWaiting] = useState<{ leave: number; reviews: number; incentive: number; attendanceOt: number; attendanceMissed: number }>({ leave: 0, reviews: 0, incentive: 0, attendanceOt: 0, attendanceMissed: 0 });
   const loadWaiting = () => officeFetch('/api/status?resource=hr&action=hr_badges').then((response) => response.json()).then((result) => { if (!result.error) setWaiting(result); }).catch(() => undefined);
-  useEffect(() => { void loadWaiting(); const timer = window.setInterval(() => void loadWaiting(), 180000); return () => window.clearInterval(timer); }, [view]);
+  useEffect(() => {
+    void loadWaiting();
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadWaiting(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [view]);
   // The number on Staff Profiles: staff change requests waiting for HR.
   useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
