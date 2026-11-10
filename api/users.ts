@@ -1,4 +1,4 @@
-import { officeAccess } from './_office-db.js';
+import { errorReply, officeAccess } from './_office-db.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -22,7 +22,7 @@ export default async function handler(req: any, res: any) {
       const { data, error } = await db.auth.admin.createUser({email:body.email.trim(), password:body.password, email_confirm:true, user_metadata:{full_name:body.fullName.trim()}, app_metadata:{office_access:officeAccess, home_office:homeOffice}});
       if (error) throw error;
       const { error: profileError } = await db.from('profiles').upsert({id:data.user.id,email:body.email.trim(),full_name:body.fullName.trim(),role:body.role === 'Superadmin' ? 'super_admin' : 'staff',status:'active',department:body.department || null});
-      if (profileError) throw new Error('Account created, but profile setup failed. Check this account before retrying.');
+      if (profileError) throw Object.assign(new Error('Account created, but profile setup failed. Check this account before retrying.'), { status: 500 });
       return res.json({success:true});
     }
     const email = req.query.email || body.email;
@@ -67,7 +67,7 @@ export default async function handler(req: any, res: any) {
       }
       if (Object.keys(profileUpdate).length) {
         const { error: profileError } = await db.from('profiles').update(profileUpdate).eq('id', target.id);
-        if (profileError) throw new Error('Sign-in details were updated, but the profile could not be saved. Refresh and check this account.');
+        if (profileError) throw Object.assign(new Error('Sign-in details were updated, but the profile could not be saved. Refresh and check this account.'), { status: 500 });
       }
       return res.json({success:true});
     }
@@ -78,5 +78,5 @@ export default async function handler(req: any, res: any) {
       return res.json({success:true});
     }
     return res.status(405).json({error:'Method not allowed.'});
-  } catch(error:any) { return res.status(error.status || 400).json({error:error.message}); }
+  } catch(error:any) { return errorReply(res, error, 'Unable to complete this request.'); }
 }

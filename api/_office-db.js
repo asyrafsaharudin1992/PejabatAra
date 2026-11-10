@@ -132,7 +132,7 @@ export function workspaceHandler(resource) {
       if (req.method === 'GET') return res.status(200).json((data || []).map(decode));
       if (!data?.length) return res.status(404).json({ error:'Record not found.' });
       return res.status(200).json(req.method === 'POST' ? decode(data[0]) : { success:true });
-    } catch (error) { return res.status(error.status || 400).json({ error: error.message || 'Request failed.' }); }
+    } catch (error) { return errorReply(res, error, 'Request failed.'); }
   };
 }
 

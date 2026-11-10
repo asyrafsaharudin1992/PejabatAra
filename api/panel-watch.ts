@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { database, driveRequest, hash, required, syncPanelFiles } from './_panel-drive.js';
+import { errorReply } from './_office-db.js';
 
 function authorised(req: any) {
   const supplied = String(req.headers.authorization || '').replace(/^Bearer /, '');
@@ -41,6 +42,6 @@ export default async function handler(req: any, res: any) {
     if (saveError) throw saveError;
     return res.status(200).json({ active: true, expiresAt, renewed: true });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Unable to register Drive watch.' });
+    return errorReply(res, error, 'Unable to register Drive watch.');
   }
 }
