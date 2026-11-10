@@ -23,6 +23,10 @@
           "value": "max-age=63072000"
         },
         {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co https://drive.google.com https://*.googleusercontent.com; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co; frame-src https://drive.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+        },
+        {
           "key": "X-Content-Type-Options",
           "value": "nosniff"
         },
