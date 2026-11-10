@@ -285,16 +285,27 @@ function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError
 // see it. Pay figures stay hidden until "Show private details" is pressed, like the rest of the profile.
 export type CareerEntry = { id: string; date: string | null; kind: string; detail: string; from: string; to: string; amount: number | null };
 const PAY_KINDS = /increment|salary|hourly|bonus/i;
-function ProfileCareer({ employeeId, reveal, onError, onLoaded }: { employeeId: string; reveal: boolean; onError: (message: string) => void; onLoaded?: (entries: CareerEntry[]) => void }) {
+function ProfileCareer({ employeeId, reveal, onError, onLoaded, onRaised }: { employeeId: string; reveal: boolean; onError: (message: string) => void; onLoaded?: (entries: CareerEntry[]) => void; onRaised?: () => void }) {
   const [entries, setEntries] = useState<CareerEntry[] | null>(null);
+  const [reload, setReload] = useState(0);
+  const [raising, setRaising] = useState(false);
+  const [raiseDate, setRaiseDate] = useState('');
+  const [raiseSalary, setRaiseSalary] = useState('');
+  const [saving, setSaving] = useState(false);
+  const saveRaise = async () => {
+    if (!window.confirm(`Set the new basic salary to RM ${raiseSalary} from ${raiseDate}? The days before that date are still paid at the old salary.`)) return;
+    setSaving(true);
+    try { const result = await api('action=increment_save', { employeeId, date: raiseDate, newSalary: Number(raiseSalary) }); if (result.error) throw new Error(result.error); setRaising(false); setRaiseDate(''); setRaiseSalary(''); setReload((value) => value + 1); onRaised?.(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the increment.'); } finally { setSaving(false); }
+  };
   const [notSetUp, setNotSetUp] = useState(false);
-  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); const list = ((result.entries || []) as CareerEntry[]).map((entry) => entry.date && entry.date < '1950' ? { ...entry, date: null } : entry); setEntries(list); onLoaded?.(list); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onLoaded?.([]); onError(cause.message); }); }, [employeeId]);
+  useEffect(() => { setEntries(null); api(`action=career&employeeId=${employeeId}`).then((result) => { if (result.error) throw new Error(result.error); const list = ((result.entries || []) as CareerEntry[]).map((entry) => entry.date && entry.date < '1950' ? { ...entry, date: null } : entry); setEntries(list); onLoaded?.(list); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setEntries([]); onLoaded?.([]); onError(cause.message); }); }, [employeeId, reload]);
   const paged = usePaged<CareerEntry>(entries || [], 10, employeeId);
   const pay = (entry: CareerEntry) => PAY_KINDS.test(entry.kind) || PAY_KINDS.test(entry.detail);
   const shown = (entry: CareerEntry, value: string) => value && pay(entry) && !reveal ? '••••' : value;
   const change = (entry: CareerEntry) => entry.from && entry.to && entry.to !== '0.00' ? `${shown(entry, entry.from)} → ${shown(entry, entry.to)}` : shown(entry, entry.to || entry.from);
   return <section className={card}>
-    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-semibold">Employment history</h3><span className="text-xs text-slate-400">HR only · staff cannot see this</span></div>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-semibold">Employment history</h3><span className="flex items-center gap-3 text-xs text-slate-400">HR only · staff cannot see this<button type="button" onClick={() => setRaising((value) => !value)} className="inline-flex items-center gap-1 rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-bold text-white"><Plus className="h-3.5 w-3.5" />Add increment</button></span></div>
+    {raising && <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-[#f4fafd] p-3"><label className="text-xs font-semibold text-slate-500">Starts on<input type="date" value={raiseDate} onChange={(event) => setRaiseDate(event.target.value)} className="mt-1 block h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label><label className="text-xs font-semibold text-slate-500">New basic salary (RM)<input type="number" min="0" step="0.01" value={raiseSalary} onChange={(event) => setRaiseSalary(event.target.value)} className="mt-1 block h-10 w-44 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label><button type="button" onClick={() => void saveRaise()} disabled={saving || !raiseDate || !(Number(raiseSalary) > 0)} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40">Save increment</button><p className="w-full text-xs text-slate-500">The pay run pays the days before this date at the old salary and the days from this date at the new one, like Infotech.</p></div>}
     {entries === null ? <p className="mt-2 text-sm text-slate-500">Loading…</p> : notSetUp ? <p className="mt-2 text-sm text-amber-700">Not set up yet: the database migration 202611010004 has not been run.</p> : !entries.length ? <p className="mt-2 text-sm text-slate-500">No history recorded.</p> : <>
       <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Date</th><th className="pr-4">Event</th><th className="pr-4">Change</th><th>Amount</th></tr></thead>
         <tbody>{paged.rows.map((entry) => <tr key={entry.id} className="border-t border-slate-100"><td className="py-2 pr-4 whitespace-nowrap text-slate-500">{entry.date ? dmy(entry.date) : '—'}</td><td className="pr-4"><span className="font-semibold text-[#14233b]">{entry.kind}</span>{entry.detail && entry.detail.toUpperCase() !== entry.kind.toUpperCase() && <span className="ml-2 text-xs text-slate-400">{entry.detail.toLowerCase()}</span>}</td><td className="pr-4 text-slate-600">{change(entry) || '—'}</td><td className="whitespace-nowrap text-slate-600">{entry.amount ? (reveal ? money(entry.amount) : '••••') : ''}</td></tr>)}</tbody></table></div>
@@ -374,7 +385,7 @@ export function ProfileView({ id, onBack, onError }: { id: string; onBack: () =>
     </div>
     <ProfileDocuments employeeId={id} onError={onError} />
     <ProfilePayHistory employeeId={id} reveal={reveal} onError={onError} />
-    <ProfileCareer employeeId={id} reveal={reveal} onError={onError} onLoaded={setCareer} />
+    <ProfileCareer employeeId={id} reveal={reveal} onError={onError} onLoaded={setCareer} onRaised={() => void load()} />
     {e.remarks && <section className={card}><h3 className="font-semibold">Remarks</h3><p className="mt-2 whitespace-pre-line text-sm">{e.remarks}</p></section>}
       <section className={card}><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4 text-slate-400" />Change history</h3>
       {!data.audit.length ? <p className="mt-2 text-sm text-slate-500">No changes yet.</p> : <ul className="mt-3 space-y-2 text-sm">{history.rows.map((item, i) => <li key={i} className="flex flex-wrap gap-x-2 text-slate-600"><span className="text-slate-400">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span className="font-semibold text-[#14233b]">{item.by || 'Someone'}</span><span>{item.action === 'create' ? 'created the profile' : `changed ${Object.keys(item.changes).map((key) => SECRET.has(key) ? (FIELD_LABEL[key] || key.replace(/_/g, ' ')) : `${FIELD_LABEL[key] || key.replace(/_/g, ' ')}`).join(', ')}`}</span></li>)}</ul>}

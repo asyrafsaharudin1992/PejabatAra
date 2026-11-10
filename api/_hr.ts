@@ -1648,6 +1648,25 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ entries: (data || []).map((row: any) => ({ id: row.id, date: row.event_date, kind: row.kind, detail: row.detail, from: row.from_value, to: row.to_value, amount: row.amount === null ? null : Number(row.amount), source: row.source })) });
     }
 
+    // A pay raise: records it in the employment history (the pay run pays the days before the date at the old salary) and sets the new basic salary.
+    if (req.method === 'POST' && action === 'increment_save') {
+      const employeeId = text(body.employeeId, 60), date = text(body.date, 10), next = Math.round(Number(body.newSalary) * 100) / 100;
+      if (!employeeId) throw fail(400, 'Choose a staff member.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw fail(400, 'Choose the date the new salary starts.');
+      if (!(next > 0) || next > 1000000) throw fail(400, 'Type the new basic salary.');
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,basic_salary').eq('id', employeeId).maybeSingle();
+      if (personError) throw personError;
+      if (!person) throw fail(404, 'Staff member not found.');
+      const before = Math.round(Number(person.basic_salary || 0) * 100) / 100;
+      if (before === next) throw fail(400, 'The new salary is the same as the current one.');
+      const { error: historyError } = await db.from('hr_career_history').insert({ employee_id: employeeId, event_date: date, kind: 'Increment', detail: 'BASIC SALARY', from_value: before.toFixed(2), to_value: next.toFixed(2), amount: Math.round((next - before) * 100) / 100, source: 'AraOffice' });
+      if (historyError) throw historyError;
+      const { error: salaryError } = await db.from('hr_employees').update({ basic_salary: next }).eq('id', employeeId);
+      if (salaryError) throw salaryError;
+      await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { basic_salary: [String(before), String(next)], increment_date: ['', date] }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+
     // Documents on a staff profile: HR sees every one, and can add or remove any.
     if (action === 'documents' || action.startsWith('document_')) {
       const employeeId = text(req.query.employeeId || body.employeeId, 60);
