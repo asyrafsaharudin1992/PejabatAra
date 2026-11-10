@@ -432,6 +432,30 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, group });
     }
 
+    // Public holiday list (HR > Leave > Public holidays): one row per group and date.
+    if (req.method === 'GET' && action === 'holidays') {
+      const { data, error } = await db.from('hr_holidays').select('group_code,holiday_date,name').order('holiday_date').limit(1000);
+      if (error) throw error;
+      return res.status(200).json({ holidays: (data || []).map((row: any) => ({ group: row.group_code, date: row.holiday_date, name: row.name })) });
+    }
+    if (req.method === 'POST' && action === 'holiday_save') {
+      const group = text(body.group, 20), date = text(body.date, 10), name = text(body.name, 120);
+      if (!['SG-MNG', 'SG-OPS', 'MLHL'].includes(group)) throw fail(400, 'Choose a holiday group.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw fail(400, 'Choose a valid date.');
+      if (!name) throw fail(400, 'Type the holiday name.');
+      const { error } = await db.from('hr_holidays').upsert({ group_code: group, holiday_date: date, name }, { onConflict: 'group_code,holiday_date' });
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { holiday_saved: { group, date, name } }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'POST' && action === 'holiday_delete') {
+      const group = text(body.group, 20), date = text(body.date, 10);
+      const { error } = await db.from('hr_holidays').delete().eq('group_code', group).eq('holiday_date', date);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { holiday_deleted: { group, date } }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+
     if (req.method === 'POST' && action === 'set_leave_calendar_access') {
       const id = text(body.id, 60);
       if (!Array.isArray(body.companies) || body.companies.some((company: unknown) => company !== 'KJ' && company !== 'SK')) throw fail(400, 'Choose department only, KJ, SK, or KJ + SK.');
