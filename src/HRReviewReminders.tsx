@@ -36,6 +36,13 @@ export function HRReviewReminders({ reminders, notSetUp, settings, settingsVersi
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save this reminder.'); }
     finally { setBusy(false); }
   };
+  const dismiss = async (item: ReviewReminder) => {
+    if (!window.confirm(`Delete this reminder for ${item.fullName} (${item.periodLabel}, due ${dmy(item.dueOn)})? Use this for an assessment already done before AraOffice. It stays under Closed.`)) return;
+    setBusy(true); setNotice('');
+    try { await reviewApi('action=hr_reminder_dismiss', { employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn }); await onReload(); setNotice('Reminder deleted.'); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to delete this reminder.'); }
+    finally { setBusy(false); }
+  };
   const change = async (id: string, state: string) => {
     setBusy(true); setNotice('');
     try { await reviewApi('action=hr_reminder_state', { id, state }); await onReload(); setNotice(state === 'complete' ? 'Reminder marked complete.' : state === 'cancel' ? 'Reminder cancelled.' : 'Reminder reopened.'); }
@@ -69,7 +76,7 @@ export function HRReviewReminders({ reminders, notSetUp, settings, settingsVersi
         <td className="pr-4"><p className="font-semibold">{item.periodLabel}</p><p className="text-xs text-slate-400">{item.source === 'automatic' ? item.periodLabel === 'Annual appraisal' ? 'From confirmation date' : 'Probation schedule · first 3 months' : 'HR reminder'}</p>{item.notes && <p className="mt-1 max-w-xs whitespace-pre-wrap text-xs text-slate-500">{item.notes}</p>}</td>
         <td className="whitespace-nowrap pr-4">{dmy(item.dueOn)}{open(item) && <p className={`text-xs ${item.daysUntil < 0 ? 'text-rose-600' : 'text-slate-400'}`}>{item.daysUntil < 0 ? `${-item.daysUntil} days overdue` : item.daysUntil === 0 ? 'Today' : `In ${item.daysUntil} days`}</p>}</td>
         <td className="pr-4"><span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS[item.status][1]}`}>{STATUS[item.status][0]}</span></td>
-        <td className="py-3 text-right"><div className="flex flex-wrap justify-end gap-2">{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
+        <td className="py-3 text-right"><div className="flex flex-wrap justify-end gap-2">{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.source === 'automatic' && open(item) && <button type="button" disabled={busy} onClick={() => void dismiss(item)} className="px-2 py-1 text-xs font-semibold text-rose-600">Delete</button>}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
           {item.source === 'custom' && open(item) && <><button type="button" disabled={busy} onClick={() => setDraft({ id: item.id, employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn, notes: item.notes })} className="px-2 py-1 text-xs font-semibold text-slate-500">Edit</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'complete')} className="px-2 py-1 text-xs font-semibold text-emerald-700">Mark complete</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'cancel')} className="px-2 py-1 text-xs font-semibold text-slate-400">Cancel reminder</button></>}
           {item.source === 'custom' && !item.reviewId && ['completed', 'cancelled'].includes(item.status) && <button type="button" disabled={busy} onClick={() => void change(item.id, 'reopen')} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">Reopen</button>}</div></td>
       </tr>)}</tbody></table></div>}

@@ -164,7 +164,7 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_reminder_dismiss', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_reminders') {
@@ -247,6 +247,17 @@ export async function reviewHandler(req: any, res: any) {
       const { data, error } = await db.from('hr_review_reminders').update({ completed_at: body.state === 'complete' ? now : null, cancelled_at: body.state === 'cancel' ? now : null, updated_by: user.id, updated_at: now }).eq('id', body.id).select('id').maybeSingle();
       if (error) throw error;
       if (!data) throw fail(404, 'Reminder not found.');
+      return res.status(200).json({ success: true });
+    }
+    // Delete an automatic reminder (for example an assessment done before AraOffice): a cancelled HR reminder with the same
+    // staff, label and due date replaces the automatic one, so it leaves the open list and stays under Closed.
+    if (req.method === 'POST' && action === 'hr_reminder_dismiss') {
+      if (!isId(body.employeeId)) throw fail(400, 'Choose a staff member.');
+      const label = text(body.periodLabel, 40);
+      if (!label || !validReminderDate(String(body.dueOn || ''))) throw fail(400, 'Invalid reminder.');
+      const now = new Date().toISOString();
+      const { error } = await db.from('hr_review_reminders').insert({ employee_id: body.employeeId, period_label: label, due_on: body.dueOn, notes: 'Deleted by HR (assessment done before AraOffice or not needed).', cancelled_at: now, created_by: user.id, updated_by: user.id, updated_at: now });
+      if (error) throw error;
       return res.status(200).json({ success: true });
     }
     // Review 2 assessments an Admin Klinikal marked "Not needed".
