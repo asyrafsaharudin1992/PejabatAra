@@ -13,7 +13,7 @@ type State = { today: string; name: string; mode: 'places' | 'anywhere'; places:
 type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr' };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
-const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${request.otText}`].filter(Boolean).join(' · ');
+const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${Math.floor(request.otMinutes / 60)} h ${request.otMinutes % 60} m`].filter(Boolean).join(' · ');
 
 const DEVICE_KEY = 'ara_clock_device';
 // Anonymous browser identifier recorded with each clock for audit only; changing browsers is allowed.
