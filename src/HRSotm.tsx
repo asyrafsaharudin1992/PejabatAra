@@ -28,7 +28,9 @@ function shrinkFace(image: HTMLImageElement) {
   layer.getContext('2d')?.drawImage(image, 0, 0, layer.width, layer.height);
   return layer.toDataURL('image/jpeg', 0.85);
 }
-type Past = { file: string; month: string; name: string; branch: string; url: string };
+type Past = { file: string; month: string; name: string; branch: string; url: string; full: string };
+// A small copy for the Past SOTM list (480 pixels wide, about 40 KB), so the list does not load every full picture.
+const thumbOf = (layer: HTMLCanvasElement) => { const small = document.createElement('canvas'); small.width = 480; small.height = Math.round((480 * layer.height) / layer.width); small.getContext('2d')?.drawImage(layer, 0, 0, small.width, small.height); return small.toDataURL('image/jpeg', 0.75); };
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Unable to read that picture.')); image.src = src; });
 
 type Combo = { branch: string; name: string; face: string };
@@ -41,7 +43,7 @@ function CombinedPanel({ month, items, personId, logo, onError, onClose }: { mon
   const left = items.find((item) => /kajang/i.test(item.branch)), right = items.find((item) => /seri\s*kembangan/i.test(item.branch));
   useEffect(() => { if (left && right) Promise.all([loadImage(left.face), loadImage(right.face)]).then((pair) => setFaces([pair[0], pair[1]])).catch((cause: Error) => onError(cause.message)); }, []);
   useEffect(() => { if (canvas.current && left && right && faces) drawCombined(canvas.current, { month: monthLabel(month), left: { ...left, face: faces[0] }, right: { ...right, face: faces[1] }, logo }); }, [faces, logo]);
-  const keep = () => call('action=sotm_save', { employeeId: personId, month, name: 'Kajang and Seri Kembangan', branch: 'Combined', poster: canvas.current?.toDataURL('image/jpeg', 0.88) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The poster could not be saved.'); return false; });
+  const keep = () => call('action=sotm_save', { employeeId: personId, month, name: 'Kajang and Seri Kembangan', branch: 'Combined', poster: canvas.current?.toDataURL('image/jpeg', 0.88), thumb: canvas.current ? thumbOf(canvas.current) : undefined }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The poster could not be saved.'); return false; });
   const share = async () => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
@@ -108,7 +110,7 @@ function CertificateMaker({ people, logo, onError }: { people: Person[] | null; 
     if (!canvas.current) return;
     setBusy(true); setNotice('');
     const layer = canvas.current, text = `Congratulations ${name}, Staff of the Month for ${monthLabel(month)}! Thank you for your hard work.`;
-    const keep = personId ? call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved.'); return false; }) : Promise.resolve(false);
+    const keep = personId ? call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9), thumb: thumbOf(layer) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved.'); return false; }) : Promise.resolve(false);
     try {
       const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/jpeg', 0.92), `Sijil SOTM ${monthLabel(month)} - ${name || 'staff'}.jpg`), text);
       const kept = await keep, done = kept ? ' Saved under Past SOTM > Certificates.' : '';
@@ -121,7 +123,7 @@ function CertificateMaker({ people, logo, onError }: { people: Person[] | null; 
     setBusy(true); setNotice('');
     const layer = canvas.current;
     let kept = false;
-    if (personId) { try { await call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9) }); kept = true; } catch (cause) { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved, but it is downloaded.'); } }
+    if (personId) { try { await call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9), thumb: thumbOf(layer) }); kept = true; } catch (cause) { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved, but it is downloaded.'); } }
     layer.toBlob((blob) => { if (blob) { downloadBlob([blob], `Sijil SOTM ${monthLabel(month)} - ${name || 'staff'}.png`, 'image/png'); setNotice(kept ? 'Downloaded and saved under Past SOTM > Certificates.' : 'Downloaded.'); } else onError('Unable to make the certificate.'); setBusy(false); }, 'image/png');
   };
   const field = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
@@ -162,6 +164,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   const [combo, setCombo] = useState<{ month: string; items: Combo[]; open: boolean } | null>(null);
   const [filterMonth, setFilterMonth] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
+  const [limit, setLimit] = useState(12);
   const canvas = useRef<HTMLCanvasElement>(null);
   const fail = (cause: unknown, fallback: string) => onError(cause instanceof Error ? cause.message : fallback);
   useEffect(() => {
@@ -170,6 +173,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   }, []);
   const loadPast = () => { setPast(null); call(`action=sotm_list&kind=${pastKind}`).then((result) => setPast(result.items || [])).catch((cause) => { setPast([]); fail(cause, 'Unable to load past posters.'); }); };
   useEffect(() => { if (tab === 'past') loadPast(); }, [tab, pastKind]);
+  useEffect(() => setLimit(12), [pastKind, filterMonth, filterBranch]);
   useEffect(() => { if (canvas.current && tab === 'create') drawPoster(canvas.current, { name, branch, quote, month: monthLabel(month), photo, logo, zoom, moveX, moveY }); }, [tab, name, branch, quote, month, photo, logo, zoom, moveX, moveY]);
   const choose = async (id: string) => {
     setPersonId(id); setNotice(''); setNewFace(null); setPhoto(null); setZoom(1); setMoveX(0); setMoveY(0);
@@ -200,7 +204,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
     setBusy(true); setNotice('');
     const layer = canvas.current, text = message(name, monthLabel(month));
     // The poster is kept under Past SOTM (and the face photo, if it is new). If saving fails the poster is still used.
-    const keep = personId ? call('action=sotm_save', { employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.88), face: newFace, combo: photo ? cropFace(photo, zoom, moveX, moveY) : undefined }).then(() => { setNewFace(null); return true; }).catch((cause) => { fail(cause, 'The poster could not be saved, but it is still used.'); return false; }) : Promise.resolve(false);
+    const keep = personId ? call('action=sotm_save', { employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.88), thumb: thumbOf(layer), face: newFace, combo: photo ? cropFace(photo, zoom, moveX, moveY) : undefined }).then(() => { setNewFace(null); return true; }).catch((cause) => { fail(cause, 'The poster could not be saved, but it is still used.'); return false; }) : Promise.resolve(false);
     try {
       if (kind === 'share') {
         // Straight from the click: the phone only opens its share sheet if nothing was awaited first.
@@ -217,7 +221,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { fail(cause, 'Unable to share.'); }
     setBusy(false);
   };
-  const fileOf = async (item: Past) => new File([await (await fetch(item.url)).blob()], `${pastKind === 'cert' ? 'Sijil ' : ''}SOTM ${monthLabel(item.month)} - ${item.name}.jpg`, { type: 'image/jpeg' });
+  const fileOf = async (item: Past) => new File([await (await fetch(item.full)).blob()], `${pastKind === 'cert' ? 'Sijil ' : ''}SOTM ${monthLabel(item.month)} - ${item.name}.jpg`, { type: 'image/jpeg' });
   const downloadPast = async (item: Past) => { try { const file = await fileOf(item); downloadBlob([file], file.name, 'image/jpeg'); } catch (cause) { fail(cause, 'Unable to download.'); } };
   const sharePast = async (item: Past) => {
     const text = message(item.name, monthLabel(item.month));
@@ -245,11 +249,12 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
         <select aria-label="Filter by month" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)} className="h-10 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white [&>option]:text-slate-800"><option value="">All months</option>{pastMonths.map((value) => <option key={value} value={value}>{monthLabel(value)}</option>)}</select>
         <select aria-label="Filter by branch" value={filterBranch} onChange={(event) => setFilterBranch(event.target.value)} className="h-10 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white [&>option]:text-slate-800"><option value="">All branches</option>{pastBranches.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
       {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
-      {past === null ? <p className="mt-5 text-sm text-white/70">Loading…</p> : !pastShown.length ? <p className="mt-5 text-sm text-white/70">{past.length ? 'Nothing for this filter.' : pastKind === 'cert' ? 'No certificate yet. Download a certificate and it is kept here.' : 'No poster yet. Download or share a poster and it is kept here.'}</p> : <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{pastShown.map((item) => <article key={item.file} className="group overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-white/10">
+      {past === null ? <p className="mt-5 text-sm text-white/70">Loading…</p> : !pastShown.length ? <p className="mt-5 text-sm text-white/70">{past.length ? 'Nothing for this filter.' : pastKind === 'cert' ? 'No certificate yet. Download a certificate and it is kept here.' : 'No poster yet. Download or share a poster and it is kept here.'}</p> : <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{pastShown.slice(0, limit).map((item) => <article key={item.file} className="group overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-white/10">
         <img src={item.url} alt={`SOTM ${monthLabel(item.month)} ${item.name}`} loading="lazy" className={`w-full object-cover ${pastKind === 'cert' ? 'aspect-[1.414]' : 'aspect-[4/5]'}`} />
         <div className="flex items-center gap-2 p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{item.name}</p><p className="truncate text-xs text-slate-500">{monthLabel(item.month)}{item.branch && ` · ${item.branch}`}</p></div>
           <button onClick={() => void sharePast(item)} aria-label={`Share ${item.name} on WhatsApp`} className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-600 text-white"><MessageCircle className="h-4 w-4" /></button><button onClick={() => void downloadPast(item)} aria-label={`Download ${item.name}`} className="grid h-9 w-9 place-items-center rounded-xl bg-[#0b587b] text-white"><Download className="h-4 w-4" /></button><button onClick={() => void removePast(item)} aria-label={`Delete ${item.name}`} className="rounded-xl p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button></div>
       </article>)}</div>}
+      {pastShown.length > limit && <button onClick={() => setLimit(limit + 12)} className="mt-5 h-10 w-full rounded-xl bg-white/10 text-sm font-semibold text-white hover:bg-white/20">Show more ({pastShown.length - limit} left)</button>}
     </section></div>;
 
   const comboPrompt = combo && !combo.open && <section className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="min-w-0 flex-1 text-sm font-semibold text-amber-900">Kajang and Seri Kembangan are both done for {monthLabel(combo.month)}. Generate the combined poster?</p><button onClick={() => setCombo({ ...combo, open: true })} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white">Yes, generate</button><button onClick={() => setCombo(null)} className="h-10 rounded-xl border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-900">Not now</button></section>;

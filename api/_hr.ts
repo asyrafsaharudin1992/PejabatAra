@@ -454,23 +454,14 @@ export async function hrHandler(req: any, res: any) {
         const { data, error } = await db.storage.from('hr-misc').list(folder, { limit: 200 });
         if (error) throw error;
         const files = (data || []).filter((file: any) => /^\d{4}-\d{2}__.+\.jpg$/.test(file.name)).map((file: any) => file.name as string).sort().reverse();
-        const signed = files.length ? await db.storage.from('hr-misc').createSignedUrls(files.map((name: string) => `${folder}/${name}`), 3600) : { data: [], error: null };
+        // A small picture is kept for each poster so the list loads that, and the full picture only when it is downloaded or shared.
+        const thumbList = files.length ? await db.storage.from('hr-misc').list(`${folder}-thumb`, { limit: 200 }) : { data: [] as any[] };
+        const thumbs = new Set<string>((thumbList.data || []).map((file: any) => file.name as string));
+        const paths = [...files.map((name: string) => `${folder}/${name}`), ...files.filter((name: string) => thumbs.has(name)).map((name: string) => `${folder}-thumb/${name}`)];
+        const signed = paths.length ? await db.storage.from('hr-misc').createSignedUrls(paths, 3600) : { data: [], error: null };
         if (signed.error) throw signed.error;
-        return res.status(200).json({ items: files.map((name: string, index: number) => { const [who, where = ''] = name.slice(9, -4).split('__'); return { file: name, month: name.slice(0, 7), name: who, branch: where, url: signed.data?.[index]?.signedUrl || '' }; }).filter((item: any) => item.url) });
-      }
-      // The signature printed on the certificate: one small PNG, kept private and shown to HR only.
-      if (req.method === 'GET' && action === 'sotm_signature') {
-        const { data, error } = await db.storage.from('hr-misc').download('sotm-config/signature.png');
-        if (error || !data) return res.status(200).json({ signature: null });
-        return res.status(200).json({ signature: `data:image/png;base64,${Buffer.from(await data.arrayBuffer()).toString('base64')}` });
-      }
-      if (req.method === 'POST' && action === 'sotm_signature_save') {
-        const buffer = Buffer.from(String(body.signature || '').replace(/^data:image\/png;base64,/, ''), 'base64');
-        if (buffer.length < 200 || buffer.length > 300_000 || buffer[0] !== 0x89 || buffer[1] !== 0x50 || buffer[2] !== 0x4e || buffer[3] !== 0x47) throw fail(400, 'The signature must be a small PNG picture.');
-        const { error } = await db.storage.from('hr-misc').upload('sotm-config/signature.png', buffer, { contentType: 'image/png', upsert: true });
-        if (error) throw error;
-        await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { sotm_signature: ['', 'updated'] }, changed_by: user.id });
-        return res.status(200).json({ success: true });
+        const urlOf = new Map<string, string>((signed.data || []).map((entry: any) => [entry.path as string, entry.signedUrl as string]));
+        return res.status(200).json({ items: files.map((name: string) => { const [who, where = ''] = name.slice(9, -4).split('__'); const full = urlOf.get(`${folder}/${name}`) || ''; return { file: name, month: name.slice(0, 7), name: who, branch: where, url: urlOf.get(`${folder}-thumb/${name}`) || full, full }; }).filter((item: any) => item.full) });
       }
       // The framed face of each branch's winner for a month (a small picture), used to make the combined poster.
       if (req.method === 'GET' && action === 'sotm_combo') {
@@ -502,6 +493,11 @@ export async function hrHandler(req: any, res: any) {
         const poster = jpeg(body.poster, 1_500_000, 'poster');
         const { error } = await db.storage.from('hr-misc').upload(`${folderOf(body.kind)}/${month}__${name}${branch ? `__${branch}` : ''}.jpg`, poster, { contentType: 'image/jpeg', upsert: true });
         if (error) throw error;
+        if (body.thumb) {
+          const thumb = jpeg(body.thumb, 150_000, 'thumbnail');
+          const { error: thumbError } = await db.storage.from('hr-misc').upload(`${folderOf(body.kind)}-thumb/${month}__${name}${branch ? `__${branch}` : ''}.jpg`, thumb, { contentType: 'image/jpeg', upsert: true });
+          if (thumbError) throw thumbError;
+        }
         if (body.face && body.kind !== 'cert') {
           const face = jpeg(body.face, 400_000, 'face photo');
           const { error: faceError } = await db.storage.from('hr-misc').upload(`sotm-faces/${employeeId}.jpg`, face, { contentType: 'image/jpeg', upsert: true });
@@ -523,7 +519,7 @@ export async function hrHandler(req: any, res: any) {
       if (req.method === 'POST' && action === 'sotm_delete') {
         const file = text(body.file, 120);
         if (!/^\d{4}-\d{2}__[^/\\]+\.jpg$/.test(file)) throw fail(400, 'Choose a poster.');
-        const { error } = await db.storage.from('hr-misc').remove([`${folderOf(body.kind)}/${file}`]);
+        const { error } = await db.storage.from('hr-misc').remove([`${folderOf(body.kind)}/${file}`, `${folderOf(body.kind)}-thumb/${file}`]);
         if (error) throw error;
         await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { sotm_deleted: [file, ''] }, changed_by: user.id });
         return res.status(200).json({ success: true });
