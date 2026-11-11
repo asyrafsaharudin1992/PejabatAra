@@ -257,6 +257,12 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
 
   if (req.method === 'GET' && action === 'attendance_history') {
+    // One day only (the Apply OT form fills in the times for the date chosen).
+    if (isDate(req.query.date)) {
+      const date = String(req.query.date);
+      const days = (await buildDays(db, [me], date, date, rules)).get(me.id) || [];
+      return res.status(200).json({ month: date.slice(0, 7), today: today(), days: days.map(dayView) });
+    }
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today().slice(0, 7);
     if (Number(month.slice(5)) < 1 || Number(month.slice(5)) > 12) throw fail(400, 'Choose a valid month.');
     const days = (await buildDays(db, [me], `${month}-01`, monthEnd(month), rules)).get(me.id) || [];
@@ -367,9 +373,18 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
 
   if (req.method === 'GET' && action === 'attendance_daily') {
     const date = isDate(req.query.date) ? String(req.query.date) : today();
-    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, date, date)]);
-    const days = buildDaysFrom(data, people, date, date, rules);
-    return res.status(200).json({ date, today: today(), rows: people.map((p) => { const { code: shift, ...rest } = dayView((days.get(p.id) || [])[0] || { date } as Day); return { ...person(p), ...rest, shift }; }).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)) });
+    const before = addDay(date, -1);
+    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, before, date)]);
+    const days = buildDaysFrom(data, people, before, date, rules);
+    return res.status(200).json({ date, today: today(), rows: people.map((p) => {
+      const list = days.get(p.id) || [];
+      let day = list.find((item) => item.date === date) || { date } as Day;
+      // Post night: the clock out on a day off that ends last night's shift (for example out at 12:00 after a night shift) is shown on the day it happened.
+      const last = list.find((item) => item.date === before);
+      if (last?.outAt && new Date(Date.parse(last.outAt) + 8 * 3600000).toISOString().slice(0, 10) === date && (day.status === 'off' || day.status === 'no-times')) day = { ...day, status: 'post-call', outAt: last.outAt, start: last.start, end: last.end, code: last.code };
+      const { code: shift, ...rest } = dayView(day);
+      return { ...person(p), ...rest, shift };
+    }).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)) });
   }
 
   if (req.method === 'GET' && action === 'attendance_month') {

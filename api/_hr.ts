@@ -438,6 +438,57 @@ export async function hrHandler(req: any, res: any) {
       if (error) throw error;
       return res.status(200).json({ holidays: (data || []).map((row: any) => ({ group: row.group_code, date: row.holiday_date, name: row.name })) });
     }
+    // SOTM (Staff of the Month): the finished posters and each person's face photo, kept in private storage (sotm/ and sotm-faces/). HR only.
+    if (action.startsWith('sotm_')) {
+      const jpeg = (value: unknown, max: number, what: string) => {
+        const buffer = Buffer.from(String(value || '').replace(/^data:image\/jpeg;base64,/, ''), 'base64');
+        if (buffer.length < 1000 || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) throw fail(400, `The ${what} must be a JPEG picture.`);
+        if (buffer.length > max) throw fail(400, `The ${what} is too large.`);
+        return buffer;
+      };
+      const isId = (value: string) => /^[0-9a-f-]{36}$/i.test(value);
+      if (req.method === 'GET' && action === 'sotm_list') {
+        const { data, error } = await db.storage.from('hr-misc').list('sotm', { limit: 200 });
+        if (error) throw error;
+        const files = (data || []).filter((file: any) => /^\d{4}-\d{2}__.+\.jpg$/.test(file.name)).map((file: any) => file.name as string).sort().reverse();
+        const signed = files.length ? await db.storage.from('hr-misc').createSignedUrls(files.map((name: string) => `sotm/${name}`), 3600) : { data: [], error: null };
+        if (signed.error) throw signed.error;
+        return res.status(200).json({ items: files.map((name: string, index: number) => { const [who, where = ''] = name.slice(9, -4).split('__'); return { file: name, month: name.slice(0, 7), name: who, branch: where, url: signed.data?.[index]?.signedUrl || '' }; }).filter((item: any) => item.url) });
+      }
+      if (req.method === 'GET' && action === 'sotm_face') {
+        const employeeId = text(req.query.employeeId, 60);
+        if (!isId(employeeId)) throw fail(400, 'Choose a staff member.');
+        const { data, error } = await db.storage.from('hr-misc').download(`sotm-faces/${employeeId}.jpg`);
+        if (error || !data) return res.status(200).json({ face: null });
+        return res.status(200).json({ face: `data:image/jpeg;base64,${Buffer.from(await data.arrayBuffer()).toString('base64')}` });
+      }
+      if (req.method === 'POST' && action === 'sotm_save') {
+        const employeeId = text(body.employeeId, 60), month = text(body.month, 7), name = text(body.name, 80).replace(/[^A-Za-z0-9 ._()'-]/g, '').trim(), branch = text(body.branch, 40).replace(/[^A-Za-z0-9 ._()'-]/g, '').trim();
+        if (!isId(employeeId)) throw fail(400, 'Choose a staff member.');
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw fail(400, 'Choose the month.');
+        if (!name) throw fail(400, 'Type the name for the poster.');
+        const poster = jpeg(body.poster, 1_500_000, 'poster');
+        const { error } = await db.storage.from('hr-misc').upload(`sotm/${month}__${name}${branch ? `__${branch}` : ''}.jpg`, poster, { contentType: 'image/jpeg', upsert: true });
+        if (error) throw error;
+        if (body.face) {
+          const face = jpeg(body.face, 400_000, 'face photo');
+          const { error: faceError } = await db.storage.from('hr-misc').upload(`sotm-faces/${employeeId}.jpg`, face, { contentType: 'image/jpeg', upsert: true });
+          if (faceError) throw faceError;
+        }
+        await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { sotm_saved: ['', `${month} ${name}`] }, changed_by: user.id });
+        return res.status(200).json({ success: true });
+      }
+      if (req.method === 'POST' && action === 'sotm_delete') {
+        const file = text(body.file, 120);
+        if (!/^\d{4}-\d{2}__[^/\\]+\.jpg$/.test(file)) throw fail(400, 'Choose a poster.');
+        const { error } = await db.storage.from('hr-misc').remove([`sotm/${file}`]);
+        if (error) throw error;
+        await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { sotm_deleted: [file, ''] }, changed_by: user.id });
+        return res.status(200).json({ success: true });
+      }
+      throw fail(404, 'Unknown request.');
+    }
+
     if (req.method === 'POST' && action === 'holiday_save') {
       const group = text(body.group, 20), date = text(body.date, 10), name = text(body.name, 120);
       if (!['SG-MNG', 'SG-OPS', 'MLHL'].includes(group)) throw fail(400, 'Choose a holiday group.');

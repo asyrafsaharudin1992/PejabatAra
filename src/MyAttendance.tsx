@@ -117,7 +117,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
   const autofill = async (date: string) => {
     setNoClock(false);
     try {
-      const list: Day[] = date.slice(0, 7) === month && days ? days : ((await assessmentFetch(`action=attendance_history&month=${date.slice(0, 7)}`)) as { days: Day[] }).days;
+      const list = ((await assessmentFetch(`action=attendance_history&date=${date}`)) as { days: Day[] }).days;
       const day = list.find((item) => item.date === date);
       const ot = day && day.otCounted > 0 ? `${String(Math.floor(day.otCounted / 60)).padStart(2, '0')}:${String(day.otCounted % 60).padStart(2, '0')}` : '';
       setForm((current) => current && current.date === date && !current.id ? { ...current, inTime: day?.inTime || '', outTime: day?.outTime || '', otTime: ot } : current);
