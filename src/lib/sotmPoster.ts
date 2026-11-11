@@ -40,9 +40,10 @@ export function whiteLogo(logo: CanvasImageSource & { width: number; height: num
   return layer;
 }
 
-export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
+// `scale` draws the same poster larger (1.5 for the picture that is downloaded, shared and kept; 1 for the preview), so it stays sharp.
+export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput, scale = 1) {
   const g = canvas.getContext('2d'); if (!g) return;
-  canvas.width = W; canvas.height = H;
+  canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale); g.scale(scale, scale);
   const cx = W / 2, cy = 690, radius = 245;
   const gold = g.createLinearGradient(0, 0, W, H); gold.addColorStop(0, '#b9770e'); gold.addColorStop(0.25, '#ffe39a'); gold.addColorStop(0.5, '#e8a92c'); gold.addColorStop(0.75, '#ffe9a8'); gold.addColorStop(1, '#b9770e');
   // Background: very deep navy with a teal glow behind the photo and a dark edge.
@@ -62,7 +63,7 @@ export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
   for (const [x, y] of [[26, 26], [W - 26, 26], [26, H - 26], [W - 26, H - 26]]) { g.save(); g.translate(x, y); g.rotate(Math.PI / 4); g.fillStyle = '#0c1a2e'; g.fillRect(-13, -13, 26, 26); g.strokeStyle = gold; g.lineWidth = 3; g.strokeRect(-13, -13, 26, 26); g.restore(); }
   g.textAlign = 'center';
   // White logo, then the title between two gold rules.
-  if (input.logo) { const layer = whiteLogo(input.logo, 120); g.drawImage(layer, (W - layer.width) / 2, 78); }
+  if (input.logo) { const layer = whiteLogo(input.logo, Math.round(120 * scale)), w = layer.width / scale; g.drawImage(layer, (W - w) / 2, 78, w, layer.height / scale); }
   g.fillStyle = gold; g.font = `700 32px ${FONT}`; spaced(g, 'STAFF OF THE MONTH', cx, 250, 9);
   for (const sign of [-1, 1]) { g.fillStyle = gold; g.fillRect(sign < 0 ? 100 : 840, 238, 140, 2); star(g, cx + sign * 308, 239, 8, '#ffe39a', 3, 4); }
   g.save(); g.shadowColor = 'rgba(232,169,44,0.55)'; g.shadowBlur = 26; g.fillStyle = '#fff7e0'; g.font = `700 96px ${SERIF}`; g.fillText(input.month, cx, 350); g.restore();
@@ -109,7 +110,7 @@ export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
 }
 
 // The part of the photo that shows inside the circle (same zoom and position as the poster), as a small square JPEG for the combined poster.
-export function cropFace(photo: CanvasImageSource & { width: number; height: number }, zoom: number, moveX: number, moveY: number, size = 480) {
+export function cropFace(photo: CanvasImageSource & { width: number; height: number }, zoom: number, moveX: number, moveY: number, size = 640) {
   const layer = document.createElement('canvas'); layer.width = size; layer.height = size;
   const g = layer.getContext('2d'); if (!g) return '';
   const half = size / 2, base = Math.max(size / photo.width, size / photo.height) * zoom, pw = photo.width * base, ph = photo.height * base;

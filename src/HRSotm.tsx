@@ -23,14 +23,14 @@ async function call(query: string, body?: unknown) {
 }
 // A face photo is made small before it is kept: at most 640 pixels on the long side, as a JPEG.
 function shrinkFace(image: HTMLImageElement) {
-  const scale = Math.min(1, 640 / Math.max(image.width, image.height)), layer = document.createElement('canvas');
+  const scale = Math.min(1, 960 / Math.max(image.width, image.height)), layer = document.createElement('canvas');
   layer.width = Math.round(image.width * scale); layer.height = Math.round(image.height * scale);
   layer.getContext('2d')?.drawImage(image, 0, 0, layer.width, layer.height);
   return layer.toDataURL('image/jpeg', 0.85);
 }
 type Past = { file: string; month: string; name: string; branch: string; url: string; full: string };
-// A small copy for the Past SOTM list (480 pixels wide, about 40 KB), so the list does not load every full picture.
-const thumbOf = (layer: HTMLCanvasElement) => { const small = document.createElement('canvas'); small.width = 480; small.height = Math.round((480 * layer.height) / layer.width); small.getContext('2d')?.drawImage(layer, 0, 0, small.width, small.height); return small.toDataURL('image/jpeg', 0.75); };
+// A small copy for the Past SOTM list (640 pixels wide, about 70 KB), so the list does not load every full picture.
+const thumbOf = (layer: HTMLCanvasElement) => { const small = document.createElement('canvas'); small.width = 640; small.height = Math.round((640 * layer.height) / layer.width); small.getContext('2d')?.drawImage(layer, 0, 0, small.width, small.height); return small.toDataURL('image/jpeg', 0.78); };
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Unable to read that picture.')); image.src = src; });
 
 type Combo = { branch: string; name: string; face: string };
@@ -43,13 +43,15 @@ function CombinedPanel({ month, items, personId, logo, onError, onClose }: { mon
   const left = items.find((item) => /kajang/i.test(item.branch)), right = items.find((item) => /seri\s*kembangan/i.test(item.branch));
   useEffect(() => { if (left && right) Promise.all([loadImage(left.face), loadImage(right.face)]).then((pair) => setFaces([pair[0], pair[1]])).catch((cause: Error) => onError(cause.message)); }, []);
   useEffect(() => { if (canvas.current && left && right && faces) drawCombined(canvas.current, { month: monthLabel(month), left: { ...left, face: faces[0] }, right: { ...right, face: faces[1] }, logo }); }, [faces, logo]);
-  const keep = () => call('action=sotm_save', { employeeId: personId, month, name: 'Kajang and Seri Kembangan', branch: 'Combined', poster: canvas.current?.toDataURL('image/jpeg', 0.88), thumb: canvas.current ? thumbOf(canvas.current) : undefined }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The poster could not be saved.'); return false; });
+  // The picture that is downloaded, shared and kept is drawn at 1.5 times the preview size, so it stays sharp.
+  const exportCanvas = () => { const out = document.createElement('canvas'); if (left && right && faces) drawCombined(out, { month: monthLabel(month), left: { ...left, face: faces[0] }, right: { ...right, face: faces[1] }, logo }, 1.5); return out; };
+  const keep = (layer: HTMLCanvasElement) => call('action=sotm_save', { employeeId: personId, month, name: 'Kajang and Seri Kembangan', branch: 'Combined', poster: layer.toDataURL('image/jpeg', 0.88), thumb: thumbOf(layer) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The poster could not be saved.'); return false; });
   const share = async () => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
-    const saved = keep();
+    const layer = exportCanvas(), saved = keep(layer);
     try {
-      const outcome = await shareToWhatsApp(fileFromDataUrl(canvas.current.toDataURL('image/jpeg', 0.92), `SOTM ${monthLabel(month)} - Kajang and Seri Kembangan.jpg`), `Congratulations to our Staff of the Month for ${monthLabel(month)}! Thank you for your hard work.`);
+      const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/png'), `SOTM ${monthLabel(month)} - Kajang and Seri Kembangan.png`), `Congratulations to our Staff of the Month for ${monthLabel(month)}! Thank you for your hard work.`);
       const done = (await saved) ? ' Saved under Past SOTM.' : '';
       setNotice(outcome === 'copied' || outcome === 'downloaded' ? `${SHARE_NOTICE[outcome]}${done}` : outcome === 'shared' ? `Shared.${done}` : '');
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to share.'); }
@@ -58,7 +60,7 @@ function CombinedPanel({ month, items, personId, logo, onError, onClose }: { mon
   const download = async () => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
-    const layer = canvas.current, saved = await keep();
+    const layer = exportCanvas(), saved = await keep(layer);
     layer.toBlob((blob) => { if (blob) { downloadBlob([blob], `SOTM ${monthLabel(month)} - Kajang and Seri Kembangan.png`, 'image/png'); setNotice(saved ? 'Downloaded. Saved under Past SOTM.' : 'Downloaded.'); } setBusy(false); }, 'image/png');
   };
   return <section className={`${card} space-y-4`}>
@@ -202,13 +204,16 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   const finish = async (kind: 'download' | 'share') => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
-    const layer = canvas.current, text = message(name, monthLabel(month));
+    // The picture that is downloaded, shared and kept is drawn at 1.5 times the preview size, so it stays sharp.
+    const layer = document.createElement('canvas');
+    drawPoster(layer, { name, branch, quote, month: monthLabel(month), photo, logo, zoom, moveX, moveY }, 1.5);
+    const text = message(name, monthLabel(month));
     // The poster is kept under Past SOTM (and the face photo, if it is new). If saving fails the poster is still used.
     const keep = personId ? call('action=sotm_save', { employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.88), thumb: thumbOf(layer), face: newFace, combo: photo ? cropFace(photo, zoom, moveX, moveY) : undefined }).then(() => { setNewFace(null); return true; }).catch((cause) => { fail(cause, 'The poster could not be saved, but it is still used.'); return false; }) : Promise.resolve(false);
     try {
       if (kind === 'share') {
         // Straight from the click: the phone only opens its share sheet if nothing was awaited first.
-        const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/jpeg', 0.92), `SOTM ${monthLabel(month)} - ${name || 'staff'}.jpg`), text);
+        const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/png'), `SOTM ${monthLabel(month)} - ${name || 'staff'}.png`), text);
         const kept = await keep, done = kept ? ' Saved under Past SOTM.' : '';
         if (kept) void offerCombined(month);
         setNotice(outcome === 'copied' || outcome === 'downloaded' ? `${SHARE_NOTICE[outcome]}${done}` : outcome === 'shared' ? `Shared.${done}` : kept ? 'Saved under Past SOTM.' : '');

@@ -8,9 +8,9 @@ const WEBSITE = 'www.hsohealthcare.com';
 export type Winner = { branch: string; name: string; face: HTMLImageElement | null };
 export type CombinedInput = { month: string; left: Winner; right: Winner; logo: (CanvasImageSource & { width: number; height: number }) | null };
 
-export function drawCombined(canvas: HTMLCanvasElement, input: CombinedInput) {
+export function drawCombined(canvas: HTMLCanvasElement, input: CombinedInput, scale = 1) {
   const g = canvas.getContext('2d'); if (!g) return;
-  const S = COMBINED_SIZE; canvas.width = S; canvas.height = S;
+  const S = COMBINED_SIZE; canvas.width = Math.round(S * scale); canvas.height = Math.round(S * scale); g.scale(scale, scale);
   const gold = g.createLinearGradient(0, 0, S, S); gold.addColorStop(0, '#b9770e'); gold.addColorStop(0.25, '#ffe39a'); gold.addColorStop(0.5, '#e8a92c'); gold.addColorStop(0.75, '#ffe9a8'); gold.addColorStop(1, '#b9770e');
   const bg = g.createRadialGradient(S / 2, 470, 80, S / 2, 520, 900); bg.addColorStop(0, '#16304f'); bg.addColorStop(0.55, '#0c1a2e'); bg.addColorStop(1, '#050b15'); g.fillStyle = bg; g.fillRect(0, 0, S, S);
   for (const x of [290, 790]) { const glow = g.createRadialGradient(x, 500, 80, x, 500, 380); glow.addColorStop(0, 'rgba(24,130,170,0.5)'); glow.addColorStop(1, 'rgba(24,130,170,0)'); g.fillStyle = glow; g.fillRect(0, 0, S, S); }
@@ -58,7 +58,7 @@ export function drawCombined(canvas: HTMLCanvasElement, input: CombinedInput) {
   // Foot: logo, clinic, both phone numbers and the website.
   g.fillStyle = 'rgba(8,16,30,0.75)'; g.fillRect(40, 880, S - 80, 160);
   g.fillStyle = gold; g.fillRect(40, 880, S - 80, 2);
-  if (input.logo) { const layer = whiteLogo(input.logo, 90); g.drawImage(layer, 70, 915); }
+  if (input.logo) { const layer = whiteLogo(input.logo, Math.round(90 * scale)); g.drawImage(layer, 70, 915, layer.width / scale, layer.height / scale); }
   g.textAlign = 'left'; g.fillStyle = '#fff7e0'; g.font = `800 28px ${FONT}`; g.fillText('KLINIK ARA 24 JAM', 180, 950);
   g.fillStyle = gold; g.font = `600 20px ${FONT}`; g.fillText('KAJANG | SERI KEMBANGAN', 180, 982);
   g.fillStyle = '#fff7e0'; g.font = `600 24px ${FONT}`; PHONES.forEach((line, index) => g.fillText(`☎  ${line}`, 520, 944 + index * 36));
