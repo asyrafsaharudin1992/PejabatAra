@@ -112,6 +112,18 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     try { await assessmentFetch('action=attendance_request_cancel', { method: 'POST', body: JSON.stringify({ id }) }); loadRequests(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to cancel.'); } finally { setBusy(false); }
   };
+  // Apply OT: once the date is chosen, the times clocked that day and the OT hours the system counted are filled in. They can still be changed.
+  const [noClock, setNoClock] = useState(false);
+  const autofill = async (date: string) => {
+    setNoClock(false);
+    try {
+      const list: Day[] = date.slice(0, 7) === month && days ? days : ((await assessmentFetch(`action=attendance_history&month=${date.slice(0, 7)}`)) as { days: Day[] }).days;
+      const day = list.find((item) => item.date === date);
+      const ot = day && day.otCounted > 0 ? `${String(Math.floor(day.otCounted / 60)).padStart(2, '0')}:${String(day.otCounted % 60).padStart(2, '0')}` : '';
+      setForm((current) => current && current.date === date && !current.id ? { ...current, inTime: day?.inTime || '', outTime: day?.outTime || '', otTime: ot } : current);
+      setNoClock(!day?.inTime);
+    } catch { /* the person can still type the times */ }
+  };
   const [rates, setRates] = useState<Record<string, string>>({});
   const decide = async (id: string, decision: 'approved' | 'rejected') => {
     setBusy(true); setError('');
@@ -142,12 +154,13 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     </section>}
 
     <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && <button onClick={() => setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' })} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && <button onClick={() => { setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' }); if (!missed) void autofill(addDay(state.today, -1)); }} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
       {form && <div className="space-y-3">
-        <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
+        <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => { setForm({ ...form, date: event.target.value }); if (!missed && !form.id) void autofill(event.target.value); }} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
         <div className={`grid gap-3 ${missed ? 'grid-cols-2' : 'grid-cols-3'}`}><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label>{!missed && <label className="block text-sm"><span className="mb-1 block text-slate-500">OT hours (hh:mm)</span><input type="time" value={form.otTime} onChange={(event) => setForm({ ...form, otTime: event.target.value })} className={field} /></label>}</div>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={reasons.includes(form.reason) ? form.reason : reasons[0]} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Remarks (optional)</span><input value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} maxLength={500} className={field} /></label>
+        {!missed && noClock && <p className="text-xs text-amber-700">No clock record for this day, so type the times or the OT hours yourself.</p>}
         <p className="text-xs text-slate-400">{missed ? 'Enter the clock time you missed.' : 'Fill only what you need: the OT hours you worked, or the times of the day.'} Your supervisor approves first, then HR confirms.</p>
         <div className="flex flex-wrap gap-2"><button onClick={() => void send(false)} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => void send(true)} disabled={busy} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-[#0b587b] disabled:opacity-60">Save draft</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Close</button></div>
       </div>}
