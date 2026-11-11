@@ -2,30 +2,30 @@ export const W = 1080, H = 1350;
 
 export type PosterInput = { name: string; branch: string; quote: string; month: string; photo: CanvasImageSource & { width: number; height: number } | null; logo: (CanvasImageSource & { width: number; height: number }) | null; zoom: number; moveX: number; moveY: number };
 
-const FONT = '-apple-system, "Segoe UI", Roboto, sans-serif';
-const SERIF = 'Georgia, "Times New Roman", serif';
-function star(g: CanvasRenderingContext2D, x: number, y: number, outer: number, color: string | CanvasGradient, inner = outer * 0.42, points = 5) {
+export const FONT = '-apple-system, "Segoe UI", Roboto, sans-serif';
+export const SERIF = 'Georgia, "Times New Roman", serif';
+export function star(g: CanvasRenderingContext2D, x: number, y: number, outer: number, color: string | CanvasGradient, inner = outer * 0.42, points = 5) {
   g.fillStyle = color; g.beginPath();
   for (let point = 0; point < points * 2; point++) { const radius = point % 2 ? inner : outer, angle = -Math.PI / 2 + (point * Math.PI) / points; g.lineTo(x + radius * Math.cos(angle), y + radius * Math.sin(angle)); }
   g.closePath(); g.fill();
 }
 // Text with spacing between the letters.
-function spaced(g: CanvasRenderingContext2D, text: string, x: number, y: number, gap: number) {
+export function spaced(g: CanvasRenderingContext2D, text: string, x: number, y: number, gap: number) {
   const letters = [...text], widths = letters.map((letter) => g.measureText(letter).width), total = widths.reduce((sum, width) => sum + width, 0) + gap * (letters.length - 1);
   let at = x - total / 2; g.textAlign = 'left'; letters.forEach((letter, index) => { g.fillText(letter, at, y); at += widths[index] + gap; }); g.textAlign = 'center';
 }
 // A branch of laurel leaves along an arc of a circle, from `from` to `to` (radians).
-function laurel(g: CanvasRenderingContext2D, cx: number, cy: number, radius: number, from: number, to: number, side: 1 | -1, fill: CanvasGradient) {
+export function laurel(g: CanvasRenderingContext2D, cx: number, cy: number, radius: number, from: number, to: number, side: 1 | -1, fill: CanvasGradient, scale = 1) {
   const count = 15;
   for (let index = 0; index < count; index++) {
-    const angle = from + ((to - from) * index) / (count - 1), size = 34 - index * 0.9;
+    const angle = from + ((to - from) * index) / (count - 1), size = (34 - index * 0.9) * scale;
     const x = cx + radius * Math.cos(angle), y = cy + radius * Math.sin(angle), tangent = angle + (side * Math.PI) / 2;
     for (const turn of [-0.62, 0.62]) { g.save(); g.translate(x, y); g.rotate(tangent + turn * side); g.fillStyle = fill; g.beginPath(); g.ellipse(size * 0.5, 0, size * 0.62, size * 0.2, 0, 0, Math.PI * 2); g.fill(); g.restore(); }
   }
 }
 
 // The logo file is dark on white: turn the dark parts into white and the white background into nothing.
-function whiteLogo(logo: CanvasImageSource & { width: number; height: number }, size: number) {
+export function whiteLogo(logo: CanvasImageSource & { width: number; height: number }, size: number) {
   const scale = Math.min(size / logo.width, size / logo.height), w = Math.round(logo.width * scale), h = Math.round(logo.height * scale);
   const layer = document.createElement('canvas'); layer.width = w; layer.height = h;
   const context = layer.getContext('2d'); if (!context) return layer;
@@ -106,4 +106,14 @@ export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
   // Clinic and branch on one line at the foot, between gold rules.
   g.fillStyle = gold; g.fillRect(120, 1254, W - 240, 2);
   g.fillStyle = gold; g.font = `700 30px ${FONT}`; spaced(g, `KLINIK ARA 24 JAM${branch ? `  ·  ${branch.toUpperCase()}` : ''}`, cx, 1296, 8);
+}
+
+// The part of the photo that shows inside the circle (same zoom and position as the poster), as a small square JPEG for the combined poster.
+export function cropFace(photo: CanvasImageSource & { width: number; height: number }, zoom: number, moveX: number, moveY: number, size = 480) {
+  const layer = document.createElement('canvas'); layer.width = size; layer.height = size;
+  const g = layer.getContext('2d'); if (!g) return '';
+  const half = size / 2, base = Math.max(size / photo.width, size / photo.height) * zoom, pw = photo.width * base, ph = photo.height * base;
+  g.fillStyle = '#e8f1f6'; g.fillRect(0, 0, size, size);
+  g.drawImage(photo, half - pw / 2 + moveX * Math.max(0, (pw - size) / 2), half - ph / 2 + moveY * Math.max(0, (ph - size) / 2), pw, ph);
+  return layer.toDataURL('image/jpeg', 0.85);
 }

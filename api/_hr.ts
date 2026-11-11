@@ -472,6 +472,21 @@ export async function hrHandler(req: any, res: any) {
         await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { sotm_signature: ['', 'updated'] }, changed_by: user.id });
         return res.status(200).json({ success: true });
       }
+      // The framed face of each branch's winner for a month (a small picture), used to make the combined poster.
+      if (req.method === 'GET' && action === 'sotm_combo') {
+        const month = text(req.query.month, 7);
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw fail(400, 'Choose the month.');
+        const { data, error } = await db.storage.from('hr-misc').list('sotm-combo', { limit: 100, search: `${month}__` });
+        if (error) throw error;
+        const files = (data || []).map((file: any) => file.name as string).filter((name: string) => name.startsWith(`${month}__`) && name.endsWith('.jpg'));
+        const items = await Promise.all(files.map(async (name: string) => {
+          const download = await db.storage.from('hr-misc').download(`sotm-combo/${name}`);
+          if (download.error || !download.data) return null;
+          const [, branch = '', who = ''] = name.slice(0, -4).split('__');
+          return { branch, name: who, face: `data:image/jpeg;base64,${Buffer.from(await download.data.arrayBuffer()).toString('base64')}` };
+        }));
+        return res.status(200).json({ items: items.filter(Boolean) });
+      }
       if (req.method === 'GET' && action === 'sotm_face') {
         const employeeId = text(req.query.employeeId, 60);
         if (!isId(employeeId)) throw fail(400, 'Choose a staff member.');
@@ -491,6 +506,16 @@ export async function hrHandler(req: any, res: any) {
           const face = jpeg(body.face, 400_000, 'face photo');
           const { error: faceError } = await db.storage.from('hr-misc').upload(`sotm-faces/${employeeId}.jpg`, face, { contentType: 'image/jpeg', upsert: true });
           if (faceError) throw faceError;
+        }
+        // A framed face for the combined poster: one per branch and month (a newer one replaces the older one).
+        if (body.combo && branch && body.kind !== 'cert') {
+          const face = jpeg(body.combo, 200_000, 'face picture');
+          const prefix = `${month}__${branch}__`;
+          const older = await db.storage.from('hr-misc').list('sotm-combo', { limit: 100, search: prefix });
+          const stale = (older.data || []).map((file: any) => `sotm-combo/${file.name}`).filter((path: string) => path.startsWith(`sotm-combo/${prefix}`));
+          if (stale.length) await db.storage.from('hr-misc').remove(stale);
+          const { error: comboError } = await db.storage.from('hr-misc').upload(`sotm-combo/${prefix}${name}.jpg`, face, { contentType: 'image/jpeg', upsert: true });
+          if (comboError) throw comboError;
         }
         await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { [body.kind === 'cert' ? 'sotm_certificate_saved' : 'sotm_saved']: ['', `${month} ${name}`] }, changed_by: user.id });
         return res.status(200).json({ success: true });

@@ -2,8 +2,10 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { Download, ImagePlus, MessageCircle, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
+import { fileFromDataUrl, SHARE_NOTICE, shareToWhatsApp } from './lib/shareFile';
 import { card } from './AssessmentStaff';
-import { drawPoster } from './lib/sotmPoster';
+import { cropFace, drawPoster } from './lib/sotmPoster';
+import { drawCombined } from './lib/sotmCombined';
 import { drawCertificate } from './lib/sotmCertificate';
 
 // Office HR > SOTM (Staff of the Month): pick the person and the month, add a face photo, and the poster is drawn right here in the browser.
@@ -28,6 +30,42 @@ function shrinkFace(image: HTMLImageElement) {
 }
 type Past = { file: string; month: string; name: string; branch: string; url: string };
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Unable to read that picture.')); image.src = src; });
+
+type Combo = { branch: string; name: string; face: string };
+// The poster for both branches together: shown after the second branch's poster is made, and saved under Past SOTM when it is downloaded or shared.
+function CombinedPanel({ month, items, personId, logo, onError, onClose }: { month: string; items: Combo[]; personId: string; logo: HTMLImageElement | null; onError: (message: string) => void; onClose: () => void }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [faces, setFaces] = useState<[HTMLImageElement, HTMLImageElement] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const left = items.find((item) => /kajang/i.test(item.branch)), right = items.find((item) => /seri\s*kembangan/i.test(item.branch));
+  useEffect(() => { if (left && right) Promise.all([loadImage(left.face), loadImage(right.face)]).then((pair) => setFaces([pair[0], pair[1]])).catch((cause: Error) => onError(cause.message)); }, []);
+  useEffect(() => { if (canvas.current && left && right && faces) drawCombined(canvas.current, { month: monthLabel(month), left: { ...left, face: faces[0] }, right: { ...right, face: faces[1] }, logo }); }, [faces, logo]);
+  const keep = () => call('action=sotm_save', { employeeId: personId, month, name: 'Kajang and Seri Kembangan', branch: 'Combined', poster: canvas.current?.toDataURL('image/jpeg', 0.88) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The poster could not be saved.'); return false; });
+  const share = async () => {
+    if (!canvas.current) return;
+    setBusy(true); setNotice('');
+    const saved = keep();
+    try {
+      const outcome = await shareToWhatsApp(fileFromDataUrl(canvas.current.toDataURL('image/jpeg', 0.92), `SOTM ${monthLabel(month)} - Kajang and Seri Kembangan.jpg`), `Congratulations to our Staff of the Month for ${monthLabel(month)}! Thank you for your hard work.`);
+      const done = (await saved) ? ' Saved under Past SOTM.' : '';
+      setNotice(outcome === 'copied' || outcome === 'downloaded' ? `${SHARE_NOTICE[outcome]}${done}` : outcome === 'shared' ? `Shared.${done}` : '');
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to share.'); }
+    setBusy(false);
+  };
+  const download = async () => {
+    if (!canvas.current) return;
+    setBusy(true); setNotice('');
+    const layer = canvas.current, saved = await keep();
+    layer.toBlob((blob) => { if (blob) { downloadBlob([blob], `SOTM ${monthLabel(month)} - Kajang and Seri Kembangan.png`, 'image/png'); setNotice(saved ? 'Downloaded. Saved under Past SOTM.' : 'Downloaded.'); } setBusy(false); }, 'image/png');
+  };
+  return <section className={`${card} space-y-4`}>
+    <div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><h3 className="text-lg font-semibold">Combined poster · {monthLabel(month)}</h3><p className="text-sm text-slate-500">Kajang and Seri Kembangan together, with both phone numbers and the website at the foot.</p></div><button onClick={onClose} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600">Close</button></div>
+    {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
+    <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void download()} disabled={busy || !faces} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0b587b] px-5 text-sm font-bold text-white disabled:opacity-40"><Download className="h-4 w-4" />Download</button><button type="button" onClick={() => void share()} disabled={busy || !faces} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white disabled:opacity-40"><MessageCircle className="h-4 w-4" />WhatsApp</button></div>
+    <div className="flex justify-center"><canvas ref={canvas} aria-label="Combined Staff of the Month poster" className="h-auto w-full max-w-[560px] rounded-2xl shadow-lg ring-1 ring-slate-200" /></div>
+  </section>;
+}
 
 function CertificateMaker({ people, logo, onError }: { people: Person[] | null; logo: HTMLImageElement | null; onError: (message: string) => void }) {
   const [personId, setPersonId] = useState('');
@@ -66,6 +104,18 @@ function CertificateMaker({ people, logo, onError }: { people: Person[] | null; 
   };
   const choose = (id: string) => { setPersonId(id); const person = (people || []).find((item) => item.id === id); setName(person ? titleCase(person.fullName) : ''); setBranch(person?.branch || ''); };
   // Download also keeps the certificate under Past SOTM (Certificates). If saving fails the certificate is still downloaded.
+  const share = async () => {
+    if (!canvas.current) return;
+    setBusy(true); setNotice('');
+    const layer = canvas.current, text = `Congratulations ${name}, Staff of the Month for ${monthLabel(month)}! Thank you for your hard work.`;
+    const keep = personId ? call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9) }).then(() => true).catch((cause) => { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved.'); return false; }) : Promise.resolve(false);
+    try {
+      const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/jpeg', 0.92), `Sijil SOTM ${monthLabel(month)} - ${name || 'staff'}.jpg`), text);
+      const kept = await keep, done = kept ? ' Saved under Past SOTM > Certificates.' : '';
+      setNotice(outcome === 'copied' || outcome === 'downloaded' ? `${SHARE_NOTICE[outcome]}${done}` : outcome === 'shared' ? `Shared.${done}` : kept ? 'Saved under Past SOTM > Certificates.' : '');
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to share.'); }
+    setBusy(false);
+  };
   const download = async () => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
@@ -87,7 +137,7 @@ function CertificateMaker({ people, logo, onError }: { people: Person[] | null; 
       <label className={label}>Position (one line each)<textarea value={signerTitle} maxLength={120} rows={2} onChange={(event) => setSignerTitle(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
       <label className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#0b587b] text-sm font-semibold text-[#0b587b]"><ImagePlus className="h-4 w-4" />{saving ? 'Saving…' : signature ? 'Change signature' : 'Upload signature'}<input type="file" accept="image/*" disabled={saving} onChange={pickSignature} className="sr-only" /></label>
       {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
-      <button type="button" onClick={() => void download()} disabled={busy || !name.trim()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-bold text-white disabled:opacity-40"><Download className="h-4 w-4" />Download certificate (PNG)</button>
+      <div className="flex gap-2"><button type="button" onClick={() => void download()} disabled={busy || !name.trim()} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-bold text-white disabled:opacity-40"><Download className="h-4 w-4" />Download</button><button type="button" onClick={() => void share()} disabled={busy || !name.trim()} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-bold text-white disabled:opacity-40"><MessageCircle className="h-4 w-4" />WhatsApp</button></div>
     </div>
     <div className="flex items-start justify-center"><canvas ref={canvas} aria-label="Certificate preview" className="h-auto w-full max-w-[900px] rounded-xl shadow-lg ring-1 ring-slate-200" /></div>
   </section>;
@@ -109,6 +159,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   const [notice, setNotice] = useState('');
   const [past, setPast] = useState<Past[] | null>(null);
   const [pastKind, setPastKind] = useState<'poster' | 'cert'>('poster');
+  const [combo, setCombo] = useState<{ month: string; items: Combo[]; open: boolean } | null>(null);
   const [filterMonth, setFilterMonth] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -136,38 +187,44 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   };
   // Download and WhatsApp both keep the poster under Past SOTM first (and the face photo, if it is new). If saving fails the poster is still used.
   const message = (who: string, when: string) => `Congratulations ${who}, Staff of the Month for ${when}! Thank you for your hard work.`;
+  // When both branches have a poster for this month, offer the combined poster.
+  const offerCombined = async (forMonth: string) => {
+    try {
+      const result = await call(`action=sotm_combo&month=${forMonth}`);
+      const items = (result.items || []) as Combo[];
+      if (items.some((item) => /kajang/i.test(item.branch)) && items.some((item) => /seri\s*kembangan/i.test(item.branch))) setCombo({ month: forMonth, items, open: false });
+    } catch { /* the offer is optional */ }
+  };
   const finish = async (kind: 'download' | 'share') => {
     if (!canvas.current) return;
     setBusy(true); setNotice('');
-    const layer = canvas.current;
-    let kept = false;
-    if (personId) { try { await call('action=sotm_save', { employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.88), face: newFace }); setNewFace(null); kept = true; } catch (cause) { fail(cause, 'The poster could not be saved, but it is still used.'); } }
-    const done = kept ? ' Saved under Past SOTM.' : '';
-    const mime = kind === 'share' ? 'image/jpeg' : 'image/png';
-    layer.toBlob(async (blob) => {
-      try {
-        if (!blob) return;
-        const fileName = `SOTM ${monthLabel(month)} - ${name || 'staff'}.${kind === 'share' ? 'jpg' : 'png'}`, text = message(name, monthLabel(month));
-        if (kind === 'share') {
-          const file = new File([blob], fileName, { type: mime });
-          if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], text }); setNotice(`Shared.${done}`); return; }
-          downloadBlob([blob], fileName, mime); window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
-          setNotice(`The picture was downloaded. Attach it in WhatsApp.${done}`); return;
-        }
-        downloadBlob([blob], fileName, mime); setNotice(`Downloaded.${done}`);
-      } catch (cause) { if ((cause as Error)?.name !== 'AbortError') fail(cause, 'Unable to share.'); } finally { setBusy(false); }
-    }, mime, kind === 'share' ? 0.92 : undefined);
+    const layer = canvas.current, text = message(name, monthLabel(month));
+    // The poster is kept under Past SOTM (and the face photo, if it is new). If saving fails the poster is still used.
+    const keep = personId ? call('action=sotm_save', { employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.88), face: newFace, combo: photo ? cropFace(photo, zoom, moveX, moveY) : undefined }).then(() => { setNewFace(null); return true; }).catch((cause) => { fail(cause, 'The poster could not be saved, but it is still used.'); return false; }) : Promise.resolve(false);
+    try {
+      if (kind === 'share') {
+        // Straight from the click: the phone only opens its share sheet if nothing was awaited first.
+        const outcome = await shareToWhatsApp(fileFromDataUrl(layer.toDataURL('image/jpeg', 0.92), `SOTM ${monthLabel(month)} - ${name || 'staff'}.jpg`), text);
+        const kept = await keep, done = kept ? ' Saved under Past SOTM.' : '';
+        if (kept) void offerCombined(month);
+        setNotice(outcome === 'copied' || outcome === 'downloaded' ? `${SHARE_NOTICE[outcome]}${done}` : outcome === 'shared' ? `Shared.${done}` : kept ? 'Saved under Past SOTM.' : '');
+      } else {
+        const kept = await keep;
+        if (kept) void offerCombined(month);
+        layer.toBlob((blob) => { if (blob) { downloadBlob([blob], `SOTM ${monthLabel(month)} - ${name || 'staff'}.png`, 'image/png'); setNotice(kept ? 'Downloaded. Saved under Past SOTM.' : 'Downloaded.'); } setBusy(false); }, 'image/png');
+        return;
+      }
+    } catch (cause) { fail(cause, 'Unable to share.'); }
+    setBusy(false);
   };
   const fileOf = async (item: Past) => new File([await (await fetch(item.url)).blob()], `${pastKind === 'cert' ? 'Sijil ' : ''}SOTM ${monthLabel(item.month)} - ${item.name}.jpg`, { type: 'image/jpeg' });
   const downloadPast = async (item: Past) => { try { const file = await fileOf(item); downloadBlob([file], file.name, 'image/jpeg'); } catch (cause) { fail(cause, 'Unable to download.'); } };
   const sharePast = async (item: Past) => {
     const text = message(item.name, monthLabel(item.month));
     try {
-      const file = await fileOf(item);
-      if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], text }); return; }
-      downloadBlob([file], file.name, 'image/jpeg'); window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
-      setNotice('The picture was downloaded. Attach it in WhatsApp.');
-    } catch (cause) { if ((cause as Error)?.name !== 'AbortError') fail(cause, 'Unable to share.'); }
+      const outcome = await shareToWhatsApp(fileOf(item), text);
+      if (outcome === 'copied' || outcome === 'downloaded') setNotice(SHARE_NOTICE[outcome]);
+    } catch (cause) { fail(cause, 'Unable to share.'); }
   };
   const removePast = async (item: Past) => {
     if (!window.confirm(`Delete the ${monthLabel(item.month)} poster for ${item.name}?`)) return;
@@ -195,7 +252,9 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
       </article>)}</div>}
     </section></div>;
 
-  return <div className="space-y-4">{tabs}
+  const comboPrompt = combo && !combo.open && <section className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="min-w-0 flex-1 text-sm font-semibold text-amber-900">Kajang and Seri Kembangan are both done for {monthLabel(combo.month)}. Generate the combined poster?</p><button onClick={() => setCombo({ ...combo, open: true })} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white">Yes, generate</button><button onClick={() => setCombo(null)} className="h-10 rounded-xl border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-900">Not now</button></section>;
+  if (combo?.open) return <div className="space-y-4">{tabs}<CombinedPanel month={combo.month} items={combo.items} personId={personId} logo={logo} onError={onError} onClose={() => setCombo(null)} /></div>;
+  return <div className="space-y-4">{tabs}{comboPrompt}
     <section className={`${card} grid gap-6 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]`}>
       <div className="space-y-4">
         <div><h3 className="text-lg font-semibold">Staff of the Month</h3><p className="mt-1 text-sm text-slate-500">Choose the staff and the month. A face photo saved earlier comes up by itself; add one only if it is new. Download or WhatsApp also keeps the poster under Past SOTM.</p></div>

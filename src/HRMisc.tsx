@@ -2,6 +2,7 @@ import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from '
 import { ArrowLeft, ArrowRight, Award, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
+import { SHARE_NOTICE, shareToWhatsApp } from './lib/shareFile';
 import { shrinkPoster } from './ManagedServices';
 import { card } from './AssessmentStaff';
 import { HRSotm } from './HRSotm';
@@ -217,12 +218,8 @@ function FileCard({ item, busy, onEdit, onDelete, onError, onNotice, mode }: { k
   const share = async () => {
     if (!file) return;
     const message = item.body || item.title;
-    try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: item.title, text: message }); return; } }
-    catch (cause) { if ((cause as Error)?.name === 'AbortError') return; }
-    // No share sheet (a computer): save the image, then open WhatsApp with the message so the image can be attached.
-    downloadBlob([file], file.name, file.type);
-    whatsapp(message);
-    onNotice('The poster was saved to your computer. Attach it in the WhatsApp chat that opened.');
+    const outcome = await shareToWhatsApp(file, message, item.title);
+    if (outcome === 'copied' || outcome === 'downloaded') onNotice(SHARE_NOTICE[outcome]);
   };
   return <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
     <div ref={box} className="grid aspect-[4/5] place-items-center bg-slate-50">{image ? (src ? <img src={src} alt={item.title} className="h-full w-full object-contain" /> : <p className="text-xs text-slate-400">Loading…</p>) : <div className="text-center text-slate-400"><FileDown className="mx-auto h-10 w-10" /><p className="mt-2 text-xs">PDF</p></div>}</div>
