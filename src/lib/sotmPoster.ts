@@ -1,6 +1,6 @@
 export const W = 1080, H = 1350;
 
-export type PosterInput = { name: string; branch: string; month: string; photo: CanvasImageSource & { width: number; height: number } | null; logo: (CanvasImageSource & { width: number; height: number }) | null; zoom: number; moveX: number; moveY: number };
+export type PosterInput = { name: string; branch: string; quote: string; month: string; photo: CanvasImageSource & { width: number; height: number } | null; logo: (CanvasImageSource & { width: number; height: number }) | null; zoom: number; moveX: number; moveY: number };
 
 const FONT = '-apple-system, "Segoe UI", Roboto, sans-serif';
 function star(g: CanvasRenderingContext2D, x: number, y: number, outer: number, color: string) {
@@ -28,7 +28,7 @@ function whiteLogo(logo: CanvasImageSource & { width: number; height: number }, 
 export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
   const g = canvas.getContext('2d'); if (!g) return;
   canvas.width = W; canvas.height = H;
-  const cx = W / 2, cy = 735, radius = 268;
+  const cx = W / 2, cy = 700, radius = 250;
   // Background: deep navy to ARA blue, light rays and rings behind the photo.
   const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#101c30'); bg.addColorStop(0.5, '#1b3150'); bg.addColorStop(1, '#0b587b'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
   g.save(); g.translate(cx, cy);
@@ -62,16 +62,26 @@ export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
     g.drawImage(input.photo, px, py, pw, ph);
   } else { g.fillStyle = '#9bb5c7'; g.font = `600 36px ${FONT}`; g.fillText('Add a face photo', cx, cy + 12); }
   g.restore();
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 16; g.shadowOffsetY = 6; g.fillStyle = ringGold; g.beginPath(); g.arc(cx + 205, cy + 205, 60, 0, Math.PI * 2); g.fill(); g.restore();
-  g.strokeStyle = '#ffffff'; g.lineWidth = 8; g.beginPath(); g.arc(cx + 205, cy + 205, 60, 0, Math.PI * 2); g.stroke(); star(g, cx + 205, cy + 205, 35, '#14233b');
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 16; g.shadowOffsetY = 6; g.fillStyle = ringGold; g.beginPath(); g.arc(cx + 190, cy + 190, 56, 0, Math.PI * 2); g.fill(); g.restore();
+  g.strokeStyle = '#ffffff'; g.lineWidth = 8; g.beginPath(); g.arc(cx + 190, cy + 190, 56, 0, Math.PI * 2); g.stroke(); star(g, cx + 190, cy + 190, 32, '#14233b');
   // Name straight on the background: it shrinks to fit one line, or two when long.
   const name = input.name.trim() || 'Staff name', branch = input.branch.trim();
   let size = 74; const fit = (text: string) => { g.font = `800 ${size}px ${FONT}`; return g.measureText(text).width <= 940; };
   while (size > 46 && !fit(name)) size -= 2;
   g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 12; g.shadowOffsetY = 4; g.fillStyle = '#ffffff';
-  if (fit(name)) g.fillText(name, W / 2, 1160);
-  else { const words = name.split(' '), half = Math.ceil(words.length / 2); size = 56; g.font = `800 ${size}px ${FONT}`; g.fillText(words.slice(0, half).join(' '), W / 2, 1125); g.fillText(words.slice(half).join(' '), W / 2, 1187); }
+  const oneLine = fit(name);
+  if (oneLine) g.fillText(name, W / 2, 1072);
+  else { const words = name.split(' '), half = Math.ceil(words.length / 2); size = 56; g.font = `800 ${size}px ${FONT}`; g.fillText(words.slice(0, half).join(' '), W / 2, 1050); g.fillText(words.slice(half).join(' '), W / 2, 1110); }
   g.restore();
+  // Thank-you line under the name, wrapped to the width of the poster.
+  const quote = input.quote.trim();
+  if (quote) {
+    g.fillStyle = 'rgba(255,255,255,0.92)'; g.font = `italic 600 31px ${FONT}`;
+    const lines: string[] = []; let line = '';
+    for (const word of quote.split(/\s+/)) { const test = line ? `${line} ${word}` : word; if (g.measureText(test).width > 860 && line) { lines.push(line); line = word; } else line = test; }
+    if (line) lines.push(line);
+    lines.slice(0, 3).forEach((text, index) => g.fillText(text, W / 2, (oneLine ? 1132 : 1166) + index * 42));
+  }
   // Dark band at the bottom with the clinic and the branch.
   g.fillStyle = 'rgba(10,20,36,0.62)'; g.beginPath(); g.moveTo(0, 1232); g.quadraticCurveTo(W / 2, 1200, W, 1232); g.lineTo(W, H); g.lineTo(0, H); g.closePath(); g.fill();
   g.strokeStyle = '#ffd166'; g.lineWidth = 4; g.beginPath(); g.moveTo(0, 1232); g.quadraticCurveTo(W / 2, 1200, W, 1232); g.stroke();
