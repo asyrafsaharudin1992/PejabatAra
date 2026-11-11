@@ -4,6 +4,7 @@ import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
 import { card } from './AssessmentStaff';
 import { drawPoster } from './lib/sotmPoster';
+import { drawCertificate } from './lib/sotmCertificate';
 
 // Office HR > SOTM (Staff of the Month): pick the person and the month, add a face photo, and the poster is drawn right here in the browser.
 // Nothing is saved on the server; HR downloads the picture and shares it.
@@ -28,8 +29,72 @@ function shrinkFace(image: HTMLImageElement) {
 type Past = { file: string; month: string; name: string; branch: string; url: string };
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Unable to read that picture.')); image.src = src; });
 
+function CertificateMaker({ people, logo, onError }: { people: Person[] | null; logo: HTMLImageElement | null; onError: (message: string) => void }) {
+  const [personId, setPersonId] = useState('');
+  const [name, setName] = useState('');
+  const [branch, setBranch] = useState('');
+  const [month, setMonth] = useState(currentMonth());
+  const [signer, setSigner] = useState('Dr. Ahmad Syafiq bin So’ib');
+  const [signerTitle, setSignerTitle] = useState('Ketua Pegawai Sumber Manusia\nHSO Healthcare Sdn Bhd (1449939-U)');
+  const [signature, setSignature] = useState<HTMLImageElement | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => { if (canvas.current) drawCertificate(canvas.current, { name, branch, month, signer, signerTitle, signature, logo }); }, [name, branch, month, signer, signerTitle, signature, logo]);
+  useEffect(() => { call('action=sotm_signature').then((result) => result.signature ? loadImage(result.signature) : null).then((image) => { if (image) setSignature(image); }).catch(() => undefined); }, []);
+  // The signature picture is cleaned before it is kept: the light background becomes see-through, the ink goes dark blue, at most 600 pixels wide.
+  const pickSignature = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { onError('Choose a picture file (PNG or JPG).'); return; }
+    const url = URL.createObjectURL(file);
+    loadImage(url).then(async (image) => {
+      const scale = Math.min(1, 600 / image.width), layer = document.createElement('canvas'); layer.width = Math.round(image.width * scale); layer.height = Math.round(image.height * scale);
+      const context = layer.getContext('2d'); if (!context) throw new Error('Unable to read that picture.');
+      context.drawImage(image, 0, 0, layer.width, layer.height);
+      const pixels = context.getImageData(0, 0, layer.width, layer.height);
+      const opaque = pixels.data.every((_value, index) => index % 4 !== 3 || pixels.data[index] === 255);
+      for (let index = 0; index < pixels.data.length; index += 4) {
+        const alpha = opaque ? Math.min(255, Math.max(0, Math.round((255 - (pixels.data[index] * 0.3 + pixels.data[index + 1] * 0.59 + pixels.data[index + 2] * 0.11)) * 1.3))) : pixels.data[index + 3];
+        pixels.data[index] = 20; pixels.data[index + 1] = 35; pixels.data[index + 2] = 59; pixels.data[index + 3] = alpha;
+      }
+      context.putImageData(pixels, 0, 0);
+      const data = layer.toDataURL('image/png');
+      setSaving(true); await call('action=sotm_signature_save', { signature: data }); setSignature(await loadImage(data));
+    }).catch((cause: Error) => onError(cause.message)).finally(() => { setSaving(false); URL.revokeObjectURL(url); });
+  };
+  const choose = (id: string) => { setPersonId(id); const person = (people || []).find((item) => item.id === id); setName(person ? titleCase(person.fullName) : ''); setBranch(person?.branch || ''); };
+  // Download also keeps the certificate under Past SOTM (Certificates). If saving fails the certificate is still downloaded.
+  const download = async () => {
+    if (!canvas.current) return;
+    setBusy(true); setNotice('');
+    const layer = canvas.current;
+    let kept = false;
+    if (personId) { try { await call('action=sotm_save', { kind: 'cert', employeeId: personId, month, name, branch, poster: layer.toDataURL('image/jpeg', 0.9) }); kept = true; } catch (cause) { onError(cause instanceof Error ? cause.message : 'The certificate could not be saved, but it is downloaded.'); } }
+    layer.toBlob((blob) => { if (blob) { downloadBlob([blob], `Sijil SOTM ${monthLabel(month)} - ${name || 'staff'}.png`, 'image/png'); setNotice(kept ? 'Downloaded and saved under Past SOTM > Certificates.' : 'Downloaded.'); } else onError('Unable to make the certificate.'); setBusy(false); }, 'image/png');
+  };
+  const field = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
+  const label = 'block text-xs font-semibold text-slate-500';
+  return <section className={`${card} grid gap-6 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]`}>
+    <div className="space-y-4">
+      <div><h3 className="text-lg font-semibold">Certificate</h3><p className="mt-1 text-sm text-slate-500">Sijil Penghargaan for the Staff of the Month, A4 landscape. Choose the staff and the month, then download the picture and print it.</p></div>
+      <label className={label}>Staff<select value={personId} onChange={(event) => choose(event.target.value)} className={`${field} mt-1`}><option value="">{people === null ? 'Loading…' : 'Choose staff'}</option>{(people || []).map((person) => <option key={person.id} value={person.id}>{titleCase(person.fullName)}</option>)}</select></label>
+      <label className={label}>Month<input type="month" value={month} onChange={(event) => setMonth(event.target.value || currentMonth())} className={`${field} mt-1`} /></label>
+      <label className={label}>Name on certificate<input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} className={`${field} mt-1`} /></label>
+      <label className={label}>Branch<input value={branch} maxLength={40} onChange={(event) => setBranch(event.target.value)} className={`${field} mt-1`} /></label>
+      <label className={label}>Signed by<input value={signer} maxLength={80} onChange={(event) => setSigner(event.target.value)} className={`${field} mt-1`} /></label>
+      <label className={label}>Position (one line each)<textarea value={signerTitle} maxLength={120} rows={2} onChange={(event) => setSignerTitle(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+      <label className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#0b587b] text-sm font-semibold text-[#0b587b]"><ImagePlus className="h-4 w-4" />{saving ? 'Saving…' : signature ? 'Change signature' : 'Upload signature'}<input type="file" accept="image/*" disabled={saving} onChange={pickSignature} className="sr-only" /></label>
+      {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
+      <button type="button" onClick={() => void download()} disabled={busy || !name.trim()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0b587b] text-sm font-bold text-white disabled:opacity-40"><Download className="h-4 w-4" />Download certificate (PNG)</button>
+    </div>
+    <div className="flex items-start justify-center"><canvas ref={canvas} aria-label="Certificate preview" className="h-auto w-full max-w-[900px] rounded-xl shadow-lg ring-1 ring-slate-200" /></div>
+  </section>;
+}
+
 export function HRSotm({ onError }: { onError: (message: string) => void }) {
-  const [tab, setTab] = useState<'create' | 'past'>('create');
+  const [tab, setTab] = useState<'create' | 'cert' | 'past'>('create');
   const [people, setPeople] = useState<Person[] | null>(null);
   const [personId, setPersonId] = useState('');
   const [name, setName] = useState('');
@@ -43,6 +108,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [past, setPast] = useState<Past[] | null>(null);
+  const [pastKind, setPastKind] = useState<'poster' | 'cert'>('poster');
   const [filterMonth, setFilterMonth] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -51,8 +117,8 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
     call('action=employees').then((result) => setPeople(((result.employees || []) as Person[]).filter((person) => person.status === 'Active'))).catch((cause) => { setPeople([]); fail(cause, 'Unable to load staff.'); });
     loadImage('/ara-logo.png').then(setLogo).catch(() => setLogo(null));
   }, []);
-  const loadPast = () => { call('action=sotm_list').then((result) => setPast(result.items || [])).catch((cause) => { setPast([]); fail(cause, 'Unable to load past posters.'); }); };
-  useEffect(() => { if (tab === 'past') loadPast(); }, [tab]);
+  const loadPast = () => { setPast(null); call(`action=sotm_list&kind=${pastKind}`).then((result) => setPast(result.items || [])).catch((cause) => { setPast([]); fail(cause, 'Unable to load past posters.'); }); };
+  useEffect(() => { if (tab === 'past') loadPast(); }, [tab, pastKind]);
   useEffect(() => { if (canvas.current && tab === 'create') drawPoster(canvas.current, { name, branch, quote, month: monthLabel(month), photo, logo, zoom, moveX, moveY }); }, [tab, name, branch, quote, month, photo, logo, zoom, moveX, moveY]);
   const choose = async (id: string) => {
     setPersonId(id); setNotice(''); setNewFace(null); setPhoto(null); setZoom(1); setMoveX(0); setMoveY(0);
@@ -92,7 +158,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
       } catch (cause) { if ((cause as Error)?.name !== 'AbortError') fail(cause, 'Unable to share.'); } finally { setBusy(false); }
     }, mime, kind === 'share' ? 0.92 : undefined);
   };
-  const fileOf = async (item: Past) => new File([await (await fetch(item.url)).blob()], `SOTM ${monthLabel(item.month)} - ${item.name}.jpg`, { type: 'image/jpeg' });
+  const fileOf = async (item: Past) => new File([await (await fetch(item.url)).blob()], `${pastKind === 'cert' ? 'Sijil ' : ''}SOTM ${monthLabel(item.month)} - ${item.name}.jpg`, { type: 'image/jpeg' });
   const downloadPast = async (item: Past) => { try { const file = await fileOf(item); downloadBlob([file], file.name, 'image/jpeg'); } catch (cause) { fail(cause, 'Unable to download.'); } };
   const sharePast = async (item: Past) => {
     const text = message(item.name, monthLabel(item.month));
@@ -105,23 +171,25 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   };
   const removePast = async (item: Past) => {
     if (!window.confirm(`Delete the ${monthLabel(item.month)} poster for ${item.name}?`)) return;
-    try { await call('action=sotm_delete', { file: item.file }); loadPast(); } catch (cause) { fail(cause, 'Unable to delete.'); }
+    try { await call('action=sotm_delete', { file: item.file, kind: pastKind }); loadPast(); } catch (cause) { fail(cause, 'Unable to delete.'); }
   };
   const field = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
   const label = 'block text-xs font-semibold text-slate-500';
-  const tabs = <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['create', 'Create poster'], ['past', 'Past SOTM']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); setNotice(''); }} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>;
+  const tabs = <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['create', 'Create poster'], ['cert', 'Certificate'], ['past', 'Past SOTM']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); setNotice(''); }} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>;
 
   const pastMonths: string[] = [...new Set<string>((past || []).map((item) => item.month))];
   const pastBranches: string[] = [...new Set<string>((past || []).map((item) => item.branch).filter(Boolean))].sort();
   const pastShown = (past || []).filter((item) => (!filterMonth || item.month === filterMonth) && (!filterBranch || item.branch === filterBranch));
+  if (tab === 'cert') return <div className="space-y-4">{tabs}<CertificateMaker people={people} logo={logo} onError={onError} /></div>;
   if (tab === 'past') return <div className="space-y-4">{tabs}
     <section className="rounded-[26px] bg-gradient-to-br from-[#14233b] via-[#1b3150] to-[#0b587b] p-5 text-white sm:p-7">
       <div className="flex flex-wrap items-end gap-3"><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#ffd166]">★ Hall of Fame</p><h3 className="mt-1 text-2xl font-semibold">Staff of the Month</h3></div>
+        <div role="group" aria-label="Posters or certificates" className="inline-flex rounded-xl bg-white/10 p-1">{([['poster', 'Posters'], ['cert', 'Certificates']] as const).map(([key, text]) => <button key={key} type="button" aria-pressed={pastKind === key} onClick={() => { setPastKind(key); setNotice(''); }} className={`h-8 rounded-lg px-3 text-sm font-semibold ${pastKind === key ? 'bg-[#ffd166] text-[#14233b]' : 'text-white/80'}`}>{text}</button>)}</div>
         <select aria-label="Filter by month" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)} className="h-10 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white [&>option]:text-slate-800"><option value="">All months</option>{pastMonths.map((value) => <option key={value} value={value}>{monthLabel(value)}</option>)}</select>
         <select aria-label="Filter by branch" value={filterBranch} onChange={(event) => setFilterBranch(event.target.value)} className="h-10 rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white [&>option]:text-slate-800"><option value="">All branches</option>{pastBranches.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
       {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
-      {past === null ? <p className="mt-5 text-sm text-white/70">Loading…</p> : !pastShown.length ? <p className="mt-5 text-sm text-white/70">{past.length ? 'No poster for this filter.' : 'No poster yet. Download or share a poster and it is kept here.'}</p> : <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{pastShown.map((item) => <article key={item.file} className="group overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-white/10">
-        <img src={item.url} alt={`SOTM ${monthLabel(item.month)} ${item.name}`} loading="lazy" className="aspect-[4/5] w-full object-cover" />
+      {past === null ? <p className="mt-5 text-sm text-white/70">Loading…</p> : !pastShown.length ? <p className="mt-5 text-sm text-white/70">{past.length ? 'Nothing for this filter.' : pastKind === 'cert' ? 'No certificate yet. Download a certificate and it is kept here.' : 'No poster yet. Download or share a poster and it is kept here.'}</p> : <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{pastShown.map((item) => <article key={item.file} className="group overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-white/10">
+        <img src={item.url} alt={`SOTM ${monthLabel(item.month)} ${item.name}`} loading="lazy" className={`w-full object-cover ${pastKind === 'cert' ? 'aspect-[1.414]' : 'aspect-[4/5]'}`} />
         <div className="flex items-center gap-2 p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{item.name}</p><p className="truncate text-xs text-slate-500">{monthLabel(item.month)}{item.branch && ` · ${item.branch}`}</p></div>
           <button onClick={() => void sharePast(item)} aria-label={`Share ${item.name} on WhatsApp`} className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-600 text-white"><MessageCircle className="h-4 w-4" /></button><button onClick={() => void downloadPast(item)} aria-label={`Download ${item.name}`} className="grid h-9 w-9 place-items-center rounded-xl bg-[#0b587b] text-white"><Download className="h-4 w-4" /></button><button onClick={() => void removePast(item)} aria-label={`Delete ${item.name}`} className="rounded-xl p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button></div>
       </article>)}</div>}

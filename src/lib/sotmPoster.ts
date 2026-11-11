@@ -3,10 +3,25 @@ export const W = 1080, H = 1350;
 export type PosterInput = { name: string; branch: string; quote: string; month: string; photo: CanvasImageSource & { width: number; height: number } | null; logo: (CanvasImageSource & { width: number; height: number }) | null; zoom: number; moveX: number; moveY: number };
 
 const FONT = '-apple-system, "Segoe UI", Roboto, sans-serif';
-function star(g: CanvasRenderingContext2D, x: number, y: number, outer: number, color: string) {
+const SERIF = 'Georgia, "Times New Roman", serif';
+function star(g: CanvasRenderingContext2D, x: number, y: number, outer: number, color: string | CanvasGradient, inner = outer * 0.42, points = 5) {
   g.fillStyle = color; g.beginPath();
-  for (let point = 0; point < 10; point++) { const radius = point % 2 ? outer * 0.42 : outer, angle = -Math.PI / 2 + (point * Math.PI) / 5; g.lineTo(x + radius * Math.cos(angle), y + radius * Math.sin(angle)); }
+  for (let point = 0; point < points * 2; point++) { const radius = point % 2 ? inner : outer, angle = -Math.PI / 2 + (point * Math.PI) / points; g.lineTo(x + radius * Math.cos(angle), y + radius * Math.sin(angle)); }
   g.closePath(); g.fill();
+}
+// Text with spacing between the letters.
+function spaced(g: CanvasRenderingContext2D, text: string, x: number, y: number, gap: number) {
+  const letters = [...text], widths = letters.map((letter) => g.measureText(letter).width), total = widths.reduce((sum, width) => sum + width, 0) + gap * (letters.length - 1);
+  let at = x - total / 2; g.textAlign = 'left'; letters.forEach((letter, index) => { g.fillText(letter, at, y); at += widths[index] + gap; }); g.textAlign = 'center';
+}
+// A branch of laurel leaves along an arc of a circle, from `from` to `to` (radians).
+function laurel(g: CanvasRenderingContext2D, cx: number, cy: number, radius: number, from: number, to: number, side: 1 | -1, fill: CanvasGradient) {
+  const count = 15;
+  for (let index = 0; index < count; index++) {
+    const angle = from + ((to - from) * index) / (count - 1), size = 34 - index * 0.9;
+    const x = cx + radius * Math.cos(angle), y = cy + radius * Math.sin(angle), tangent = angle + (side * Math.PI) / 2;
+    for (const turn of [-0.62, 0.62]) { g.save(); g.translate(x, y); g.rotate(tangent + turn * side); g.fillStyle = fill; g.beginPath(); g.ellipse(size * 0.5, 0, size * 0.62, size * 0.2, 0, 0, Math.PI * 2); g.fill(); g.restore(); }
+  }
 }
 
 // The logo file is dark on white: turn the dark parts into white and the white background into nothing.
@@ -28,33 +43,37 @@ function whiteLogo(logo: CanvasImageSource & { width: number; height: number }, 
 export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
   const g = canvas.getContext('2d'); if (!g) return;
   canvas.width = W; canvas.height = H;
-  const cx = W / 2, cy = 700, radius = 250;
-  // Background: deep navy to ARA blue, light rays and rings behind the photo.
-  const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#101c30'); bg.addColorStop(0.5, '#1b3150'); bg.addColorStop(1, '#0b587b'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = 690, radius = 245;
+  const gold = g.createLinearGradient(0, 0, W, H); gold.addColorStop(0, '#b9770e'); gold.addColorStop(0.25, '#ffe39a'); gold.addColorStop(0.5, '#e8a92c'); gold.addColorStop(0.75, '#ffe9a8'); gold.addColorStop(1, '#b9770e');
+  // Background: very deep navy with a teal glow behind the photo and a dark edge.
+  const bg = g.createRadialGradient(cx, 560, 80, cx, 640, 1000); bg.addColorStop(0, '#16304f'); bg.addColorStop(0.55, '#0c1a2e'); bg.addColorStop(1, '#050b15'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const glow = g.createRadialGradient(cx, cy, 120, cx, cy, 560); glow.addColorStop(0, 'rgba(24,130,170,0.55)'); glow.addColorStop(1, 'rgba(24,130,170,0)'); g.fillStyle = glow; g.fillRect(0, 0, W, H);
   g.save(); g.translate(cx, cy);
-  for (let ray = 0; ray < 18; ray++) { const angle = (ray * Math.PI * 2) / 18; g.fillStyle = 'rgba(112,216,250,0.07)'; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 1100, angle, angle + Math.PI / 18); g.closePath(); g.fill(); }
+  for (let ray = 0; ray < 24; ray++) { const angle = (ray * Math.PI * 2) / 24; g.fillStyle = 'rgba(255,227,154,0.035)'; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 1000, angle, angle + Math.PI / 24); g.closePath(); g.fill(); }
   g.restore();
-  const glow = g.createRadialGradient(cx, cy, 120, cx, cy, 640); glow.addColorStop(0, 'rgba(112,216,250,0.45)'); glow.addColorStop(1, 'rgba(112,216,250,0)'); g.fillStyle = glow; g.fillRect(0, 0, W, H);
-  g.lineWidth = 3; for (const [ring, alpha] of [[345, 0.35], [405, 0.22], [475, 0.14]]) { g.strokeStyle = `rgba(255,209,102,${alpha})`; g.beginPath(); g.arc(cx, cy, ring, 0, Math.PI * 2); g.stroke(); }
-  // Confetti and stars.
-  const colours = ['#ffd166', '#ffffff', '#70d8fa', '#ff8fb8'];
-  [[80, 330, 0.5], [160, 470, 1.2], [60, 600, 2.1], [130, 760, 0.3], [75, 930, 1.7], [180, 1080, 0.9], [1000, 340, 1.4], [920, 470, 0.2], [1020, 620, 2.4], [950, 780, 1.1], [1005, 940, 0.6], [900, 1080, 1.9], [250, 330, 2.7], [830, 330, 0.8], [40, 450, 1.5], [1040, 480, 2.2]].forEach(([x, y, turn], index) => { g.save(); g.translate(x, y); g.rotate(turn); g.fillStyle = colours[index % colours.length]; g.globalAlpha = 0.9; g.beginPath(); g.roundRect(-9, -4, 18, 8, 3); g.fill(); g.restore(); });
-  for (const [x, y, size] of [[80, 150, 22], [1000, 160, 26], [60, 700, 16], [1030, 760, 18], [140, 1000, 14], [940, 1000, 16], [880, 400, 11], [200, 410, 11]]) star(g, x, y, size, '#ffd166');
+  // Fine gold dust.
+  let seed = 7; const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let dot = 0; dot < 90; dot++) { const x = random() * W, y = random() * H; if (Math.hypot(x - cx, y - cy) < 330) continue; g.globalAlpha = 0.15 + random() * 0.6; g.fillStyle = '#ffe39a'; g.beginPath(); g.arc(x, y, 0.8 + random() * 2.2, 0, Math.PI * 2); g.fill(); }
+  g.globalAlpha = 1;
+  for (const [x, y, size] of [[120, 300, 16], [960, 330, 20], [90, 860, 12], [990, 900, 15], [170, 1120, 11], [910, 1130, 13]]) star(g, x, y, size, '#ffe39a', size * 0.18, 4);
+  // Double gold frame with corner diamonds.
+  g.strokeStyle = gold; g.lineWidth = 4; g.strokeRect(26, 26, W - 52, H - 52);
+  g.strokeStyle = 'rgba(255,227,154,0.45)'; g.lineWidth = 1.5; g.strokeRect(42, 42, W - 84, H - 84);
+  for (const [x, y] of [[26, 26], [W - 26, 26], [26, H - 26], [W - 26, H - 26]]) { g.save(); g.translate(x, y); g.rotate(Math.PI / 4); g.fillStyle = '#0c1a2e'; g.fillRect(-13, -13, 26, 26); g.strokeStyle = gold; g.lineWidth = 3; g.strokeRect(-13, -13, 26, 26); g.restore(); }
   g.textAlign = 'center';
-  // White logo straight on the background.
-  if (input.logo) { const layer = whiteLogo(input.logo, 150); g.drawImage(layer, (W - layer.width) / 2, 34); }
-  // Gold ribbon with folded tails, then the month.
-  const gold = g.createLinearGradient(0, 205, 0, 295); gold.addColorStop(0, '#ffe39a'); gold.addColorStop(1, '#f0aa2e');
-  g.fillStyle = '#c98a14'; g.beginPath(); g.moveTo(110, 232); g.lineTo(200, 232); g.lineTo(200, 286); g.lineTo(110, 286); g.lineTo(138, 259); g.closePath(); g.fill();
-  g.beginPath(); g.moveTo(970, 232); g.lineTo(880, 232); g.lineTo(880, 286); g.lineTo(970, 286); g.lineTo(942, 259); g.closePath(); g.fill();
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.3)'; g.shadowBlur = 16; g.shadowOffsetY = 6; g.fillStyle = gold; g.beginPath(); g.roundRect(160, 208, 760, 84, 14); g.fill(); g.restore();
-  g.fillStyle = '#14233b'; g.font = `800 40px ${FONT}`; g.fillText('S T A F F   O F   T H E   M O N T H', W / 2, 264);
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 14; g.shadowOffsetY = 4; g.fillStyle = '#ffffff'; g.font = `800 100px ${FONT}`; g.fillText(input.month, W / 2, 396); g.restore();
-  // Photo: white ring, gold ring, and a star badge.
-  const ringGold = g.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius); ringGold.addColorStop(0, '#ffe39a'); ringGold.addColorStop(0.5, '#f0aa2e'); ringGold.addColorStop(1, '#ffe39a');
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.4)'; g.shadowBlur = 44; g.shadowOffsetY = 16; g.fillStyle = '#ffffff'; g.beginPath(); g.arc(cx, cy, radius + 32, 0, Math.PI * 2); g.fill(); g.restore();
-  g.fillStyle = ringGold; g.beginPath(); g.arc(cx, cy, radius + 16, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(cx, cy, radius + 4, 0, Math.PI * 2); g.fill();
+  // White logo, then the title between two gold rules.
+  if (input.logo) { const layer = whiteLogo(input.logo, 120); g.drawImage(layer, (W - layer.width) / 2, 78); }
+  g.fillStyle = gold; g.font = `700 32px ${FONT}`; spaced(g, 'STAFF OF THE MONTH', cx, 250, 9);
+  for (const sign of [-1, 1]) { g.fillStyle = gold; g.fillRect(sign < 0 ? 100 : 840, 238, 140, 2); star(g, cx + sign * 308, 239, 8, '#ffe39a', 3, 4); }
+  g.save(); g.shadowColor = 'rgba(232,169,44,0.55)'; g.shadowBlur = 26; g.fillStyle = '#fff7e0'; g.font = `700 96px ${SERIF}`; g.fillText(input.month, cx, 350); g.restore();
+  // Photo: laurel wreath, gold and white rings, and a gold seal.
+  const leaf = g.createLinearGradient(cx - 330, cy - 330, cx + 330, cy + 330); leaf.addColorStop(0, '#ffe9a8'); leaf.addColorStop(0.5, '#e8a92c'); leaf.addColorStop(1, '#ffe39a');
+  laurel(g, cx, cy, radius + 56, Math.PI * 0.62, Math.PI * 1.34, -1, leaf);
+  laurel(g, cx, cy, radius + 56, Math.PI * 0.38, -Math.PI * 0.34, 1, leaf);
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.55)'; g.shadowBlur = 40; g.shadowOffsetY = 16; g.fillStyle = gold; g.beginPath(); g.arc(cx, cy, radius + 24, 0, Math.PI * 2); g.fill(); g.restore();
+  g.fillStyle = '#0c1a2e'; g.beginPath(); g.arc(cx, cy, radius + 14, 0, Math.PI * 2); g.fill();
+  g.fillStyle = gold; g.beginPath(); g.arc(cx, cy, radius + 8, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(cx, cy, radius + 2, 0, Math.PI * 2); g.fill();
   g.save(); g.beginPath(); g.arc(cx, cy, radius, 0, Math.PI * 2); g.clip(); g.fillStyle = '#e8f1f6'; g.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
   if (input.photo) {
     const base = Math.max((radius * 2) / input.photo.width, (radius * 2) / input.photo.height) * input.zoom, pw = input.photo.width * base, ph = input.photo.height * base;
@@ -62,29 +81,29 @@ export function drawPoster(canvas: HTMLCanvasElement, input: PosterInput) {
     g.drawImage(input.photo, px, py, pw, ph);
   } else { g.fillStyle = '#9bb5c7'; g.font = `600 36px ${FONT}`; g.fillText('Add a face photo', cx, cy + 12); }
   g.restore();
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 16; g.shadowOffsetY = 6; g.fillStyle = ringGold; g.beginPath(); g.arc(cx + 190, cy + 190, 56, 0, Math.PI * 2); g.fill(); g.restore();
-  g.strokeStyle = '#ffffff'; g.lineWidth = 8; g.beginPath(); g.arc(cx + 190, cy + 190, 56, 0, Math.PI * 2); g.stroke(); star(g, cx + 190, cy + 190, 32, '#14233b');
-  // Name straight on the background: it shrinks to fit one line, or two when long.
+  const sx = cx + 184, sy = cy + 184;
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.5)'; g.shadowBlur = 18; g.shadowOffsetY = 6; star(g, sx, sy, 66, gold, 59, 22); g.restore();
+  g.fillStyle = '#0c1a2e'; g.beginPath(); g.arc(sx, sy, 46, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#ffe39a'; g.lineWidth = 3; g.beginPath(); g.arc(sx, sy, 40, 0, Math.PI * 2); g.stroke(); star(g, sx, sy, 26, gold);
+  // Name in serif, a gold flourish, the thank-you line.
   const name = input.name.trim() || 'Staff name', branch = input.branch.trim();
-  let size = 74; const fit = (text: string) => { g.font = `800 ${size}px ${FONT}`; return g.measureText(text).width <= 940; };
-  while (size > 46 && !fit(name)) size -= 2;
-  g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 12; g.shadowOffsetY = 4; g.fillStyle = '#ffffff';
+  let size = 80; const fit = (text: string) => { g.font = `700 ${size}px ${SERIF}`; return g.measureText(text).width <= 900; };
+  while (size > 48 && !fit(name)) size -= 2;
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = 14; g.shadowOffsetY = 4; g.fillStyle = '#fff7e0';
   const oneLine = fit(name);
-  if (oneLine) g.fillText(name, W / 2, 1072);
-  else { const words = name.split(' '), half = Math.ceil(words.length / 2); size = 56; g.font = `800 ${size}px ${FONT}`; g.fillText(words.slice(0, half).join(' '), W / 2, 1050); g.fillText(words.slice(half).join(' '), W / 2, 1110); }
+  if (oneLine) g.fillText(name, cx, 1090);
+  else { const words = name.split(' '), half = Math.ceil(words.length / 2); size = 58; g.font = `700 ${size}px ${SERIF}`; g.fillText(words.slice(0, half).join(' '), cx, 1062); g.fillText(words.slice(half).join(' '), cx, 1122); }
   g.restore();
-  // Thank-you line under the name, wrapped to the width of the poster.
+  const lineY = oneLine ? 1122 : 1150;
+  g.fillStyle = gold; g.fillRect(cx - 210, lineY, 170, 2); g.fillRect(cx + 40, lineY, 170, 2); star(g, cx, lineY + 1, 11, '#ffe39a', 4, 4);
   const quote = input.quote.trim();
   if (quote) {
-    g.fillStyle = 'rgba(255,255,255,0.92)'; g.font = `italic 600 31px ${FONT}`;
+    g.fillStyle = 'rgba(255,247,224,0.9)'; g.font = `italic 400 30px ${SERIF}`;
     const lines: string[] = []; let line = '';
-    for (const word of quote.split(/\s+/)) { const test = line ? `${line} ${word}` : word; if (g.measureText(test).width > 860 && line) { lines.push(line); line = word; } else line = test; }
+    for (const word of quote.split(/\s+/)) { const test = line ? `${line} ${word}` : word; if (g.measureText(test).width > 840 && line) { lines.push(line); line = word; } else line = test; }
     if (line) lines.push(line);
-    lines.slice(0, 3).forEach((text, index) => g.fillText(text, W / 2, (oneLine ? 1132 : 1166) + index * 42));
+    lines.slice(0, 3).forEach((text, index) => g.fillText(text, cx, lineY + 52 + index * 40));
   }
-  // Dark band at the bottom with the clinic and the branch.
-  g.fillStyle = 'rgba(10,20,36,0.62)'; g.beginPath(); g.moveTo(0, 1232); g.quadraticCurveTo(W / 2, 1200, W, 1232); g.lineTo(W, H); g.lineTo(0, H); g.closePath(); g.fill();
-  g.strokeStyle = '#ffd166'; g.lineWidth = 4; g.beginPath(); g.moveTo(0, 1232); g.quadraticCurveTo(W / 2, 1200, W, 1232); g.stroke();
-  g.fillStyle = '#ffffff'; g.font = `800 42px ${FONT}`; g.fillText('K L I N I K   A R A   2 4   J A M', W / 2, branch ? 1286 : 1304);
-  if (branch) { g.fillStyle = '#ffd166'; g.font = `700 34px ${FONT}`; g.fillText(branch.toUpperCase(), W / 2, 1330); }
+  // Clinic and branch on one line at the foot, between gold rules.
+  g.fillStyle = gold; g.fillRect(120, 1254, W - 240, 2);
+  g.fillStyle = gold; g.font = `700 30px ${FONT}`; spaced(g, `KLINIK ARA 24 JAM${branch ? `  ·  ${branch.toUpperCase()}` : ''}`, cx, 1296, 8);
 }
