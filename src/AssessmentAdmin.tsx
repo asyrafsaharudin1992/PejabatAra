@@ -76,7 +76,7 @@ async function downloadQuiz(quiz: Quiz, staff: Staff[], attempts: Attempt[]) {
 
 const newQuestion = (): Question => ({ id: crypto.randomUUID(), text: '', options: ['', '', '', ''], answer: 0 });
 
-export default function AssessmentAdmin() {
+export default function AssessmentAdmin({ embedded = false }: { embedded?: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [tab, setTab] = useState<'quizzes' | 'results'>('quizzes');
   const [message, setMessage] = useState('');
@@ -131,11 +131,13 @@ export default function AssessmentAdmin() {
   // Staff who have submitted at least once, not the number of tries.
   const attemptCount = (quizId: string) => new Set(data?.attempts.filter((attempt) => attempt.quizId === quizId).map((attempt) => attempt.staffId)).size;
 
-  return <main className="min-h-screen bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16">
+  return <main className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16'}>
     <div className="mx-auto max-w-5xl">
+      {!embedded && <>
       <a href="#office/admin" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Back to Control Centre</a>
       <p className="mt-8 text-[10px] font-bold uppercase tracking-[0.25em] text-[#0b9aca]">ARAOFFICE CONTROL CENTRE</p>
       <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">Assessment Room</h1>
+      </>}
       <p className="mt-2 text-sm text-slate-500">Staff open the Assessment Room from the lobby on their own phones, without the device key, and sign in with their name, staff code and the last 4 digits of their IC. Add staff and their codes in <a href="#office/users" className="font-semibold text-[#0b587b] underline">User Management</a>.</p>
       {message && <p role="status" className="mt-6 rounded-xl bg-white p-4 text-sm shadow-sm">{message}</p>}
 

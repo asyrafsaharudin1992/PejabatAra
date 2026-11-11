@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import {
+import { ArrowLeft, 
   AlertCircle,
   ArrowRight,
   Bell,
@@ -133,7 +133,8 @@ function normalizeUser(user: PortalUser): PortalUser {
   };
 }
 
-export default function PortalApp() {
+// `embedded`: shown inside the COO office. The office keeps its own menu, as a row of tabs above the page instead of a sidebar.
+export default function PortalApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [user, setUser] = useState<PortalUser | null>(() => {
     const saved = readLocal<PortalUser | null>("ara_portal_session", null);
     const previewMode = localStorage.getItem("ara_view_mode");
@@ -245,8 +246,8 @@ export default function PortalApp() {
   if (!user) return <LoginScreen onLogin={login} />;
 
   return (
-    <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-      <Sidebar
+    <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
+      {!embedded && <Sidebar
         panelAlertCount={panelTraining.guides.filter((guide) => guide.status === 'pending').length}
         announcementCount={announcementReads.loaded ? content.announcements.filter((item) => !announcementReads.allRead(item.id)).length : 0}
         user={user}
@@ -255,9 +256,9 @@ export default function PortalApp() {
         onClose={() => setMobileNavOpen(false)}
         onNavigate={navigate}
         onLogout={logout}
-      />
+      />}
 
-      <div className="min-h-screen lg:pl-[300px]">
+      <div className={embedded ? '' : 'min-h-screen lg:pl-[300px]'}>
         {adminAccount?.role === "Superadmin" && (
           <div className="border-b border-[#dce4ed] bg-white/95 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-[38px]">
             <div className="mx-auto flex max-w-[1500px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -277,7 +278,7 @@ export default function PortalApp() {
             </div>
           </div>
         )}
-        <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
+        <header className={`sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden${embedded ? ' !hidden' : ''}`}>
           <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6 lg:px-10">
             <button
               className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white lg:hidden"
@@ -314,7 +315,8 @@ export default function PortalApp() {
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 lg:p-[38px]">
+        <main className={embedded ? 'pt-1' : 'p-4 sm:p-6 lg:p-[38px]'}>
+          {embedded && view !== 'home' && <div className="mx-auto mb-4 max-w-[1500px]"><button onClick={() => navigate('home')} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-[#0b587b] shadow-sm ring-1 ring-slate-100 hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />CA office home</button></div>}
           {view === "home" && (
             <HomeView
               onNavigate={navigate}

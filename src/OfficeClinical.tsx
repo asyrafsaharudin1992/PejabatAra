@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { ArrowLeft, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
@@ -808,7 +808,8 @@ function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null
   </div>;
 }
 
-export default function OfficeClinical() {
+// `embedded`: shown inside the COO office. The office keeps its own menu, as a row of tabs above the page instead of a sidebar.
+export default function OfficeClinical({ embedded = false }: { embedded?: boolean } = {}) {
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branch, setBranch] = useState('');
   const [view, setView] = useState<View>('home');
@@ -863,16 +864,20 @@ export default function OfficeClinical() {
     report: day.tasks.filter((task) => !task.doneOn).length,
   } : {}, [day]);
 
-  return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar view={view} open={menuOpen} branches={branches || []} branch={branch} viewAs={viewAs} counts={counts} onViewAs={(name) => { setViewAs(name); if (name !== 'all') setBranch(name); }} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
-    <div className="min-h-screen lg:pl-[300px]">
-      <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
+  return <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
+    {!embedded && <Sidebar view={view} open={menuOpen} branches={branches || []} branch={branch} viewAs={viewAs} counts={counts} onViewAs={(name) => { setViewAs(name); if (name !== 'all') setBranch(name); }} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />}
+    <div className={embedded ? '' : 'min-h-screen lg:pl-[300px]'}>
+      <header className={`sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden${embedded ? ' !hidden' : ''}`}>
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
           <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">Clinical Admin · {branch}</p><h1 className="truncate text-xl font-semibold tracking-tight">{TITLES[view]}</h1></div>
         </div>
       </header>
-      <main className="p-4 sm:p-6 lg:p-[38px]">
+      <main className={embedded ? 'pt-1' : 'p-4 sm:p-6 lg:p-[38px]'}>
+        {embedded && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center gap-3">
+          {view !== 'home' && <button onClick={() => navigate('home')} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-[#0b587b] shadow-sm ring-1 ring-slate-100 hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />Clinical Admin home</button>}
+          {(branches?.length || 0) > 1 && <div className="inline-flex rounded-xl bg-white p-1 text-sm shadow-sm ring-1 ring-slate-100"><span className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">View as</span>{['all', ...(branches || [])].map((name) => <button key={name} onClick={() => { setViewAs(name); if (name !== 'all') setBranch(name); }} className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${viewAs === name ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{name === 'all' ? 'All branches' : name}</button>)}</div>}
+        </div>}
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}

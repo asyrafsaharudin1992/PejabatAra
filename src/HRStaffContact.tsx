@@ -6,15 +6,17 @@ import type { Employee } from './HRProfiles';
 const DEFAULT_MESSAGE = `Assalamualaikum {{name}},\n\nDimaklumkan bahawa kita akan mula menggunakan AraOffice untuk urusan staf, termasuk permohonan cuti sakit (MC), rekod kehadiran, tuntutan OT dan penilaian prestasi (assessment). Sila sign in dan lengkapkan urusan berkaitan melalui sistem ini.\n\nNama sign-in: {{signin}}\nStaff ID: {{staffId}}\nKata laluan sementara: 4 digit terakhir nombor IC anda. Anda boleh menukarnya selepas sign in buat kali pertama.\n\nSila simpan maklumat sign-in anda dengan selamat dan jangan kongsikan kata laluan. Jika menghadapi masalah untuk sign in, sila hubungi HR. Terima kasih.`;
 const MESSAGE_KEY = 'araoffice.hr.staffContact.message';
 
-export default function HRStaffContact({ people }: { people: Employee[] | null }) {
+export default function HRStaffContact({ people, scope }: { people: Employee[] | null; scope?: 'coo' }) {
+  // The COO uses the same screen with its own template (starts empty) and its own record, apart from HR's.
+  const base = scope === 'coo' ? '/api/status?resource=coo&action=' : '/api/status?resource=hr&action=';
   const [query, setQuery] = useState('');
-  const [message, setMessage] = useState(DEFAULT_MESSAGE);
+  const [message, setMessage] = useState(scope === 'coo' ? '' : DEFAULT_MESSAGE);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   type LogEntry = { id: string; at: string; by: string; message: string; recipients: { name: string; code: string }[] };
   const [log, setLog] = useState<LogEntry[] | null>(null);
   const [openLog, setOpenLog] = useState('');
-  const loadLog = () => officeFetch('/api/status?resource=hr&action=contact_log').then((response) => response.json()).then((result) => setLog(result.entries || [])).catch(() => setLog([]));
+  const loadLog = () => officeFetch(`${base}contact_log`).then((response) => response.json()).then((result) => setLog(result.entries || [])).catch(() => setLog([]));
   useEffect(() => { void loadLog(); }, []);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const active = useMemo(() => (people || []).filter(p => p.status === 'Active'), [people]);
@@ -27,14 +29,14 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
   // The template is shared: every HR user sees the version that was saved last. The browser copy is only a fallback until it loads.
   useEffect(() => {
     let live = true;
-    try { const local = localStorage.getItem(MESSAGE_KEY); if (local) setMessage(local); } catch { /* storage may be unavailable */ }
-    officeFetch('/api/status?resource=hr&action=contact_message').then((response) => response.json()).then((result) => { if (live && result.message) { setMessage(result.message); try { localStorage.removeItem(MESSAGE_KEY); } catch { /* ignore */ } } }).catch(() => { /* keep what is shown */ });
+    try { const local = scope === 'coo' ? null : localStorage.getItem(MESSAGE_KEY); if (local) setMessage(local); } catch { /* storage may be unavailable */ }
+    officeFetch(`${base}contact_message`).then((response) => response.json()).then((result) => { if (live && result.message) { setMessage(result.message); try { localStorage.removeItem(MESSAGE_KEY); } catch { /* ignore */ } } }).catch(() => { /* keep what is shown */ });
     return () => { live = false; };
   }, []);
   const saveMessage = async () => {
     setError('');
     try {
-      const response = await officeFetch('/api/status?resource=hr&action=contact_message_save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) });
+      const response = await officeFetch(`${base}contact_message_save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) });
       const result = await response.json();
       if (!response.ok || result.error) throw new Error(result.error || 'Unable to save.');
       setSaved(true); window.setTimeout(() => setSaved(false), 2500);
@@ -47,7 +49,7 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
       window.open(`https://wa.me/${handle(p) ? encodeURIComponent(handle(p)) : p.phone.replace(/\D/g, '').replace(/^0/, '60')}?text=${encodeURIComponent(personalized)}`, '_blank', 'noopener,noreferrer');
     });
     // Keep a record (names and codes only) so HR can see what was sent and when.
-    officeFetch('/api/status?resource=hr&action=contact_log_add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message.trim(), recipients: recipients.map((p) => ({ name: p.fullName, code: p.employeeCode })) }) }).then(() => loadLog()).catch(() => setError('The message was opened in WhatsApp, but the record could not be saved.'));
+    officeFetch(`${base}contact_log_add`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message.trim(), recipients: recipients.map((p) => ({ name: p.fullName, code: p.employeeCode })) }) }).then(() => loadLog()).catch(() => setError('The message was opened in WhatsApp, but the record could not be saved.'));
   };
   // The same template sent by the same person on the same day is one row (the staff are added up), so repeated sends do not fill the table.
   const day = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
@@ -64,7 +66,7 @@ export default function HRStaffContact({ people }: { people: Employee[] | null }
     <div className="rounded-2xl bg-white p-5 shadow-sm"><h3 className="flex items-center gap-2 text-lg font-semibold text-[#17364c]"><MessageCircle size={20}/>Contact staff</h3><p className="mt-1 text-sm text-slate-500">Choose staff and prepare a WhatsApp message. Each person opens in a separate tab for you to send.</p></div>
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex items-center gap-2"><Search size={17}/><input aria-label="Search staff to contact" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search name or staff number…" className="h-10 flex-1 outline-none"/></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>{picked.size} selected</span><button onClick={()=>setPicked(new Set(shown.filter(p=>p.id&&reachable(p)).map(p=>p.id!)))} className="font-semibold text-sky-700">Select all with a phone</button></div><div className="mt-2 max-h-96 space-y-1 overflow-auto">{shown.map(p=><label key={p.id||p.employeeCode} className="flex cursor-pointer items-center gap-3 rounded-xl p-3 hover:bg-slate-50"><input type="checkbox" disabled={!reachable(p)||!p.id} checked={!!p.id&&picked.has(p.id)} onChange={()=>p.id&&toggle(p.id)}/><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{p.fullName}</span><span className="text-xs text-slate-500">{p.employeeCode} · {p.company}</span></span><span className="text-xs text-slate-400">{handle(p) ? `WhatsApp @${handle(p)}` : (p.phone||'No phone')}</span></label>)}</div></div>
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"><label className="block text-sm font-semibold">Message<textarea value={message} onChange={e=>{setMessage(e.target.value);setSaved(false);}} rows={13} placeholder="Type the message for the staff…" className="mt-2 w-full rounded-xl border border-slate-200 p-3 text-sm font-normal outline-none focus:border-sky-400"/></label><p className="text-xs text-slate-500">The message is filled in and personalised for each person. Placeholders: {'{{name}}'}, {'{{signin}}'}, {'{{staffId}}'}.</p><div className="flex gap-2"><button onClick={() => void saveMessage()} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-[#0b587b] hover:bg-slate-50">{saved ? 'Template saved for all HR' : 'Save template (for all HR)'}</button><button onClick={()=>{setMessage(DEFAULT_MESSAGE);setSaved(false);}} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-600">Original template</button></div>{error && <p role="alert" className="text-xs text-rose-700">{error}</p>}<p className="text-xs text-slate-500"><Users size={14} className="mr-1 inline"/>{recipients.length} recipients have a phone number</p><button onClick={send} disabled={!message.trim()||!recipients.length} className="w-full rounded-xl bg-[#25d366] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><MessageCircle size={16} className="mr-2 inline"/>Open WhatsApp for {recipients.length} staff</button><p className="text-xs text-slate-400">WhatsApp needs you to press Send in each chat.</p></div>
+      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4"><label className="block text-sm font-semibold">Message<textarea value={message} onChange={e=>{setMessage(e.target.value);setSaved(false);}} rows={13} placeholder="Type the message for the staff…" className="mt-2 w-full rounded-xl border border-slate-200 p-3 text-sm font-normal outline-none focus:border-sky-400"/></label><p className="text-xs text-slate-500">The message is filled in and personalised for each person. Placeholders: {'{{name}}'}, {'{{signin}}'}, {'{{staffId}}'}.</p><div className="flex gap-2"><button onClick={() => void saveMessage()} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-[#0b587b] hover:bg-slate-50">{saved ? (scope === 'coo' ? 'Template saved' : 'Template saved for all HR') : (scope === 'coo' ? 'Save template' : 'Save template (for all HR)')}</button><button onClick={()=>{setMessage(DEFAULT_MESSAGE);setSaved(false);}} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-600">Original template</button></div>{error && <p role="alert" className="text-xs text-rose-700">{error}</p>}<p className="text-xs text-slate-500"><Users size={14} className="mr-1 inline"/>{recipients.length} recipients have a phone number</p><button onClick={send} disabled={!message.trim()||!recipients.length} className="w-full rounded-xl bg-[#25d366] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><MessageCircle size={16} className="mr-2 inline"/>Open WhatsApp for {recipients.length} staff</button><p className="text-xs text-slate-400">WhatsApp needs you to press Send in each chat.</p></div>
     </div>
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <h3 className="flex items-center gap-2 text-sm font-semibold text-[#17364c]"><History size={16}/>Messages opened in WhatsApp</h3>

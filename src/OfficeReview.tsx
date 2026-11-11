@@ -158,7 +158,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
       <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Performance Review · Klinik ARA 24 Jam</p><h1 className="mt-3 text-3xl font-semibold tracking-tight">Staff performance review</h1><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews Office HR has asked you to do. Rate the four areas of the monthly review form; the result goes straight back to HR.</p></div>
-          <div className="inline-flex shrink-0 rounded-xl bg-white/10 p-1">{([['todo', `To do${todo ? ` (${todo.length})` : ''}`], ['done', `Submitted${done ? ` (${done.length})` : ''}`]] as const).map(([id, label]) => <button key={id} onClick={() => { setView(id); setOpen(null); setThanks(null); }} className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${view === id ? 'bg-white text-[#0b3d59]' : 'text-[#d8edf6] hover:bg-white/10'}`}>{label}</button>)}</div>
+          <div className="inline-flex shrink-0 rounded-xl bg-white/10 p-1">{([['todo', `Waiting for review${todo ? ` (${todo.length})` : ''}`], ['done', `Submitted${done ? ` (${done.length})` : ''}`]] as const).map(([id, label]) => <button key={id} onClick={() => { setView(id); setOpen(null); setThanks(null); }} className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${view === id ? 'bg-white text-[#0b3d59]' : 'text-[#d8edf6] hover:bg-white/10'}`}>{label}</button>)}</div>
         </div>
       </section>
 

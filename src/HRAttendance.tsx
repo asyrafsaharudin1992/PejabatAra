@@ -13,10 +13,12 @@ import { ImportRow, readInfotechReport } from './lib/infotechReport';
 // Staff clock on their phone in Individual Sign In. Rules follow Infotech and HR: late is a record for discipline (no pay is
 // deducted), leaving early is not counted, and OT is captured automatically but approved by HR.
 const API = '/api/status?resource=hr';
-async function api(query: string, body?: unknown) {
+async function hrApi(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   return response.json();
 }
+const api = hrApi;
+type Source = (query: string) => Promise<any>;
 type Tab = 'today' | 'month' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
 type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
@@ -55,7 +57,9 @@ function MonthBar({ month, setMonth, children }: { month: string; setMonth: (mon
   </section>;
 }
 
-function Today({ onError }: { onError: (message: string) => void }) {
+function Today({ onError, source }: { onError: (message: string) => void; source?: Source }) {
+  // The COO sees the same table from its own source and cannot open the clock details (that is for HR to change).
+  const api: Source & typeof hrApi = (source as typeof hrApi) || hrApi;
   const [date, setDate] = useState(todayKey());
   const [rows, setRows] = useState<Row[] | null>(null);
   const [company, setCompany] = useState('');
@@ -99,7 +103,7 @@ function Today({ onError }: { onError: (message: string) => void }) {
             <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
             <td className="pr-3">{badge(row.status)}</td>
-            <td className="text-right"><button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button></td>
+            <td className="text-right">{!source && <button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button>}</td>
           </tr>
           {open === row.id && <tr key={`${row.id}-details`}><td colSpan={7} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">
             {!clocks ? 'Loading…' : <>
@@ -128,7 +132,8 @@ function Today({ onError }: { onError: (message: string) => void }) {
   </div>;
 }
 
-function Month({ onError }: { onError: (message: string) => void }) {
+function Month({ onError, source }: { onError: (message: string) => void; source?: Source }) {
+  const api: Source & typeof hrApi = (source as typeof hrApi) || hrApi;
   const [month, setMonth] = useState(monthOf(new Date()));
   const [data, setData] = useState<{ rows: MonthRow[]; noRecord?: string[]; rules: { lateGrace: number; otMin: number } } | null>(null);
   useEffect(() => { setData(null); api(`action=attendance_month&month=${month}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => { setData({ rows: [], rules: { lateGrace: 0, otMin: 0 } }); onError(cause.message); }); }, [month]);

@@ -26,7 +26,7 @@ const monthName = (month: string) => new Date(`${month}-01T00:00:00`).toLocaleDa
 const WEEKDAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const isDoctor = (person: Person) => /\b(DR|DOCTOR)\b/i.test(person.designation);
 // "AHMAD SYAFIQ BIN SO'IB" becomes "Syafiq": the first name that is not a common first word.
-const guessName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
+export const guessName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
 const isLeave = (day: Day) => !day.works && ['AL', 'UPL', 'MC', 'ML', 'EL'].includes(day.shift);
 const isOffice = (shift: string) => ['OH', 'AM-6', 'AM-5'].includes(shift);
 // Colour by what the day is: a day shift, a night shift, office hours, a rest day, leave, a public holiday, or not yet scheduled.
@@ -60,14 +60,16 @@ function Choice<T extends string>({ value, onChange, options, label }: { value: 
   return <div role="group" aria-label={label} className="inline-flex rounded-xl bg-slate-100 p-1">{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)} className={`h-8 rounded-lg px-3.5 text-sm font-semibold transition ${value === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>;
 }
 
-export function HRRoster({ onError }: { onError: (message: string) => void }) {
+// `readOnly`: the COO looks at the roster but cannot change it (no editing, no upload, no upload). A trial pattern draft can be allowed with `canDraft`: it only calculates on screen and saves nothing.
+export function HRRoster({ onError, readOnly = false, defaultView = 'table', hideCodes = [], canDraft = false }: { onError: (message: string) => void; readOnly?: boolean; defaultView?: 'table' | 'calendar'; hideCodes?: string[]; canDraft?: boolean }) {
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [printing, setPrinting] = useState(false);
   const [drafting, setDrafting] = useState(false);
   usePrintSheet(printing, `Roster - ${month}`, () => setPrinting(false));
-  const [company, setCompany] = useState('');
+  // The calendar view shows one clinic at a time, so it starts on KJ.
+  const [company, setCompany] = useState(defaultView === 'calendar' ? 'KJ' : '');
   const [group, setGroup] = useState<'staff' | 'doctors'>('staff');
-  const [view, setView] = useState<'table' | 'calendar'>('table');
+  const [view, setView] = useState<'table' | 'calendar'>(defaultView);
   const [personId, setPersonId] = useState('');
   const [picked, setPicked] = useState('');
   // The grid shows AraOffice's codes; HR can switch to the codes as they were imported from Infotech.
@@ -98,7 +100,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
   };
 
-  const startEdit = (person: Person, date: string, day?: Day) => setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
+  const startEdit = (person: Person, date: string, day?: Day) => readOnly ? undefined : setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
   const saveEdit = async () => {
     if (!edit) return;
     setEdit({ ...edit, saving: true });
@@ -112,7 +114,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
 
   const count = Number(month.slice(5)), year = Number(month.slice(0, 4));
   const dates = Array.from({ length: new Date(year, count, 0).getDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
-  const people = (data?.people || []).filter((person) => (group === 'doctors') === isDoctor(person)).filter((person) => !company || person.company === company).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
+  const people = (data?.people || []).filter((person) => !hideCodes.includes(person.code)).filter((person) => (group === 'doctors') === isDoctor(person)).filter((person) => !company || person.company === company).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
   const byPerson = new Map<string, Map<string, Day>>();
   for (const day of data?.days || []) { if (!byPerson.has(day.id)) byPerson.set(day.id, new Map()); byPerson.get(day.id)!.set(day.date, day); }
   const selected = people.find((person) => person.id === personId);
@@ -155,8 +157,8 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
           <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
           {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-1 text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}
         </div>
-        <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => setDrafting((open) => !open)} className="h-10 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-4 text-sm font-semibold text-[#0b587b]">Pattern draft · Trial</button><button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
-        <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label></div>
+        <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-10 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-4 text-sm font-semibold text-[#0b587b]">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+        {!readOnly && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-slate-100 pt-4">
         <Choice label="Who" value={group} onChange={setGroup} options={[['staff', 'Staff'], ['doctors', 'Doctors']]} />
@@ -166,7 +168,7 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
         {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={field}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>}
       </div>
     </section>
-    {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} onClose={() => setDrafting(false)} />}
+    {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>
@@ -179,16 +181,16 @@ export function HRRoster({ onError }: { onError: (message: string) => void }) {
           </tr>)}</tbody>
         </table> :
         <div className="min-w-[760px]">
-          <div className="grid grid-cols-7 gap-2 pb-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">{MONDAY_FIRST.map((name) => <p key={name}>{name}</p>)}</div>
-          <div className="grid grid-cols-7 gap-2">
-            {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} />)}
+          <div className="grid grid-cols-7 text-center text-xs font-semibold text-slate-500">{MONDAY_FIRST.map((name) => <p key={name} className="py-1">{name}</p>)}</div>
+          <div className="grid grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200">
+            {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} className="min-h-[88px] border-b border-r border-slate-200 bg-slate-50" />)}
             {dates.map((date) => {
               const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined; const weekend = [0, 6].includes(new Date(`${date}T00:00:00`).getDay());
-              return <button key={date} onClick={() => selected ? startEdit(selected, date, own) : setPicked(picked === date ? '' : date)} title={selected ? 'Click to change this day' : undefined} className={`min-h-[124px] break-words rounded-2xl border p-2 text-left align-top transition ${picked === date ? 'border-[#0b587b] ring-2 ring-[#0b587b]/20' : date === today ? 'border-[#0b587b]/50' : 'border-slate-200'} ${weekend ? 'bg-slate-50' : 'bg-white'} hover:border-[#0b587b]/40`}>
-                <span className={`inline-grid h-6 min-w-6 place-items-center rounded-full px-1 text-xs font-bold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{Number(date.slice(8))}</span>
-                {selected ? <p className={`mt-3 grid h-10 place-items-center rounded-lg text-sm font-bold ${cellTone(own && { ...own, shift: shown(own.shift) })}`}>{own ? shown(own.shift) : '·'}</p> : <div className="mt-1.5 space-y-1">
-                  {here.shifts.map(([shift, who]) => <p key={shift} className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {who.map((person) => shortName(person)).join(', ')}</p>)}
-                  {here.leave.length > 0 && <p className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-semibold leading-tight text-rose-800"><span className="font-bold">Leave</span> {here.leave.map((person) => shortName(person)).join(', ')}</p>}
+              return <button key={date} onClick={() => selected ? startEdit(selected, date, own) : setPicked(picked === date ? '' : date)} title={selected && !readOnly ? 'Click to change this day' : undefined} className={`flex min-h-[88px] flex-col items-stretch justify-start break-words border-b border-r border-slate-200 p-1 text-left align-top ${picked === date ? 'bg-sky-50 ring-2 ring-inset ring-[#0b587b]' : weekend ? 'bg-slate-50 hover:bg-slate-100' : 'bg-white hover:bg-slate-50'}`}>
+                <span className={`mb-0.5 inline-grid h-5 w-5 place-items-center rounded-full text-xs font-semibold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{Number(date.slice(8))}</span>
+                {selected ? <p className={`mt-1 grid h-9 place-items-center rounded-lg text-sm font-bold ${cellTone(own && { ...own, shift: shown(own.shift) })}`}>{own ? shown(own.shift) : '·'}</p> : <div className="space-y-0.5">
+                  {here.shifts.map(([shift, who]) => <p key={shift} className={`truncate rounded px-1 py-0.5 text-[10px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {who.map((person) => shortName(person)).join(', ')}</p>)}
+                  {here.leave.length > 0 && <p className="truncate rounded bg-rose-100 px-1 py-0.5 text-[10px] font-semibold leading-tight text-rose-800"><span className="font-bold">Leave</span> {here.leave.map((person) => shortName(person)).join(', ')}</p>}
                 </div>}
               </button>;
             })}

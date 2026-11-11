@@ -121,5 +121,13 @@ export function generateRosterDraft(input: { month: string; people: DraftPerson[
       previous = shift;
     }
   }
+  // Asyraf (ARA0001) and Syafiq (ARA0002) must not work at the same time: the same shift, or a day shift (AM) with office hours (OH).
+  const apart = ['ARA0001', 'ARA0002'].map((code) => people.find((p) => p.code === code));
+  if (apart[0] && apart[1]) for (const date of dates) {
+    const a = byKey.get(cellKey(apart[0].id, date)), b = byKey.get(cellKey(apart[1].id, date));
+    if (!a || !b) continue;
+    const x = newCode(a.shift), y = newCode(b.shift);
+    if (workingShift(x) && workingShift(y) && (x === y || ['AM', 'OH'].includes(x) && ['AM', 'OH'].includes(y))) warnings.push(`${date} · ${apart[0].name.split(' ').slice(0, 2).join(' ')} and ${apart[1].name.split(' ').slice(0, 2).join(' ')} are both working (${x} and ${y}); they must not work at the same time.`);
+  }
   return { cells, locum, warnings: [...new Set(warnings)], blocked: warnings.some((w) => w.includes('draft export is blocked')) };
 }

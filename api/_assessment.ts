@@ -303,7 +303,7 @@ export async function assistantDue(db: any, me: { id: string; company: string; d
 
 // Performance Review for the supervisors (CEO / CFO, CHRO, COO, CPO and each Clinical Admin), inside their own Individual Sign In.
 // HR assigns a review to a person; only that person sees and fills it in.
-async function reviewAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
+export async function reviewAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const { data: me, error } = await db.from('hr_employees').select('id,full_name,designation,company').eq('assessment_staff_id', staff.id).maybeSingle();
   if (error) throw error;
   if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
@@ -357,7 +357,7 @@ async function reviewAction(req: any, res: any, db: any, staff: { id: string }, 
   throw fail(404, 'Unknown review action.');
 }
 
-async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
+export async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date,designation').eq('assessment_staff_id', staff.id).maybeSingle();
   if (meError) throw meError;
   // Leave is counted on the roster; where there is none a doctor who follows the doctor roster counts Monday to Friday.
@@ -871,7 +871,9 @@ async function isAssessed(db: any, staff: any) {
 
 async function adminAction(req: any, res: any, action: string, body: any) {
   const { db, user, profile } = await activeAccount(req);
-  if (profile.role !== 'super_admin') throw fail(403, 'Only System Admin can manage the Assessment Room.');
+  // The COO (Office COO) may run the assessments and read the results: the quizzes, the results and a retake. Staff accounts stay with System Admin.
+  const cooMay = ['admin', 'attempt_detail', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'reset_attempt'].includes(action) && Array.isArray(user.app_metadata?.office_access) && user.app_metadata.office_access.includes('coo');
+  if (profile.role !== 'super_admin' && !cooMay) throw fail(403, 'Only System Admin can manage the Assessment Room.');
   const now = new Date().toISOString();
 
   // User Management only needs the staff list, so skip quizzes and results.

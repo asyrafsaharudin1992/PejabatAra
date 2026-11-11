@@ -152,34 +152,43 @@ function HistoryList() {
   </nav>}</div>;
 }
 
-function Approvals() {
+export function Approvals({ fetcher = assessmentFetch }: { fetcher?: (query: string, options?: RequestInit) => Promise<any> }) {
   const [state, setState] = useState<{ pending: Request[]; recent: Request[] } | null>(null);
   const [error, setError] = useState('');
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [adjust, setAdjust] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState('');
-  const load = () => assessmentFetch('action=leave_approvals').then(setState).catch((cause: Error) => setError(cause.message));
+  const [pendingPage, setPendingPage] = useState(0);
+  const [recentPage, setRecentPage] = useState(0);
+  const load = () => fetcher('action=leave_approvals').then(setState).catch((cause: Error) => setError(cause.message));
   useEffect(() => { void load(); }, []);
   const decide = async (request: Request, decision: 'approve' | 'reject') => {
     setBusy(request.id); setError('');
-    try { await assessmentFetch('action=leave_decide', { method: 'POST', body: JSON.stringify({ id: request.id, decision, note: notes[request.id] || '', ...(decision === 'approve' && adjust[request.id] ? { days: Number(adjust[request.id]) } : {}) }) }); await load(); }
+    try { await fetcher('action=leave_decide', { method: 'POST', body: JSON.stringify({ id: request.id, decision, note: notes[request.id] || '', ...(decision === 'approve' && adjust[request.id] ? { days: Number(adjust[request.id]) } : {}) }) }); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save.'); }
     setBusy('');
   };
   if (!state) return error ? <Notice tone="rose">{error}</Notice> : <p className="text-sm text-slate-500">Loading…</p>;
+  // Newest first (the day it was applied, then the leave date), ten at a time.
+  const PAGE = 10;
+  const newest = (list: Request[]) => [...list].sort((a, b) => String(b.createdAt).slice(0, 10).localeCompare(String(a.createdAt).slice(0, 10)) || b.start.localeCompare(a.start) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  const pendingAll = newest(state.pending), recentAll = newest(state.recent);
+  const pendingAt = Math.min(pendingPage, Math.max(0, Math.ceil(pendingAll.length / PAGE) - 1)), recentAt = Math.min(recentPage, Math.max(0, Math.ceil(recentAll.length / PAGE) - 1));
+  const pending = pendingAll.slice(pendingAt * PAGE, pendingAt * PAGE + PAGE), recent = recentAll.slice(recentAt * PAGE, recentAt * PAGE + PAGE);
+  const pager = (total: number, at: number, set: (page: number) => void) => total > PAGE ? <nav className="flex items-center justify-between gap-2 pt-1 text-xs text-slate-500" aria-label="Pages"><button type="button" disabled={at === 0} onClick={() => set(at - 1)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40">Newer</button><span>{at * PAGE + 1}–{Math.min(total, at * PAGE + PAGE)} of {total}</span><button type="button" disabled={(at + 1) * PAGE >= total} onClick={() => set(at + 1)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40">Older</button></nav> : null;
   return <div className="space-y-6">{error && <Notice tone="rose">{error}</Notice>}
-    {!state.pending.length ? <Notice>You have no pending leave requests to approve.</Notice> : <ul className="space-y-3">{state.pending.map((request) => <li key={request.id} className={card}>
+    {!state.pending.length ? <Notice>You have no pending leave requests to approve.</Notice> : <><ul className="space-y-3">{pending.map((request) => <li key={request.id} className={card}>
       <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-semibold">{request.applicant}</p><p className="text-xs text-slate-400">{request.code}</p></div><span className="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">{request.stage === 'final' ? 'Final approval' : request.stage === 'backup' ? 'Backup officer · supervisor level' : request.twoLevel ? 'Supervisor approval' : 'Pending'}</span></div>
       {request.stage === 'final' && request.supervisorNote && <p className="mt-1 text-xs text-slate-500">Supervisor said: {request.supervisorNote}</p>}
       <p className="mt-2 text-sm"><strong>{request.typeName}</strong> · <span className="text-[#0b587b]">{range(request)}</span> · {days(request.days)} day{request.days === 1 ? '' : 's'}</p>
       {request.reason && <p className="mt-1 text-sm text-slate-600">“{request.reason}”</p>}
-      <AttachmentLinks items={request.attachments} getUrl={staffFileUrl} onError={setError} />
+      <AttachmentLinks items={request.attachments} getUrl={fetcher === assessmentFetch ? staffFileUrl : async (id) => (await fetcher(`action=leave_attachment_url&id=${encodeURIComponent(id)}`)).url as string} onError={setError} />
       {request.balance !== null && request.balance !== undefined && <p className={`mt-1 text-xs ${request.balance < request.days && request.type !== 'UL' ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Balance now {days(request.balance)}{request.type !== 'UL' ? ` · ${days(request.balance - request.days)} after this leave` : ''}{request.balance < request.days && request.type !== 'UL' ? ': this request is more than the balance' : ''}</p>}
       {request.alsoOff && request.alsoOff.length > 0 && <p className="mt-1 text-xs text-amber-700">Also off on these dates: {request.alsoOff.join(', ')}</p>}
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_120px]"><input value={notes[request.id] || ''} onChange={(event) => setNotes({ ...notes, [request.id]: event.target.value })} placeholder="Note (optional)" maxLength={300} className={field} /><input inputMode="decimal" value={adjust[request.id] || ''} onChange={(event) => setAdjust({ ...adjust, [request.id]: event.target.value.replace(/[^\d.]/g, '') })} placeholder={`Days: ${days(request.days)}`} aria-label="Change the number of days" className={field} /></div>
       <div className="mt-3 flex gap-2"><button disabled={busy === request.id} onClick={() => void decide(request, 'approve')} className="h-11 flex-1 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">Approve</button><button disabled={busy === request.id} onClick={() => void decide(request, 'reject')} className="h-11 flex-1 rounded-xl border border-rose-200 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50">Reject</button></div>
-    </li>)}</ul>}
-    {state.recent.length > 0 && <section><h3 className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Decided recently</h3><ul className="space-y-2">{state.recent.map((request) => <li key={request.id} className={`${card} flex items-center gap-3`}><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{request.applicant}</p><p className="truncate text-xs text-slate-500">{request.typeName} · {range(request)} · {days(request.days)}d</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider ${STATUS[request.status]}`}>{STATUS_LABEL[request.status]}</span></li>)}</ul></section>}
+    </li>)}</ul>{pager(pendingAll.length, pendingAt, setPendingPage)}</>}
+    {state.recent.length > 0 && <section><h3 className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Decided recently</h3><ul className="space-y-2">{recent.map((request) => <li key={request.id} className={`${card} flex items-center gap-3`}><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{request.applicant}</p><p className="truncate text-xs text-slate-500">{request.typeName} · {range(request)} · {days(request.days)}d</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider ${STATUS[request.status]}`}>{STATUS_LABEL[request.status]}</span></li>)}</ul>{pager(recentAll.length, recentAt, setRecentPage)}</section>}
   </div>;
 }
 

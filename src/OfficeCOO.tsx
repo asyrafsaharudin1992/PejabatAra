@@ -1,19 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, GraduationCap, HeartPulse, Home, LogOut, Menu, UsersRound, X } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { CalendarCheck, CalendarDays, Users, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, HeartPulse, Home, LogOut, Menu, UsersRound, X } from 'lucide-react';
 import { CareReviewPage } from './CareReviewUI';
+import { HRRoster, guessName } from './HRRoster';
+import COOCalendar from './COOCalendar';
+import HRStaffLocation from './HRStaffLocation';
+import HRProjection from './HRProjection';
+import HRStaffContact from './HRStaffContact';
+import { ReviewRoom } from './OfficeReview';
+import { Approvals } from './LeaveScreens';
+import COOAttendance from './COOAttendance';
+import { AttendanceDailyReport, AttendanceMonthlyReport } from './HRAttendance';
+// The two offices the COO leads open inside this office, with all their own pages (shown as tabs above the page).
+const OfficeClinical = lazy(() => import('./OfficeClinical'));
+const AssessmentAdmin = lazy(() => import('./AssessmentAdmin'));
+const OfficePortal = lazy(() => import('./PortalApp'));
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
 
 // Office COO: the COO leads Clinical Admin and the Clinical Assistants. Read only: how the team looks today (who is in, late, on leave) and
 // the team's leave. HR still decides leave, OT and pay.
-type View = 'home' | 'leave' | 'care';
+type View = 'home' | 'assessment' | 'attendance' | 'review' | 'leave' | 'care' | 'roster' | 'staff' | 'clinical' | 'ca';
 type Row = { id: string; company: string; code: string; name: string; designation: string; group: string; branch: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; status: string; creditHours?: number };
-type Leave = { id: string; name: string; code: string; group: string; type: string; start: string; end: string; halfDay: boolean; days: number; status: string; reason: string };
+type Leave = { id: string; name: string; code: string; group: string; type: string; start: string; end: string; halfDay: boolean; days: number; status: string; reason: string; createdAt?: string };
 const API = '/api/status?resource=coo';
-const NAV: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'home', label: 'Team today', note: 'Who is in, late or on leave', icon: UsersRound }, { id: 'leave', label: 'Team leave', note: 'Waiting and coming up', icon: CalendarCheck }, { id: 'care', label: 'AraCare reviews', note: 'Check the KPIs of the allowance', icon: HeartPulse }];
-// The two offices the COO leads. Each opens with its own menu, exactly as Clinical Admin and the Clinical Assistants see it.
-const OFFICES: { href: string; label: string; note: string; icon: typeof Home }[] = [{ href: '#office/clinical', label: 'Clinical Admin office', note: 'Daily checklist, orders, vaccine bookings', icon: ClipboardList }, { href: '#office/ca', label: 'CA office', note: 'Training, panel guides, references', icon: GraduationCap }];
+// Office staff who are not on the COO's duty roster (HR admin, finance admin, quality control and the admin assistant).
+const ROSTER_HIDDEN = ['ARASK0058', 'ARA0061', 'ARA0035', 'ARASK0036'];
+const TONE: Record<string, string> = { home: 'text-sky-400', roster: 'text-violet-400', staff: 'text-emerald-400', leave: 'text-amber-400', care: 'text-rose-400', review: 'text-orange-400', attendance: 'text-teal-400', assessment: 'text-lime-400', clinical: 'text-cyan-300', ca: 'text-fuchsia-400' };
+const NAV: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'home', label: 'Home', note: 'My calendar and reminders', icon: Home }, { id: 'roster', label: 'Roster', note: 'Duty roster by month (view only)', icon: CalendarDays }, { id: 'staff', label: 'Staff', note: 'Who is where, by group and clinic', icon: Users }, { id: 'leave', label: 'Leave', note: 'Who is on leave, and what is waiting', icon: CalendarCheck }, { id: 'care', label: 'AraCare reviews', note: 'Check the KPIs of the allowance', icon: HeartPulse }, { id: 'assessment', label: 'Assessment Room', note: 'Quizzes and results', icon: GraduationCap }, { id: 'attendance', label: 'Attendance', note: 'Team attendance and OT for your approval', icon: Clock3 }, { id: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck }];
+// The two offices the COO leads: they open inside this office, with all their own pages.
+const OFFICES: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'clinical', label: 'Clinical Admin', note: 'Daily checklist, orders, vaccine bookings', icon: ClipboardList }, { id: 'ca', label: 'Clinical Assistants (CA)', note: 'Training, panel guides, references', icon: GraduationCap }];
 const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emerald-50 text-emerald-700'], working: ['Working', 'bg-sky-50 text-sky-700'], absent: ['Absent', 'bg-rose-50 text-rose-700'], 'not-in': ['Not in yet', 'bg-amber-50 text-amber-700'], leave: ['Leave', 'bg-violet-50 text-violet-700'], 'missing-out': ['No clock out', 'bg-amber-50 text-amber-700'], extra: ['Clocked on a day off', 'bg-slate-100 text-slate-500'], off: ['Off', 'bg-slate-100 text-slate-400'], upcoming: ['Upcoming', 'bg-slate-100 text-slate-500'], 'no-times': ['Shift not set', 'bg-slate-100 text-slate-500'], exempt: ['No clock needed', 'bg-slate-100 text-slate-500'], 'post-call': ['Post night', 'bg-indigo-50 text-indigo-700'], 'no-record': ['No record', 'bg-slate-50 text-slate-400'] };
 const badge = (status: string) => { const [text, tone] = STATUS[status] || [status, 'bg-slate-100 text-slate-500']; return <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{text}</span>; };
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -27,63 +43,109 @@ async function call(query: string, body?: unknown) {
   return result;
 }
 
-function TeamToday({ onError }: { onError: (message: string) => void }) {
-  const [date, setDate] = useState('');
+type ScheduleItem = { id: string; name: string; short?: string; code: string; company: string; group: string; team: boolean; type: string; start: string; end: string; half: string | null; days: number; status: 'approved' | 'waiting' };
+const shiftDay = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:00Z`) + by * 86400000).toISOString().slice(0, 10);
+// Who is on leave: one row for each staff member with leave in the month, one column for each day. Violet is approved leave, amber is leave still waiting.
+function LeaveSchedule({ onError }: { onError: (message: string) => void }) {
+  const [month, setMonth] = useState(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 7));
+  const [items, setItems] = useState<ScheduleItem[] | null>(null);
   const [today, setToday] = useState('');
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [group, setGroup] = useState('');
-  const [branch, setBranch] = useState('');
-  const [showOff, setShowOff] = useState(false);
-  useEffect(() => {
-    let live = true; setRows(null);
-    call(`action=team${date ? `&date=${date}` : ''}`).then((result) => { if (!live) return; setRows(result.rows); setToday(result.today); if (!date) setDate(result.date); }).catch((cause: Error) => { if (live) { setRows([]); onError(cause.message); } });
-    return () => { live = false; };
-  }, [date]);
-  const branches = useMemo(() => [...new Set((rows || []).map((row) => row.branch).filter(Boolean))].sort(), [rows]);
-  const shown = (rows || []).filter((row) => (!group || row.group === group) && (!branch || row.branch === branch) && row.status !== 'no-record');
-  const expected = shown.filter((row) => !['off', 'extra', 'no-times', 'post-call'].includes(row.status));
-  const count = (...statuses: string[]) => expected.filter((row) => statuses.includes(row.status)).length;
-  const chips: [string, number, string][] = [['Team', shown.length, 'text-slate-700'], ['Expected', expected.length, 'text-slate-700'], ['In', count('present', 'working', 'missing-out'), 'text-emerald-700'], ['Not in yet', count('not-in', 'upcoming'), 'text-amber-700'], ['Absent', count('absent'), 'text-rose-700'], ['Leave', count('leave'), 'text-violet-700'], ['Late', expected.filter((row) => row.lateCounted > 0).length, 'text-amber-700']];
-  const list = shown.filter((row) => showOff || row.status !== 'off');
-  return <div className="space-y-4">
-    <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <button onClick={() => date && setDate(addDay(date, -1))} aria-label="Previous day" className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white"><ChevronLeft className="h-4 w-4" /></button>
-      <input type="date" value={date} onChange={(event) => event.target.value && setDate(event.target.value)} aria-label="Date" className={field} />
-      <button onClick={() => date && setDate(addDay(date, 1))} aria-label="Next day" className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white"><ChevronRight className="h-4 w-4" /></button>
-      {today && date !== today && <button onClick={() => setDate(today)} className="text-sm font-semibold text-[#0b587b]">Today</button>}
-      <select value={group} onChange={(event) => setGroup(event.target.value)} aria-label="Group" className={`${field} ml-auto`}><option value="">Clinical Admin and Assistants</option><option value="Clinical Admin">Clinical Admin</option><option value="Clinical Assistant">Clinical Assistants</option></select>
-      <select value={branch} onChange={(event) => setBranch(event.target.value)} aria-label="Branch" className={field}><option value="">All branches</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-      <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={showOff} onChange={(event) => setShowOff(event.target.checked)} />Show off days</label>
-    </section>
-    <div className="grid grid-cols-3 gap-3 sm:grid-cols-7">{chips.map(([label, value, tone]) => <div key={label} className={`${card} !p-4 text-center`}><p className={`text-2xl font-semibold ${tone}`}>{value}</p><p className="mt-1 text-xs text-slate-500">{label}</p></div>)}</div>
-    <section className={`${card} overflow-x-auto`}>
-      {!rows ? <p className="text-sm text-slate-500">Loading…</p> : !list.length ? <p className="text-sm text-slate-500">Nobody to show for this day.</p> : <table className="w-full min-w-[720px] text-sm">
-        <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">In</th><th className="pr-3">Out</th><th className="pr-3">Late</th><th>Status</th></tr></thead>
-        <tbody>{list.map((row) => <tr key={row.id} className="border-t border-slate-100">
-          <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.group} · {row.branch || row.company} · {row.code}</p></td>
-          <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{row.shift || '—'}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span></td>
-          <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
-          <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : '—'}</td>
-          <td>{badge(row.status)}</td>
-        </tr>)}</tbody>
-      </table>}
-    </section>
-  </div>;
+  const [company, setCompany] = useState('');
+  const [teamOnly, setTeamOnly] = useState(false);
+  const [query, setQuery] = useState('');
+  const [mode, setMode] = useState<'calendar' | 'table'>('calendar');
+  const [holidays, setHolidays] = useState<{ group: string; date: string; name: string }[]>([]);
+  const [showHolidays, setShowHolidays] = useState(false);
+  const [picked, setPicked] = useState(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10));
+  useEffect(() => { let live = true; setItems(null); call(`action=leave_schedule&month=${month}`).then((result) => { if (live) { setItems(result.items); setToday(result.today); } }).catch((cause: Error) => { if (live) { setItems([]); onError(cause.message); } }); return () => { live = false; }; }, [month]);
+  useEffect(() => { let live = true; call(`action=holidays&month=${month}`).then((result) => { if (live) setHolidays(result.holidays || []); }).catch(() => { if (live) setHolidays([]); }); return () => { live = false; }; }, [month]);
+  const holidayOn = (date: string) => holidays.filter((holiday) => holiday.date === date);
+  const monthShift = (by: number) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + by); const next = date.toISOString().slice(0, 7); setMonth(next); setPicked(`${next}-01`); };
+  const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).getUTCDate();
+  const days = Array.from({ length: last }, (_item, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (items || []).filter((item) => (!company || item.company === company) && (!teamOnly || item.team) && words.every((word) => `${item.name} ${item.code}`.toLowerCase().includes(word)));
+  const people: ScheduleItem[] = [...new Map<string, ScheduleItem>(shown.map((item): [string, ScheduleItem] => [item.id, item])).values()].sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
+  const cell = (id: string, date: string) => shown.filter((item) => item.id === id && item.start <= date && item.end >= date).sort((a, b) => Number(a.status === 'waiting') - Number(b.status === 'waiting'))[0];
+  const shortOf = (item: ScheduleItem) => item.short || guessName(item.name);
+  const onDay = (date: string) => shown.filter((item) => item.start <= date && item.end >= date).sort((a, b) => Number(a.status === 'waiting') - Number(b.status === 'waiting') || a.name.localeCompare(b.name));
+  const pickedItems = onDay(picked);
+  const onLeaveToday = new Set(shown.filter((item) => item.status === 'approved' && item.start <= today && item.end >= today).map((item) => item.name));
+  return <section className={`${card} space-y-3`}>
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" aria-label="Previous month" onClick={() => monthShift(-1)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white"><ChevronLeft className="h-4 w-4" /></button>
+      <h3 className="min-w-[160px] text-center text-lg font-semibold">{new Date(`${month}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3>
+      <button type="button" aria-label="Next month" onClick={() => monthShift(1)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white"><ChevronRight className="h-4 w-4" /></button>
+      <button type="button" aria-expanded={showHolidays} onClick={() => setShowHolidays(!showHolidays)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"><CalendarDays className="h-4 w-4" />See Public Holidays{holidays.length > 0 && <span className="rounded-full bg-white px-1.5 text-xs">{new Set(holidays.map((holiday) => `${holiday.date}|${holiday.name}`)).size}</span>}</button>
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" aria-label="Search staff" className={`${field} ml-auto min-w-[180px]`} />
+      <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Clinic" className={field}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
+      <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={teamOnly} onChange={(event) => setTeamOnly(event.target.checked)} />My team only</label>
+      <div role="tablist" className="inline-flex rounded-xl bg-slate-100 p-1">{([['calendar', 'Calendar'], ['table', 'Table']] as const).map(([id, text]) => <button key={id} type="button" role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${mode === id ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{text}</button>)}</div></div>
+    {today.slice(0, 7) === month && <p className="text-sm text-slate-600"><strong>On leave today:</strong> {onLeaveToday.size ? [...onLeaveToday].join(', ') : 'nobody'}</p>}
+    {showHolidays && <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3 text-sm"><p className="font-semibold text-rose-800">Public holidays in {new Date(`${month}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</p>{!holidays.length ? <p className="mt-1 text-slate-500">No public holiday this month.</p> : <ul className="mt-2 space-y-1">{[...new Map<string, { group: string; date: string; name: string }>(holidays.map((holiday) => [`${holiday.date}|${holiday.name}`, holiday])).values()].map((holiday) => <li key={holiday.date + holiday.name} className="flex flex-wrap items-baseline gap-x-3"><span className="w-32 shrink-0 font-semibold text-slate-700">{dayName(holiday.date)}</span><span className="text-slate-600">{holiday.name}</span><span className="text-[11px] text-slate-400">{holidays.filter((other) => other.date === holiday.date && other.name === holiday.name).map((other) => other.group).join(', ')}</span></li>)}</ul>}</div>}
+    {!items ? <p className="text-sm text-slate-500">Loading…</p> : mode === 'calendar' ? <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,1fr)]"><div className="min-w-0 overflow-x-auto"><div className="min-w-[480px]">
+      <div className="grid grid-cols-7 text-center text-xs font-semibold text-slate-500">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((name) => <p key={name} className="py-1">{name}</p>)}</div>
+      <div className="grid grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200">
+        {Array.from({ length: (new Date(`${month}-01T00:00:00Z`).getUTCDay() + 6) % 7 }, (_blank, index) => <div key={`b${index}`} className="min-h-[88px] border-b border-r border-slate-200 bg-slate-50" />)}
+        {days.map((date) => {
+          const here = onDay(date);
+          const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
+          return <button key={date} type="button" onClick={() => setPicked(date)} aria-pressed={date === picked} aria-label={`${date}, ${here.length} on leave`} className={`flex min-h-[88px] flex-col items-stretch justify-start border-b border-r border-slate-200 p-1 text-left align-top ${date === picked ? 'bg-sky-50 ring-2 ring-inset ring-[#0b587b]' : weekend ? 'bg-slate-50 hover:bg-slate-100' : 'bg-white hover:bg-slate-50'}`}>
+            <span className={`mb-0.5 inline-grid h-5 w-5 place-items-center rounded-full text-xs font-semibold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{Number(date.slice(8))}</span>
+            {holidayOn(date).length > 0 && <span title={holidayOn(date).map((holiday) => `${holiday.name} (${holiday.group})`).join(', ')} className="mb-0.5 block truncate rounded bg-rose-100 px-1 py-0.5 text-[10px] font-semibold leading-tight text-rose-800">{holidayOn(date)[0].name}</span>}
+            <span className="block space-y-0.5">{here.slice(0, 3).map((item) => <span key={item.id + item.start} title={`${item.name}: ${item.type}`} className={`block truncate rounded px-1 py-0.5 text-[10px] font-semibold leading-tight ${item.status === 'waiting' ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-800'}`}>{shortOf(item)} · {item.type}{item.half ? ' ½' : ''}</span>)}{here.length > 3 && <span className="block text-[10px] font-semibold text-[#0b587b]">+{here.length - 3} more</span>}</span>
+          </button>;
+        })}
+      </div></div></div>
+      <aside className="min-w-0 rounded-xl bg-slate-50 p-3"><h4 className="text-sm font-semibold">{dayName(picked)}</h4>
+        {!pickedItems.length ? <p className="mt-2 text-sm text-slate-500">Nobody is on leave.</p> : <ul className="mt-2 space-y-2">{pickedItems.map((item) => <li key={item.id + item.start} className="rounded-lg border border-slate-200 bg-white p-2.5 text-sm"><div className="flex items-center justify-between gap-2"><p className="font-semibold text-slate-800">{item.name}</p><span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'waiting' ? 'bg-amber-100 text-amber-800' : 'bg-violet-100 text-violet-800'}`}>{item.status === 'waiting' ? 'Waiting' : 'Approved'}</span></div><p className="text-xs text-slate-500">{item.company} · {item.code} · {item.group}</p><p className="mt-1 text-xs text-slate-600">{item.type}{item.half ? ` (${item.half})` : ''} · {item.start === item.end ? dayName(item.start) : `${dayName(item.start)} to ${dayName(item.end)}`}</p></li>)}</ul>}
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-2.5"><h4 className="text-sm font-semibold">For your approval</h4><p className="mb-2 text-[11px] text-slate-500">Leave waiting for your decision, same as in your Individual Sign In.</p><div className="max-h-[420px] overflow-y-auto pr-1"><Approvals fetcher={(query, options) => call(query, options?.body ? JSON.parse(String(options.body)) : undefined)} /></div></div>
+      </aside></div> : !people.length ? <p className="text-sm text-slate-500">Nobody has leave in this month.</p> : <div className="overflow-x-auto"><table className="border-separate border-spacing-0 text-xs">
+      <thead><tr><th className="sticky left-0 z-10 min-w-[200px] bg-white px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">Staff</th>{days.map((date) => { const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()); return <th key={date} className={`w-8 min-w-8 px-0 py-1 text-center font-semibold ${date === today ? 'text-[#0b587b]' : weekend ? 'text-slate-300' : 'text-slate-500'}`}>{Number(date.slice(8))}<br /><span className="text-[9px] font-normal">{['S', 'M', 'T', 'W', 'T', 'F', 'S'][new Date(`${date}T00:00:00Z`).getUTCDay()]}</span></th>; })}</tr></thead>
+      <tbody>{people.map((person) => <tr key={person.id}>
+        <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-2 py-1.5"><p className="font-semibold text-slate-800">{person.name}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code} · {person.group}</p></td>
+        {days.map((date) => { const here = cell(person.id, date); const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()); return <td key={date} title={here ? `${person.name}: ${here.type}${here.half ? ` (${here.half})` : ''}, ${here.start} to ${here.end}${here.status === 'waiting' ? ' · waiting for approval' : ''}` : undefined} className={`border-t border-slate-100 p-0 text-center ${date === today ? 'bg-sky-50' : weekend ? 'bg-slate-50' : ''}`}>{here && <span className={`mx-auto my-0.5 grid h-6 w-7 place-items-center rounded text-[10px] font-bold ${here.status === 'approved' ? 'bg-violet-600 text-white' : 'bg-amber-200 text-amber-900'}`}>{here.type}{here.half ? '½' : ''}</span>}</td>; })}
+      </tr>)}</tbody></table></div>}
+    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500"><span className="inline-flex items-center gap-1"><span className="h-3 w-5 rounded bg-violet-600" />Approved</span><span className="inline-flex items-center gap-1"><span className="h-3 w-5 rounded bg-amber-200" />Waiting for approval</span><span>The letters are the leave type (AL annual, ML medical, UL unpaid, EL emergency). ½ is a half day.</span></p>
+  </section>;
 }
 
 function TeamLeave({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Leave[] | null>(null);
   const [today, setToday] = useState('');
   useEffect(() => { call('action=leave').then((result) => { setRows(result.leave); setToday(result.today); }).catch((cause: Error) => { setRows([]); onError(cause.message); }); }, []);
-  const waiting = (rows || []).filter((row) => row.status === 'pending' || row.status === 'supervisor_approved');
-  const coming = (rows || []).filter((row) => row.status === 'approved');
+  const [page, setPage] = useState(0);
+  const waitingAll = (rows || []).filter((row) => row.status === 'pending' || row.status === 'supervisor_approved').sort((a, b) => String(b.createdAt || '').slice(0, 10).localeCompare(String(a.createdAt || '').slice(0, 10)) || b.start.localeCompare(a.start));
+  const waiting = waitingAll.slice(page * 10, page * 10 + 10);
   const table = (list: Leave[], empty: string) => !list.length ? <p className="text-sm text-slate-500">{empty}</p> : <table className="w-full min-w-[640px] text-sm">
     <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Leave</th><th className="pr-3">From</th><th className="pr-3">To</th><th className="pr-3 text-right">Days</th><th>Status</th></tr></thead>
     <tbody>{list.map((row) => <tr key={row.id} className="border-t border-slate-100"><td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.group} · {row.code}</p></td><td className="pr-3">{row.type}{row.halfDay && <span className="ml-1 text-xs text-slate-400">(half day)</span>}</td><td className="pr-3 whitespace-nowrap">{dayName(row.start)}</td><td className="pr-3 whitespace-nowrap">{dayName(row.end)}</td><td className="pr-3 text-right tabular-nums">{row.days}</td><td>{row.status === 'approved' ? (row.start <= today && row.end >= today ? <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">On leave now</span> : <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Approved</span>) : <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">{row.status === 'pending' ? 'Waiting for supervisor' : 'Waiting for HR'}</span>}</td></tr>)}</tbody>
   </table>;
   return <div className="space-y-4">
-    <section className={`${card} overflow-x-auto`}><h3 className="mb-3 font-semibold">Waiting for approval {rows && <span className="ml-1 text-sm font-normal text-slate-400">({waiting.length})</span>}</h3>{!rows ? <p className="text-sm text-slate-500">Loading…</p> : table(waiting, 'Nothing is waiting.')}</section>
-    <section className={`${card} overflow-x-auto`}><h3 className="mb-3 font-semibold">Approved, on leave now or coming up {rows && <span className="ml-1 text-sm font-normal text-slate-400">({coming.length})</span>}</h3>{!rows ? null : table(coming, 'No approved leave coming up.')}</section>
+    <LeaveSchedule onError={onError} />
+    <section className={`${card} overflow-x-auto`}><h3 className="mb-3 font-semibold">Waiting for approval {rows && <span className="ml-1 text-sm font-normal text-slate-400">({waitingAll.length})</span>}</h3>{!rows ? <p className="text-sm text-slate-500">Loading…</p> : table(waiting, 'Nothing is waiting.')}{waitingAll.length > 10 && <nav className="mt-3 flex items-center justify-between gap-2 text-xs text-slate-500" aria-label="Pages"><button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40">Newer</button><span>{page * 10 + 1}–{Math.min(waitingAll.length, page * 10 + 10)} of {waitingAll.length}</span><button type="button" disabled={(page + 1) * 10 >= waitingAll.length} onClick={() => setPage(page + 1)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40">Older</button></nav>}</section>
+  </div>;
+}
+
+function AttendanceHub({ onError }: { onError: (message: string) => void }) {
+  const [part, setPart] = useState<'today' | 'month' | 'ot'>('today');
+  // The attendance of the COO's own team, read only; the OT tab is where the COO approves.
+  const source = (query: string) => call(query);
+  return <div className="space-y-4">
+    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['today', 'Today'], ['month', 'Month'], ['ot', 'OT']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={part === id} onClick={() => setPart(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${part === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>
+    {part === 'today' ? <AttendanceDailyReport onError={onError} source={source} /> : part === 'month' ? <AttendanceMonthlyReport onError={onError} source={source} /> : <COOAttendance call={call} onError={onError} />}
+  </div>;
+}
+
+function StaffDirectory({ onError }: { onError: (message: string) => void }) {
+  const [people, setPeople] = useState<Parameters<typeof HRStaffLocation>[0]['people']>(null);
+  useEffect(() => { call('action=directory').then((result) => setPeople(result.people)).catch((cause: Error) => { setPeople([]); onError(cause.message); }); }, []);
+  const [part, setPart] = useState<'staff' | 'contact' | 'forecast'>('staff');
+  const [contacts, setContacts] = useState<Parameters<typeof HRStaffContact>[0]['people']>(null);
+  useEffect(() => { if (part === 'contact' && !contacts) call('action=contact_people').then((result) => setContacts(result.people)).catch((cause: Error) => { setContacts([]); onError(cause.message); }); }, [part]);
+  return <div className="space-y-4">
+    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['staff', 'Staff'], ['contact', 'Contact'], ['forecast', 'Forecast']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={part === id} onClick={() => setPart(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${part === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>
+    {part === 'staff' ? <HRStaffLocation people={people} /> : part === 'contact' ? <HRStaffContact people={contacts} scope="coo" /> : <HRProjection readOnly />}
   </div>;
 }
 
@@ -93,7 +155,7 @@ export default function OfficeCOO() {
   const [error, setError] = useState('');
   const navigate = (next: View) => { setView(next); setMenuOpen(false); setError(''); window.scrollTo({ top: 0 }); };
   const logout = async () => { await signOutSupabase(); localStorage.removeItem('ara_portal_session'); localStorage.removeItem('araoffice_user'); localStorage.removeItem('ara_view_mode'); window.location.hash = ''; };
-  const title = NAV.find((item) => item.id === view)?.label || '';
+  const title = NAV.find((item) => item.id === view)?.label || OFFICES.find((item) => item.id === view)?.label || '';
   return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
     {menuOpen && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />}
     <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -101,22 +163,35 @@ export default function OfficeCOO() {
       <div className="mx-1 mt-5 h-px bg-white/10" />
       <nav className="mt-6 flex-1 space-y-1">
         <p className="px-3.5 pb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">My team</p>
-        {NAV.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className="h-[18px] w-[18px] shrink-0 text-[#20c7f4]" strokeWidth={1.8} /><span className="min-w-0 text-left">{item.label}</span></button>)}
+        {NAV.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className={`h-[18px] w-[18px] shrink-0 ${TONE[item.id]}`} strokeWidth={1.8} /><span className="min-w-0 text-left">{item.label}</span></button>)}
         <p className="px-3.5 pb-1 pt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">Offices I lead</p>
-        {OFFICES.map((item) => <a key={item.href} href={item.href} className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><item.icon className="h-[18px] w-[18px] shrink-0 text-[#ffd166]" strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">{item.label}</span><ChevronRight className="h-4 w-4 opacity-45" /></a>)}
+        {OFFICES.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className={`h-[18px] w-[18px] shrink-0 ${TONE[item.id]}`} strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">{item.label}</span></button>)}
       </nav>
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">COO</div><div className="min-w-0"><p className="truncate text-sm font-semibold">Operations</p><p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p></div></div><button onClick={() => void logout()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 py-2.5 text-sm font-semibold hover:bg-white/15"><LogOut className="h-4 w-4" />Sign out</button></div>
     </aside>
     <div className="min-h-screen lg:pl-[300px]">
       <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden"><div className="flex h-[76px] items-center gap-4 px-4 sm:px-6"><button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">Office COO</p><h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1></div></div></header>
       <main className="p-4 sm:p-6 lg:p-[38px]">
+        {view === 'clinical' || view === 'ca' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}>{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : <OfficePortal key="ca" embedded />}</Suspense> :
         <div className="mx-auto max-w-[1500px] space-y-5">
-          <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office COO · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">{title}</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">{view === 'home' ? 'Your team: Clinical Admin and the Clinical Assistants of both branches. Who is in, late or on leave, day by day.' : view === 'leave' ? 'Leave of your team: what is waiting for approval and what is coming up. HR keeps the final decision.' : 'The AraCare Care Coordination Allowance claims: check the KPIs and say if the allowance is payable.'}</p></section>
+          {view === 'home' && <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
+            <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
+              <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Chief Operating</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome, Dr Luqman</h2><p className="mt-3 text-base text-[#bed2df]">Your team, your calendar and the approvals that wait for you.</p></div>
+              <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' })}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“Success isn’t about massive breakthroughs or one-time actions; it’s about the small, consistent steps you take every day.”</p></div>
+            </div>
+          </section>}
+          {view !== 'review' && view !== 'home' && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office COO · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">{title}</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">{view === 'home' ? 'Your own calendar and reminders. Add a reminder for a date, repeat it, and tick it Done.' : view === 'leave' ? 'Who is on leave, day by day, and the leave of your team that is still waiting for approval. HR keeps the final decision.' : view === 'assessment' ? 'The assessments for the Clinical Assistants: add or edit the questions, and see everyone’s results.' : view === 'attendance' ? 'Your team’s attendance today and for the month (view only), and the OT requests that wait for your approval. After you approve, HR confirms the OT rate.' : view === 'review' ? 'The monthly reviews HR has given to you. Fill in the form and sign; the result goes back to HR.' : view === 'roster' ? 'The duty roster, as HR keeps it. You can look at it but not change it.' : view === 'staff' ? 'All active staff by group and clinic, and the CA staffing forecast. You can look at them but not change them.' : 'The AraCare Care Coordination Allowance claims: check the KPIs and say if the allowance is payable.'}</p>
+          </section>}
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-          {view === 'home' && <TeamToday onError={setError} />}
+          {view === 'home' && <COOCalendar />}
+          {view === 'staff' && <StaffDirectory onError={setError} />}
           {view === 'leave' && <TeamLeave onError={setError} />}
+          {view === 'roster' && <HRRoster readOnly canDraft hideCodes={ROSTER_HIDDEN} defaultView="calendar" onError={setError} />}
+          {view === 'assessment' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the Assessment Room…</p>}><AssessmentAdmin embedded /></Suspense>}
+          {view === 'attendance' && <AttendanceHub onError={setError} />}
+          {view === 'review' && <ReviewRoom embedded onSignedOut={() => undefined} api={(query, body) => call(query.replace('action=', 'action=review_'), body)} />}
           {view === 'care' && <CareReviewPage load={() => call('action=care')} review={(payload) => call('action=care_review', payload)} onError={setError} />}
-        </div>
+        </div>}
       </main>
     </div>
   </div>;

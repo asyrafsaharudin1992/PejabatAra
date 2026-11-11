@@ -1,17 +1,18 @@
 import { addReviewMonths, isProbationAssessment, malaysiaToday, probationAssessmentAllowed, probationEvaluationDates, validReminderDate } from './reviewReminders.js';
-export type CalendarCategory = 'statutory' | 'forecast' | 'payroll' | 'probation' | 'evaluation' | 'review' | 'contract' | 'appraisal' | 'birthday' | 'other';
-export const calendarCategories: Record<CalendarCategory, string> = { statutory: 'KWSP / Tax / SOCSO', forecast: 'Forecast', payroll: 'Payroll', probation: 'Probation / Confirmation', evaluation: 'CA Evaluation', review: 'Performance Review', contract: 'Contract renewal', appraisal: 'Appraisal', birthday: 'Birthday / Gift', other: 'Other' };
+export type CalendarCategory = 'statutory' | 'forecast' | 'payroll' | 'sotm' | 'probation' | 'evaluation' | 'review' | 'contract' | 'appraisal' | 'birthday' | 'other';
+export const calendarCategories: Record<CalendarCategory, string> = { statutory: 'KWSP / Tax / SOCSO', forecast: 'Forecast', payroll: 'Payroll', sotm: 'Staff of the Month', probation: 'Probation / Confirmation', evaluation: 'CA Evaluation', review: 'Performance Review', contract: 'Contract renewal', appraisal: 'Appraisal', birthday: 'Birthday / Gift', other: 'Other' };
 export type CalendarPerson = { id: string; name: string; code: string; company: string; designation: string; joinDate: string | null; confirmDate: string | null; resignDate?: string | null; birthday?: string | null };
-export type CalendarRule = { id: string; title: string; category: CalendarCategory; employeeId: string; company: string; anchor: 'date' | 'join' | 'confirmation' | 'birthday'; date: string; offsetMonths: number; offsetDays: number; repeat: 'none' | 'monthly' | 'yearly'; every: number; notes: string; enabled: boolean };
-export type CalendarSettings = { statutoryPayments: boolean; shareForecast: boolean; payroll: boolean; probationWeeks: boolean; probationMonths: boolean; caEvaluation: boolean; appraisal: boolean; birthdays: boolean; payrollDay: number; forecastDay: number; statutoryDay: number; probationDays: number; confirmMonths: number };
+export type CalendarRule = { id: string; title: string; category: CalendarCategory; employeeId: string; company: string; anchor: 'date' | 'join' | 'confirmation' | 'birthday'; date: string; offsetMonths: number; offsetDays: number; repeat: 'none' | 'monthly' | 'yearly'; every: number; notes: string; enabled: boolean; monthlyTask?: boolean };
+export type CalendarSettings = { statutoryPayments: boolean; shareForecast: boolean; payroll: boolean; probationWeeks: boolean; probationMonths: boolean; caEvaluation: boolean; appraisal: boolean; birthdays: boolean; sotm?: boolean; sotmDay?: number; payrollDay: number; forecastDay: number; statutoryDay: number; probationDays: number; confirmMonths: number };
 export type ProbationState = 'probation' | 'not-probation';
 export type CalendarConfig = { settings: CalendarSettings; rules: CalendarRule[]; probation: Record<string, ProbationState> };
 export type CalendarOccurrence = { state: 'done' | 'skipped'; at: string; by: string };
-export type CalendarEvent = { id: string; title: string; category: CalendarCategory; date: string; start: string; completedOn?: string; employeeId: string; person: string; company: string; notes: string; source: 'automatic' | 'manual' | 'review'; ruleId?: string; reviewId?: string; reviewDone?: boolean; state: 'open' | 'done' | 'skipped' | 'assigned' };
+export type CalendarEvent = { id: string; title: string; category: CalendarCategory; date: string; start: string; completedOn?: string; employeeId: string; person: string; company: string; notes: string; source: 'automatic' | 'manual' | 'review'; monthly?: boolean; ruleId?: string; reviewId?: string; reviewDone?: boolean; state: 'open' | 'done' | 'skipped' | 'assigned' };
 export type CalendarReview = { id: string; employeeId: string; label: string; due: string; status: string };
-export const defaultCalendarConfig = (): CalendarConfig => ({ settings: { statutoryPayments: true, shareForecast: true, payroll: true, probationWeeks: true, probationMonths: true, caEvaluation: true, appraisal: true, birthdays: true, payrollDay: 15, forecastDay: 7, statutoryDay: 15, probationDays: 14, confirmMonths: 3 }, rules: [], probation: {} });
+export const defaultCalendarConfig = (): CalendarConfig => ({ settings: { statutoryPayments: true, shareForecast: true, payroll: true, probationWeeks: true, probationMonths: true, caEvaluation: true, appraisal: true, birthdays: true, sotm: true, sotmDay: 5, payrollDay: 15, forecastDay: 7, statutoryDay: 15, probationDays: 14, confirmMonths: 3 }, rules: [], probation: {} });
 export const shiftCalendarDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
-export const isMonthlyHrTask = (event: CalendarEvent) => /^(share-forecast|payroll|statutory):/.test(event.id);
+// Monthly tasks sit in their own list until ticked done: the built-in ones (forecast, payroll, statutory, Staff of the Month) and any reminder HR marks as a monthly task.
+export const isMonthlyHrTask = (event: CalendarEvent) => /^(share-forecast|payroll|statutory|sotm):/.test(event.id) || event.monthly === true;
 export const occurrenceCompletedOn = (occurrence?: CalendarOccurrence | null) => occurrence?.state === 'done' && Number.isFinite(Date.parse(occurrence.at)) ? new Date(occurrence.at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }) : undefined;
 export function calendarEventOnDate(event: CalendarEvent, date: string): boolean {
   if (isMonthlyHrTask(event)) {
@@ -35,14 +36,14 @@ export function validateCalendarRule(input: unknown): CalendarRule {
   if (rule.anchor === 'date' && !validReminderDate(rule.date)) throw new Error('Enter a valid date.');
   if (typeof rule.employeeId !== 'string' || rule.employeeId && !/^[a-zA-Z0-9-]{1,80}$/.test(rule.employeeId) || rule.anchor !== 'date' && !rule.employeeId) throw new Error('Select a staff member for a staff-based date.');
   if (!['', 'KJ', 'SK'].includes(rule.company) || typeof rule.enabled !== 'boolean' || typeof rule.notes !== 'string' || rule.notes.length > 2000) throw new Error('Check the clinic, notes and enabled setting.');
-  return { id: rule.id, title: rule.title.trim(), category: rule.category, employeeId: rule.employeeId, company: rule.company, anchor: rule.anchor, date: rule.anchor === 'date' ? rule.date : '', offsetMonths: integer(rule.offsetMonths, 0, 120, 'Months after base date'), offsetDays: integer(rule.offsetDays, -365, 365, 'Days from base date'), repeat: rule.repeat, every: integer(rule.every, 1, 24, 'Repeat interval'), notes: rule.notes.trim(), enabled: rule.enabled };
+  return { id: rule.id, title: rule.title.trim(), category: rule.category, employeeId: rule.employeeId, company: rule.company, anchor: rule.anchor, date: rule.anchor === 'date' ? rule.date : '', offsetMonths: integer(rule.offsetMonths, 0, 120, 'Months after base date'), offsetDays: integer(rule.offsetDays, -365, 365, 'Days from base date'), repeat: rule.repeat, every: integer(rule.every, 1, 24, 'Repeat interval'), notes: rule.notes.trim(), enabled: rule.enabled, ...(rule.monthlyTask === true && rule.repeat === 'monthly' ? { monthlyTask: true } : {}) };
 }
 const dd = (n: number) => String(n).padStart(2, '0'), ord = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
 export function validateCalendarSettings(input: unknown): CalendarSettings {
   const value = input as CalendarSettings;
   if (!value || ['statutoryPayments', 'shareForecast', 'payroll', 'probationWeeks', 'probationMonths', 'caEvaluation', 'appraisal', 'birthdays'].some((key) => typeof value[key] !== 'boolean')) throw new Error('Check the automatic reminder settings.');
   const d = defaultCalendarConfig().settings, num = (v: unknown, fallback: number, min: number, max: number, label: string) => { if (v === undefined) return fallback; if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw new Error(`${label} must be a whole number from ${min} to ${max}.`); return v; };
-  return { statutoryPayments: value.statutoryPayments, shareForecast: value.shareForecast, payroll: value.payroll, probationWeeks: value.probationWeeks, probationMonths: value.probationMonths, caEvaluation: value.caEvaluation, appraisal: value.appraisal, birthdays: value.birthdays, payrollDay: num(value.payrollDay, d.payrollDay, 1, 28, 'Payroll due day'), forecastDay: num(value.forecastDay, d.forecastDay, 1, 28, 'Share Forecast due day'), statutoryDay: num(value.statutoryDay, d.statutoryDay, 1, 28, 'KWSP / Tax / SOCSO due day'), probationDays: num(value.probationDays, d.probationDays, 1, 90, 'Probation check days'), confirmMonths: num(value.confirmMonths, d.confirmMonths, 1, 12, 'Confirmation check months') };
+  return { statutoryPayments: value.statutoryPayments, shareForecast: value.shareForecast, payroll: value.payroll, probationWeeks: value.probationWeeks, probationMonths: value.probationMonths, caEvaluation: value.caEvaluation, appraisal: value.appraisal, birthdays: value.birthdays, payrollDay: num(value.payrollDay, d.payrollDay, 1, 28, 'Payroll due day'), forecastDay: num(value.forecastDay, d.forecastDay, 1, 28, 'Share Forecast due day'), statutoryDay: num(value.statutoryDay, d.statutoryDay, 1, 28, 'KWSP / Tax / SOCSO due day'), probationDays: num(value.probationDays, d.probationDays, 1, 90, 'Probation check days'), confirmMonths: num(value.confirmMonths, d.confirmMonths, 1, 12, 'Confirmation check months'), sotm: value.sotm !== false, sotmDay: num(value.sotmDay, d.sotmDay ?? 5, 1, 28, 'Staff of the Month due day') };
 }
 function recurringDates(first: string, month: string, intervalMonths: number): string[] {
   if (!validReminderDate(first)) return [];
@@ -84,6 +85,10 @@ export function buildHrCalendar(month: string, people: CalendarPerson[], config:
   }
   if (config.settings.statutoryPayments) {
     add({ title: 'KWSP / Tax / SOCSO', category: 'statutory', start: `${month}-${dd(config.settings.statutoryDay)}`, date: `${month}-${dd(config.settings.statutoryDay)}`, employeeId: '', person: '', company: '', notes: `Monthly HR task, due on the ${ord(config.settings.statutoryDay)}. Review and complete KWSP, Tax and SOCSO work. Listed in the sidebar until completed; the calendar shows a tick only on the completion date.`, source: 'automatic' }, 'statutory', `${month}-14`);
+  }
+  if (config.settings.sotm !== false) {
+    const day = dd(config.settings.sotmDay ?? 5);
+    add({ title: 'Staff of the Month', category: 'sotm', start: `${month}-${day}`, date: `${month}-${day}`, employeeId: '', person: '', company: '', notes: `Monthly HR task, due on the ${ord(config.settings.sotmDay ?? 5)}. Choose the Staff of the Month for each branch, then make the poster and certificate in HR > Miscellaneous > SOTM. Listed in the sidebar until complete.`, source: 'automatic' }, 'sotm', `${month}-${day}`);
   }
   const matchedReviews = new Set<string>();
   for (const person of people) {
@@ -130,7 +135,7 @@ export function buildHrCalendar(month: string, people: CalendarPerson[], config:
     if (!base || !validReminderDate(base)) { missingDates.push(`${rule.title}${person ? ` · ${person.name}` : ''}: ${rule.anchor} date is missing.`); continue; }
     for (const date of ruleDates(rule, base, month)) {
       if (person && isCalendarCa(person) && ['evaluation', 'probation'].includes(rule.category) && !probationAssessmentAllowed(person, config.probation?.[person.id], date, today)) continue;
-      add({ title: rule.title, category: rule.category, start: date, date, employeeId: person?.id || '', person: person?.name || '', company: person?.company || rule.company, notes: rule.notes, source: 'manual', ruleId: rule.id }, `manual:${rule.id}`);
+      add({ title: rule.title, category: rule.category, start: date, date, employeeId: person?.id || '', person: person?.name || '', company: person?.company || rule.company, notes: rule.notes, source: 'manual', ruleId: rule.id, ...(rule.monthlyTask === true ? { monthly: true } : {}) }, `manual:${rule.id}`);
     }
   }
   for (const review of reviews) {
