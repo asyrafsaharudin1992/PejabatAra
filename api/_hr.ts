@@ -463,6 +463,20 @@ export async function hrHandler(req: any, res: any) {
         const urlOf = new Map<string, string>((signed.data || []).map((entry: any) => [entry.path as string, entry.signedUrl as string]));
         return res.status(200).json({ items: files.map((name: string) => { const [who, where = ''] = name.slice(9, -4).split('__'); const full = urlOf.get(`${folder}/${name}`) || ''; return { file: name, month: name.slice(0, 7), name: who, branch: where, url: urlOf.get(`${folder}-thumb/${name}`) || full, full }; }).filter((item: any) => item.full) });
       }
+      // The signature printed on the certificate: one small PNG, kept private and shown to HR only.
+      if (req.method === 'GET' && action === 'sotm_signature') {
+        const { data, error } = await db.storage.from('hr-misc').download('sotm-config/signature.png');
+        if (error || !data) return res.status(200).json({ signature: null });
+        return res.status(200).json({ signature: `data:image/png;base64,${Buffer.from(await data.arrayBuffer()).toString('base64')}` });
+      }
+      if (req.method === 'POST' && action === 'sotm_signature_save') {
+        const buffer = Buffer.from(String(body.signature || '').replace(/^data:image\/png;base64,/, ''), 'base64');
+        if (buffer.length < 200 || buffer.length > 300_000 || buffer[0] !== 0x89 || buffer[1] !== 0x50 || buffer[2] !== 0x4e || buffer[3] !== 0x47) throw fail(400, 'The signature must be a small PNG picture.');
+        const { error } = await db.storage.from('hr-misc').upload('sotm-config/signature.png', buffer, { contentType: 'image/png', upsert: true });
+        if (error) throw error;
+        await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { sotm_signature: ['', 'updated'] }, changed_by: user.id });
+        return res.status(200).json({ success: true });
+      }
       // The framed face of each branch's winner for a month (a small picture), used to make the combined poster.
       if (req.method === 'GET' && action === 'sotm_combo') {
         const month = text(req.query.month, 7);
