@@ -1,9 +1,10 @@
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Award, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
 import { shrinkPoster } from './ManagedServices';
 import { card } from './AssessmentStaff';
+import { HRSotm } from './HRSotm';
 
 // Office HR > Miscellaneous: four cards. Important links, posters HR shares on WhatsApp, notes (optionally with a due date that shows on the HR calendar) and
 // things HR prints often. Each card opens its own page; HR adds and removes everything here.
@@ -49,6 +50,7 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [notSetUp, setNotSetUp] = useState(false);
   const [section, setSection] = useState<Kind | null>(null);
+  const [sotm, setSotm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [edit, setEdit] = useState<{ id?: string; kind: 'link' | 'note' | 'print'; title: string; url: string; body: string; dueOn: string } | null>(null);
@@ -101,13 +103,23 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
     {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
     {items === null && <p className="text-sm text-slate-500">Loading…</p>}
 
-    {items && !current && <>
+    {sotm && <>
+      <button onClick={() => setSotm(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b] hover:underline"><ArrowLeft className="h-4 w-4" />Miscellaneous</button>
+      <HRSotm onError={onError} />
+    </>}
+
+    {items && !current && !sotm && <>
       {dueNotes.length > 0 && <button onClick={() => setSection('note')} className="flex w-full items-center gap-3 rounded-2xl bg-amber-50 p-4 text-left text-sm text-amber-900 hover:bg-amber-100"><CalendarClock className="h-5 w-5 shrink-0" /><span><strong>{dueNotes.length} {dueNotes.length === 1 ? 'note is' : 'notes are'} due</strong> in the next 7 days or overdue. Open Notes to see them.</span></button>}
       <div className="grid gap-4 sm:grid-cols-2">{SECTIONS.map((entry) => { const Icon = entry.icon; const count = of(entry.kind).length; return <button key={entry.kind} onClick={() => setSection(entry.kind)} className="group flex flex-col rounded-[26px] border border-black/[0.045] bg-white p-6 text-left shadow-[0_2px_8px_rgba(0,0,0,0.025)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
         <span className="flex items-start justify-between"><span className={`grid h-12 w-12 place-items-center rounded-2xl ${entry.tone}`}><Icon className="h-6 w-6" /></span><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">{count}</span></span>
         <span className="mt-5 text-lg font-semibold">{entry.title}</span><span className="mt-1 text-sm text-slate-500">{entry.hint}</span>
         <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
-      </button>; })}</div>
+      </button>; })}
+        <button onClick={() => setSotm(true)} className="group flex flex-col rounded-[26px] border border-black/[0.045] bg-white p-6 text-left shadow-[0_2px_8px_rgba(0,0,0,0.025)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
+          <span className="flex items-start justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-600"><Award className="h-6 w-6" /></span></span>
+          <span className="mt-5 text-lg font-semibold">SOTM</span><span className="mt-1 text-sm text-slate-500">Staff of the Month poster: choose the staff, add a face photo, download.</span>
+          <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+        </button></div>
     </>}
 
     {items && current && <section className={`${card} space-y-5`}>
