@@ -3,6 +3,8 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, FileDown, FileText, LogOu
 import { assessmentFetch, PageShell, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
 import { PrintPortal } from './PrintPortal';
+import { CareSection } from './CareSection';
+import CareApprovals from './CareApprovals';
 import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
@@ -94,7 +96,7 @@ function ViewForm({ claim, onClose }: { claim: SheetClaim; onClose: () => void }
 
 export default function IncentiveClaims() {
   const [signedIn, setSignedIn] = useState(() => Boolean(localStorage.getItem(TOKEN_KEY)));
-  const [me, setMe] = useState<{ name: string; branch: string } | null>(null);
+  const [me, setMe] = useState<{ name: string; branch: string; careApprover?: boolean; careWaiting?: number } | null>(null);
   const [month, setMonth] = useState(todayKL().slice(0, 7));
   const [claim, setClaim] = useState<Claim | null>(null);
   const [history, setHistory] = useState<History>([]);
@@ -102,6 +104,8 @@ export default function IncentiveClaims() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
+  // The COO also checks the AraCare claims here (a second part of the page).
+  const [part, setPart] = useState<'mine' | 'care'>('mine');
   const months = useMemo(claimMonths, []);
 
   const load = async () => {
@@ -134,10 +138,14 @@ export default function IncentiveClaims() {
   const editable = claim && (claim.status === 'draft' || claim.status === 'returned');
   const total = claim ? claimTotal(claim.entries) : 0;
   return <PageShell eyebrow="Staff Incentives" title={me ? `Hi, ${me.name.split(' ')[0]}` : 'Loading…'} subtitle="Tick the procedures you performed, then submit at month end." onSignOut={signOut}>
+    {me?.careApprover && <div role="tablist" className="mt-5 inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['mine', 'My claim'], ['care', `AraCare approval${me.careWaiting ? ` (${me.careWaiting})` : ''}`]] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={part === id} onClick={() => setPart(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${part === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{label}</button>)}</div>}
+    {part === 'care' && me?.careApprover ? <div className="mt-4"><CareApprovals /></div> : <>
     <div className="mt-6 grid grid-cols-2 gap-3">
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Month</span><select value={month} onChange={(event) => setMonth(event.target.value)} className={`${field} bg-white`}>{months.map((value) => <option key={value} value={value}>{monthLabel(value)}</option>)}</select></label>
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Branch</span><select value={claim?.branch || ''} disabled={!editable} onChange={(event) => claim && setClaim({ ...claim, branch: event.target.value })} className={`${field} bg-white disabled:opacity-70`}><option value="">Choose…</option>{Object.values(INCENTIVE_BRANCHES).map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
     </div>
+
+    <CareSection month={month} />
 
     {error && <div className="mt-4 flex gap-2 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
     {!claim && !error && <p className="mt-6 text-sm text-slate-500">Loading your claim…</p>}
@@ -165,6 +173,7 @@ export default function IncentiveClaims() {
 
       {history.filter((item) => item.month !== month).length > 0 && <section className="mt-6"><h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Other months</h2><div className="mt-2 space-y-2">{history.filter((item) => item.month !== month).map((item) => <button key={item.month} onClick={() => setMonth(item.month)} className="flex w-full items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-left text-sm shadow-sm hover:bg-slate-50"><span className="font-semibold">{monthLabel(item.month)}</span><span className="flex items-center gap-2"><span className="text-xs text-slate-500">{item.count} entries · {rm(item.total)}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_TONE[item.status]}`}>{STATUS_LABEL[item.status]}</span></span></button>)}</div></section>}
       {viewing && <ViewForm claim={{ ...claim, staffName: me?.name || '' }} onClose={() => setViewing(false)} />}
+    </>}
     </>}
   </PageShell>;
 }

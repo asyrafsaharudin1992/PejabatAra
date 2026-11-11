@@ -1,5 +1,6 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
+import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { codesOf } from '../src/lib/incentiveCodes.js';
@@ -638,6 +639,47 @@ export async function hrHandler(req: any, res: any) {
       await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { incentive_code_active: [body.active === true ? 'hidden' : 'shown', body.active === true ? 'shown' : 'hidden'], id }, changed_by: user.id });
       return res.status(200).json({ extraCodes: await extraIncentiveCodes(db) });
     }
+    // AraCare (Care Coordination Allowance): the claims, the staff who may claim, and marking a claim received. A claim the COO has approved arrives here
+    // directly (it does not go through Clinical Admin).
+    if (req.method === 'GET' && action === 'care_claims') {
+      const month = text(req.query.month, 7);
+      if (month !== 'all' && !/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      let query = db.from('care_claims').select(CARE_COLUMNS);
+      if (month !== 'all') query = query.eq('month', month);
+      const { data, error } = await query.order('month', { ascending: false }).limit(300);
+      if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ claims: [], notSetUp: true }); throw error; }
+      const claims = await withPeople(db, data || []);
+      claims.sort((a, b) => b.month.localeCompare(a.month) || (a.staffName || '').localeCompare(b.staffName || ''));
+      return res.status(200).json({ claims });
+    }
+    if (req.method === 'GET' && action === 'care_staff') {
+      const { data, error } = await db.from('care_staff').select('staff_id,created_at');
+      if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ staff: [], candidates: [], notSetUp: true }); throw error; }
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('assessment_staff_id,full_name,employee_code,branch').eq('status', 'Active').not('assessment_staff_id', 'is', null).order('full_name').limit(500);
+      if (peopleError) throw peopleError;
+      const chosen = new Set((data || []).map((row: any) => row.staff_id));
+      const view = (row: any) => ({ id: row.assessment_staff_id, name: row.full_name, code: row.employee_code, branch: row.branch || '' });
+      return res.status(200).json({ staff: (people || []).filter((row: any) => chosen.has(row.assessment_staff_id)).map(view), candidates: (people || []).filter((row: any) => !chosen.has(row.assessment_staff_id)).map(view) });
+    }
+    if (req.method === 'POST' && action === 'care_staff_save') {
+      const staffId = text(body.staffId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(staffId)) throw fail(400, 'Choose a staff member.');
+      const { error } = body.on === false ? await db.from('care_staff').delete().eq('staff_id', staffId) : await db.from('care_staff').upsert({ staff_id: staffId, added_by: text(user.email || user.id, 120) });
+      if (['42P01', 'PGRST205'].includes(error?.code)) throw fail(503, 'AraCare is not set up yet. System Admin needs to run the latest database migration first.');
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { aracare_staff: [body.on === false ? 'allowed' : '', body.on === false ? '' : 'allowed'], staff_id: staffId }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'POST' && action === 'care_receive') {
+      const id = text(body.id, 60), by = text(body.by, 80);
+      if (body.received !== false && !by) throw fail(400, 'Enter your name.');
+      const { data: claim, error } = await db.from('care_claims').select('id,status,hr_submitted_at').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!claim || claim.status !== 'approved' || !claim.hr_submitted_at) throw fail(409, 'This claim has not been approved by the COO yet.');
+      const { error: saveError } = await db.from('care_claims').update(body.received === false ? { hr_received_at: null, hr_received_by: '' } : { hr_received_at: now, hr_received_by: by }).eq('id', id);
+      if (saveError) throw saveError;
+      return res.status(200).json({ success: true });
+    }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
     // HR sets a new rate for one or more codes from the 1st of a month (this month or later). Entries already added keep the rate they were saved with.
@@ -688,15 +730,16 @@ export async function hrHandler(req: any, res: any) {
     // The red numbers on the HR menu: what is waiting for HR to decide or receive. A part whose table or column is not set up yet counts as zero.
     if (req.method === 'GET' && action === 'hr_badges') {
       const count = async (work: () => PromiseLike<{ count: number | null; error: any }>) => { try { const { count: total, error } = await work(); return error ? 0 : total || 0; } catch { return 0; } };
-      const [leave, reviews, doctorClaims, claimsToReceive, requestsWaiting] = await Promise.all([
+      const [leave, reviews, doctorClaims, claimsToReceive, careToReceive, requestsWaiting] = await Promise.all([
         count(() => db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'supervisor_approved')),
         count(() => db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('status', 'submitted').is('hr_received_on', null)),
         count(() => db.from('incentive_claims').select('id', { count: 'exact', head: true }).eq('form', 'doctor').eq('status', 'submitted')),
         count(() => db.from('incentive_claims').select('id', { count: 'exact', head: true }).not('hr_submitted_at', 'is', null).is('hr_received_at', null)),
+        count(() => db.from('care_claims').select('id', { count: 'exact', head: true }).eq('status', 'approved').is('hr_received_at', null)),
         db.from('hr_attendance_requests').select('reason').eq('status', 'supervisor_approved').limit(500).then((result: any) => result.error ? [] : result.data || [], () => []),
       ]);
       const missed = (requestsWaiting as any[]).filter((row) => /^forgot to clock/i.test(String(row.reason || '').trim())).length;
-      return res.status(200).json({ leave, reviews, incentive: doctorClaims + claimsToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
+      return res.status(200).json({ leave, reviews, incentive: doctorClaims + claimsToReceive + careToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
     }
     // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
     if (req.method === 'GET' && action === 'misc_list') {

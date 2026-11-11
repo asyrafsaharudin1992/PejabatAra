@@ -347,3 +347,26 @@
   .payslip-bank { margin-top: 3mm; }
   .payslip-note { margin-top: 6mm; text-align: center; font-size: 8pt; color: #7a8896; }
 }
+
+/* AraCare claim form (Borang Tuntutan Care Coordination Allowance): the same document on screen and on A4 portrait paper. */
+.care-doc { width: 182mm; max-width: 100%; background: #fff; color: #000; font: 10.5pt/1.5 Arial, Helvetica, sans-serif; }
+.care-doc header { display: flex; justify-content: flex-end; align-items: center; gap: 5mm; margin-bottom: 7mm; }
+.care-doc header img { width: 22mm; height: 22mm; object-fit: contain; }
+.care-doc header p { margin: 0; font-size: 8pt; line-height: 1.35; color: #14233b; }
+.care-doc h1 { font-size: 12.5pt; font-weight: bold; margin: 0 0 5mm; }
+.care-doc h2 { font-size: 11pt; font-weight: bold; margin: 5mm 0 1.5mm; }
+.care-doc p { margin: 0 0 1.5mm; }
+.care-doc .line { display: inline-block; min-width: 60mm; border-bottom: 1px solid #000; padding: 0 1mm; }
+.care-doc table { width: 100%; border-collapse: collapse; margin-top: 2mm; }
+.care-doc th, .care-doc td { border: 1px solid #000; padding: 1mm 2mm; text-align: left; vertical-align: top; }
+.care-doc .boxes span { margin-right: 5mm; white-space: nowrap; }
+.care-doc .pb { break-before: page; }
+.care-print { display: none; }
+@page care-form { size: A4 portrait; margin: 14mm; }
+@media print {
+  html:has(body.care-printing) { zoom: 1 !important; }
+  body.care-printing { background: white !important; margin: 0 !important; }
+  body.care-printing > *:not(.care-print):not(style) { display: none !important; }
+  body.care-printing .care-print { display: block; page: care-form; }
+  .care-print *, .care-doc * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

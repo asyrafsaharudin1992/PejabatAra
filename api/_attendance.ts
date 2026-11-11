@@ -365,6 +365,23 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
   throw fail(404, 'Unknown attendance action.');
 }
 
+// One day of attendance for a list of people (the COO's team view). Same rules as the HR Today list, including the Post night mark.
+export async function teamDailyRows(db: any, people: Employee[], date: string) {
+  if (!people.length) return [];
+  const before = addDay(date, -1);
+  const [rules, data] = await Promise.all([loadRules(db), fetchData(db, before, date, people.map((p) => p.id))]);
+  const days = buildDaysFrom(data, people, before, date, rules);
+  return people.map((p) => {
+    const list = days.get(p.id) || [];
+    let day = list.find((item) => item.date === date) || { date } as Day;
+    const last = list.find((item) => item.date === before);
+    if (last?.outAt && new Date(Date.parse(last.outAt) + 8 * 3600000).toISOString().slice(0, 10) === date && (day.status === 'off' || day.status === 'no-times')) day = { ...day, status: 'post-call', outAt: last.outAt, start: last.start, end: last.end, code: last.code };
+    const { code: shift, ...rest } = dayView(day);
+    return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation, ...rest, shift };
+  });
+}
+export const TEAM_COLUMNS = PERSON;
+
 // ---- Office HR side ----
 export async function attendanceHrAction(req: any, res: any, db: any, action: string, body: any, userLabel: string) {
   const active = async () => { const { data, error } = await db.from('hr_employees').select(PERSON).eq('status', 'Active').order('full_name').limit(500); if (error) throw error; return (data || []) as Employee[]; };

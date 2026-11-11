@@ -1,4 +1,5 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
+import { careAction, careWaitingCount, isCooTitle } from './_care.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
@@ -772,6 +773,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   if (action.startsWith('review_')) return await reviewAction(req, res, db, staff, action, body);
   if (action.startsWith('leave_')) return await leaveAction(req, res, db, staff, action, body);
   if (action.startsWith('incentive')) return await incentiveAction(req, res, db, staff, action, body);
+  if (action === 'care' || action.startsWith('care_')) return await careAction(req, res, db, staff, action, body);
 
   if (req.method === 'GET' && action === 'me') {
     let isApprover = false, leaveWaiting = 0, designation = '', reviewWaiting = 0, announcementsListed = false, announcementsUnread = 0;
@@ -805,13 +807,16 @@ async function staffAction(req: any, res: any, action: string, body: any) {
         try { reviewWaiting += (await assistantDue(db, self)).due.length; } catch { /* the reminder is optional */ }
       } catch { /* leave or review tables not set up yet */ }
     }
+    // The COO checks the AraCare claims: shown as a tile with the number waiting.
+    const careApprover = isCooTitle(designation);
+    const careWaiting = careApprover ? await careWaitingCount(db) : 0;
     // The red number on the Announcements icon (only for the staff who must read them).
     try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

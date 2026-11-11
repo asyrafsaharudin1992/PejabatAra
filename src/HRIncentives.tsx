@@ -8,6 +8,7 @@ import { PrintPage, PrintPortal } from './PrintPortal';
 import { Claim, MonthSummary } from './ClinicalIncentives';
 import { HRIncentiveRates } from './HRIncentiveRates';
 import { HRIncentiveForms } from './HRIncentiveForms';
+import { HRCare } from './HRCare';
 
 // Office HR: the staff incentive claims that Clinical Admin has approved and sent to HR, by month. Read only:
 // Clinical Admin checks and approves each claim, and returning one there takes it back from this list.
@@ -31,7 +32,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
   const [problem, setProblem] = useState('');
   const [flowOpen, setFlowOpen] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
-  const [tab, setTab] = useState<'claims' | 'staff' | 'doctor'>('claims');
+  const [tab, setTab] = useState<'claims' | 'staff' | 'doctor' | 'care'>('claims');
   const [printing, setPrinting] = useState<'' | 'print' | 'pdf'>('');
   const load = () => {
     setClaims(null);
@@ -81,8 +82,9 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
     {!embedded && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff incentives</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Incentive claims that Clinical Admin has checked, approved and sent to HR. Claims still being filled in or waiting for approval are listed too (use the progress filter) and are not counted until they are sent. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>}
-    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['claims', 'Claims'], ['staff', 'Staff form'], ['doctor', 'Doctor form']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>
-    {tab !== 'claims' && <HRIncentiveForms key={tab} form={tab} onError={onError} />}
+    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['claims', 'Claims'], ['staff', 'Staff form'], ['doctor', 'Doctor form'], ['care', 'AraCare']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>
+    {(tab === 'staff' || tab === 'doctor') && <HRIncentiveForms key={tab} form={tab} onError={onError} />}
+    {tab === 'care' && <HRCare onError={onError} />}
     <div className={tab === 'claims' ? 'space-y-5' : 'hidden'}>
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} min-w-[200px] flex-1`} />
