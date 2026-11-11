@@ -1,4 +1,5 @@
 import { officeAccess, errorReply } from './_office-db.js';
+import { extraIncentiveCodes } from './_assessment.js';
 
 // Office Clinical Administration. Served from /api/status?resource=clinical
 // because the Vercel Hobby plan allows only 12 functions.
@@ -218,7 +219,7 @@ export async function clinicalHandler(req: any, res: any) {
       if (result.error?.code === '42703') result = await read(base, false);
       const { data, error } = result;
       if (error) throw error;
-      return res.status(200).json({ claims: (data || []).map((row: any) => ({ hrSubmittedAt: row.hr_submitted_at || null, hrSubmittedBy: row.hr_submitted_by || '', hrReceivedAt: row.hr_received_at || null, hrReceivedBy: row.hr_received_by || '', id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
+      return res.status(200).json({ extraCodes: await extraIncentiveCodes(db), claims: (data || []).map((row: any) => ({ hrSubmittedAt: row.hr_submitted_at || null, hrSubmittedBy: row.hr_submitted_by || '', hrReceivedAt: row.hr_received_at || null, hrReceivedBy: row.hr_received_by || '', id: row.id, month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at })) });
     }
     if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
 

@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
-import { LEAVE_TYPES, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
+import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
 import { codesOf } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
@@ -596,7 +596,33 @@ export async function hrHandler(req: any, res: any) {
       const waitingStaff = (data || []).filter((row: any) => row.form === 'doctor' && row.status === 'submitted').map((row: any) => row.staff_id);
       const owners = new Map<string, string>();
       if (waitingStaff.length) { const { data: people } = await db.from('hr_employees').select('employee_code,assessment_staff_id').in('assessment_staff_id', waitingStaff); (people || []).forEach((person: any) => owners.set(person.assessment_staff_id, person.employee_code)); }
-      return res.status(200).json({ claims: (data || []).map((row: any) => ({ approver: row.status === 'submitted' && !row.hr_submitted_at ? (row.form === 'doctor' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : 'Clinical Admin') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+      return res.status(200).json({ extraCodes: await extraIncentiveCodes(db), claims: (data || []).map((row: any) => ({ approver: row.status === 'submitted' && !row.hr_submitted_at ? (row.form === 'doctor' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : 'Clinical Admin') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
+    }
+    // Incentives HR adds to the staff form or the doctor form (they apply at once). A code is hidden, never deleted, so old claims keep their name.
+    if (req.method === 'GET' && action === 'incentive_codes') return res.status(200).json({ extraCodes: await extraIncentiveCodes(db) });
+    if (req.method === 'POST' && action === 'incentive_code_save') {
+      const form = body.form === 'doctor' ? 'doctor' : 'staff';
+      const code = text(body.code, 10).toUpperCase(), name = text(body.name, 120), group = text(body.group, 60);
+      const ownAmount = body.ownAmount === true, needsPatient = form === 'staff' && body.needsPatient === true;
+      const rate = ownAmount ? 0 : Math.round(Number(body.rate) * 100) / 100;
+      if (!/^[A-Z0-9-]{1,10}$/.test(code)) throw fail(400, 'The code can have letters, numbers and a dash, up to 10 characters.');
+      if (!name) throw fail(400, 'Type the name of the incentive.');
+      if (!group) throw fail(400, 'Choose or type the group.');
+      if (!ownAmount && (!Number.isFinite(rate) || rate <= 0 || rate > 2000)) throw fail(400, 'Enter the rate in RM (more than 0, up to 2000).');
+      await extraIncentiveCodes(db);
+      if (codesOf(form).some((item) => item.code === code)) throw fail(409, `The code ${code} is already used on this form. Choose another code.`);
+      const { error } = await db.from('hr_incentive_codes').insert({ form, code, name, rate, group_name: group, own_amount: ownAmount, needs_patient: needsPatient, active: true, created_by: text(user.email || user.id, 120) });
+      if (['42P01', 'PGRST205'].includes(error?.code)) throw fail(503, 'Adding incentives is not set up yet. System Admin needs to run the latest database migration first.');
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { incentive_code_added: ['', `${form} ${code} ${name} RM ${rate.toFixed(2)}`] }, changed_by: user.id });
+      return res.status(200).json({ extraCodes: await extraIncentiveCodes(db) });
+    }
+    if (req.method === 'POST' && action === 'incentive_code_active') {
+      const id = text(body.id, 60);
+      const { error } = await db.from('hr_incentive_codes').update({ active: body.active === true }).eq('id', id);
+      if (error) throw error;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { incentive_code_active: [body.active === true ? 'hidden' : 'shown', body.active === true ? 'shown' : 'hidden'], id }, changed_by: user.id });
+      return res.status(200).json({ extraCodes: await extraIncentiveCodes(db) });
     }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
@@ -604,6 +630,7 @@ export async function hrHandler(req: any, res: any) {
     if (req.method === 'POST' && action === 'incentive_rate_set') {
       const wanted: string[] = [...new Set<string>((Array.isArray(body.codes) ? body.codes : [body.code]).map((item: unknown) => text(item, 10)).filter(Boolean))].slice(0, 60);
       const form = body.form === 'doctor' ? 'doctor' : 'staff';
+      await extraIncentiveCodes(db);
       const codes = wanted.map((item) => codesOf(form).find((code) => code.code === item));
       if (!codes.length || codes.some((code) => !code || code.ownAmount)) throw fail(400, 'Choose codes that have a fixed rate.');
       const rate = Math.round(Number(body.rate) * 100) / 100;

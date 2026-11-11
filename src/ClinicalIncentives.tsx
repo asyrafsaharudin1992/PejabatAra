@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Send, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
-import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE, IncentiveForm } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
 import { PrintPage, PrintPortal } from './PrintPortal';
 
@@ -37,7 +37,7 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
 
   const load = async () => {
     setClaims(null);
-    try { setClaims((await (await officeFetch(`${API}&action=incentives&branch=${encodeURIComponent(branchFilter)}&month=${month}`)).json()).claims); }
+    try { const result = await (await officeFetch(`${API}&action=incentives&branch=${encodeURIComponent(branchFilter)}&month=${month}`)).json(); setExtraCodes(result.extraCodes); setClaims(result.claims); }
     catch (cause) { setClaims([]); onError(cause instanceof Error ? cause.message : 'Unable to load claims.'); }
   };
   useEffect(() => { setOpenId(''); setNotice(''); void load(); }, [branchFilter, month]);

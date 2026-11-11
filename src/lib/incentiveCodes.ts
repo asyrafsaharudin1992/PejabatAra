@@ -1,7 +1,7 @@
 // Incentive codes and rates from memo HSO/MEMO/SM/2026/0012 (effective claims 10/26).
 // Shared by the API, which fixes the RM of every entry, and the staff and admin pages.
 // `ownAmount` codes have no fixed rate, so staff type the amount.
-export type IncentiveCode = { code: string; name: string; rate: number; group: string; ownAmount?: boolean };
+export type IncentiveCode = { code: string; name: string; rate: number; group: string; ownAmount?: boolean; needsPatient?: boolean; inactive?: boolean; custom?: boolean };
 
 // Two incentive forms: the staff form (clinic assistants, memo HSO/MEMO/SM/2026/0012) and the doctor form (DOCTOR INCENTIVES, October 2026).
 // Their codes overlap (both have 001), so an entry saved from the doctor form carries form 'doctor'.
@@ -58,8 +58,13 @@ export const DOCTOR_INCENTIVE_CODES: IncentiveCode[] = [
   doctor('025', 'Pap Smear LBC (sahaja)', 10), doctor('026', 'HPV DNA (sahaja)', 20), doctor('027', 'Shincort', 100), doctor('028', 'Hyaluronic Acid', 150),
   doctor('029', 'Cross-linked HA', 200), doctor('030', 'Circumcision Adult/Paeds (resident during shift)', 80), doctor('031', 'USG NT Scan', 10), doctor('032', 'USG NT + 2D Scan', 30),
 ];
-export const codesOf = (form: IncentiveForm | undefined) => form === 'doctor' ? DOCTOR_INCENTIVE_CODES : INCENTIVE_CODES;
-export const groupsOf = (form: IncentiveForm | undefined) => form === 'doctor' ? [DOCTOR_GROUP] : INCENTIVE_GROUPS;
+// Incentives HR has added (HR > Incentive). They sit next to the memo's codes. Every page that shows claims registers them from the server's reply first.
+export type ExtraIncentive = IncentiveCode & { id: string; form: IncentiveForm };
+let extraCodes: ExtraIncentive[] = [];
+export const setExtraCodes = (rows: ExtraIncentive[] | undefined) => { extraCodes = Array.isArray(rows) ? rows : []; };
+export const extraCodesOf = (form: IncentiveForm | undefined) => extraCodes.filter((item) => (item.form === 'doctor') === (form === 'doctor'));
+export const codesOf = (form: IncentiveForm | undefined): IncentiveCode[] => [...(form === 'doctor' ? DOCTOR_INCENTIVE_CODES : INCENTIVE_CODES), ...extraCodesOf(form)];
+export const groupsOf = (form: IncentiveForm | undefined) => { const base = form === 'doctor' ? [DOCTOR_GROUP] : INCENTIVE_GROUPS; return [...base, ...new Set(extraCodesOf(form).map((item) => item.group).filter((group) => group && !base.includes(group)))]; };
 
 // Staff branch codes (Assessment Room) and the clinic branches the Clinical Admin works on.
 export const INCENTIVE_BRANCHES: Record<string, string> = { KJ: 'Kajang', SK: 'Seri Kembangan' };

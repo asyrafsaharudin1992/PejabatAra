@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, FileDown, FileText, LogOu
 import { assessmentFetch, PageShell, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './IncentiveSheet';
 import { PrintPortal } from './PrintPortal';
-import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
 // phones like the Assessment Room (same session), add each procedure as they do it,
@@ -39,7 +39,7 @@ function AddEntry({ claim, rates, onAdded, onError }: { key?: string; claim: Cla
   const doctor = claim.form === 'doctor';
   const [saving, setSaving] = useState(false);
   const chosen = codesOf(claim.form).find((item) => item.code === code);
-  const procedure = doctor || !chosen || /^(\d|L)/.test(chosen.code);
+  const procedure = doctor || !chosen || (chosen.needsPatient ?? /^(\d|L)/.test(chosen.code));
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); onError('');
@@ -58,7 +58,7 @@ function AddEntry({ claim, rates, onAdded, onError }: { key?: string; claim: Cla
       <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Code incentive</span>
         <select required value={code} onChange={(event) => setCode(event.target.value)} className={field}>
           <option value="">Choose…</option>
-          {groupsOf(claim.form).map((group) => <optgroup key={group} label={group}>{codesOf(claim.form).filter((item) => item.group === group).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${rateOn(item.code, date, rates, claim.form)})`}</option>)}</optgroup>)}
+          {groupsOf(claim.form).filter((group) => codesOf(claim.form).some((item) => item.group === group && !item.inactive)).map((group) => <optgroup key={group} label={group}>{codesOf(claim.form).filter((item) => item.group === group && !item.inactive).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}{item.ownAmount ? '' : ` (RM ${rateOn(item.code, date, rates, claim.form)})`}</option>)}</optgroup>)}
         </select>
       </label>
       <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-700">Date</span><input required type="date" min={`${claim.month}-01`} max={lastDay} value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label>
@@ -108,7 +108,7 @@ export default function IncentiveClaims() {
     setError('');
     try {
       const [profile, result] = await Promise.all([me ? Promise.resolve({ staff: me }) : assessmentFetch('action=me'), assessmentFetch(`action=incentive&month=${month}`)]);
-      setMe(profile.staff); setClaim(result.claim); setHistory(result.history); setRates(result.rates || []);
+      setExtraCodes(result.extraCodes); setMe(profile.staff); setClaim(result.claim); setHistory(result.history); setRates(result.rates || []);
     } catch (cause: any) { if (cause.status === 401) setSignedIn(false); else setError(cause.message); }
   };
   useEffect(() => { if (signedIn) { setClaim(null); void load(); } }, [signedIn, month]);

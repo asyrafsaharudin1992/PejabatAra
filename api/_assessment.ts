@@ -9,7 +9,7 @@ import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 
 import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
 import { ASSISTANT_STAGES, assistantDueOn, type DueAssessment, type SkippedAssessment } from '../src/lib/assistantReview.js';
-import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn } from '../src/lib/incentiveCodes.js';
+import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn, setExtraCodes, ExtraIncentive } from '../src/lib/incentiveCodes.js';
 
 // Assessment Room. Served from /api/status?resource=assessment because the
 // Vercel Hobby plan allows only 12 functions.
@@ -111,6 +111,14 @@ export async function incentiveFormOf(db: any, staffId: string): Promise<Incenti
   return /\b(DR|DOCTOR)\b/i.test(data?.designation || '') ? 'doctor' : 'staff';
 }
 
+// The incentives HR has added to the forms. Before the migration has run there are none, so only the memo's codes exist.
+// Each caller refreshes the list first, because a server instance may still hold an older one.
+export async function extraIncentiveCodes(db: any): Promise<ExtraIncentive[]> {
+  const { data, error } = await db.from('hr_incentive_codes').select('id,form,code,name,rate,group_name,own_amount,needs_patient,active').order('created_at', { ascending: true });
+  const rows: ExtraIncentive[] = error ? [] : (data || []).map((row: any) => ({ id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', code: row.code, name: row.name, rate: Number(row.rate || 0), group: row.group_name || '', ownAmount: Boolean(row.own_amount), needsPatient: Boolean(row.needs_patient), inactive: !row.active, custom: true }));
+  setExtraCodes(rows);
+  return rows;
+}
 // The rate changes HR has set. Before the migration has run there are none, so the memo's rates apply.
 export async function incentiveRateChanges(db: any): Promise<RateChange[]> {
   let { data, error } = await db.from('hr_incentive_rates').select('id,form,code,rate,effective_from,set_by').order('effective_from', { ascending: true });
@@ -154,6 +162,7 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
       history: (data || []).map((claim: any) => ({ month: claim.month, status: claim.status, total: claimTotal(claim.entries || []), count: (claim.entries || []).length })),
       form: formNow,
       rates: await incentiveRateChanges(db),
+      extraCodes: await extraIncentiveCodes(db),
     });
   }
   if (staff.can_preview) throw fail(403, 'Preview accounts cannot make claims.');
@@ -164,14 +173,16 @@ async function incentiveAction(req: any, res: any, db: any, staff: { id: string;
     const existing = await editableClaim(db, staff.id, month);
     const entry = body.entry || {};
     const form = formNow;
+    await extraIncentiveCodes(db);
     const code = codesOf(form).find((item) => item.code === entry.code);
     if (!code) throw fail(400, 'Choose an incentive code.');
+    if (code.inactive) throw fail(400, 'This incentive is no longer available. Choose another one.');
     const date = text(entry.date, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month || date > malaysiaToday()) throw fail(400, 'The date must be in the claim month and not in the future.');
     const clinicId = text(entry.clinicId, 40);
     const patient = text(entry.patient, 120);
     // Staff procedures are done on a patient and the other incentives (A–I) are not; on the doctor form every line needs the patient's name.
-    if (form === 'doctor' ? !patient : /^(\d|L)/.test(code.code) && (!patient || !clinicId)) throw fail(400, form === 'doctor' ? 'Enter the patient name.' : 'Enter the patient name and clinic ID.');
+    if (form === 'doctor' ? !patient : (code.needsPatient ?? /^(\d|L)/.test(code.code)) && (!patient || !clinicId)) throw fail(400, form === 'doctor' ? 'Enter the patient name.' : 'Enter the patient name and clinic ID.');
     const rm = code.ownAmount ? Math.round(Number(entry.rm) * 100) / 100 : rateOn(code.code, date, await incentiveRateChanges(db), form);
     if (!Number.isFinite(rm) || rm <= 0 || rm > 2000) throw fail(400, 'Enter the amount (RM) for this incentive.');
     // The doctor form has a Sales commission column (RM typed by the doctor, shown on the form and not part of the incentive total).
