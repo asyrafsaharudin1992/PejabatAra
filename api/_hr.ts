@@ -1855,6 +1855,30 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true, salaryChanged: salary });
     }
 
+    // HR removes a line of the employment history. If it was the latest increment or salary adjustment and the basic salary still equals
+    // its "To" value, the basic salary goes back to its "From" value, so a wrongly keyed raise leaves nothing behind.
+    if (req.method === 'POST' && action === 'career_delete') {
+      const id = text(body.id, 60);
+      if (!id) throw fail(400, 'Choose the line to remove.');
+      const { data: row, error: readError } = await db.from('hr_career_history').select('employee_id,kind,event_date,from_value,to_value').eq('id', id).maybeSingle();
+      if (readError) throw readError;
+      if (!row) throw fail(404, 'That line was not found.');
+      let restored: number | null = null;
+      if (/^(increment|salary adjustment)$/i.test(row.kind) && row.from_value !== '' && Number.isFinite(Number(row.from_value))) {
+        const { data: latest } = await db.from('hr_career_history').select('id').eq('employee_id', row.employee_id).in('kind', ['Increment', 'Salary Adjustment']).order('event_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }).limit(1);
+        const { data: person } = await db.from('hr_employees').select('basic_salary').eq('id', row.employee_id).maybeSingle();
+        if (latest?.[0]?.id === id && Math.round(Number(person?.basic_salary || 0) * 100) === Math.round(Number(row.to_value) * 100)) restored = Math.round(Number(row.from_value) * 100) / 100;
+      }
+      const { error } = await db.from('hr_career_history').delete().eq('id', id);
+      if (error) throw error;
+      if (restored !== null) {
+        const { error: salaryError } = await db.from('hr_employees').update({ basic_salary: restored }).eq('id', row.employee_id);
+        if (salaryError) throw salaryError;
+      }
+      await db.from('hr_audit').insert({ employee_id: row.employee_id, action: 'update', changes: { history_removed: [`${row.kind} ${row.event_date || ''} ${row.from_value}>${row.to_value}`, ''], ...(restored !== null ? { basic_salary: [row.to_value, String(restored)] } : {}) }, changed_by: user.id });
+      return res.status(200).json({ success: true, salaryChanged: restored });
+    }
+
     // A pay raise: records it in the employment history (the pay run pays the days before the date at the old salary) and sets the new basic salary.
     if (req.method === 'POST' && action === 'increment_save') {
       const employeeId = text(body.employeeId, 60), date = text(body.date, 10), next = Math.round(Number(body.newSalary) * 100) / 100;

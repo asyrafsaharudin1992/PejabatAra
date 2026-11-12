@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, CalendarCheck, CalendarDays, Users, UserMinus, UserRoundPlus, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, ExternalLink, HeartPulse, Home, Stethoscope, LogOut, Menu, UsersRound, X } from 'lucide-react';
+import { ArrowUpRight, CalendarCheck, CalendarDays, Users, UserMinus, UserRoundPlus, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, ExternalLink, HeartPulse, Home, IdCard, Stethoscope, LogOut, Menu, UsersRound, X } from 'lucide-react';
 import { CareReviewPage } from './CareReviewUI';
 import { HRRoster, guessName } from './HRRoster';
 import COOCalendar from './COOCalendar';
@@ -222,7 +222,7 @@ export default function OfficeCOO() {
       {/* Phone and tablet: a slim header and a floating tab bar at the bottom (like AraLocum); the full menu opens from "More". */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-md lg:hidden"><div className="flex items-center justify-between gap-3 px-4 py-3"><div className="flex min-w-0 items-center gap-2.5"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#082f49] text-[#70d8fa]"><UsersRound className="h-[18px] w-[18px]" /></span><div className="min-w-0"><p className="text-[10px] font-bold uppercase leading-none tracking-[0.18em] text-[#18bff2]">Office COO</p><h1 className="mt-0.5 truncate text-[15px] font-semibold leading-tight tracking-tight">{title}</h1></div></div><button className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu className="h-[18px] w-[18px]" /></button></div></header>
       <main className="p-3 pb-28 sm:p-6 sm:pb-28 lg:p-[38px]">
-        {view === 'clinical' || view === 'ca' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}>{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : <OfficePortal key="ca" embedded />}</Suspense> :
+        {view === 'clinical' || view === 'ca' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}><div className="max-sm:[zoom:0.84]">{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : <OfficePortal key="ca" embedded />}</div></Suspense> :
         <div className="mx-auto max-w-[1500px] space-y-5">
           {view === 'home' && <section className="ara-hero rounded-[18px] px-4 py-3.5 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
             <div className="flex flex-col gap-4 sm:gap-7 md:flex-row md:items-start md:justify-between">
@@ -244,8 +244,8 @@ export default function OfficeCOO() {
         </div>}
       </main>
       <nav aria-label="Main" className="fixed inset-x-4 bottom-4 z-40 flex select-none justify-around rounded-2xl border border-slate-100 bg-white/95 px-2 py-2 shadow-[0_8px_30px_rgba(15,23,42,0.16)] backdrop-blur-md lg:hidden">
-        {(['home', 'leave', 'attendance', 'roster'] as View[]).map((id) => { const item = NAV.find((entry) => entry.id === id)!; const current = view === id; return <button key={id} type="button" onClick={() => navigate(id)} aria-current={current ? 'page' : undefined} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${current ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><item.icon className="h-[21px] w-[21px]" strokeWidth={current ? 2.2 : 1.8} /><span className="max-w-[64px] truncate text-[9.5px] leading-tight">{item.label}</span></button>; })}
-        <button type="button" onClick={() => setMenuOpen(true)} className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-slate-400 outline-none"><Menu className="h-[21px] w-[21px]" strokeWidth={1.8} /><span className="text-[9.5px] leading-tight">More</span></button>
+        {([['home', 'Home', Home], ['clinical', 'Clinical Admin', ClipboardList], ['ca', 'CA office', GraduationCap]] as const).map(([id, label, Icon]) => { const current = view === id; return <button key={id} type="button" onClick={() => navigate(id)} aria-current={current ? 'page' : undefined} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${current ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Icon className="h-[21px] w-[21px]" strokeWidth={current ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">{label}</span></button>; })}
+        <a href="#office/individual" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-slate-400 outline-none"><IdCard className="h-[21px] w-[21px]" strokeWidth={1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">Individual</span></a>
       </nav>
     </div>
   </div>;

@@ -533,7 +533,7 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
   if (error) return <Banner tone="error">{error}</Banner>;
   if (!data) return <p className="mt-6 text-sm text-slate-500">Loading summary…</p>;
   const today = Number(data.date.slice(8, 10));
-  return <div className="grid gap-4 md:grid-cols-2">{data.branches.map((row) => {
+  return <div className="grid gap-3 sm:gap-4 md:grid-cols-2">{data.branches.map((row) => {
     const pending = row.report ? ALL_ITEMS.filter((id) => (row.report!.checks[id]?.status || 'pending') === 'pending').length : null;
     const lateMonthly = MONTHLY.filter((task) => task.due !== null && today > task.due && !row.monthlyDone.includes(task.id) && !(row.hiddenMonthly || []).includes(task.id));
     return <section key={row.branch} className={card}>
@@ -798,20 +798,20 @@ const BRANCH_CODES: Record<string, string> = { Kajang: 'KJ', 'Seri Kembangan': '
 
 function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
-  return <div className="mx-auto max-w-[1500px] space-y-8">
+  return <div className="mx-auto max-w-[1500px] space-y-4 sm:space-y-8">
     {/* Same layout as the CA office's Home: greeting on the left, date and a quote on the right. */}
-    <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
-      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 text-base text-[#bed2df]">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
-        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
+    <section className="ara-hero rounded-[18px] px-4 py-3.5 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
+      <div className="flex flex-col gap-3 sm:gap-7 md:flex-row md:items-start md:justify-between">
+        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] sm:mt-3 sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 hidden text-base text-[#bed2df] sm:block">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
+        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-4 py-2 text-xs font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-4 hidden text-sm italic leading-6 text-[#a9c1d0] sm:block md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
       </div>
     </section>
-    {overseer && <section><div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Today</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Both branches</span></div><Summary onOpen={onOpenBranch} /></section>}
+    {overseer && <section><div className="mb-2 flex items-end justify-between gap-4 sm:mb-4"><h3 className="text-lg font-semibold tracking-tight sm:text-2xl">Today</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Both branches</span></div><Summary onOpen={onOpenBranch} /></section>}
     <section>
-      <div className="mb-4 flex items-end justify-between gap-4"><h3 className="text-2xl font-semibold tracking-tight">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group min-h-[132px] rounded-[24px] bg-[#0b3d59] p-5 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c]">
-        <div className="flex items-center justify-between"><item.icon className={`h-6 w-6 ${item.tone}`} /><ArrowRight className="h-4 w-4 text-white/40 transition group-hover:translate-x-0.5 group-hover:text-white" /></div>
-        <p className="mt-6 font-semibold">{item.label}</p><p className="mt-1 text-sm text-[#9bb5c7]">{item.note}</p>
+      <div className="mb-2 flex items-end justify-between gap-4 sm:mb-4"><h3 className="text-lg font-semibold tracking-tight sm:text-2xl">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group rounded-2xl bg-[#0b3d59] p-3 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c] sm:min-h-[132px] sm:rounded-[24px] sm:p-5">
+        <div className="flex items-center justify-between"><item.icon className={`h-5 w-5 sm:h-6 sm:w-6 ${item.tone}`} /><ArrowRight className="h-4 w-4 text-white/40 transition group-hover:translate-x-0.5 group-hover:text-white" /></div>
+        <p className="mt-2.5 text-[13px] font-semibold leading-tight sm:mt-6 sm:text-base">{item.label}</p><p className="mt-1 hidden text-sm text-[#9bb5c7] sm:block">{item.note}</p>
       </button>)}</div>
     </section>
   </div>;
