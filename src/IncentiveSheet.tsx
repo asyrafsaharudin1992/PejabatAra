@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { approvedTotal, claimTotal, dmy, IncentiveEntry, IncentiveStatus, IncentiveForm } from './lib/incentiveCodes';
+import { approvedTotal, claimTotal, dmy, nightTotal, otherTotal, IncentiveEntry, IncentiveStatus, IncentiveForm } from './lib/incentiveCodes';
 import { PrintPage } from './PrintPortal';
 
 // The memo's STAFF INCENTIVES sheet, shared by the staff page (View form) and the Clinical
@@ -63,8 +63,24 @@ function SheetTable({ claim, entries, last }: { claim: SheetClaim; entries: Ince
   return <>
     <table className="mt-[3mm] w-full border-collapse"><thead><tr className="font-bold"><th className={cell}>Date</th><th className={cell}>{doctor ? 'Patient name' : 'Patient name/Details'}</th><th className={cell}>{doctor ? 'Plato ID' : 'Patient clinic ID'}</th><th className={cell}>Outstanding payment</th>{doctor && <th className={cell}>Sales commission</th>}<th className={cell}>Code Incentive</th><th className={cell}>RM</th><th className={cell}>Approved ( / )</th></tr></thead>
       <tbody>{entries.map((entry) => <tr key={entry.id}><td className={`${cell} whitespace-nowrap`}>{dmy(entry.date)}</td><td className={cell}>{entry.patient}</td><td className={cell}>{entry.clinicId}</td><td className={cell}>{entry.outstanding}</td>{doctor && <td className={`${cell} text-right`}>{entry.commission === undefined ? '' : entry.commission.toFixed(2)}</td>}<td className={`${cell} text-center`}>{entry.code}</td><td className={`${cell} text-right`}>{entry.rm.toFixed(2)}</td><td className={`${cell} text-center`}>{entry.review === 'rejected' ? '✗' : entry.review === 'approved' ? '✓' : ''}</td></tr>)}</tbody>
-      {last && <tfoot><tr className="font-bold"><td colSpan={doctor ? 6 : 5} className={`${cell} text-right`}>Total Claimed Incentives</td><td className={`${cell} text-right`}>{claimTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>
-        {claim.entries.some((entry) => entry.review) && <tr className="font-bold"><td colSpan={doctor ? 6 : 5} className={`${cell} text-right`}>Total Approved Incentives</td><td className={`${cell} text-right`}>{approvedTotal(claim.entries).toFixed(2)}</td><td className={cell} /></tr>}</tfoot>}
+      {last && <tfoot>
+        {(() => {
+          const span = doctor ? 6 : 5;
+          const row = (label: string, value: number, bold = true) => <tr key={label} className={bold ? 'font-bold' : ''}><td colSpan={span} className={`${cell} text-right`}>{label}</td><td className={`${cell} text-right`}>{value.toFixed(2)}</td><td className={cell} /></tr>;
+          // A claim with Night Shift Allowance shows it apart: the other incentives, the night shift, and the total of both.
+          const split = !doctor && claim.entries.some((entry) => entry.code === 'B');
+          const reviewed = claim.entries.some((entry) => entry.review);
+          const approved = claim.entries.filter((entry) => entry.review === 'approved');
+          return <>
+            {split && row('Total Incentives (without Night Shift)', otherTotal(claim.entries), false)}
+            {split && row('Night Shift Allowance', nightTotal(claim.entries), false)}
+            {row(split ? 'Total Claimed (Incentives + Night Shift)' : 'Total Claimed Incentives', claimTotal(claim.entries))}
+            {reviewed && split && row('Approved Incentives (without Night Shift)', otherTotal(approved), false)}
+            {reviewed && split && row('Approved Night Shift Allowance', nightTotal(approved), false)}
+            {reviewed && row(split ? 'Total Approved (Incentives + Night Shift)' : 'Total Approved Incentives', approvedTotal(claim.entries))}
+          </>;
+        })()}
+      </tfoot>}
     </table>
     {last && <div className="mt-[4mm] flex gap-[40mm] font-bold"><span>Prepared by: <span className="font-normal">{claim.staffName}</span></span><span>Approved by: <span className="font-normal">{claim.status === 'approved' ? claim.approvedBy : ''}</span></span></div>}
   </>;

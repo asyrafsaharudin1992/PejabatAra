@@ -1,5 +1,6 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { FormEvent, lazy, ReactNode, Suspense, useContext, useEffect, useMemo, useState } from 'react';
+import { OfficeShortcuts } from './lib/officeShortcuts';
+import { ArrowLeft, ArrowRightLeft, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
@@ -553,7 +554,7 @@ function Summary({ onOpen }: { onOpen: (branch: string) => void }) {
 }
 
 
-type View = 'home' | 'report' | 'history' | 'orders' | 'bookings' | 'contacts' | 'incentives' | 'forms' | 'panel' | 'links';
+type View = 'home' | 'caoffice' | 'report' | 'history' | 'orders' | 'bookings' | 'contacts' | 'incentives' | 'forms' | 'panel' | 'links';
 
 // Sidebar tabs besides Home. Quick access on Home is built from this list too, as in the CA office.
 // Turn back on together with the Orders tab.
@@ -569,7 +570,7 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'panel', label: 'Panel', note: 'Panel guides & portals', icon: BookOpen, tone: 'text-emerald-400' },
   { id: 'links', label: 'Important Links', note: 'Work systems', icon: Link2, tone: 'text-[#20c7f4]' },
 ];
-const TITLES: Record<View, string> = { home: 'Home', report: 'Daily Checklist', history: 'History', contacts: 'Quick Contact', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', forms: 'Print Forms', panel: 'Panel', links: 'Important Links' };
+const TITLES: Record<View, string> = { home: 'Home', caoffice: 'CA office', report: 'Daily Checklist', history: 'History', contacts: 'Quick Contact', orders: 'Orders', bookings: 'Vaccine Bookings', incentives: 'Incentive Claims', forms: 'Print Forms', panel: 'Panel', links: 'Important Links' };
 
 // Shown until System Admin saves its own list in the Important Links tab.
 const DEFAULT_LINKS: QuickLink[] = [
@@ -579,10 +580,14 @@ const DEFAULT_LINKS: QuickLink[] = [
   { id: 'zuellig', title: 'Zuellig Pharma', url: 'https://my.ezrx.com/', description: 'eZRx ordering', group: 'Orders' },
 ];
 
+// The CA office opens inside this office (on the right), like it does in the COO office.
+const CAOffice = lazy(() => import('./PortalApp'));
+
 function LogoMark() { return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><Stethoscope className="h-6 w-6" /></div>; }
 
 function Sidebar({ view, open, branches, branch, viewAs, counts, onViewAs, onClose, onNavigate, onLogout }: { view: View; open: boolean; branches: string[]; branch: string; viewAs: string; counts: Partial<Record<View, number>>; onViewAs: (name: string) => void; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
   const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]' }, ...TABS];
+  const shortcuts = useContext(OfficeShortcuts);
   return <>
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
     <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto overscroll-contain border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -596,7 +601,11 @@ function Sidebar({ view, open, branches, branch, viewAs, counts, onViewAs, onClo
       <nav className="mt-6 flex-1 space-y-1">{items.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#162a43] shadow-[0_10px_28px_rgba(0,0,0,0.18)]' : 'text-[#e3ecf5] hover:bg-white/[0.07] hover:text-white'}`}>
         <item.icon className={`h-[18px] w-[18px] shrink-0 ${item.id === 'home' && view === 'home' ? 'text-[#5b4cf0]' : item.tone}`} strokeWidth={1.8} />{item.label}
         {counts[item.id] ? <span className="ml-auto grid h-6 min-w-6 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] text-white">{counts[item.id]}</span> : <ChevronRight className="ml-auto h-4 w-4 opacity-45" />}
-      </button>)}</nav>
+      </button>)}
+      {shortcuts && <div className="mt-6 space-y-1 border-t border-white/10 pt-4"><p className="px-3.5 pb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">Other offices</p>
+        {shortcuts.offices.map((room) => room.id === 'ca' ? <button key={room.id} type="button" onClick={() => onNavigate('caoffice')} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-left text-[13.5px] font-semibold transition ${view === 'caoffice' ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><ArrowRightLeft className="h-[18px] w-[18px] shrink-0 text-[#ffd166]" strokeWidth={1.8} />{room.short} office</button> : <a key={room.id} href={`#office/${room.id}`} className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><ArrowRightLeft className="h-[18px] w-[18px] shrink-0 text-[#ffd166]" strokeWidth={1.8} />{room.short} office</a>)}
+        <a href={shortcuts.back.href} className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><ArrowLeft className="h-[18px] w-[18px] shrink-0 text-[#7f9bb0]" strokeWidth={1.8} />{shortcuts.back.label}</a></div>}
+      </nav>
       <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
         <div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">{branches.length > 1 && viewAs === 'all' ? 'All' : BRANCH_CODES[branch] || '—'}</div><div className="min-w-0"><p className="truncate text-sm font-semibold">{branches.length > 1 && viewAs !== 'all' ? `Viewing as ${ADMIN_NAMES[branch] || branch}` : ADMIN_NAMES[branch] && branches.length === 1 ? `${ADMIN_NAMES[branch]} · Clinical Admin` : 'Clinical Admin'}</p><p className="truncate text-xs text-[#9bb5c7]">{branches.length > 1 && viewAs === 'all' ? 'All branches' : branch || 'No branch assigned'}</p></div></div>
         <button onClick={onLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
@@ -882,7 +891,8 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
         {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
         {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
-        {view !== 'home' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
+        {view === 'caoffice' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the CA office…</p>}><CAOffice key="ca" embedded /></Suspense>}
+        {view !== 'home' && view !== 'caoffice' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}
         {day && <div key={`${day.branch}-${day.date}`} className={view === 'report' ? '' : 'hidden'}><DailyReport day={day} reload={load} onError={onError} onPatch={(change) => setDay((current) => current && change(current))} /></div>}
         {view === 'orders' && day && <Orders day={day} reload={load} onError={onError} />}

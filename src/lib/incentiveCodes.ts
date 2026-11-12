@@ -73,6 +73,10 @@ export const INCENTIVE_BRANCHES: Record<string, string> = { KJ: 'Kajang', SK: 'S
 export type IncentiveEntry = { id: string; date: string; patient: string; clinicId: string; outstanding: string; code: string; rm: number; form?: 'doctor'; commission?: number; review?: 'approved' | 'rejected'; reason?: string };
 export type IncentiveStatus = 'draft' | 'submitted' | 'approved' | 'returned';
 export const claimTotal = (entries: IncentiveEntry[]) => Math.round(entries.reduce((total, entry) => total + Number(entry.rm || 0), 0) * 100) / 100;
+// The Night Shift Allowance (code B) is shown apart from the other incentives on the printed claim.
+export const NIGHT_CODE = 'B';
+export const nightTotal = (entries: IncentiveEntry[]) => claimTotal(entries.filter((entry) => entry.code === NIGHT_CODE));
+export const otherTotal = (entries: IncentiveEntry[]) => claimTotal(entries.filter((entry) => entry.code !== NIGHT_CODE));
 export const approvedTotal = (entries: IncentiveEntry[]) => claimTotal(entries.filter((entry) => entry.review === 'approved'));
 
 // Display helpers shared by the staff page, the Clinical Admin page and the printed sheet.
