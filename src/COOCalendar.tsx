@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { calendarEventOnDate, calendarEventOverdue, isMonthlyHrTask, shiftCalendarDays, type CalendarCategory, type CalendarEvent, type CalendarRule } from './lib/hrCalendar';
@@ -67,15 +67,31 @@ export default function COOCalendar() {
       <div className="min-w-0 flex-1"><p className={`text-sm font-semibold ${event.state === 'done' ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{event.title}</p><p className="text-xs text-slate-500">{dayLabel(event.date)}{event.notes ? ` · ${event.notes}` : ''}</p></div>
       {rule(event) && <button type="button" onClick={() => open(rule(event))} className="text-xs font-semibold text-[#0b587b] hover:underline">Edit</button>}</div></article>;
 
-  return <section className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-xl font-semibold tracking-tight">My calendar &amp; reminders</h3><p className="mt-1 text-sm text-slate-500">Your own reminders. Add one for a date, repeat it, and tick it Done.</p></div><button type="button" disabled={loading || busy} onClick={() => open()} className={primaryButton}><Plus size={16} />Add reminder</button></div>
-    <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={busy || loading} aria-label="Previous month" onClick={() => go(shiftMonth(month, -1))} className={button}><ChevronLeft size={17} /></button><h4 className="min-w-[170px] text-center text-lg font-semibold">{monthLabel(month)}</h4><button type="button" disabled={busy || loading} aria-label="Next month" onClick={() => go(shiftMonth(month, 1))} className={button}><ChevronRight size={17} /></button>{month !== today.slice(0, 7) && <button type="button" onClick={() => go(today.slice(0, 7))} className="text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}</div>
+  return <section className="space-y-4 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm sm:rounded-[24px] sm:p-6">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-semibold tracking-tight sm:text-xl">My calendar &amp; reminders</h3><p className="mt-1 hidden text-sm text-slate-500 sm:block">Your own reminders. Add one for a date, repeat it, and tick it Done.</p></div><button type="button" disabled={loading || busy} onClick={() => open()} className={primaryButton}><Plus size={16} />Add reminder</button></div>
+    <div className="hidden flex-wrap items-center gap-2 sm:flex"><button type="button" disabled={busy || loading} aria-label="Previous month" onClick={() => go(shiftMonth(month, -1))} className={button}><ChevronLeft size={17} /></button><h4 className="min-w-[170px] text-center text-lg font-semibold">{monthLabel(month)}</h4><button type="button" disabled={busy || loading} aria-label="Next month" onClick={() => go(shiftMonth(month, 1))} className={button}><ChevronRight size={17} /></button>{month !== today.slice(0, 7) && <button type="button" onClick={() => go(today.slice(0, 7))} className="text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}</div>
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     {!loading && <div className="flex flex-wrap gap-2 text-xs"><span className="rounded-lg bg-sky-50 px-3 py-2 text-sky-800">{events.filter((event) => event.state !== 'done').length} pending</span><span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-800">{events.filter((event) => calendarEventOverdue(event, today)).length} overdue</span><span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">{events.filter((event) => event.state === 'done').length} done</span></div>}
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
-      <div className="min-w-0 overflow-x-auto"><div className="min-w-[480px]">
-        <div className="grid grid-cols-7 text-center text-xs font-semibold text-slate-500">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((name) => <p key={name} className="py-1">{name}</p>)}</div>
-        <div className="grid grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200">{cells.map((date) => {
+      <div className="min-w-0 overflow-x-auto"><div className="sm:min-w-[480px]">
+        {/* Phone: the month on a dark card with square day tiles and coloured dots, like AraLocum; the day's reminders show below. */}
+        <div className="rounded-[24px] bg-gradient-to-br from-[#082f49] via-[#0a3b5d] to-[#0d5078] p-3 text-white shadow-[0_12px_30px_rgba(8,47,73,0.14)] sm:hidden">
+          <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-1.5"><CalendarDays className="h-4 w-4 text-sky-300" /><h4 className="text-sm font-bold tracking-tight">{monthLabel(month)}</h4>{month !== today.slice(0, 7) && <button type="button" onClick={() => go(today.slice(0, 7))} className="ml-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold">Today</button>}</div>
+            <div className="flex items-center gap-1 rounded-xl bg-white/10 p-0.5"><button type="button" disabled={busy || loading} aria-label="Previous month" onClick={() => go(shiftMonth(month, -1))} className="rounded-lg p-1.5 text-white"><ChevronLeft className="h-4 w-4" /></button><button type="button" disabled={busy || loading} aria-label="Next month" onClick={() => go(shiftMonth(month, 1))} className="rounded-lg p-1.5 text-white"><ChevronRight className="h-4 w-4" /></button></div></div>
+          <div className="mb-1 grid grid-cols-7 gap-1 text-center">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((name, index) => <span key={name} className={`py-1 text-[10px] font-bold uppercase tracking-wider ${index > 4 ? 'text-rose-200' : 'text-slate-300'}`}>{name}</span>)}</div>
+          <div className="grid grid-cols-7 gap-1.5">
+            {Array.from({ length: lead }, (_blank, index) => <div key={`pb${index}`} className="aspect-square rounded-xl bg-white/5" />)}
+            {cells.filter((date) => date.slice(0, 7) === month).map((date) => {
+              const here = events.filter((event) => showsOn(event, date)); const chosen = date === selected;
+              return <button key={date} type="button" onClick={() => setSelected(date)} aria-pressed={chosen} aria-label={`${dayLabel(date)}, ${here.length} reminders`} className={`relative flex aspect-square flex-col items-center justify-between rounded-2xl border p-1.5 text-xs transition active:scale-95 ${chosen ? 'border-[#001F3F] bg-[#001F3F] font-bold text-white shadow-md ring-2 ring-sky-300' : date === today ? 'border-sky-300 bg-white text-slate-800' : 'border-slate-100 bg-white text-slate-800'}`}>
+                <span className="self-start text-[11px] font-medium leading-none">{Number(date.slice(8))}</span>
+                {here.length > 0 && <span className="flex items-center justify-center gap-0.5">{here.slice(0, 3).map((event) => <i key={event.id} className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: event.state === 'done' ? '#10b981' : chosen ? '#ffffff' : tone(event.category)[1] }} />)}{here.length > 3 && <b className="text-[8px] font-mono opacity-70">+{here.length - 3}</b>}</span>}
+              </button>;
+            })}
+          </div>
+        </div>
+        <div className="hidden grid-cols-7 text-center text-xs font-semibold text-slate-500 sm:grid">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((name) => <p key={name} className="py-1">{name}</p>)}</div>
+        <div className="hidden grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200 sm:grid">{cells.map((date) => {
           const current = date.slice(0, 7) === month, here = current ? events.filter((event) => showsOn(event, date)) : [];
           return <button key={date} type="button" disabled={!current} onClick={() => setSelected(date)} aria-pressed={date === selected} className={`flex min-h-[72px] flex-col items-stretch border-b border-r border-slate-200 p-1 text-left align-top ${!current ? 'bg-slate-50 text-slate-300' : date === selected ? 'bg-sky-50 ring-2 ring-inset ring-[#0b587b]' : 'bg-white hover:bg-slate-50'}`}>
             <span className={`mb-0.5 text-xs font-semibold ${date === today ? 'grid h-5 w-5 place-items-center rounded-full bg-[#0b587b] text-white' : ''}`}>{Number(date.slice(8))}</span>

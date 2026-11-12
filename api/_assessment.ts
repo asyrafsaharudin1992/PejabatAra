@@ -7,7 +7,7 @@ import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewFull, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
-import { activeAccount, hashSecret, serviceDb, errorReply } from './_office-db.js';
+import { activeAccount, currentDevice, deviceLockEnabled, hashSecret, serviceDb, errorReply } from './_office-db.js';
 import { payslipPdf } from './_payslip-pdf.js';
 import { ASSISTANT_STAGES, assistantDueOn, type DueAssessment, type SkippedAssessment } from '../src/lib/assistantReview.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn, setExtraCodes, ExtraIncentive } from '../src/lib/incentiveCodes.js';
@@ -651,6 +651,24 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
+  // The COO opens the COO office from their Individual Sign In without typing the office email and password again, and without the
+  // device key: their own sign-in (name, staff code, password) is the proof. Only the person whose job title is COO gets this.
+  if (req.method === 'POST' && action === 'coo_office_session') {
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,designation,status').eq('assessment_staff_id', staff.id).maybeSingle();
+    if (meError) throw meError;
+    if (!me || me.status !== 'Active' || !isCooTitle(me.designation)) throw fail(403, 'This is for the COO only.');
+    const { data: link, error: linkError } = await db.auth.admin.generateLink({ type: 'magiclink', email: COO_OFFICE_EMAIL });
+    if (linkError || !link?.properties?.hashed_token || !link.user) throw fail(500, 'The COO office account is not ready. Ask System Admin.');
+    // A phone that is not registered yet is registered here (30 days), as the sign-in already proves who it is.
+    let device: { token: string; name: string } | null = null;
+    if (await deviceLockEnabled(db) && !(await currentDevice(db, req))) {
+      const token = randomBytes(32).toString('base64url');
+      const { error: deviceError } = await db.from('registered_devices').insert({ name: 'COO phone', token_hash: hashSecret(token), registered_by: link.user.id, expires_at: new Date(Date.now() + 30 * 24 * 3600000).toISOString(), last_seen_at: new Date().toISOString() });
+      if (deviceError) throw deviceError;
+      device = { token, name: 'COO phone' };
+    }
+    return res.status(200).json({ tokenHash: link.properties.hashed_token, device });
+  }
   if (req.method === 'POST' && action === 'set_password') {
     const { data: row, error: rowError } = await db.from('assessment_staff').select('staff_code,password_hash').eq('id', staff.id).single();
     if (rowError) throw rowError;
@@ -974,6 +992,7 @@ async function adminAction(req: any, res: any, action: string, body: any) {
   throw fail(405, 'Method not allowed.');
 }
 
+const COO_OFFICE_EMAIL = 'operation@hsohealthcare.com';
 const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt', 'reset_password']);
 
 export async function assessmentHandler(req: any, res: any) {

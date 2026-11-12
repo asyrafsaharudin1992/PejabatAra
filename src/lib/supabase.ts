@@ -32,6 +32,28 @@ const roleMap: Record<string, UserRole> = {
   staff: "Staff",
 };
 
+// The COO opens the office from their Individual Sign In: the server gives a one-time token for the COO office account, and this turns it into the same office sign-in as the email and password one.
+export async function signInWithOfficeToken(tokenHash: string): Promise<PortalUser> {
+  if (!supabase) throw new Error("Supabase belum dikonfigurasi");
+  await supabase.auth.initialize();
+  const { data: authData, error: authError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' });
+  if (authError || !authData.user || !authData.session) throw authError || new Error("Log masuk gagal");
+  const identity = await fetchOfficeIdentity(authData.session.access_token);
+  const { data: membership } = await supabase.from("staff_branches").select("branches(name)").eq("profile_id", authData.user.id).limit(1).maybeSingle();
+  const branchRecord = membership?.branches as unknown as { name?: string } | null;
+  return {
+    id: authData.user.id,
+    email: authData.user.email || "",
+    fullName: identity.fullName || authData.user.user_metadata?.full_name || "Operations",
+    role: roleMap[identity.role] || "Staff",
+    department: identity.department || "Department not assigned",
+    branch: branchRecord?.name || "Cawangan belum ditetapkan",
+    status: identity.status,
+    lastActive: "Sekarang",
+    officeAccess: Array.isArray(authData.user.app_metadata?.office_access) ? authData.user.app_metadata.office_access : [],
+  };
+}
+
 export async function getOfficeIdentity() {
   if (!supabase) throw new OfficeIdentityError('Supabase is not configured.', 503);
   const { data, error } = await supabase.auth.getSession();

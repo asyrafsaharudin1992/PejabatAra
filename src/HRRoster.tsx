@@ -57,7 +57,7 @@ const MONDAY_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // A row of choices where one is lit, like a segmented control.
 function Choice<T extends string>({ value, onChange, options, label }: { value: T; onChange: (next: T) => void; options: [T, ReactNode][]; label: string }) {
-  return <div role="group" aria-label={label} className="inline-flex rounded-xl bg-slate-100 p-1">{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)} className={`h-8 rounded-lg px-3.5 text-sm font-semibold transition ${value === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>;
+  return <div role="group" aria-label={label} className="inline-flex rounded-xl bg-slate-100 p-0.5 sm:p-1">{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)} className={`h-7 rounded-lg px-2.5 text-xs font-semibold transition sm:h-8 sm:px-3.5 sm:text-sm ${value === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>;
 }
 
 // `readOnly`: the COO looks at the roster but cannot change it (no editing, no upload, no upload). A trial pattern draft can be allowed with `canDraft`: it only calculates on screen and saves nothing.
@@ -133,11 +133,13 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
   };
   // The name each person signs in with; a guess from the full name only if they have no sign-in yet.
   const shortName = (person: Person) => person.short || guessName(person.name);
+  // The COO sees short names on screen (HR keeps the full names).
+  const label = (person: Person) => readOnly ? shortName(person) : person.name;
   const lead = (new Date(`${month}-01T00:00:00`).getDay() + 6) % 7;
   const detail = picked ? onDate(picked) : null;
   const today = new Date().toLocaleDateString('en-CA');
   const nav = 'grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
-  const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700';
+  const field = 'h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 sm:h-10 sm:text-sm';
 
   const printPeople = view === 'calendar' && selected ? [selected] : people;
   const printPages = Array.from({ length: Math.ceil(printPeople.length / 10) }, (_, index) => printPeople.slice(index * 10, (index + 1) * 10));
@@ -157,15 +159,15 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
           <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
           {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-1 text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-10 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-4 text-sm font-semibold text-[#0b587b]">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+        <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-9 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
         {!readOnly && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-slate-100 pt-4">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 pt-3 sm:gap-x-5 sm:gap-y-3 sm:pt-4">
         <Choice label="Who" value={group} onChange={setGroup} options={[['staff', 'Staff'], ['doctors', 'Doctors']]} />
         <Choice label="Clinic" value={company} onChange={setCompany} options={[...(view === 'table' ? [['', 'KJ and SK'] as [string, string]] : []), ['KJ', 'KJ'], ['SK', 'SK']]} />
-        <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />
+        {!readOnly && <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />}
         <Choice label="View" value={view} onChange={(next) => { setView(next); if (next === 'calendar' && !company) setCompany('KJ'); }} options={[['table', 'Table'], ['calendar', 'Calendar']]} />
-        {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={field}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>}
+        {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={`${field} max-w-[130px] sm:max-w-none`}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{label(person)}</option>)}</select>}
       </div>
     </section>
     {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
@@ -174,15 +176,31 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
     <section className={`${card} overflow-x-auto`}>
       {!data ? <p className="text-sm text-slate-500">Loading…</p> : !people.length ? <p className="text-sm text-slate-500">{empty}</p> : view === 'table' ?
         <table className="border-separate border-spacing-0 text-xs">
-          <thead><tr><th className="sticky left-0 z-10 min-w-[210px] bg-white px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
+          <thead><tr><th className="sticky left-0 z-10 min-w-[110px] bg-white px-3 py-2 text-left sm:min-w-[210px] text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
-            <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800">{person.name}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
+            <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800" title={person.name}>{label(person)}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
             {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><button type="button" onClick={() => startEdit(person, date, day)} title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 w-full cursor-pointer place-items-center rounded-md px-0.5 text-[11px] font-bold transition hover:ring-2 hover:ring-[#0b587b]/40 ${cellTone(day && { ...day, shift: shown(day.shift) })}`}>{day ? shown(day.shift) : '·'}</button></td>; })}
           </tr>)}</tbody>
         </table> :
-        <div className="min-w-[760px]">
-          <div className="grid grid-cols-7 text-center text-xs font-semibold text-slate-500">{MONDAY_FIRST.map((name) => <p key={name} className="py-1">{name}</p>)}</div>
-          <div className="grid grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200">
+        <div className="sm:min-w-[760px]">
+          {/* Phone: square day tiles with coloured dots on a dark card, like AraLocum; the details of the chosen day show below. */}
+          <div className="rounded-[24px] bg-gradient-to-br from-[#082f49] via-[#0a3b5d] to-[#0d5078] p-3 text-white shadow-[0_12px_30px_rgba(8,47,73,0.14)] sm:hidden">
+            <div className="mb-1 grid grid-cols-7 gap-1 text-center">{MONDAY_FIRST.map((name, index) => <span key={name} className={`py-1 text-[10px] font-bold uppercase tracking-wider ${index > 4 ? 'text-rose-200' : 'text-slate-300'}`}>{name}</span>)}</div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {Array.from({ length: lead }, (_, index) => <div key={`pl-${index}`} className="aspect-square rounded-xl bg-white/5" />)}
+              {dates.map((date) => {
+                const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined;
+                const chosen = picked === date; const total = here.shifts.reduce((sum, [, who]) => sum + who.length, 0) + here.leave.length;
+                return <button key={date} type="button" onClick={() => selected ? startEdit(selected, date, own) : setPicked(picked === date ? '' : date)} aria-pressed={chosen} aria-label={`${date}, ${total} on the roster`} className={`relative flex aspect-square flex-col items-center justify-between rounded-2xl border p-1.5 text-xs transition active:scale-95 ${chosen ? 'border-[#001F3F] bg-[#001F3F] font-bold text-white shadow-md ring-2 ring-sky-300' : date === today ? 'border-sky-300 bg-white text-slate-800' : 'border-slate-100 bg-white text-slate-800'}`}>
+                  <span className="self-start text-[11px] font-medium leading-none">{Number(date.slice(8))}</span>
+                  {selected ? <span className={`mb-0.5 rounded px-1 text-[9px] font-bold leading-4 ${own ? cellTone({ ...own, shift: shown(own.shift) }) : 'text-slate-300'}`}>{own ? shown(own.shift) : '·'}</span>
+                    : total > 0 && <span className="flex items-center justify-center gap-0.5">{here.shifts.slice(0, 3).map(([shift]) => <i key={shift} className={`h-1.5 w-1.5 rounded-full ${shift === 'PM' ? 'bg-amber-400' : isOffice(shift) ? 'bg-sky-400' : 'bg-emerald-400'}`} />)}{here.leave.length > 0 && <i className="h-1.5 w-1.5 rounded-full bg-rose-400" />}<b className="ml-0.5 text-[8px] font-mono opacity-70">{total}</b></span>}
+                </button>;
+              })}
+            </div>
+          </div>
+          <div className="hidden grid-cols-7 text-center text-xs font-semibold text-slate-500 sm:grid">{MONDAY_FIRST.map((name) => <p key={name} className="py-1">{name}</p>)}</div>
+          <div className="hidden grid-cols-7 overflow-hidden rounded-xl border-l border-t border-slate-200 sm:grid">
             {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} className="min-h-[88px] border-b border-r border-slate-200 bg-slate-50" />)}
             {dates.map((date) => {
               const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined; const weekend = [0, 6].includes(new Date(`${date}T00:00:00`).getDay());
@@ -198,8 +216,8 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
           {detail && !selected && <div className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm">
             <p className="font-semibold">{new Date(`${picked}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}<span className="ml-2 text-xs font-normal text-slate-400">Click a name to change that person's day</span></p>
             {!detail.shifts.length && !detail.leave.length ? <p className="mt-1 text-slate-500">Nobody on the roster.</p> : <ul className="mt-3 space-y-2">
-              {detail.shifts.map(([shift, who]) => <li key={shift} className="flex items-baseline gap-3"><span className={`w-14 shrink-0 rounded-md px-1 py-0.5 text-center text-xs font-bold ${shiftTone(shift)}`}>{shift}</span><span className="flex flex-wrap gap-1.5">{who.map((person) => <button key={person.id} type="button" onClick={() => startEdit(person, picked, byPerson.get(person.id)?.get(picked))} title="Click to change this day" className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-[#e9f6fb] hover:ring-[#0b587b]/40">{person.name}</button>)}</span></li>)}
-              {detail.leave.length > 0 && <li className="flex items-baseline gap-3"><span className="w-14 shrink-0 rounded-md bg-rose-100 px-1 py-0.5 text-center text-xs font-bold text-rose-800">Leave</span><span className="flex flex-wrap gap-1.5">{detail.leave.map((person) => <button key={person.id} type="button" onClick={() => startEdit(person, picked, byPerson.get(person.id)?.get(picked))} title="Click to change this day" className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-[#e9f6fb] hover:ring-[#0b587b]/40">{person.name}</button>)}</span></li>}
+              {detail.shifts.map(([shift, who]) => <li key={shift} className="flex items-baseline gap-3"><span className={`w-14 shrink-0 rounded-md px-1 py-0.5 text-center text-xs font-bold ${shiftTone(shift)}`}>{shift}</span><span className="flex flex-wrap gap-1.5">{who.map((person) => <button key={person.id} type="button" onClick={() => startEdit(person, picked, byPerson.get(person.id)?.get(picked))} title="Click to change this day" className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-[#e9f6fb] hover:ring-[#0b587b]/40">{label(person)}</button>)}</span></li>)}
+              {detail.leave.length > 0 && <li className="flex items-baseline gap-3"><span className="w-14 shrink-0 rounded-md bg-rose-100 px-1 py-0.5 text-center text-xs font-bold text-rose-800">Leave</span><span className="flex flex-wrap gap-1.5">{detail.leave.map((person) => <button key={person.id} type="button" onClick={() => startEdit(person, picked, byPerson.get(person.id)?.get(picked))} title="Click to change this day" className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition hover:bg-[#e9f6fb] hover:ring-[#0b587b]/40">{label(person)}</button>)}</span></li>}
             </ul>}
           </div>}
         </div>}

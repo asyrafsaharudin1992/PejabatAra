@@ -370,3 +370,13 @@
   body.care-printing .care-print { display: block; page: care-form; }
   .care-print *, .care-doc * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+
+/* Office COO on a phone: the cards and boxes sit closer to their content, so more fits on the screen. Text size is not changed. */
+@media (max-width: 639px) {
+  .coo-compact .p-8 { padding: 0.875rem; }
+  .coo-compact .p-7, .coo-compact .p-6 { padding: 0.75rem; }
+  .coo-compact .p-5, .coo-compact .p-4 { padding: 0.625rem; }
+  .coo-compact .py-6 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .coo-compact .rounded-\[24px\], .coo-compact .rounded-\[28px\] { border-radius: 16px; }
+}

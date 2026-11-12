@@ -1,10 +1,11 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Baby, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Baby, Building2, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
 import { ReviewRoom } from './OfficeReview';
 import MyRoster from './MyRoster';
+import CooOfficeEntry from './CooOfficeEntry';
 import MyPayslips from './MyPayslips';
 import MyAnnouncements from './MyAnnouncements';
 import { DocumentsPanel, type Doc } from './DocumentsPanel';
@@ -14,7 +15,7 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
 type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
+type View = 'home' | 'coo' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -245,6 +246,7 @@ export default function IndividualHub() {
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'toolkit' && me?.staff.isDoctor) return <Screen nav={phoneNav} title="Medical Toolkit" onBack={() => setView('home')}><Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening Medical Toolkit…</p>}><MedicalToolkit /></Suspense></Screen>;
   if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
+  if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
@@ -270,6 +272,7 @@ export default function IndividualHub() {
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
+    ...(me?.staff.careApprover ? [{ label: 'Office - COO', desc: 'Open your COO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('coo') } as Item] : []),
     { label: 'Payslip', desc: 'Password protected · your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip'), locked: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },

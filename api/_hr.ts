@@ -1827,6 +1827,34 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ entries: (data || []).map((row: any) => ({ id: row.id, date: row.event_date, kind: row.kind, detail: row.detail, from: row.from_value, to: row.to_value, amount: row.amount === null ? null : Number(row.amount), source: row.source })) });
     }
 
+    // HR corrects a line of the employment history (date, event, detail, from, to, amount). If it is the latest increment or salary
+    // adjustment, the staff member's current basic salary follows it, as when it was added.
+    if (req.method === 'POST' && action === 'career_edit') {
+      const id = text(body.id, 60), date = text(body.date, 10), kind = text(body.kind, 60);
+      if (!id) throw fail(400, 'Choose the line to change.');
+      if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)))) throw fail(400, 'Choose a valid date.');
+      if (!kind) throw fail(400, 'Write the event, for example Increment.');
+      const amount = body.amount === '' || body.amount === null || body.amount === undefined ? null : Number(body.amount);
+      if (amount !== null && !Number.isFinite(amount)) throw fail(400, 'The amount must be a number.');
+      const { data: row, error: readError } = await db.from('hr_career_history').select('employee_id,kind,event_date,detail,from_value,to_value,amount').eq('id', id).maybeSingle();
+      if (readError) throw readError;
+      if (!row) throw fail(404, 'That line was not found.');
+      const patch = { event_date: date || null, kind, detail: text(body.detail, 200), from_value: text(body.from, 60), to_value: text(body.to, 60), amount };
+      const { error } = await db.from('hr_career_history').update(patch).eq('id', id);
+      if (error) throw error;
+      let salary: number | null = null;
+      if (/^(increment|salary adjustment)$/i.test(kind) && Number.isFinite(Number(patch.to_value)) && patch.to_value !== '') {
+        const { data: latest } = await db.from('hr_career_history').select('id').eq('employee_id', row.employee_id).in('kind', ['Increment', 'Salary Adjustment']).order('event_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }).limit(1);
+        if (latest?.[0]?.id === id) {
+          salary = Math.round(Number(patch.to_value) * 100) / 100;
+          const { error: salaryError } = await db.from('hr_employees').update({ basic_salary: salary }).eq('id', row.employee_id);
+          if (salaryError) throw salaryError;
+        }
+      }
+      await db.from('hr_audit').insert({ employee_id: row.employee_id, action: 'update', changes: { history_edit: [`${row.kind} ${row.event_date || ''} ${row.from_value}>${row.to_value}`, `${kind} ${date} ${patch.from_value}>${patch.to_value}`], ...(salary !== null ? { basic_salary: ['', String(salary)] } : {}) }, changed_by: user.id });
+      return res.status(200).json({ success: true, salaryChanged: salary });
+    }
+
     // A pay raise: records it in the employment history (the pay run pays the days before the date at the old salary) and sets the new basic salary.
     if (req.method === 'POST' && action === 'increment_save') {
       const employeeId = text(body.employeeId, 60), date = text(body.date, 10), next = Math.round(Number(body.newSalary) * 100) / 100;
