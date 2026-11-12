@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, CalendarDays, Users, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, HeartPulse, Home, LogOut, Menu, UsersRound, X } from 'lucide-react';
+import { ArrowUpRight, CalendarCheck, CalendarDays, Users, UserMinus, UserRoundPlus, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, ExternalLink, HeartPulse, Home, Stethoscope, LogOut, Menu, UsersRound, X } from 'lucide-react';
 import { CareReviewPage } from './CareReviewUI';
 import { HRRoster, guessName } from './HRRoster';
 import COOCalendar from './COOCalendar';
@@ -26,7 +26,8 @@ type Leave = { id: string; name: string; code: string; group: string; type: stri
 const API = '/api/status?resource=coo';
 // Office staff who are not on the COO's duty roster (HR admin, finance admin, quality control and the admin assistant).
 const ROSTER_HIDDEN = ['ARASK0058', 'ARA0061', 'ARA0035', 'ARASK0036'];
-const TONE: Record<string, string> = { home: 'text-sky-400', roster: 'text-violet-400', staff: 'text-emerald-400', leave: 'text-amber-400', care: 'text-rose-400', review: 'text-orange-400', attendance: 'text-teal-400', assessment: 'text-lime-400', clinical: 'text-cyan-300', ca: 'text-fuchsia-400' };
+const LOCUM_URL = 'https://aralocum.hsohealthcare.com/';
+const TONE: Record<string, string> = { home: 'text-sky-400', roster: 'text-violet-400', staff: 'text-emerald-400', leave: 'text-amber-400', care: 'text-rose-400', review: 'text-orange-400', attendance: 'text-teal-400', assessment: 'text-lime-400',  clinical: 'text-cyan-300', ca: 'text-fuchsia-400' };
 const NAV: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'home', label: 'Home', note: 'My calendar and reminders', icon: Home }, { id: 'roster', label: 'Roster', note: 'Duty roster by month (view only)', icon: CalendarDays }, { id: 'staff', label: 'Staff', note: 'Who is where, by group and clinic', icon: Users }, { id: 'leave', label: 'Leave', note: 'Who is on leave, and what is waiting', icon: CalendarCheck }, { id: 'care', label: 'AraCare reviews', note: 'Check the KPIs of the allowance', icon: HeartPulse }, { id: 'assessment', label: 'Assessment Room', note: 'Quizzes and results', icon: GraduationCap }, { id: 'attendance', label: 'Attendance', note: 'Team attendance and OT for your approval', icon: Clock3 }, { id: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck }];
 // The two offices the COO leads: they open inside this office, with all their own pages.
 const OFFICES: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'clinical', label: 'Clinical Admin', note: 'Daily checklist, orders, vaccine bookings', icon: ClipboardList }, { id: 'ca', label: 'Clinical Assistants (CA)', note: 'Training, panel guides, references', icon: GraduationCap }];
@@ -127,6 +128,38 @@ function TeamLeave({ onError }: { onError: (message: string) => void }) {
   </div>;
 }
 
+type GlancePerson = { id: string; name: string; company: string; group: string; joinDate: string | null; confirmDate: string | null; resignDate: string | null; probation: boolean };
+// The team at a glance, like the HR Home: how many in the team, the Clinical Assistants at each clinic, who is on probation, new starters and those leaving.
+function TeamGlance({ onError, onStaff }: { onError: (message: string) => void; onStaff: () => void }) {
+  const [data, setData] = useState<{ today: string; people: GlancePerson[] } | null>(null);
+  useEffect(() => { call('action=glance').then(setData).catch((cause: Error) => onError(cause.message)); }, []);
+  const people = data?.people;
+  const today = data?.today || '';
+  const first = (name: string) => name.split(/\s+/).filter((word) => !/^(NUR|NURUL|SITI|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|AHMAD)$/i.test(word))[0] || name;
+  const label = (date: string) => new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' });
+  const back7 = today ? new Date(Date.parse(`${today}T00:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10) : '';
+  const count = (list: GlancePerson[], company: string) => list.filter((person) => person.company === company).length;
+  const assistants = (people || []).filter((person) => person.group === 'Clinical Assistant');
+  const probation = (people || []).filter((person) => person.probation && (!person.joinDate || person.joinDate <= today) && (!person.confirmDate || person.confirmDate > today));
+  const starters = (people || []).filter((person) => person.joinDate && person.joinDate >= back7).sort((a, b) => a.joinDate!.localeCompare(b.joinDate!));
+  const leaving = (people || []).filter((person) => person.resignDate && person.resignDate >= today).sort((a, b) => a.resignDate!.localeCompare(b.resignDate!));
+  const cards = [
+    { title: 'My team', count: people?.length, icon: Users, tone: 'bg-sky-50 text-sky-700', detail: people ? `KJ ${count(people, 'KJ')} · SK ${count(people, 'SK')}` : '', note: people ? `${assistants.length} CA · ${people.filter((person) => person.group === 'Clinical Admin').length} Clinical Admin · ${people.filter((person) => person.group === 'Doctor').length} doctors` : '' },
+    { title: 'Clinical Assistants', count: people ? assistants.length : undefined, icon: Users, tone: 'bg-teal-50 text-teal-700', detail: people ? `SK ${count(assistants, 'SK')} · KJ ${count(assistants, 'KJ')}` : '', note: 'Active CA at each clinic' },
+    { title: 'On probation', count: people ? probation.length : undefined, icon: ClipboardCheck, tone: 'bg-violet-50 text-violet-700', detail: probation.length ? probation.map((person) => `${first(person.name)} · ${person.company}`).join(' · ') : 'No staff currently on probation', note: 'HR-verified · already started' },
+    { title: 'New starters', count: people ? starters.length : undefined, icon: UserRoundPlus, tone: 'bg-emerald-50 text-emerald-700', detail: starters.length ? starters.map((person) => `${first(person.name)} · ${person.company}`).join(' · ') : 'No new starters', note: starters.length ? starters.map((person) => `${person.joinDate! > today ? 'Starts' : 'Started'} ${label(person.joinDate!)}`).join(' · ') : 'Kept for 7 days after they start' },
+    { title: 'Leaving', count: people ? leaving.length : undefined, icon: UserMinus, tone: 'bg-rose-50 text-rose-700', detail: leaving.length ? leaving.map((person) => `${first(person.name)} · ${label(person.resignDate!)}`).join(' · ') : 'No resignations planned', note: 'Last working day, from the staff profile' },
+  ];
+  return <section aria-label="Team overview" className="space-y-2">
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-base font-semibold tracking-tight">At a glance</h3><p className="text-xs text-slate-500">Your team today</p></div>
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">{cards.map((item) => <button key={item.title} type="button" onClick={onStaff} disabled={!people} className="group rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-[0_5px_20px_rgba(20,35,59,0.03)] transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md disabled:pointer-events-none">
+      <div className="flex items-center justify-between"><span className={`grid h-8 w-8 place-items-center rounded-lg ${item.tone}`}><item.icon size={16} /></span><ArrowUpRight size={14} className="text-slate-300 transition group-hover:text-sky-600" /></div>
+      <p className="mt-3 text-xs font-medium text-slate-500">{item.title}</p><p className="text-2xl font-semibold tracking-tight text-[#17364c]">{item.count ?? '—'}</p>
+      <p className="mt-1.5 text-xs font-semibold leading-4 text-slate-700">{people ? item.detail : 'Loading…'}</p><p className="mt-0.5 text-[11px] leading-4 text-slate-500">{people ? item.note : ' '}</p>
+    </button>)}</div>
+  </section>;
+}
+
 function AttendanceHub({ onError }: { onError: (message: string) => void }) {
   const [part, setPart] = useState<'today' | 'month' | 'ot'>('today');
   // The attendance of the COO's own team, read only; the OT tab is where the COO approves.
@@ -164,6 +197,7 @@ export default function OfficeCOO() {
       <nav className="mt-6 flex-1 space-y-1">
         <p className="px-3.5 pb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">My team</p>
         {NAV.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className={`h-[18px] w-[18px] shrink-0 ${TONE[item.id]}`} strokeWidth={1.8} /><span className="min-w-0 text-left">{item.label}</span></button>)}
+        <a href={LOCUM_URL} target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><Stethoscope className="h-[18px] w-[18px] shrink-0 text-cyan-300" strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">AraLocum</span><ExternalLink className="h-3.5 w-3.5 text-[#7f9bb0]" /></a>
         <p className="px-3.5 pb-1 pt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">Offices I lead</p>
         {OFFICES.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className={`h-[18px] w-[18px] shrink-0 ${TONE[item.id]}`} strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">{item.label}</span></button>)}
       </nav>
@@ -183,7 +217,7 @@ export default function OfficeCOO() {
           {view !== 'review' && view !== 'home' && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office COO · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">{title}</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">{view === 'home' ? 'Your own calendar and reminders. Add a reminder for a date, repeat it, and tick it Done.' : view === 'leave' ? 'Who is on leave, day by day, and the leave of your team that is still waiting for approval. HR keeps the final decision.' : view === 'assessment' ? 'The assessments for the Clinical Assistants: add or edit the questions, and see everyone’s results.' : view === 'attendance' ? 'Your team’s attendance today and for the month (view only), and the OT requests that wait for your approval. After you approve, HR confirms the OT rate.' : view === 'review' ? 'The monthly reviews HR has given to you. Fill in the form and sign; the result goes back to HR.' : view === 'roster' ? 'The duty roster, as HR keeps it. You can look at it but not change it.' : view === 'staff' ? 'All active staff by group and clinic, and the CA staffing forecast. You can look at them but not change them.' : 'The AraCare Care Coordination Allowance claims: check the KPIs and say if the allowance is payable.'}</p>
           </section>}
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-          {view === 'home' && <COOCalendar />}
+          {view === 'home' && <div className="space-y-6"><TeamGlance onError={setError} onStaff={() => navigate('staff')} /><COOCalendar /></div>}
           {view === 'staff' && <StaffDirectory onError={setError} />}
           {view === 'leave' && <TeamLeave onError={setError} />}
           {view === 'roster' && <HRRoster readOnly canDraft hideCodes={ROSTER_HIDDEN} defaultView="calendar" onError={setError} />}

@@ -7,20 +7,22 @@ import { attendanceHrAction, attendanceStaffAction } from './_attendance.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 
 // Office COO: the COO leads operations: Clinical Admin, the Clinical Assistants and the doctors. The team is every active staff member whose job title is
-// Clinical Assistant (or Officer), Admin Clinical or Admin Assistant, and every doctor except those who hold a chief title (CEO, COO, CHRO).
+// Clinical Assistant (or Officer) or Admin Clinical, and every doctor, the four directors (CEO, COO, CHRO, CPO) included.
 // Read only: HR still decides leave, OT and pay.
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
-const TEAM_TITLE = /CLINIC(AL)? ASSISTANT|ADMIN CLINICAL|ADMIN ASSISTANT/i;
+const TEAM_TITLE = /CLINIC(AL)? ASSISTANT|ADMIN CLINICAL/i;
 const isDoctor = (designation: string) => /\b(DR|DOCTOR)\b/i.test(designation || '');
-const CHIEF = /^\s*(CEO|COO|CHRO)\b/i;
-const group = (designation: string) => isDoctor(designation) ? 'Doctor' : /ADMIN/i.test(designation) && !/ASSISTANT OFFICER/i.test(designation) ? 'Clinical Admin' : 'Clinical Assistant';
+// The four directors (CEO, COO, CHRO, CPO) are doctors too, so they count as doctors in the team.
+// Izzah (ARA0041) is Admin Klinikal although her job title says Clinic Assistant Officer.
+const CLINICAL_ADMIN_CODES = new Set(['ARA0041']);
+const group = (designation: string, code = '') => isDoctor(designation) ? 'Doctor' : CLINICAL_ADMIN_CODES.has(code) || /ADMIN/i.test(designation) && !/ASSISTANT OFFICER/i.test(designation) ? 'Clinical Admin' : 'Clinical Assistant';
 
 async function team(db: any) {
   const { data, error } = await db.from('hr_employees').select(`${TEAM_COLUMNS},branch`).eq('status', 'Active').order('full_name').limit(500);
   if (error) throw error;
-  return ((data || []) as (Employee & { branch?: string })[]).filter((person) => isDoctor(person.designation || '') ? !CHIEF.test(person.designation || '') : TEAM_TITLE.test(person.designation || ''));
+  return ((data || []) as (Employee & { branch?: string })[]).filter((person) => isDoctor(person.designation || '') || TEAM_TITLE.test(person.designation || ''));
 }
 
 export async function cooHandler(req: any, res: any) {
@@ -120,6 +122,19 @@ export async function cooHandler(req: any, res: any) {
     if (req.method === 'POST' && action === 'care_review') { await reviewCare(db, body); return res.status(200).json({ success: true }); }
     if (req.method !== 'GET') throw fail(405, 'Method not allowed.');
 
+    // The team at a glance (Home): who is in the team, the starters, those on probation and those leaving. Only the COO's own team.
+    if (req.method === 'GET' && action === 'glance') {
+      const members = await team(db);
+      const ids = members.map((person) => person.id);
+      const { data: dates, error } = ids.length ? await db.from('hr_employees').select('id,join_date,confirm_date,resign_date').in('id', ids) : { data: [], error: null };
+      if (error) throw error;
+      const when = new Map((dates || []).map((row: any) => [row.id, row]));
+      // Who is on probation is HR's list (read only), kept with HR's calendar settings.
+      let probation: Record<string, string> = {};
+      try { const hrBranch = await branchId(db, 'AraOffice HR Private', false); if (hrBranch) { const { data } = await db.from('portal_state').select('payload').eq('branch_id', hrBranch).eq('state_key', 'hr_calendar_config').maybeSingle(); probation = data?.payload?.probation && typeof data.payload.probation === 'object' ? data.payload.probation : {}; } } catch { /* no list yet */ }
+      return res.status(200).json({ today: today(), people: members.map((person: any) => { const row: any = when.get(person.id) || {}; return { id: person.id, name: person.full_name, company: person.company, group: group(person.designation || '', person.employee_code || ''), joinDate: row.join_date || null, confirmDate: row.confirm_date || null, resignDate: row.resign_date || null, probation: probation[person.id] === 'probation' }; }) });
+    }
+
     // Public holidays of the month (read only), for the leave calendar.
     if (req.method === 'GET' && action === 'holidays') {
       const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month)) ? String(req.query.month) : today().slice(0, 7);
@@ -143,13 +158,13 @@ export async function cooHandler(req: any, res: any) {
       const shortOf = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')]));
       const members = new Set((await team(db)).map((person) => person.id));
       const named = new Map((people || []).map((person: any) => [person.id, person]));
-      return res.status(200).json({ month, today: today(), items: (rows || []).filter((row: any) => named.has(row.employee_id)).map((row: any) => { const person: any = named.get(row.employee_id); return { id: person.id, name: person.full_name, short: shortOf.get(person.assessment_staff_id) || '', code: person.employee_code, company: person.company, group: isDoctor(person.designation || '') ? 'Doctor' : group(person.designation || ''), team: members.has(person.id), type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day || null, days: Number(row.days || 0), status: row.status === 'approved' ? 'approved' : 'waiting' }; }) });
+      return res.status(200).json({ month, today: today(), items: (rows || []).filter((row: any) => named.has(row.employee_id)).map((row: any) => { const person: any = named.get(row.employee_id); return { id: person.id, name: person.full_name, short: shortOf.get(person.assessment_staff_id) || '', code: person.employee_code, company: person.company, group: isDoctor(person.designation || '') ? 'Doctor' : group(person.designation || '', person.employee_code || ''), team: members.has(person.id), type: row.leave_type, start: row.start_date, end: row.end_date, half: row.half_day || null, days: Number(row.days || 0), status: row.status === 'approved' ? 'approved' : 'waiting' }; }) });
     }
 
     // Leave of the team: what is waiting for approval.
     if (action === 'leave') {
       const people = await team(db);
-      const names = new Map(people.map((person) => [person.id, { name: person.full_name, code: person.employee_code, group: group(person.designation || '') }]));
+      const names = new Map(people.map((person) => [person.id, { name: person.full_name, code: person.employee_code, group: group(person.designation || '', person.employee_code || '') }]));
       const from = new Date(Date.now() + 8 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
       const { data, error } = await db.from('hr_leave_requests').select('id,employee_id,leave_type,start_date,end_date,half_day,days,status,reason,created_at').in('employee_id', people.map((person) => person.id)).in('status', ['pending', 'supervisor_approved']).gte('end_date', from).order('start_date').limit(500);
       if (error) throw error;
