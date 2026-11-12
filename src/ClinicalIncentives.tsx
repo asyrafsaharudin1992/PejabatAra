@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, FileDown, Printer, RefreshCw, Send, Undo2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card, input } from './AssessmentStaff';
-import { approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
+import { NIGHT_CODE, nightTotal, otherTotal, approvedTotal, claimTotal, codeName, dmy, IncentiveEntry, IncentiveStatus, monthLabel, rm, STATUS_LABEL, STATUS_TONE, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
 import { PrintPage, PrintPortal } from './PrintPortal';
 
@@ -93,6 +93,7 @@ export default function ClinicalIncentives({ branch, branches, onError }: { key?
     {sorted.length > 0 && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{sorted.map((claim) => <button key={claim.id} onClick={() => setOpenId(claim.id)} className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-md`}>
       <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{claim.staffName}</p><p className="mt-0.5 text-xs text-slate-400"><span className="font-mono">{claim.staffCode}</span>{branchFilter === 'all' ? ` · ${claim.branch}` : ''}{month === 'all' ? ` · ${monthLabel(claim.month)}` : ''}</p></div><span className="flex shrink-0 flex-col items-end gap-1"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[claim.status]}`}>{STATUS_LABEL[claim.status]}</span>{claim.hrSubmittedAt && <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${claim.hrReceivedAt ? 'bg-teal-50 text-teal-700' : 'bg-violet-50 text-violet-700'}`}>{claim.hrReceivedAt ? 'Received by HR' : 'Sent to HR'}</span>}</span></div>
       <p className="mt-4 text-2xl font-semibold">{rm(claim.status === 'approved' ? approvedTotal(claim.entries) : claimTotal(claim.entries))}</p>
+      {claim.form !== 'doctor' && claim.entries.some((entry) => entry.code === NIGHT_CODE) && <p className="mt-1 text-xs text-slate-600">Incentives {rm(otherTotal(claim.entries))} · Night shift {rm(nightTotal(claim.entries))}</p>}
       <p className="mt-1 text-xs text-slate-500">{claim.entries.length} entries{claim.submittedAt ? ` · submitted ${new Date(claim.submittedAt).toLocaleDateString('en-GB')}` : ''}</p>
     </button>)}</div>}
     {printing === 'pdf' && <PdfHint />}
@@ -210,7 +211,7 @@ function ClaimDetail({ claim, onBack, onDecided, onError }: { key?: string; clai
               : <span className={`text-xs font-bold ${rejected ? 'text-rose-600' : 'text-emerald-600'}`}>{rejected ? '✗ Not approved' : '✓ Approved'}</span>}</td>
           </tr>{rejected && (open || entry.reason) && <tr className="bg-rose-50/40"><td colSpan={7} className="pb-2 pr-3 text-xs">{open ? <label className="flex items-center gap-2 text-rose-700"><span className="shrink-0 font-semibold">Why not approved? (the staff will see this)</span><input key={`${entry.id}-${entry.reason || ''}`} defaultValue={entry.reason || ''} maxLength={200} onBlur={(event) => { if (event.target.value.trim() !== (entry.reason || '')) mark(entry.id, 'rejected', event.target.value.trim()); }} placeholder="e.g. no clinic ID, patient not seen on that date" className="h-8 min-w-0 flex-1 rounded-lg border border-rose-200 bg-white px-2 text-xs text-slate-700" /></label> : <span className="text-rose-700">Reason: {entry.reason}</span>}</td></tr>}</Fragment>;
         })}</tbody>
-        <tfoot><tr className="border-t-2 border-slate-200"><td colSpan={5} className="pt-3 text-right font-semibold">Total claimed incentives</td><td className="pr-3 pt-3 text-right font-semibold">{total.toFixed(2)}</td><td /></tr>
+        <tfoot>{claim.form !== 'doctor' && entries.some((entry) => entry.code === NIGHT_CODE) && <><tr className="border-t-2 border-slate-200"><td colSpan={5} className="pt-3 text-right text-slate-600">Total incentives (without Night Shift)</td><td className="pr-3 pt-3 text-right">{otherTotal(entries).toFixed(2)}</td><td /></tr><tr><td colSpan={5} className="pt-1 text-right text-slate-600">Night Shift Allowance</td><td className="pr-3 pt-1 text-right">{nightTotal(entries).toFixed(2)}</td><td /></tr></>}<tr className="border-t-2 border-slate-200"><td colSpan={5} className="pt-3 text-right font-semibold">{claim.form !== 'doctor' && entries.some((entry) => entry.code === NIGHT_CODE) ? 'Total claimed (incentives + night shift)' : 'Total claimed incentives'}</td><td className="pr-3 pt-3 text-right font-semibold">{total.toFixed(2)}</td><td /></tr>
           <tr><td colSpan={5} className="pb-3 text-right font-semibold text-emerald-700">Total approved{rejectedCount ? ` (${rejectedCount} not approved)` : ''}{unchecked && open ? ` · ${unchecked} not checked` : ''}</td><td className="pr-3 pb-3 text-right text-lg font-semibold text-emerald-700">{approved.toFixed(2)}</td><td /></tr></tfoot>
       </table>
     </section>

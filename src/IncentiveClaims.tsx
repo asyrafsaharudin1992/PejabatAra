@@ -5,7 +5,7 @@ import { ClaimPages, PdfHint, SheetClaim, SheetPreview, usePrintSheet } from './
 import { PrintPortal } from './PrintPortal';
 import { CareSection } from './CareSection';
 import CareApprovals from './CareApprovals';
-import { approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
+import { NIGHT_CODE, nightTotal, otherTotal, approvedTotal, claimTotal, codeName, dmy, INCENTIVE_BRANCHES, INCENTIVE_CODES, INCENTIVE_GROUPS, IncentiveEntry, IncentiveStatus, monthLabel, RateChange, rateOn, rm, STATUS_LABEL, STATUS_TONE, codesOf, groupsOf, IncentiveForm, setExtraCodes } from './lib/incentiveCodes';
 
 // Staff Incentive Claims (memo HSO/MEMO/SM/2026/0012). Staff sign in from their own
 // phones like the Assessment Room (same session), add each procedure as they do it,
@@ -166,7 +166,9 @@ export default function IncentiveClaims() {
             <span className="shrink-0 text-sm font-semibold">{rm(entry.rm)}</span>
             {editable && <button onClick={() => { if (window.confirm(`Remove ${entry.code} on ${dmy(entry.date)}?`)) void act('incentive_remove', { id: entry.id }); }} disabled={busy} className="-mr-1 rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove entry"><Trash2 className="h-4 w-4" /></button>}
           </li>)}</ul>}
-        <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-4"><span className="text-sm font-semibold">Total claimed incentives</span><span className="text-lg font-semibold">{rm(total)}</span></div>
+        <div className="mt-2 border-t border-slate-200 pt-4">
+          {claim.form !== 'doctor' && claim.entries.some((entry) => entry.code === NIGHT_CODE) && <div className="mb-2 space-y-1 text-sm text-slate-600"><div className="flex items-center justify-between"><span>Total incentives (without Night Shift)</span><span className="font-semibold">{rm(otherTotal(claim.entries))}</span></div><div className="flex items-center justify-between"><span>Night Shift Allowance</span><span className="font-semibold">{rm(nightTotal(claim.entries))}</span></div></div>}
+          <div className="flex items-center justify-between"><span className="text-sm font-semibold">{claim.form !== 'doctor' && claim.entries.some((entry) => entry.code === NIGHT_CODE) ? 'Total claimed (incentives + night shift)' : 'Total claimed incentives'}</span><span className="text-lg font-semibold">{rm(total)}</span></div></div>
         {claim.entries.some((entry) => entry.review) && <div className="mt-1 flex items-center justify-between"><span className="text-sm font-semibold text-emerald-700">Total approved</span><span className="text-lg font-semibold text-emerald-700">{rm(approvedTotal(claim.entries))}</span></div>}
         {editable && claim.entries.length > 0 && <button onClick={() => void submit()} disabled={busy || !claim.branch} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Send className="h-4 w-4" />{claim.branch ? `Submit ${monthLabel(claim.month)} claim` : 'Choose your branch to submit'}</button>}
       </section>

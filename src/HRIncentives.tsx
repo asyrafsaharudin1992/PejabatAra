@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, ScrollText, Settings, Undo2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
-import { approvedTotal, claimTotal, codeName, dmy, monthLabel, rm, setExtraCodes } from './lib/incentiveCodes';
+import { NIGHT_CODE, nightTotal, otherTotal, approvedTotal, claimTotal, codeName, dmy, monthLabel, rm, setExtraCodes } from './lib/incentiveCodes';
 import { ClaimPages, PdfHint, usePrintSheet } from './IncentiveSheet';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { Claim, MonthSummary } from './ClinicalIncentives';
@@ -134,7 +134,8 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
                 : <button onClick={() => void mark([claim.id], true)} disabled={busy} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">Mark received</button>}</td>
             </tr>
             {openId === claim.id && <tr><td colSpan={8} className="bg-slate-50/60 px-4 py-3"><table className="w-full text-xs"><thead className="text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="py-1 text-left">Date</th><th className="text-left">Patient</th><th className="text-left">Code</th><th className="text-right">RM</th>{claim.entries.some((entry) => entry.commission) && <th className="text-right">Sales commission</th>}<th className="text-right">Clinic check</th></tr></thead>
-              <tbody>{claim.entries.map((entry) => <tr key={entry.id} className={entry.review === 'rejected' ? 'text-slate-400 line-through' : ''}><td className="py-1">{dmy(entry.date)}</td><td>{entry.patient || '—'}</td><td><span className="font-mono font-bold text-[#0b587b]">{entry.code}</span> {codeName(entry.code, entry.form)}</td><td className="text-right">{entry.rm.toFixed(2)}</td>{claim.entries.some((item) => item.commission) && <td className="text-right">{entry.commission ? entry.commission.toFixed(2) : '—'}</td>}<td className="text-right no-underline">{entry.review === 'approved' ? '✓ Approved' : entry.review === 'rejected' ? '✗ Not approved' : ''}</td></tr>)}</tbody></table>
+              <tbody>{claim.entries.map((entry) => <Fragment key={entry.id}><tr className={entry.review === 'rejected' ? 'text-slate-400 line-through' : ''}><td className="py-1">{dmy(entry.date)}</td><td>{entry.patient || '—'}</td><td><span className="font-mono font-bold text-[#0b587b]">{entry.code}</span> {codeName(entry.code, entry.form)}</td><td className="text-right">{entry.rm.toFixed(2)}</td>{claim.entries.some((item) => item.commission) && <td className="text-right">{entry.commission ? entry.commission.toFixed(2) : '—'}</td>}<td className="text-right no-underline">{entry.review === 'approved' ? '✓ Approved' : entry.review === 'rejected' ? '✗ Not approved' : ''}</td></tr>{entry.review === 'rejected' && <tr><td colSpan={6} className="pb-1.5 pl-2 text-xs text-rose-700">Not approved because: {entry.reason?.trim() || 'no reason was written'}</td></tr>}</Fragment>)}</tbody></table>
+              {claim.form !== 'doctor' && claim.entries.some((entry) => entry.code === NIGHT_CODE) && <p className="mt-2 text-xs font-semibold text-slate-700">Incentives (without Night Shift) {rm(otherTotal(claim.entries))} · Night Shift Allowance {rm(nightTotal(claim.entries))} · Total {rm(claimTotal(claim.entries))}</p>}
               {claim.adminNote && <p className="mt-2 text-xs text-slate-500">Clinical Admin note: {claim.adminNote}</p>}</td></tr>}
           </Fragment>)}</tbody>
         </table>}
