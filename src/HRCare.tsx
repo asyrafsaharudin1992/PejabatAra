@@ -36,15 +36,15 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
   const months = (() => { const list: string[] = []; for (let value = thisMonth(); value >= '2026-10'; ) { list.push(value); const index = Number(value.slice(0, 4)) * 12 + Number(value.slice(5, 7)) - 2; value = `${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`; } return list; })();
   const act = async (query: string, body: unknown, after: () => void) => { setBusy(true); try { await call(query, body); after(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); } };
   const receive = (claim: CareClaim, received: boolean) => {
-    if (received && !receiver.trim()) { onError('Enter your name in "Received by" first.'); return; }
-    try { localStorage.setItem(RECEIVER_KEY, receiver); } catch { /* storage not available */ }
-    void act('action=care_receive', { id: claim.id, by: receiver, received }, loadClaims);
+    const by = receiver.trim() || 'HR';
+    if (received) { try { localStorage.setItem(RECEIVER_KEY, receiver.trim()); } catch { /* storage not available */ } }
+    void act('action=care_receive', { id: claim.id, by, received }, loadClaims);
   };
   const toReceive = (claims || []).filter((claim) => claim.status === 'approved' && !claim.hrReceivedAt).length;
   return <div className="space-y-4">
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{months.map((value) => <option key={value} value={value}>{careMonth(value)}</option>)}</select>
-      <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">Received by<input value={receiver} maxLength={80} onChange={(event) => setReceiver(event.target.value)} placeholder="Your name" className={`${field} w-56 font-normal`} /></label>
+      <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">Received by<input value={receiver} maxLength={80} onChange={(event) => setReceiver(event.target.value)} placeholder="Your name (optional)" className={`${field} w-56 font-normal`} /></label>
       {claims && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${toReceive ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{toReceive ? `${toReceive} to receive` : 'Nothing to receive'}</span>}
     </section>
     {notSetUp && <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">AraCare is not set up yet. System Admin needs to run the latest database migration first.</p>}
