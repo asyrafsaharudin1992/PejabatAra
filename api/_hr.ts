@@ -686,6 +686,20 @@ export async function hrHandler(req: any, res: any) {
       if (saveError) throw saveError;
       return res.status(200).json({ success: true });
     }
+    // HR corrects a claim's month (e.g. sent in November but really for October) and amount.
+    if (req.method === 'POST' && action === 'care_edit') {
+      const id = text(body.id, 60), month = text(body.month, 7), amount = Math.round(Number(body.amount) * 100) / 100;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw fail(400, 'Choose a valid month.');
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1000) throw fail(400, 'Enter an amount in RM (more than 0, up to 1000).');
+      const { data: claim, error } = await db.from('care_claims').select('id,month,amount').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!claim) throw fail(404, 'Claim not found.');
+      const { error: saveError } = await db.from('care_claims').update({ month, amount }).eq('id', id);
+      if (saveError?.code === '23505') throw fail(409, 'This staff member already has an AraCare claim for that month.');
+      if (saveError) throw saveError;
+      await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { aracare_claim: [`${claim.month} RM${claim.amount}`, `${month} RM${amount}`], claim_id: id }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
     // The incentive rates: the memo's rate for each code and the changes HR has set, with the date each one starts.
     if (req.method === 'GET' && action === 'incentive_rates') return res.status(200).json({ changes: await incentiveRateChanges(db), today: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10) });
     // HR sets a new rate for one or more codes from the 1st of a month (this month or later). Entries already added keep the rate they were saved with.

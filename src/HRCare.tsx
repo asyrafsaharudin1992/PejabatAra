@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, Plus, Trash2 } from 'lucide-react';
+import { FileText, Pencil, Plus, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { CareFormView } from './CareFormSheet';
@@ -29,6 +29,7 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
   const [receiver, setReceiver] = useState(() => { try { return localStorage.getItem(RECEIVER_KEY) || ''; } catch { return ''; } });
   const [viewing, setViewing] = useState<CareClaim | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; month: string; amount: string } | null>(null);
   const loadClaims = () => { setClaims(null); call(`action=care_claims&month=${month}`).then((result) => { setClaims(result.claims); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setClaims([]); onError(cause.message); }); };
   const loadStaff = () => call('action=care_staff').then((result) => { setStaff(result.staff || []); setCandidates(result.candidates || []); }).catch((cause: Error) => onError(cause.message));
   useEffect(loadClaims, [month]);
@@ -40,6 +41,7 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
     if (received) { try { localStorage.setItem(RECEIVER_KEY, receiver.trim()); } catch { /* storage not available */ } }
     void act('action=care_receive', { id: claim.id, by, received }, loadClaims);
   };
+  const saveEdit = () => { if (editing) void act('action=care_edit', { id: editing.id, month: editing.month, amount: Number(editing.amount) }, () => { setEditing(null); loadClaims(); }); };
   const toReceive = (claims || []).filter((claim) => claim.status === 'approved' && !claim.hrReceivedAt).length;
   return <div className="space-y-4">
     <section className={`${card} flex flex-wrap items-center gap-3`}>
@@ -55,11 +57,15 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
         <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Month</th><th className="pr-3 text-right">RM</th><th className="pr-3">Status</th><th className="pr-3">COO</th><th /></tr></thead>
         <tbody>{claims.map((claim) => <tr key={claim.id} className="border-t border-slate-100">
           <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{claim.staffName}</p><p className="text-[11px] text-slate-400">{claim.staffCode} · {claim.branch}</p></td>
-          <td className="pr-3 whitespace-nowrap">{careMonth(claim.month)}</td><td className="pr-3 text-right tabular-nums">{claim.amount.toFixed(2)}</td>
+          {editing?.id === claim.id
+            ? <><td className="pr-3"><input type="month" value={editing.month} min="2026-10" onChange={(event) => setEditing({ ...editing, month: event.target.value })} aria-label="Month" className={`${field} h-9 w-40`} /></td><td className="pr-3 text-right"><input type="number" step="0.01" min="0" value={editing.amount} onChange={(event) => setEditing({ ...editing, amount: event.target.value })} aria-label="Amount (RM)" className={`${field} h-9 w-24 text-right`} /></td></>
+            : <><td className="pr-3 whitespace-nowrap">{careMonth(claim.month)}</td><td className="pr-3 text-right tabular-nums">{claim.amount.toFixed(2)}</td></>}
           <td className="pr-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${careStatusTone(claim)}`}>{careStatusLabel(claim)}</span>{claim.hrReceivedAt && <p className="mt-0.5 text-[11px] text-slate-400">{claim.hrReceivedBy} · {new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}</p>}</td>
           <td className="pr-3 text-xs text-slate-500">{claim.kpi ? <>{claim.kpi.eligible ? 'Layak' : 'Tidak layak'} · {claim.kpi.by}</> : '—'}</td>
-          <td className="whitespace-nowrap text-right"><button onClick={() => setViewing(claim)} className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileText className="h-3.5 w-3.5" />Form / PDF</button>
-            {claim.status === 'approved' && (claim.hrReceivedAt ? <button onClick={() => receive(claim, false)} disabled={busy} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Undo received</button> : <button onClick={() => receive(claim, true)} disabled={busy} className="rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40">Mark received</button>)}</td>
+          <td className="whitespace-nowrap text-right">{editing?.id === claim.id
+            ? <><button onClick={saveEdit} disabled={busy} className="mr-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">Save</button><button onClick={() => setEditing(null)} disabled={busy} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100">Cancel</button></>
+            : <><button onClick={() => setEditing({ id: claim.id, month: claim.month, amount: String(claim.amount) })} className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Edit</button><button onClick={() => setViewing(claim)} className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileText className="h-3.5 w-3.5" />Form / PDF</button>
+            {claim.status === 'approved' && (claim.hrReceivedAt ? <button onClick={() => receive(claim, false)} disabled={busy} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Undo received</button> : <button onClick={() => receive(claim, true)} disabled={busy} className="rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40">Mark received</button>)}</>}</td>
         </tr>)}</tbody>
       </table>}
     </section>
