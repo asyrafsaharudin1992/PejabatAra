@@ -1273,6 +1273,13 @@ export default function App() {
               <ChevronRight className="ml-auto h-4 w-4 opacity-45" />
             </button>
           ))}
+          {[["AraCare", "https://aracare.hsohealthcare.com/", "text-rose-400"], ["AraLocum", "https://aralocum.hsohealthcare.com/", "text-cyan-300"]].map(([label, href, tone]) => (
+            <a key={label} href={href} target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#e3ecf5] transition hover:bg-white/10">
+              <Globe className={cn("h-[18px] w-[18px] shrink-0", tone)} strokeWidth={1.8} />
+              {label}
+              <ExternalLink className="ml-auto h-3.5 w-3.5 text-[#7f9bb0]" />
+            </a>
+          ))}
         </nav>
         <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
           <div className="flex items-center gap-3">

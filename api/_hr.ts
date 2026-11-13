@@ -295,17 +295,19 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 
 // What the COO may read in the HR office: the roster and the CA staffing forecast (read only). Nothing else in HR, and nothing that changes data.
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context']);
+// Clinical Admin may only look at the duty roster (read only).
+const CLINICAL_CAN_READ = new Set(['roster']);
 
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     // The COO may look at the roster and the forecast (read only).
-    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo']);
+    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo', 'clinical']);
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
-    if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && COO_CAN_READ.has(action))) throw fail(403, 'Access restricted.');
+    if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
