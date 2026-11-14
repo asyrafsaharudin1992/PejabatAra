@@ -652,9 +652,9 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
-  // The COO, the CEO and the CHRO open their office from their Individual Sign In without typing the office email and password again, and without
+  // The COO, the CEO, the CHRO and the CPO open their office from their Individual Sign In without typing the office email and password again, and without
   // the device key: their own sign-in (name, staff code, password) is the proof. Only the person whose job title is COO, CEO or CHRO gets this.
-  if (req.method === 'POST' && /^(coo|ceo|hr)_office_session$/.test(action)) {
+  if (req.method === 'POST' && /^(coo|ceo|hr|procurement)_office_session$/.test(action)) {
     const office = OFFICE_SESSIONS[action.slice(0, action.indexOf('_')) as keyof typeof OFFICE_SESSIONS];
     const { data: me, error: meError } = await db.from('hr_employees').select('id,designation,status').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
@@ -837,13 +837,14 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const careWaiting = careApprover ? await careWaitingCount(db) : 0;
     const ceoOffice = /\bCEO\b/i.test(String(designation || ''));
     const hrOffice = /\bCHRO\b/i.test(String(designation || ''));
+    const cpoOffice = /\bCPO\b/i.test(String(designation || ''));
     // The red number on the Announcements icon (only for the staff who must read them).
     try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, cpoOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
@@ -1006,6 +1007,7 @@ const OFFICE_SESSIONS = {
   coo: { label: 'COO', email: 'operation@hsohealthcare.com', title: /^\s*COO\b/i },
   ceo: { label: 'CEO', email: 'asyrafsaharudin@hsohealthcare.com', title: /\bCEO\b/i },
   hr: { label: 'HR', email: 'hr@hsohealthcare.com', title: /\bCHRO\b/i },
+  procurement: { label: 'CPO', email: 'haziqshamshul@hsohealthcare.com', title: /\bCPO\b/i },
 };
 const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt', 'reset_password']);
 

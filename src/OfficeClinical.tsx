@@ -1,3 +1,4 @@
+import { useOnDemandSummary } from './lib/useOnDemandSummary';
 import { FormEvent, lazy, ReactNode, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { StackTables } from './StackTables';
 import { AraLogo } from './AraLogo';
@@ -809,7 +810,7 @@ const ADMIN_NAMES: Record<string, string> = { Kajang: 'Izzah', 'Seri Kembangan':
 const BRANCH_CODES: Record<string, string> = { Kajang: 'KJ', 'Seri Kembangan': 'SK' };
 
 type Waiting = { claims: number | null; leave: number; requests: number; reviews: number };
-function HomeView({ day, overseer, waiting, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; waiting: Waiting | null; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
+function HomeView({ day, overseer, waiting, waitingBusy, onRefreshWaiting, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; waiting: Waiting | null; waitingBusy: boolean; onRefreshWaiting: () => void; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
   return <div className="mx-auto max-w-[1500px] space-y-4 sm:space-y-8">
     {/* Same layout as the CA office's Home: greeting on the left, date and a quote on the right. */}
@@ -819,7 +820,7 @@ function HomeView({ day, overseer, waiting, onNavigate, onOpenBranch }: { day: D
         <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-4 py-2 text-xs font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-2 sm:mt-4 text-[11px] leading-4 italic text-[#a9c1d0] sm:text-sm sm:leading-6 md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
       </div>
     </section>
-    <WaitingForYou loading={!waiting} items={[{ key: 'claims', label: 'Incentive claims', note: 'Staff claims waiting for your approval', icon: Coins, count: waiting?.claims, onOpen: () => onNavigate('incentives') }, { key: 'leave', label: 'Leave approvals', note: 'In your Individual Sign In', icon: CalendarDays, count: waiting?.leave, href: '#office/individual' }, { key: 'ot', label: 'OT & clock requests', note: 'In your Individual Sign In', icon: Clock3, count: waiting?.requests, href: '#office/individual' }, { key: 'review', label: 'Performance Review', note: 'In your Individual Sign In', icon: Check, count: waiting?.reviews, href: '#office/individual' }]} />
+    <WaitingForYou loading={!waiting || waitingBusy} onRefresh={onRefreshWaiting} items={[{ key: 'claims', label: 'Incentive claims', note: 'Staff claims waiting for your approval', icon: Coins, count: waiting?.claims, onOpen: () => onNavigate('incentives') }, { key: 'leave', label: 'Leave approvals', note: 'In your Individual Sign In', icon: CalendarDays, count: waiting?.leave, href: '#office/individual' }, { key: 'ot', label: 'OT & clock requests', note: 'In your Individual Sign In', icon: Clock3, count: waiting?.requests, href: '#office/individual' }, { key: 'review', label: 'Performance Review', note: 'In your Individual Sign In', icon: Check, count: waiting?.reviews, href: '#office/individual' }]} />
     <section>
       <div className="mb-2 flex items-end justify-between gap-4 sm:mb-4"><h3 className="text-lg font-semibold tracking-tight sm:text-2xl">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
       <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group rounded-2xl bg-[#0b3d59] p-3 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c] sm:min-h-[132px] sm:rounded-[24px] sm:p-5">
@@ -854,16 +855,10 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
     officeFetch(`${API}&action=branches`).then((response) => response.json()).then(({ branches: names, admin: isAdmin }) => { setBranches(names); setBranch(names[0] || ''); setAdmin(Boolean(isAdmin)); })
       .catch((cause) => setError(cause.message));
   }, []);
-  // What waits for the admin (or for both admins): read when the Home page opens, and at most once in five minutes for the same branch.
-  const [waiting, setWaiting] = useState<Waiting | null>(null);
-  const lastWaiting = useRef<Record<string, number>>({});
-  useEffect(() => {
-    const target = overseer ? 'all' : branch;
-    if (view !== 'home' || !target || (branches?.length || 0) === 0) return;
-    if (Date.now() - (lastWaiting.current[target] || 0) < 5 * 60 * 1000) return;
-    lastWaiting.current[target] = Date.now(); setWaiting(null);
-    officeFetch(`${API}&action=waiting&branch=${encodeURIComponent(target)}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setWaiting(result); }).catch(() => setWaiting({ claims: null, leave: 0, requests: 0, reviews: 0 }));
-  }, [view, branch, overseer, branches?.length]);
+  // Reuse each branch summary when navigating Home; no timer or automatic five-minute reload.
+  const waitingTarget = overseer ? 'all' : branch;
+  const { data: waiting, busy: waitingBusy, refresh: refreshWaiting } = useOnDemandSummary<Waiting>(waitingTarget || '', () =>
+    officeFetch(`${API}&action=waiting&branch=${encodeURIComponent(waitingTarget)}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); return result; }).catch(() => ({ claims: null, leave: 0, requests: 0, reviews: 0 })), view === 'home' && (branches?.length || 0) > 0);
   const load = async () => {
     if (!branch) return;
     try { setDay(await (await officeFetch(`${API}&action=day&branch=${encodeURIComponent(branch)}`)).json()); }
@@ -914,7 +909,7 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
-        {view === 'home' && <HomeView day={day} overseer={overseer} waiting={waiting} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
+        {view === 'home' && <HomeView day={day} overseer={overseer} waiting={waiting} waitingBusy={waitingBusy} onRefreshWaiting={refreshWaiting} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
         {view === 'roster' && <HRRoster readOnly defaultView="calendar" onError={onError} />}
         {view === 'caoffice' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the CA office…</p>}><CAOffice key="ca" embedded /></Suspense>}
         {view !== 'home' && view !== 'caoffice' && view !== 'roster' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}

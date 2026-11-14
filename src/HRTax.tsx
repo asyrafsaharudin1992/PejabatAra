@@ -14,7 +14,7 @@ const money = (value: number) => value.toLocaleString('en-MY', { minimumFraction
 const TOTALS: { key: 'gross' | 'fees' | 'pcb' | 'kwsp' | 'socso' | 'eis' | 'childRelief'; label: string }[] = [{ key: 'gross', label: 'Gross pay' }, { key: 'fees', label: 'Fees / bonus' }, { key: 'pcb', label: 'PCB (tax paid)' }, { key: 'kwsp', label: 'KWSP' }, { key: 'socso', label: 'PERKESO' }, { key: 'eis', label: 'EIS' }, { key: 'childRelief', label: 'Child relief' }];
 
 export function HRTax({ onError }: { onError: (message: string) => void }) {
-  const [year, setYear] = useState(0);
+  const [year, setYear] = useState(() => new Date().getFullYear());
   const [years, setYears] = useState<number[]>([]);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [notSetUp, setNotSetUp] = useState(false);
@@ -25,9 +25,11 @@ export function HRTax({ onError }: { onError: (message: string) => void }) {
   const [doc, setDoc] = useState<{ kind: 'ea' | 'cp8d'; rows: FormRow[]; employer: Employer } | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
+    let live = true;
     setRows(null);
-    officeFetch(`/api/status?resource=hr&action=tax_summary${year ? `&year=${year}` : ''}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setYears(result.years || []); if (!year) setYear(result.year); setRows(result.rows || []); setNotSetUp(Boolean(result.notSetUp)); })
-      .catch((cause: Error) => { setRows([]); onError(cause.message); });
+    officeFetch(`/api/status?resource=hr&action=tax_summary${year ? `&year=${year}` : ''}`).then((response) => response.json()).then((result) => { if (!live) return; if (result.error) throw new Error(result.error); setYears(result.years || []); setRows(result.rows || []); setNotSetUp(Boolean(result.notSetUp)); })
+      .catch((cause: Error) => { if (live) { setRows([]); onError(cause.message); } });
+    return () => { live = false; };
   }, [year]);
   const allYears = [...new Set([...years, ...Array.from({ length: new Date().getFullYear() - 2023 }, (_, index) => 2024 + index)])].sort((a, b) => b - a);
   usePrintDocument(Boolean(doc), `${doc?.kind === 'cp8d' ? 'CP8D' : 'Borang EA'} ${year}`, () => setDoc(null));

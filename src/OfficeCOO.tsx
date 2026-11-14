@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useOnDemandSummary } from './lib/useOnDemandSummary';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { AraLogo } from './AraLogo';
 import { StackTables } from './StackTables';
 import { SubTabs } from './SubTabs';
@@ -211,15 +212,8 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState('');
   const navigate = (next: View) => { setView(next); setMenuOpen(false); setError(''); window.scrollTo({ top: 0 }); };
-  // What waits for the COO. Read when the office opens, right after a decision page (Leave, Attendance, Review, AraCare) is left, and at most once in five minutes otherwise.
-  const [waiting, setWaiting] = useState<{ leave: number | null; requests: number | null; reviews: number | null; care: number | null } | null>(null);
-  const lastWaiting = useRef(0), previousView = useRef<View>('home');
-  useEffect(() => {
-    const left = ['leave', 'attendance', 'review', 'care'].includes(previousView.current); previousView.current = view;
-    if (!left && Date.now() - lastWaiting.current < 5 * 60 * 1000) return;
-    lastWaiting.current = Date.now();
-    call('action=coo_waiting').then((result) => setWaiting(result)).catch(() => setWaiting({ leave: null, requests: null, reviews: null, care: null }));
-  }, [view]);
+  // Read once per office visit, then only when the user presses Refresh.
+  const { data: waiting, busy: waitingBusy, refresh: refreshWaiting } = useOnDemandSummary<{ leave: number | null; requests: number | null; reviews: number | null; care: number | null }>('coo', () => call('action=coo_waiting').catch(() => ({ leave: null, requests: null, reviews: null, care: null })));
   const logout = async () => { await signOutSupabase(); localStorage.removeItem('ara_portal_session'); localStorage.removeItem('araoffice_user'); localStorage.removeItem('ara_view_mode'); window.location.hash = ''; };
   const title = NAV.find((item) => item.id === view)?.label || OFFICES.find((item) => item.id === view)?.label || '';
   return <div className={embedded ? 'coo-compact text-[#14233b]' : 'coo-compact min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
@@ -233,6 +227,8 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
         <a href={LOCUM_URL} target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><Stethoscope className="h-[18px] w-[18px] shrink-0 text-cyan-300" strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">AraLocum</span><ExternalLink className="h-3.5 w-3.5 text-[#7f9bb0]" /></a>
         <p className="px-3.5 pb-1 pt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">Offices I lead</p>
         {OFFICES.map((item) => <button key={item.id} onClick={() => navigate(item.id)} className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition ${view === item.id ? 'bg-white text-[#14233b]' : 'text-[#c5d6e3] hover:bg-white/10'}`}><item.icon className={`h-[18px] w-[18px] shrink-0 ${TONE[item.id]}`} strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">{item.label}</span></button>)}
+        <p className="px-3.5 pb-1 pt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]">Me</p>
+        <a href="#office/individual" className="flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold text-[#c5d6e3] transition hover:bg-white/10"><IdCard className="h-[18px] w-[18px] shrink-0 text-teal-400" strokeWidth={1.8} /><span className="min-w-0 flex-1 text-left">Individual Sign In</span></a>
       </nav>
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4"><div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">COO</div><div className="min-w-0"><p className="truncate text-sm font-semibold">Operations</p><p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p></div></div><button onClick={() => void logout()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 py-2.5 text-sm font-semibold hover:bg-white/15"><LogOut className="h-4 w-4" />Sign out</button></div>
     </aside>
@@ -253,7 +249,7 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
           {view !== 'review' && view !== 'home' && <section className="ara-hero rounded-[18px] px-4 py-3 text-white sm:rounded-[30px] sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office COO · Klinik ARA 24 Jam</p><h2 className="mt-1 text-xl font-semibold tracking-tight sm:mt-3 sm:text-3xl">{title}</h2><p className="mt-2 hidden max-w-2xl text-sm leading-6 text-[#b9cfdd] sm:mt-3 sm:block sm:text-base sm:leading-7">{view === 'home' ? 'Your own calendar and reminders. Add a reminder for a date, repeat it, and tick it Done.' : view === 'leave' ? 'Who is on leave, day by day, and the leave of your team that is still waiting for approval. HR keeps the final decision.' : view === 'assessment' ? 'The assessments for the Clinical Assistants: add or edit the questions, and see everyone’s results.' : view === 'attendance' ? 'Your team’s attendance today and for the month (view only), and the OT requests that wait for your approval. After you approve, HR confirms the OT rate.' : view === 'review' ? 'The monthly reviews HR has given to you. Fill in the form and sign; the result goes back to HR.' : view === 'charts' ? 'The people of the company, leave and attendance, incentives and performance reviews.' : view === 'roster' ? 'The duty roster, as HR keeps it. You can look at it but not change it.' : view === 'staff' ? 'All active staff by group and clinic, and the CA staffing forecast. You can look at them but not change them.' : 'The AraCare Care Coordination Allowance claims: check the KPIs and say if the allowance is payable.'}</p>
           </section>}
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-          {view === 'home' && <div className="space-y-6"><WaitingForYou loading={!waiting} items={[{ key: 'leave', label: 'Leave approvals', note: 'Leave waiting for your decision', icon: CalendarCheck, count: waiting?.leave, onOpen: () => navigate('leave') }, { key: 'ot', label: 'OT & clock requests', note: 'Overtime and forgotten clocks', icon: Clock3, count: waiting?.requests, onOpen: () => navigate('attendance') }, { key: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck, count: waiting?.reviews, onOpen: () => navigate('review') }, { key: 'care', label: 'AraCare to check', note: 'Check the KPIs of the allowance', icon: HeartPulse, count: waiting?.care, onOpen: () => navigate('care') }]} /><TeamGlance onError={setError} onStaff={() => navigate('staff')} /><COOCalendar /></div>}
+          {view === 'home' && <div className="space-y-6"><WaitingForYou loading={!waiting || waitingBusy} onRefresh={refreshWaiting} items={[{ key: 'leave', label: 'Leave approvals', note: 'Leave waiting for your decision', icon: CalendarCheck, count: waiting?.leave, onOpen: () => navigate('leave') }, { key: 'ot', label: 'OT & clock requests', note: 'Overtime and forgotten clocks', icon: Clock3, count: waiting?.requests, onOpen: () => navigate('attendance') }, { key: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck, count: waiting?.reviews, onOpen: () => navigate('review') }, { key: 'care', label: 'AraCare to check', note: 'Check the KPIs of the allowance', icon: HeartPulse, count: waiting?.care, onOpen: () => navigate('care') }]} /><TeamGlance onError={setError} onStaff={() => navigate('staff')} /><COOCalendar /></div>}
           {view === 'staff' && <StaffDirectory onError={setError} />}
           {view === 'leave' && <TeamLeave onError={setError} />}
           {view === 'roster' && <HRRoster readOnly canDraft hideCodes={ROSTER_HIDDEN} defaultView="calendar" onError={setError} />}
@@ -267,7 +263,7 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
       </main>
       <nav aria-label="Main" className={`${embedded ? 'hidden ' : ''}fixed inset-x-4 bottom-4 z-40 flex select-none justify-around rounded-2xl border border-slate-100 bg-white/95 px-2 py-2 shadow-[0_8px_30px_rgba(15,23,42,0.16)] backdrop-blur-md lg:hidden`}>
         {([['home', 'Home', Home], ['clinical', 'Clinical Admin', ClipboardList], ['ca', 'CA office', GraduationCap]] as const).map(([id, label, Icon]) => { const current = view === id; return <button key={id} type="button" onClick={() => navigate(id)} aria-current={current ? 'page' : undefined} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${current ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Icon className="h-[21px] w-[21px]" strokeWidth={current ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">{label}</span></button>; })}
-        <a href="#office/individual" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-slate-400 outline-none"><IdCard className="h-[21px] w-[21px]" strokeWidth={1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">Individual</span></a>
+        <button type="button" onClick={() => setMenuOpen(true)} aria-label="Open the full menu" className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${menuOpen || !['home', 'clinical', 'ca'].includes(view) ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Menu className="h-[21px] w-[21px]" strokeWidth={menuOpen || !['home', 'clinical', 'ca'].includes(view) ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">Others</span></button>
       </nav>
     </div>
   </div>;

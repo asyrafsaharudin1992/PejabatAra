@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { useOnDemandSummary } from './lib/useOnDemandSummary';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { AraLogo } from './AraLogo';
 import { SubTabs } from './SubTabs';
-import { ClipboardList, Crown, ExternalLink, GraduationCap, HeartPulse, Home, IdCard, BarChart3, CalendarCheck, ClipboardCheck, LogOut, Menu, Pencil, Plus, Stethoscope, Trash2, Users, UserRound, UsersRound as TeamIcon, UsersRound, HandCoins, ShieldCheck, X } from 'lucide-react';
+import { ClipboardList, Crown, ExternalLink, GraduationCap, HeartPulse, Home, IdCard, BarChart3, CalendarCheck, ClipboardCheck, LogOut, Menu, Pencil, Plus, Stethoscope, Trash2, Users, UserRound, UsersRound as TeamIcon, UsersRound, HandCoins, ShieldCheck, Truck, X } from 'lucide-react';
 import COOCalendar from './COOCalendar';
 import { officeFetch } from './lib/officeApi';
 import { Approvals } from './LeaveScreens';
@@ -18,8 +19,9 @@ const OfficePortal = lazy(() => import('./PortalApp'));
 const OfficeCOO = lazy(() => import('./OfficeCOO'));
 const OfficeHR = lazy(() => import('./OfficeHR'));
 const OfficeQuality = lazy(() => import('./App'));
+const OfficeProcurement = lazy(() => import('./OfficeProcurement'));
 
-type View = 'home' | 'charts' | 'leave' | 'review' | 'coo' | 'hr' | 'quality' | 'clinical' | 'ca';
+type View = 'home' | 'charts' | 'leave' | 'review' | 'coo' | 'hr' | 'procurement' | 'quality' | 'clinical' | 'ca';
 type Waiting = { leave: number | null; reviews: number | null };
 // What waits for the CEO, read from the same lists as the CEO's Individual Sign In.
 async function ceoCall(query: string, body?: unknown) {
@@ -37,6 +39,7 @@ const CARE_URL = 'https://aracare.hsohealthcare.com/';
 const INSIDE: { id: Exclude<View, 'home'>; label: string; icon: typeof Home; tone: string }[] = [
   { id: 'coo', label: 'COO office', icon: UsersRound, tone: 'text-sky-400' },
   { id: 'hr', label: 'HR office', icon: ShieldCheck, tone: 'text-emerald-400' },
+  { id: 'procurement', label: 'Procurement (CPO)', icon: Truck, tone: 'text-orange-300' },
   { id: 'quality', label: 'Quality & Corporate', icon: HandCoins, tone: 'text-amber-400' },
   { id: 'clinical', label: 'Clinical Admin', icon: ClipboardList, tone: 'text-cyan-300' },
   { id: 'ca', label: 'Clinical Assistants (CA)', icon: GraduationCap, tone: 'text-fuchsia-400' },
@@ -48,10 +51,10 @@ const SYSTEMS: { href: string; label: string; icon: typeof Home; tone: string }[
 const side = 'flex w-full items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13.5px] font-semibold transition';
 const heading = 'px-3.5 pb-1 pt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#7f9bb0]';
 
-function WaitingForYou({ waiting, onOpen }: { waiting: Waiting | null; onOpen: (view: 'leave' | 'review') => void }) {
+function WaitingForYou({ waiting, onOpen, onRefresh, busy }: { waiting: Waiting | null; onOpen: (view: 'leave' | 'review') => void; onRefresh: () => void; busy: boolean }) {
   const total = waiting ? DESK.reduce((sum, item) => sum + (waiting[item.key] || 0), 0) : null;
   return <section aria-label="Waiting for you" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_5px_20px_rgba(20,35,59,0.03)] sm:p-5">
-    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-base font-semibold tracking-tight">Waiting for you</h3><span className={`rounded-full px-3 py-1 text-xs font-semibold ${total ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{total === null ? 'Loading…' : total ? `${total} waiting` : 'Nothing waiting'}</span></div>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-base font-semibold tracking-tight">Waiting for you</h3><button type="button" onClick={onRefresh} disabled={busy} className="ml-auto rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-[#0b587b] disabled:opacity-50">{busy ? 'Loading…' : 'Refresh'}</button><span className={`rounded-full px-3 py-1 text-xs font-semibold ${total ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{total === null ? 'Loading…' : total ? `${total} waiting` : 'Nothing waiting'}</span></div>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">{DESK.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item.id)} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:bg-slate-50">
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-50 text-slate-500"><item.icon className="h-[18px] w-[18px]" strokeWidth={1.8} /></span>
       <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-[#14233b]">{item.label}</span><span className="block text-[11px] leading-4 text-slate-500 sm:text-xs">{item.note}</span></span>
@@ -158,11 +161,8 @@ export default function OfficeCEO() {
   const [view, setView] = useState<View>('home');
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState('');
-  const [waiting, setWaiting] = useState<Waiting | null>(null);
-  // Refreshed when the CEO moves between pages, so the numbers stay true after a decision.
-  // Read when the office opens, right after the CEO leaves a decision page (Leave, Review), and at most once in five minutes otherwise.
-  const lastWaiting = useRef(0), previousView = useRef<View>('home');
-  useEffect(() => { const left = previousView.current === 'leave' || previousView.current === 'review'; previousView.current = view; if (!left && Date.now() - lastWaiting.current < 5 * 60 * 1000) return; lastWaiting.current = Date.now(); ceoCall('action=ceo_waiting').then((result) => setWaiting(result)).catch(() => setWaiting({ leave: null, reviews: null })); }, [view]);
+  // Read once when this office opens. Subsequent reads require the Refresh button.
+  const { data: waiting, busy: waitingBusy, refresh: refreshWaiting } = useOnDemandSummary<Waiting>('ceo', () => ceoCall('action=ceo_waiting').catch(() => ({ leave: null, reviews: null })));
   const navigate = (next: View) => { setView(next); setMenuOpen(false); setError(''); window.scrollTo({ top: 0 }); };
   const logout = async () => { await signOutSupabase(); localStorage.removeItem('ara_portal_session'); localStorage.removeItem('araoffice_user'); localStorage.removeItem('ara_view_mode'); window.location.hash = ''; };
   const title = view === 'home' ? 'Home' : view === 'charts' ? 'Charts' : DESK.find((item) => item.id === view)?.label || INSIDE.find((item) => item.id === view)?.label || '';
@@ -198,7 +198,7 @@ export default function OfficeCEO() {
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
           {view === 'leave' && <Approvals fetcher={(query, options) => ceoCall(query.replace('action=', 'action=ceo_'), options?.body ? JSON.parse(String(options.body)) : undefined)} />}
           {view === 'review' && <ReviewRoom embedded onSignedOut={() => undefined} api={(query, body) => ceoCall(query.replace('action=', 'action=ceo_review_'), body)} />}
-        </div> : view !== 'home' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}><div className="max-sm:[zoom:0.84]">{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : view === 'ca' ? <OfficePortal key="ca" embedded /> : view === 'coo' ? <OfficeCOO key="coo" embedded /> : view === 'hr' ? <OfficeHR key="hr" embedded /> : <OfficeQuality key="quality" embedded />}</div></Suspense> :
+        </div> : view !== 'home' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}><div className="max-sm:[zoom:0.84]">{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : view === 'ca' ? <OfficePortal key="ca" embedded /> : view === 'coo' ? <OfficeCOO key="coo" embedded /> : view === 'hr' ? <OfficeHR key="hr" embedded /> : view === 'procurement' ? <OfficeProcurement key="procurement" embedded /> : <OfficeQuality key="quality" embedded />}</div></Suspense> :
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section className="ara-hero rounded-[18px] px-4 py-3.5 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
             <div className="flex flex-col gap-4 sm:gap-7 md:flex-row md:items-start md:justify-between">
@@ -207,12 +207,12 @@ export default function OfficeCEO() {
             </div>
           </section>
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-          <div className="space-y-6"><WaitingForYou waiting={waiting} onOpen={navigate} /><Headcount onError={setError} /><div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]"><COOCalendar scope="ceo" stacked /><CeoTasks onError={setError} /></div></div>
+          <div className="space-y-6"><WaitingForYou waiting={waiting} onOpen={navigate} onRefresh={refreshWaiting} busy={waitingBusy} /><Headcount onError={setError} /><div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]"><COOCalendar scope="ceo" stacked /><CeoTasks onError={setError} /></div></div>
         </div>}
       </main>
-      <nav aria-label="Main" className="fixed inset-x-4 bottom-4 z-40 flex select-none justify-around rounded-2xl border border-slate-100 bg-white/95 px-2 py-2 shadow-[0_8px_30px_rgba(15,23,42,0.16)] backdrop-blur-md lg:hidden">
-        {([['home', 'Home', Home], ['coo', 'COO', UsersRound], ['hr', 'HR', ShieldCheck], ['clinical', 'Clinical', ClipboardList], ['ca', 'CA', GraduationCap]] as const).map(([id, label, Icon]) => { const current = view === id; return <button key={id} type="button" onClick={() => navigate(id)} aria-current={current ? 'page' : undefined} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${current ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Icon className="h-[21px] w-[21px]" strokeWidth={current ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">{label}</span></button>; })}
-        <a href="#office/individual" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-slate-400 outline-none"><IdCard className="h-[21px] w-[21px]" strokeWidth={1.8} /><span className="max-w-[72px] truncate text-[9.5px] leading-tight">Individual</span></a>
+      <nav aria-label="Main" className="fixed inset-x-4 bottom-4 z-40 flex select-none justify-around rounded-2xl border border-slate-100 bg-white/95 px-1.5 py-1.5 shadow-[0_8px_30px_rgba(15,23,42,0.16)] backdrop-blur-md lg:hidden">
+        {([['home', 'Home', Home], ['coo', 'COO', UsersRound], ['hr', 'HR', ShieldCheck], ['clinical', 'Clinical', ClipboardList], ['ca', 'CA', GraduationCap], ['procurement', 'CPO', Truck]] as const).map(([id, label, Icon]) => { const current = view === id; return <button key={id} type="button" onClick={() => navigate(id)} aria-current={current ? 'page' : undefined} className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${current ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Icon className="h-[18px] w-[18px]" strokeWidth={current ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9px] leading-tight">{label}</span></button>; })}
+        <button type="button" onClick={() => setMenuOpen(true)} aria-label="Open the full menu" className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-1 outline-none transition ${menuOpen || !['home', 'coo', 'hr', 'clinical', 'ca', 'procurement'].includes(view) ? 'scale-105 font-bold text-[#007AFF]' : 'text-slate-400'}`}><Menu className="h-[18px] w-[18px]" strokeWidth={menuOpen || !['home', 'coo', 'hr', 'clinical', 'ca', 'procurement'].includes(view) ? 2.2 : 1.8} /><span className="max-w-[72px] truncate text-[9px] leading-tight">Others</span></button>
       </nav>
     </div>
   </div>;

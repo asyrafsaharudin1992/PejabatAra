@@ -9,16 +9,34 @@ import { card, input } from './AssessmentStaff';
 // Individual Sign In > Office COO / CEO / HR (shown only to the COO, the CEO or the CHRO): opens that office on the phone.
 // The COO's own Individual Sign In is the proof of who they are: the server gives the COO office session (and registers this phone), so no
 // office email, password or device key is asked for. The email and password form below stays only as a fallback if that does not work.
-const open = (office: 'coo' | 'ceo' | 'hr') => { window.location.hash = `office/${office}`; };
+const open = (office: 'coo' | 'ceo' | 'hr' | 'procurement') => { window.location.hash = `office/${office}`; };
 const remember = (account: { email: string; fullName: string; status?: string; branch: string; role?: string }) => {
   localStorage.setItem('ara_portal_session', JSON.stringify(account));
   localStorage.setItem('araoffice_user', JSON.stringify({ email: account.email, fullName: account.fullName, role: account.role || 'Staff', status: account.status || 'Active', location: account.branch, profilePic: '' }));
   localStorage.removeItem('ara_view_mode');
 };
 
+// The office sign-in link is single use. React runs this effect twice in development (and a double tap can too), and two requests for the same account
+// would make the second one fail with "Email link is invalid or has expired". So one request is shared by every caller within a few seconds.
+const inFlight = new Map<string, Promise<Awaited<ReturnType<typeof signInWithOfficeToken>>>>();
+function openOfficeSession(office: string, preview: boolean) {
+  const key = `${office}:${preview}`;
+  const running = inFlight.get(key);
+  if (running) return running;
+  const started = (async () => {
+    const result = await assessmentFetch(`action=${office}_office_session`, { method: 'POST', body: JSON.stringify(preview ? { preview: true } : {}) });
+    if (result.device) saveDevice(result.device.token, result.device.name);
+    return signInWithOfficeToken(result.tokenHash);
+  })();
+  inFlight.set(key, started);
+  const forget = () => setTimeout(() => inFlight.delete(key), 5000);
+  started.then(forget, () => inFlight.delete(key));
+  return started;
+}
+
 // Layout previews enter with the verified System Admin account, while the greeting follows the selected role.
-export default function CooOfficeEntry({ office = 'coo', greeting = '', preview = false }: { office?: 'coo' | 'ceo' | 'hr'; greeting?: string; preview?: boolean } = {}) {
-  const name = office === 'ceo' ? 'CEO' : office === 'hr' ? 'HR' : 'COO';
+export default function CooOfficeEntry({ office = 'coo', greeting = '', preview = false }: { office?: 'coo' | 'ceo' | 'hr' | 'procurement'; greeting?: string; preview?: boolean } = {}) {
+  const name = office === 'ceo' ? 'CEO' : office === 'hr' ? 'HR' : office === 'procurement' ? 'Procurement' : 'COO';
   const [state, setState] = useState<'checking' | 'form'>('checking');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,9 +50,7 @@ export default function CooOfficeEntry({ office = 'coo', greeting = '', preview 
         // Already signed in to the COO office on this phone: go straight in.
         const identity = await getOfficeIdentity().catch(() => null);
         if (!preview && (identity?.role === 'super_admin' || identity?.officeAccess.includes(office))) { rememberGreeting(office, greeting); open(office); return; }
-        const result = await assessmentFetch(`action=${office}_office_session`, { method: 'POST', body: JSON.stringify(preview ? { preview: true } : {}) });
-        if (result.device) saveDevice(result.device.token, result.device.name);
-        const account = await signInWithOfficeToken(result.tokenHash);
+        const account = await openOfficeSession(office, preview);
         if (account.role !== 'Superadmin' && !account.officeAccess?.includes(office)) { await signOutSupabase(); throw new Error(`not ${office}`); }
         remember(account);
         if (preview) localStorage.setItem('ara_view_mode', 'staff');

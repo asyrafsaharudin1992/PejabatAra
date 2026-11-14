@@ -16,8 +16,8 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; canViewAs?: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; ceoOffice?: boolean; hrOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'coo' | 'ceo' | 'hr' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; canViewAs?: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; ceoOffice?: boolean; hrOffice?: boolean; cpoOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type View = 'home' | 'coo' | 'ceo' | 'hr' | 'procurement' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -198,6 +198,7 @@ const VIEW_AS: Record<string, Partial<Me['staff']>> = {
   // The directors, with the office icon each of them gets. (Their own screens still show the real account's data.)
   CHRO: { name: 'AHMAD SYAFIQ BIN SO IB', ceoOffice: false, hrOffice: true, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
   COO: { name: 'LUQMAN HAKIM BIN MOHD KAMAL', ceoOffice: false, hrOffice: false, careApprover: true, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  CPO: { name: 'HAZIQ BIN SHAMSUL', ceoOffice: false, hrOffice: false, cpoOffice: true, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
   CEO: { name: 'MOHAMAD ASYRAF BIN SAHARUDIN', ceoOffice: true, hrOffice: false, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
 };
 
@@ -254,6 +255,7 @@ export default function IndividualHub() {
   if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'hr' && me?.staff.hrOffice) return <Screen nav={phoneNav} title="Office HR" onBack={() => setView('home')}><CooOfficeEntry office="hr" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'ceo' && me?.staff.ceoOffice) return <Screen nav={phoneNav} title="Office CEO" onBack={() => setView('home')}><CooOfficeEntry office="ceo" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'procurement' && me?.staff.cpoOffice) return <Screen nav={phoneNav} title="Office Procurement" onBack={() => setView('home')}><CooOfficeEntry office="procurement" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
@@ -272,6 +274,7 @@ export default function IndividualHub() {
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
   const items: Item[] = [
+    ...(me?.staff.cpoOffice ? [{ label: 'Office - Procurement', desc: 'Open your CPO office', icon: Building2, tone: 'bg-[#fef3c7] text-[#92400e]', onClick: () => setView('procurement') } as Item] : []),
     ...(me?.staff.ceoOffice ? [{ label: 'Office - CEO', desc: 'Open your CEO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('ceo') } as Item] : []),
     ...(me?.staff.hrOffice ? [{ label: 'Office - HR', desc: 'Open your HR office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('hr') } as Item] : []),
     ...(me?.staff.careApprover ? [{ label: 'Office - COO', desc: 'Open your COO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('coo') } as Item] : []),
