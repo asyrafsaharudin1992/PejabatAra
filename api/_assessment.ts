@@ -1,4 +1,5 @@
 import { calendarAccessFor } from './_leave-calendar-access.js';
+import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
@@ -73,7 +74,7 @@ async function staffSession(db: any, req: any) {
   if (Date.parse(data.expires_at) - Date.now() < (SESSION_HOURS - 24) * 3600000) {
     await db.from('assessment_sessions').update({ expires_at: new Date(Date.now() + SESSION_HOURS * 3600000).toISOString() }).eq('token_hash', hashSecret(token));
   }
-  return data.assessment_staff as { id: string; name: string; branch: string; can_preview: boolean; staff_code: string; password_hash: string | null };
+  return data.assessment_staff as { id: string; name: string; branch: string; can_preview: boolean; staff_code: string; active: boolean; password_hash: string | null };
 }
 
 // Validates an admin-submitted question list; returns it with ids filled in.
@@ -657,15 +658,16 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const office = OFFICE_SESSIONS[action.slice(0, action.indexOf('_')) as keyof typeof OFFICE_SESSIONS];
     const { data: me, error: meError } = await db.from('hr_employees').select('id,designation,status').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
-    // Local development only (never in production): the System Admin (Atikah, ARA0035) can look at what the COO, the CEO or the CHRO gets with "View as" in
-    // Individual Sign In, using the CEO's own office account. The server on this computer is the only place it runs.
-    const preview = body?.preview === true && !process.env.VERCEL && process.env.NODE_ENV !== 'production' && SYSTEM_ADMIN_STAFF.includes(String((staff as any).staff_code || '').toUpperCase());
+    // Layout preview keeps Atikah's own System Admin office identity; it never signs in as a director.
+    const preview = body?.preview === true;
+    const admin = preview ? await individualPreviewAdmin(db, staff, me?.status === 'Active') : null;
+    if (preview && !admin) throw fail(403, 'Layout previews are for the linked System Admin only.');
     if (!preview && (!me || me.status !== 'Active' || !office.title.test(String(me.designation || '')))) throw fail(403, `This is for the ${office.label} only.`);
-    const { data: link, error: linkError } = await db.auth.admin.generateLink({ type: 'magiclink', email: preview ? OFFICE_SESSIONS.ceo.email : office.email });
-    if (linkError || !link?.properties?.hashed_token || !link.user) throw fail(500, `The ${office.label} office account is not ready. Ask System Admin.`);
+    const { data: link, error: linkError } = await db.auth.admin.generateLink({ type: 'magiclink', email: admin?.email || office.email });
+    if (linkError || !link?.properties?.hashed_token || !link.user || admin && link.user.id !== admin.id) throw fail(500, `The ${office.label} office account is not ready. Ask System Admin.`);
     // A phone that is not registered yet is registered here (30 days), as the sign-in already proves who it is.
     let device: { token: string; name: string } | null = null;
-    if (await deviceLockEnabled(db) && !(await currentDevice(db, req))) {
+    if (!preview && await deviceLockEnabled(db) && !(await currentDevice(db, req))) {
       const token = randomBytes(32).toString('base64url');
       const { error: deviceError } = await db.from('registered_devices').insert({ name: `${office.label} phone`, token_hash: hashSecret(token), registered_by: link.user.id, expires_at: new Date(Date.now() + 30 * 24 * 3600000).toISOString(), last_seen_at: new Date().toISOString() });
       if (deviceError) throw deviceError;
@@ -805,12 +807,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // Preview accounts see every assessment, including closed ones.
     if (!staff.can_preview) quizQuery = quizQuery.eq('active', true);
     const [selfResult, { data: quizzes, error: quizError }, { data: attempts, error: attemptError }] = await Promise.all([
-      db.from('hr_employees').select('id,designation,company,department,leave_calendar_companies').eq('assessment_staff_id', staff.id).maybeSingle().then((result: any) => result, () => ({ data: null })),
+      db.from('hr_employees').select('id,designation,company,department,leave_calendar_companies,status').eq('assessment_staff_id', staff.id).maybeSingle().then((result: any) => result, () => ({ data: null })),
       quizQuery,
       db.from('assessment_attempts').select('quiz_id,score,total,attempt_no,submitted_at').eq('staff_id', staff.id),
     ]);
     if (quizError || attemptError) throw quizError || attemptError;
     const self = selfResult?.data;
+    const canViewAs = Boolean(await individualPreviewAdmin(db, staff, self?.status === 'Active'));
     // The rosters of whole companies are for the people HR gave company-wide calendar access (KJ, SK or both); everyone else sees only their own.
     const rosterCompanies: string[] = self ? (() => { const access = calendarAccessFor(self); return access.scope === 'companies' ? access.companies : []; })() : [];
     if (self) {
@@ -840,7 +843,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
@@ -999,8 +1002,6 @@ async function adminAction(req: any, res: any, action: string, body: any) {
 }
 
 // The office account each of them opens, and the job title that is allowed to.
-// The Individual Sign In accounts of System Admins (staff codes).
-const SYSTEM_ADMIN_STAFF = ['ARA0035'];
 const OFFICE_SESSIONS = {
   coo: { label: 'COO', email: 'operation@hsohealthcare.com', title: /^\s*COO\b/i },
   ceo: { label: 'CEO', email: 'asyrafsaharudin@hsohealthcare.com', title: /\bCEO\b/i },

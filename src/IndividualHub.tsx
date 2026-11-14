@@ -1,5 +1,6 @@
+import { INDIVIDUAL_PREVIEW_KEY, PREVIEW_ROLES, readIndividualPreview, clearIndividualPreview } from './lib/individualPreview';
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { greetingName } from './lib/officeGreeting';
+import { clearGreeting, greetingName } from './lib/officeGreeting';
 import { ArrowLeft, ArrowRight, Baby, Building2, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
@@ -15,7 +16,7 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; ceoOffice?: boolean; hrOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; canViewAs?: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; ceoOffice?: boolean; hrOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
 type View = 'home' | 'coo' | 'ceo' | 'hr' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
@@ -187,10 +188,8 @@ function MyProfile() {
   </div>;
 }
 
-// Development only (`npm run dev`, never in the live build): "View as" switches which icons the signed-in person sees, so
-// the staff, doctor, supervisor and admin layouts can be compared on one account. Only which icons show changes (no fake red numbers); nothing is
-// written anywhere, and screens still show the real account's data.
-const AS_KEY = 'ara_dev_view_as';
+// System Admin can compare role layouts. Personal screens still use the signed-in account's data.
+const AS_KEY = INDIVIDUAL_PREVIEW_KEY;
 const VIEW_AS: Record<string, Partial<Me['staff']>> = {
   Staff: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: false, preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
   Doctor: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: true, preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
@@ -201,20 +200,21 @@ const VIEW_AS: Record<string, Partial<Me['staff']>> = {
   COO: { name: 'LUQMAN HAKIM BIN MOHD KAMAL', ceoOffice: false, hrOffice: false, careApprover: true, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
   CEO: { name: 'MOHAMAD ASYRAF BIN SAHARUDIN', ceoOffice: true, hrOffice: false, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
 };
-const readViewAs = () => { try { const value = localStorage.getItem(AS_KEY) || ''; return value in VIEW_AS ? value : ''; } catch { return ''; } };
+
 
 export default function IndividualHub() {
   const [signedIn, setSignedIn] = useState(() => Boolean(localStorage.getItem(TOKEN_KEY)));
   const [realMe, setMe] = useState<Me | null>(() => readRememberedMe());
-  const [viewAs, setViewAs] = useState(() => import.meta.env.DEV ? readViewAs() : '');
+  const [viewAs, setViewAs] = useState(readIndividualPreview);
+  const canViewAs = realMe?.staff.canViewAs === true;
+  const selectedPreview = canViewAs ? viewAs : '';
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    const sync = () => setViewAs(readViewAs());
+    const sync = () => setViewAs(readIndividualPreview());
     window.addEventListener('storage', sync); // the desktop and phone frames share this choice
     return () => window.removeEventListener('storage', sync);
   }, []);
-  const chooseViewAs = (next: string) => { try { if (next) localStorage.setItem(AS_KEY, next); else localStorage.removeItem(AS_KEY); } catch { /* ignore */ } setViewAs(next); };
-  const me = viewAs && realMe ? { staff: { ...realMe.staff, ...VIEW_AS[viewAs] } } : realMe;
+  const chooseViewAs = (next: string) => { try { if (next) localStorage.setItem(AS_KEY, next); else localStorage.removeItem(AS_KEY); } catch { /* ignore */ } clearGreeting(); if (!next) localStorage.removeItem('ara_view_mode'); setViewAs(next); };
+  const me = selectedPreview && realMe ? { staff: { ...realMe.staff, ...VIEW_AS[selectedPreview] } } : realMe;
   const [view, setView] = useState<View>('home');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
@@ -238,7 +238,7 @@ export default function IndividualHub() {
 
   const signOut = async () => {
     await assessmentFetch('action=logout', { method: 'POST', body: '{}' }).catch(() => undefined);
-    localStorage.removeItem(TOKEN_KEY); forgetMe();
+    localStorage.removeItem(TOKEN_KEY); forgetMe(); clearIndividualPreview(); setViewAs('');
     setView('home');
     setSignedIn(false);
   };
@@ -251,9 +251,9 @@ export default function IndividualHub() {
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'toolkit' && me?.staff.isDoctor) return <Screen nav={phoneNav} title="Medical Toolkit" onBack={() => setView('home')}><Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening Medical Toolkit…</p>}><MedicalToolkit /></Suspense></Screen>;
   if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
-  if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
-  if (view === 'hr' && me?.staff.hrOffice) return <Screen nav={phoneNav} title="Office HR" onBack={() => setView('home')}><CooOfficeEntry office="hr" preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
-  if (view === 'ceo' && me?.staff.ceoOffice) return <Screen nav={phoneNav} title="Office CEO" onBack={() => setView('home')}><CooOfficeEntry office="ceo" preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'hr' && me?.staff.hrOffice) return <Screen nav={phoneNav} title="Office HR" onBack={() => setView('home')}><CooOfficeEntry office="hr" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'ceo' && me?.staff.ceoOffice) return <Screen nav={phoneNav} title="Office CEO" onBack={() => setView('home')}><CooOfficeEntry office="ceo" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
@@ -290,12 +290,14 @@ export default function IndividualHub() {
     { label: 'Settings', desc: 'Change your password, sign out', icon: Settings, tone: 'bg-slate-100 text-slate-600', onClick: () => setView('settings') },
   ];
   const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge, locked: item.locked }));
+  const previewPicker = canViewAs && <section aria-label="System Admin: view as" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs text-[#0b587b]">
+    <label className="flex min-w-0 flex-1 items-center gap-2 font-semibold">View as<select aria-label="View as role" value={selectedPreview} onChange={(event) => chooseViewAs(event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-sky-200 bg-white px-2 text-xs"><option value="">Me · Atikah</option>{PREVIEW_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+    {selectedPreview && <button type="button" onClick={() => chooseViewAs('')} className="rounded-lg bg-white px-2 py-1.5 font-semibold">Exit preview</button>}
+    <p className="w-full text-[10px] leading-4 text-slate-500">{selectedPreview ? 'Layout preview only. Individual screens use your own data; offices use your System Admin session.' : 'System Admin only · compare mobile layouts by role.'}</p>
+  </section>;
   const facts: [string, string][] = profile ? [['Position', profile.position], ['Department', profile.department], ['Joined', dmy(profile.joinDate)]] : [];
 
   return <>
-    {import.meta.env.DEV && <div className="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center justify-center gap-1 bg-slate-900/90 px-2 py-1 text-[10px] font-semibold text-white" aria-label="Development: view as">
-      <span className="mr-1 text-slate-400">View as</span>{['', ...Object.keys(VIEW_AS)].map((name) => <button key={name || 'real'} type="button" onClick={() => chooseViewAs(name)} className={`rounded-full px-2 py-0.5 ${viewAs === name ? 'bg-white text-slate-900' : 'bg-white/10'}`}>{name || 'Me'}</button>)}
-    </div>}
     {/* Phone: the photo of the clinic, a greeting and the icons in a white card */}
     <div className="min-h-[100svh] bg-[#f3f6fb] pb-[84px] text-[#14233b] md:hidden">
       <header className="relative h-[clamp(300px,38svh,380px)] overflow-hidden bg-[#cfe3f4]">
@@ -310,6 +312,7 @@ export default function IndividualHub() {
         <div className="absolute inset-x-0 bottom-9 px-5"><p className="max-w-[290px] text-[21px] font-semibold leading-snug tracking-tight text-white [text-shadow:0_1px_8px_rgba(8,44,66,0.55)]">{quote}</p><i className="mt-2 block h-1 w-12 rounded-full bg-[#7cc4ff]" /></div>
       </header>
       <main className="relative z-10 -mt-6 mx-3 rounded-[26px] bg-white px-1.5 pb-4 pt-4 shadow-[0_10px_34px_rgba(11,42,74,0.1)]">
+        {previewPicker}
         <div className="grid grid-cols-4 gap-x-0 gap-y-1">{phoneItems.map((item) => <PhoneTile key={item.label} item={item} />)}</div>
       </main>
       {phoneNav}
@@ -317,6 +320,7 @@ export default function IndividualHub() {
 
     {/* Desktop workspace */}
     <div className="hidden min-h-screen bg-[#f5f5f7] text-[#1d1d1f] md:block">
+      {previewPicker}
         {/* The same clinic photo as the phone, under a deep blue wash */}
         <section className="relative overflow-hidden rounded-b-[36px] bg-[#0b3d59] shadow-[0_18px_44px_rgba(11,48,70,0.22)]">
           <div className="absolute inset-0 bg-cover bg-[center_62%]" style={{ backgroundImage: `url(${HERO})` }} />
