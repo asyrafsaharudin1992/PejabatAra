@@ -1,4 +1,5 @@
 import { randomBytes, scryptSync } from 'node:crypto';
+import { ceoCharts, headcount } from './_ceo-charts.js';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
@@ -1831,8 +1832,77 @@ export async function hrHandler(req: any, res: any) {
       const employeeId = text(req.query.employeeId, 60);
       if (!employeeId) throw fail(400, 'Choose a staff member.');
       const { data, error } = await db.from('hr_payslips').select('year,month,status,result').eq('employee_id', employeeId).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
-      if (error) { if (error.code === '42P01') return res.status(200).json({ months: [] }); throw error; }
-      return res.status(200).json({ months: (data || []).map((row: any) => ({ year: row.year, month: row.month, source: row.result?.source || 'AraOffice', gross: Number(row.result?.gross || 0), kwsp: Number(row.result?.kwspEmployee || 0), perkeso: Number(row.result?.socsoEmployee || 0), eis: Number(row.result?.eisEmployee || 0), pcb: Number(row.result?.pcb || 0), net: Number(row.result?.net || 0) })) });
+      if (error) { if (error.code === '42P01') return res.status(200).json({ months: [], ea: [] }); throw error; }
+      // The yearly tax figures (Borang EA) for years before AraOffice ran payroll; empty until migration 202611130001 is run.
+      const eaRead = await db.from('hr_ea_annual').select('year,gross_wages,fees_bonus,allowances,mtd,child_relief,kwsp,socso,eis,source').eq('employee_id', employeeId).order('year', { ascending: false });
+      const ea = (eaRead.data || []).map((row: any) => ({ year: row.year, gross: Number(row.gross_wages), fees: Number(row.fees_bonus), allowances: Number(row.allowances), pcb: Number(row.mtd), childRelief: Number(row.child_relief), kwsp: Number(row.kwsp), socso: Number(row.socso), eis: Number(row.eis), source: row.source }));
+      return res.status(200).json({ ea, months: (data || []).map((row: any) => ({ year: row.year, month: row.month, source: row.result?.source || 'AraOffice', gross: Number(row.result?.gross || 0), kwsp: Number(row.result?.kwspEmployee || 0), perkeso: Number(row.result?.socsoEmployee || 0), eis: Number(row.result?.eisEmployee || 0), pcb: Number(row.result?.pcb || 0), net: Number(row.result?.net || 0) })) });
+    }
+
+    // Yearly tax figures for every staff member: the Borang EA that came over from Infotech for earlier years, and for a year with
+    // locked payslips (this year) the figures added up from those payslips. A staff member's EA row wins over added-up payslips.
+    if (req.method === 'GET' && action === 'tax_summary') {
+      // Only the year asked for is read in full; the list of years comes from two light reads of one column each.
+      const [peopleRead, eaYearsRead, slipYearsRead] = await Promise.all([
+        db.from('hr_employees').select('id,employee_code,full_name,company,status').limit(2000),
+        db.from('hr_ea_annual').select('year').limit(5000),
+        db.from('hr_payslips').select('year').eq('status', 'locked').limit(10000),
+      ]);
+      if (peopleRead.error) throw peopleRead.error;
+      const notSetUp = ['42P01', 'PGRST205'].includes(eaYearsRead.error?.code);
+      if (eaYearsRead.error && !notSetUp) throw eaYearsRead.error;
+      if (slipYearsRead.error && slipYearsRead.error.code !== '42P01') throw slipYearsRead.error;
+      const years = [...new Set<number>([...(eaYearsRead.data || []).map((row: any) => Number(row.year)), ...(slipYearsRead.data || []).map((row: any) => Number(row.year))])].sort((a, b) => b - a);
+      const wanted = Number(req.query.year) || years[0] || new Date().getFullYear();
+      const [eaRead, slipRead] = await Promise.all([
+        notSetUp ? { data: [], error: null } : db.from('hr_ea_annual').select('employee_id,year,gross_wages,fees_bonus,allowances,mtd,child_relief,kwsp,socso,eis,source').eq('year', wanted).limit(2000),
+        db.from('hr_payslips').select('employee_id,year,month,result').eq('status', 'locked').eq('year', wanted).limit(3000),
+      ]);
+      if (eaRead.error) throw eaRead.error;
+      if (slipRead.error && slipRead.error.code !== '42P01') throw slipRead.error;
+      const ea = eaRead.data || [], slips = slipRead.data || [];
+      const rows: any[] = [];
+      for (const person of peopleRead.data || []) {
+        const own = ea.find((row: any) => row.employee_id === person.id && Number(row.year) === wanted);
+        const base = { id: person.id, code: person.employee_code, name: person.full_name, company: person.company, status: person.status };
+        if (own) { rows.push({ ...base, gross: Number(own.gross_wages) + Number(own.allowances), fees: Number(own.fees_bonus), pcb: Number(own.mtd), kwsp: Number(own.kwsp), socso: Number(own.socso), eis: Number(own.eis), childRelief: Number(own.child_relief), source: `EA · ${own.source}`, partial: false }); continue; }
+        const mine = slips.filter((row: any) => row.employee_id === person.id && Number(row.year) === wanted);
+        if (!mine.length) continue;
+        const add = (key: string) => Math.round(mine.reduce((sum: number, row: any) => sum + Number(row.result?.[key] || 0), 0) * 100) / 100;
+        rows.push({ ...base, gross: add('gross'), fees: 0, pcb: add('pcb'), kwsp: add('kwspEmployee'), socso: add('socsoEmployee'), eis: add('eisEmployee'), childRelief: 0, source: `${mine.length} payslip${mine.length === 1 ? '' : 's'}`, partial: true });
+      }
+      rows.sort((a, b) => a.company.localeCompare(b.company) || a.code.localeCompare(b.code));
+      return res.status(200).json({ year: wanted, years, rows, notSetUp });
+    }
+
+    // The Charts tab (also the CEO's and the COO's): HR sees everything, pay and tax included.
+    if (req.method === 'GET' && action === 'charts') return res.status(200).json(await ceoCharts(db, String(req.query.refresh || '') === '1', true));
+    if (req.method === 'GET' && action === 'headcount') return res.status(200).json(await headcount(db));
+
+    // Everything the printed Borang EA and the CP8D list need, for the staff who have a yearly EA row for the year (HR only).
+    if (req.method === 'GET' && action === 'tax_forms') {
+      const year = Math.round(Number(req.query.year));
+      if (!Number.isFinite(year) || year < 2000 || year > 2100) throw fail(400, 'Choose a year.');
+      const [peopleRead, eaRead, employerRead] = await Promise.all([
+        db.from('hr_employees').select('id,employee_code,full_name,company,status,ic_no,passport_no,date_of_birth,marital_status,spouse_working,children,designation,employment_type,join_date,resign_date,epf_no,socso_no,tax_no').limit(2000),
+        db.from('hr_ea_annual').select('employee_id,gross_wages,fees_bonus,allowances,mtd,child_relief,kwsp,socso,eis,details').eq('year', year).limit(2000),
+        db.from('hr_employer_details').select('epf_no,socso_no,employer_e_no,company_reg_no').eq('key', 'group').maybeSingle(),
+      ]);
+      if (['42P01', 'PGRST205'].includes(eaRead.error?.code)) return res.status(200).json({ year, rows: [], employer: null, notSetUp: true });
+      if (peopleRead.error) throw peopleRead.error;
+      if (eaRead.error) throw eaRead.error;
+      const byId = new Map((peopleRead.data || []).map((row: any) => [row.id, row]));
+      const rows = (eaRead.data || []).map((ea: any) => {
+        const person: any = byId.get(ea.employee_id);
+        if (!person) return null;
+        return {
+          id: person.id, code: person.employee_code, name: person.full_name, company: person.company, status: person.status, ic: person.ic_no || person.passport_no || '', tin: person.tax_no, dob: person.date_of_birth, marital: person.marital_status, spouseWorking: person.spouse_working,
+          childCount: Array.isArray(person.children) ? person.children.length : 0, designation: person.designation, employmentType: person.employment_type, joined: person.join_date, left: person.resign_date, epfNo: person.epf_no, socsoNo: person.socso_no,
+          gross: Number(ea.gross_wages), fees: Number(ea.fees_bonus), allowances: Number(ea.allowances), pcb: Number(ea.mtd), childRelief: Number(ea.child_relief), kwsp: Number(ea.kwsp), socso: Number(ea.socso), eis: Number(ea.eis), details: Array.isArray(ea.details) ? ea.details : [],
+        };
+      }).filter(Boolean).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.code.localeCompare(b.code));
+      const employer = employerRead.data ? { eNo: employerRead.data.employer_e_no, regNo: employerRead.data.company_reg_no } : null;
+      return res.status(200).json({ year, rows, employer });
     }
 
     if (req.method === 'GET' && action === 'career') {

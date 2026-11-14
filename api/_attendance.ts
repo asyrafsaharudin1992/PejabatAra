@@ -52,7 +52,7 @@ function metres(lat1: number, lng1: number, lat2: number, lng2: number) {
 
 type Shift = { start: string; end: string };
 type Rules = { lateGrace: number; earlyGrace: number; countEarly: boolean; otMin: number; times: Map<string, Shift> };
-async function loadRules(db: any): Promise<Rules> {
+export async function loadRules(db: any): Promise<Rules> {
   const [{ data: settings }, { data: times }] = await Promise.all([db.from('hr_attendance_settings').select('late_grace_min,early_grace_min,count_early_out,ot_min_minutes').eq('id', 1).maybeSingle(), db.from('hr_shift_times').select('code,kind,start_time,end_time')]);
   return { lateGrace: settings?.late_grace_min ?? 15, earlyGrace: settings?.early_grace_min ?? 15, countEarly: !!settings?.count_early_out, otMin: settings?.ot_min_minutes ?? 60, times: new Map((times || []).map((row: any) => [`${row.kind}|${row.code}`, { start: String(row.start_time).slice(0, 5), end: String(row.end_time).slice(0, 5) }])) };
 }
@@ -92,10 +92,9 @@ export async function buildDays(db: any, people: Employee[], from: string, to: s
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
-// The first day AraOffice (and the Infotech import, May 2026: Infotech has no duty roster before that) holds attendance for. Earlier days were never recorded here, so they show "No record" instead of absent.
-export const RECORDS_FROM = '2026-05-01';
-// SK has its duty roster from January 2026 (HR supplied Jan to Apr); KJ only from May, so KJ is "No record" before that.
-export const recordsFromFor = (company: string | null | undefined) => company === 'SK' ? '2026-01-01' : RECORDS_FROM;
+// The first day AraOffice holds attendance for, at both clinics: the Infotech import and HR's rosters now cover January 2026 onward. Earlier days were never recorded here, so they show "No record" instead of absent.
+export const RECORDS_FROM = '2026-01-01';
+export const recordsFromFor = (_company?: string | null) => RECORDS_FROM;
 
 export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));

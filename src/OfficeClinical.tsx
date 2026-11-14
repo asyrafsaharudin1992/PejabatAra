@@ -1,4 +1,6 @@
-import { FormEvent, lazy, ReactNode, Suspense, useContext, useEffect, useMemo, useState } from 'react';
+import { FormEvent, lazy, ReactNode, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { StackTables } from './StackTables';
+import { AraLogo } from './AraLogo';
 import { OfficeShortcuts } from './lib/officeShortcuts';
 import { ArrowLeft, ArrowRightLeft, CalendarDays, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
@@ -11,6 +13,8 @@ import PrintForms from './PrintForms';
 import { usePrintForms } from './lib/usePrintForms';
 import type { QuickLink } from './portalData';
 import { HRRoster } from './HRRoster';
+import { WaitingForYou } from './WaitingForYou';
+import { EmbeddedTabs } from './EmbeddedTabs';
 
 // Office Clinical Administration, laid out like the CA office. Each branch's
 // Clinical Admin ticks the daily checklist here and sends it to the WhatsApp
@@ -585,7 +589,7 @@ const DEFAULT_LINKS: QuickLink[] = [
 // The CA office opens inside this office (on the right), like it does in the COO office.
 const CAOffice = lazy(() => import('./PortalApp'));
 
-function LogoMark() { return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><Stethoscope className="h-6 w-6" /></div>; }
+function LogoMark() { return <AraLogo className="h-11 w-11 rounded-[14px]" />; }
 
 function Sidebar({ view, open, branches, branch, viewAs, counts, onViewAs, onClose, onNavigate, onLogout }: { view: View; open: boolean; branches: string[]; branch: string; viewAs: string; counts: Partial<Record<View, number>>; onViewAs: (name: string) => void; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
   const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]' }, ...TABS];
@@ -670,15 +674,17 @@ function ClinicalHistory({ branch, onError }: { key?: string; branch: string; on
 
   const report = reportOn(selected);
   const score = report && dayScore(report.checks);
-  const dayTasks = (data?.tasks || []).filter((task) => task.doneOn === selected);
+  // The ad hoc tasks that were on the list that day: added on or before it, and not finished before it (finished that day, finished later, or still open).
+  const tasksOn = (date: string) => date > (data?.today || '') ? [] : (data?.tasks || []).filter((task) => task.createdOn <= date && (!task.doneOn || task.doneOn >= date));
+  const dayTasks = tasksOn(selected);
   const dayReceived = (data?.received || []).filter((item) => item.receivedOn === selected);
   const dayMonthly = (data?.monthly || []).filter((item) => item.doneOn === selected);
   const dateLabel = new Date(`${selected}T12:00:00+08:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
 
   return <div className="mx-auto max-w-[1500px] space-y-5">
-    <Hero branch={branch} title="History" text="Every day's checklist for the month. Pick a day to see what was done, the notes, ad hoc tasks finished and deliveries received." />
-    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {[[data ? `${data.reports.length} / ${dueDays.length}` : '—', 'Days with a checklist'], [data ? `${average}%` : '—', 'Average done'], [data ? data.tasks.length : '—', 'Ad hoc tasks finished'], [data ? `${monthlyDone.size} / ${MONTHLY.length}` : '—', 'Monthly tasks done']].map(([value, label]) => <div key={label as string} className="rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.05)]"><p className="text-2xl font-semibold tracking-tight">{value}</p><p className="mt-1 text-xs font-semibold text-slate-500">{label}</p></div>)}
+    <Hero branch={branch} title="History" text="Every day's checklist for the month. Pick a day to see what was done, the notes, the ad hoc tasks on the list (finished or still open) and deliveries received." />
+    <section className="grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
+      {[[data ? `${data.reports.length} / ${dueDays.length}` : '—', 'Days with a checklist', 'Days'], [data ? `${average}%` : '—', 'Average done', 'Done'], [data ? data.tasks.filter((task) => task.doneOn && task.doneOn.startsWith(month)).length : '—', 'Ad hoc tasks finished', 'Ad hoc'], [data ? `${monthlyDone.size} / ${MONTHLY.length}` : '—', 'Monthly tasks done', 'Monthly']].map(([value, label, short]) => <div key={label as string} className="rounded-lg bg-white p-2 shadow-[0_8px_25px_rgba(20,35,59,0.05)] sm:rounded-2xl sm:p-5"><p className="truncate text-sm font-semibold tracking-tight sm:text-2xl">{value}</p><p className="mt-0.5 truncate text-[9.5px] font-semibold text-slate-500 sm:mt-1 sm:text-xs"><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span></p></div>)}
     </section>
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
       <section className={card}>
@@ -701,7 +707,7 @@ function ClinicalHistory({ branch, onError }: { key?: string; branch: string; on
               {percent !== null && <span className={`mt-1 text-[10px] font-semibold ${chosen ? 'text-white/85' : 'text-slate-500'}`}>{percent}%</span>}
               {percent !== null && <span className={`absolute bottom-1.5 h-1 w-6 rounded-full ${chosen ? 'bg-white/70' : scoreTone(percent)}`} />}
               {missed && <span className={`absolute bottom-1.5 h-1.5 w-1.5 rounded-full ${chosen ? 'bg-white/70' : 'bg-rose-300'}`} />}
-              {(data?.tasks || []).some((task) => task.doneOn === date) && <span className={`absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full ${chosen ? 'bg-white' : 'bg-[#9b8cff]'}`} title="Ad hoc task finished" />}
+              {(data?.tasks || []).some((task) => task.doneOn === date) ? <span className={`absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full ${chosen ? 'bg-white' : 'bg-[#9b8cff]'}`} title="Ad hoc task finished" /> : tasksOn(date).length > 0 && <span className={`absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full border ${chosen ? 'border-white' : 'border-[#9b8cff]'}`} title="Ad hoc task on the list" />}
             </button>;
           })}
         </div>
@@ -710,7 +716,7 @@ function ClinicalHistory({ branch, onError }: { key?: string; branch: string; on
           <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-amber-400" />60–89%</span>
           <span className="flex items-center gap-1.5"><span className="h-1 w-5 rounded-full bg-rose-400" />Below 60%</span>
           <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-rose-300" />No checklist</span>
-          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#9b8cff]" />Ad hoc task finished</span>
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#9b8cff]" />Ad hoc task finished</span><span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full border border-[#9b8cff]" />Ad hoc task on the list</span>
         </div>
       </section>
 
@@ -730,7 +736,7 @@ function ClinicalHistory({ branch, onError }: { key?: string; branch: string; on
           </div>)}</div>
         </>}
         {data && (dayTasks.length > 0 || dayReceived.length > 0 || dayMonthly.length > 0) && <div className="mt-5 space-y-4 border-t border-slate-100 pt-5">
-          {dayTasks.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Ad hoc tasks finished</p><ul className="mt-2 space-y-1.5">{dayTasks.map((task) => <li key={task.id} className="flex items-start gap-2.5 text-sm"><span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#9b8cff] text-white"><Check className="h-3 w-3" strokeWidth={3} /></span><span>{task.title}<span className="block text-xs text-slate-500">Added {dmy(task.createdOn)}</span></span></li>)}</ul></div>}
+          {dayTasks.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Ad hoc tasks</p><ul className="mt-2 space-y-1.5">{dayTasks.map((task) => <li key={task.id} className="flex items-start gap-2.5 text-sm"><span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${task.doneOn === selected ? 'bg-[#9b8cff] text-white' : 'border-2 border-[#9b8cff] text-[#9b8cff]'}`}>{task.doneOn === selected && <Check className="h-3 w-3" strokeWidth={3} />}</span><span className="min-w-0">{task.title}{task.details && <span className="mt-0.5 block whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{task.details}</span>}<span className="block text-xs text-slate-500">{task.doneOn === selected ? 'Finished this day' : task.doneOn ? `Finished ${dmy(task.doneOn)}` : 'Still open'} · {task.createdOn === selected ? 'added this day' : `added ${dmy(task.createdOn)}`}</span></span></li>)}</ul></div>}
           {dayReceived.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Deliveries received</p><ul className="mt-2 space-y-1 text-sm">{dayReceived.map((item, i) => <li key={i}>{item.supplier}: {item.name}{item.qty ? ` - ${item.qty}` : ''}</li>)}</ul></div>}
           {dayMonthly.length > 0 && <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Monthly tasks done</p><ul className="mt-2 space-y-1 text-sm">{dayMonthly.map((item) => <li key={item.taskId}>{MONTHLY.find((task) => task.id === item.taskId)?.label(monthName(`${month}-01`), monthName(`${month}-01`, -1)) || item.taskId}</li>)}</ul></div>}
         </div>}
@@ -777,13 +783,13 @@ function QuickContacts({ branch, onError }: { key?: string; branch: string; onEr
     <Hero branch={branch} title="Quick contact" text="Suppliers, pharmacies and services. Tap WhatsApp or Call to reach them straight away." action={<button onClick={() => setDraft({ id: crypto.randomUUID(), name: '', phone: '', note: '', group: '' })} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#0b3d59] hover:bg-[#e9f6fb]"><Plus className="h-4 w-4" />Add contact</button>} />
     <section className="flex items-center gap-2 rounded-2xl bg-white p-4 shadow-sm"><Search className="h-4 w-4 shrink-0 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Escape' && setQuery('')} placeholder="Search name, item or number, e.g. Pharmaniaga, dengue, vaccine…" className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-400" />{query && <button onClick={() => setQuery('')} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Clear search"><X className="h-4 w-4" /></button>}<span className="shrink-0 text-xs text-slate-400">{contacts ? `${shown.length} of ${contacts.length}` : ''}</span></section>
     {!contacts ? <p className="text-sm text-slate-500">Loading…</p> : !contacts.length ? <p className={`${card} text-sm text-slate-500`}>No contacts yet. Press Add contact to add one.</p> : !shown.length ? <p className={`${card} text-sm text-slate-500`}>No contacts match “{query.trim()}”.</p>
-      : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{shown.map((contact) => <article key={contact.id} className="group flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.05)]">
-        <div className="flex items-start gap-3">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold ${CONTACT_TONES[[...contact.name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % CONTACT_TONES.length]}`}>{initials(contact.name)}</span>
+      : <div className="grid gap-3 max-sm:gap-1.5 sm:grid-cols-2 xl:grid-cols-3 max-sm:[&>article]:min-w-0">{shown.map((contact) => <article key={contact.id} className="group flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-[0_8px_25px_rgba(20,35,59,0.05)] max-sm:min-w-0 max-sm:flex-row max-sm:items-center max-sm:gap-1.5 max-sm:overflow-hidden max-sm:rounded-xl max-sm:p-2">
+        <div className="flex items-start gap-3 max-sm:min-w-0 max-sm:flex-1 max-sm:items-center max-sm:gap-2">
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold max-sm:h-8 max-sm:w-8 max-sm:text-[11px] ${CONTACT_TONES[[...contact.name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % CONTACT_TONES.length]}`}>{initials(contact.name)}</span>
           <div className="min-w-0 flex-1"><p className="truncate font-semibold leading-snug" title={contact.name}>{contact.name}</p>{contact.note && <p className="truncate text-xs text-[#0b9aca]">{contact.note}</p>}<p className="mt-0.5 font-mono text-xs text-slate-500">{contact.phone}</p></div>
-          <div className="-mr-1 -mt-1 flex shrink-0 opacity-60 transition group-hover:opacity-100"><button onClick={() => setDraft(contact)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]" aria-label={`Edit ${contact.name}`}><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => void remove(contact)} disabled={saving} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${contact.name}`}><Trash2 className="h-3.5 w-3.5" /></button></div>
+          <div className="-mr-1 -mt-1 flex shrink-0 opacity-60 transition group-hover:opacity-100 max-sm:m-0 max-sm:opacity-100"><button onClick={() => setDraft(contact)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0b587b]" aria-label={`Edit ${contact.name}`}><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => void remove(contact)} disabled={saving} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${contact.name}`}><Trash2 className="h-3.5 w-3.5" /></button></div>
         </div>
-        <div className="mt-auto grid grid-cols-2 gap-2"><a href={`https://wa.me/${waNumber(contact.phone)}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1ebe5a]"><MessageCircle className="h-3.5 w-3.5" />WhatsApp</a><a href={`tel:+${waNumber(contact.phone)}`} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Phone className="h-3.5 w-3.5" />Call</a></div>
+        <div className="mt-auto grid grid-cols-2 gap-2 max-sm:mt-0 max-sm:flex max-sm:shrink-0 max-sm:gap-1"><a href={`https://wa.me/${waNumber(contact.phone)}`} target="_blank" rel="noreferrer" aria-label={`WhatsApp ${contact.name}`} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1ebe5a] max-sm:rounded-lg max-sm:p-2"><MessageCircle className="h-3.5 w-3.5" /><span className="max-sm:sr-only">WhatsApp</span></a><a href={`tel:+${waNumber(contact.phone)}`} aria-label={`Call ${contact.name}`} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 max-sm:rounded-lg max-sm:p-2"><Phone className="h-3.5 w-3.5" /><span className="max-sm:sr-only">Call</span></a></div>
       </article>)}</div>}
     {draft && <Modal title={contacts?.some((contact) => contact.id === draft.id) ? 'Edit contact' : 'New contact'} onClose={() => setDraft(null)}>
       <form onSubmit={submit} className="mt-6 space-y-4">
@@ -800,17 +806,18 @@ function QuickContacts({ branch, onError }: { key?: string; branch: string; onEr
 const ADMIN_NAMES: Record<string, string> = { Kajang: 'Izzah', 'Seri Kembangan': 'Amirah' };
 const BRANCH_CODES: Record<string, string> = { Kajang: 'KJ', 'Seri Kembangan': 'SK' };
 
-function HomeView({ day, overseer, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
+type Waiting = { claims: number | null; leave: number; requests: number; reviews: number };
+function HomeView({ day, overseer, waiting, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; waiting: Waiting | null; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
   return <div className="mx-auto max-w-[1500px] space-y-4 sm:space-y-8">
     {/* Same layout as the CA office's Home: greeting on the left, date and a quote on the right. */}
     <section className="ara-hero rounded-[18px] px-4 py-3.5 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
       <div className="flex flex-col gap-3 sm:gap-7 md:flex-row md:items-start md:justify-between">
         <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] sm:mt-3 sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 hidden text-base text-[#bed2df] sm:block">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
-        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-4 py-2 text-xs font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-4 hidden text-sm italic leading-6 text-[#a9c1d0] sm:block md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
+        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-4 py-2 text-xs font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-2 sm:mt-4 text-[11px] leading-4 italic text-[#a9c1d0] sm:text-sm sm:leading-6 md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
       </div>
     </section>
-    {overseer && <section><div className="mb-2 flex items-end justify-between gap-4 sm:mb-4"><h3 className="text-lg font-semibold tracking-tight sm:text-2xl">Today</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Both branches</span></div><Summary onOpen={onOpenBranch} /></section>}
+    <WaitingForYou loading={!waiting} items={[{ key: 'claims', label: 'Incentive claims', note: 'Staff claims waiting for your approval', icon: Coins, count: waiting?.claims, onOpen: () => onNavigate('incentives') }, { key: 'leave', label: 'Leave approvals', note: 'In your Individual Sign In', icon: CalendarDays, count: waiting?.leave, href: '#office/individual' }, { key: 'ot', label: 'OT & clock requests', note: 'In your Individual Sign In', icon: Clock3, count: waiting?.requests, href: '#office/individual' }, { key: 'review', label: 'Performance Review', note: 'In your Individual Sign In', icon: Check, count: waiting?.reviews, href: '#office/individual' }]} />
     <section>
       <div className="mb-2 flex items-end justify-between gap-4 sm:mb-4"><h3 className="text-lg font-semibold tracking-tight sm:text-2xl">Quick access</h3><span className="text-xs font-bold uppercase tracking-[0.18em] text-[#9aacc0]">Shortcuts</span></div>
       <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">{TABS.map((item) => <button key={item.id} onClick={() => onNavigate(item.id)} className="group rounded-2xl bg-[#0b3d59] p-3 text-left text-white transition hover:-translate-y-0.5 hover:bg-[#104b6c] sm:min-h-[132px] sm:rounded-[24px] sm:p-5">
@@ -845,6 +852,16 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
     officeFetch(`${API}&action=branches`).then((response) => response.json()).then(({ branches: names, admin: isAdmin }) => { setBranches(names); setBranch(names[0] || ''); setAdmin(Boolean(isAdmin)); })
       .catch((cause) => setError(cause.message));
   }, []);
+  // What waits for the admin (or for both admins): read when the Home page opens, and at most once in five minutes for the same branch.
+  const [waiting, setWaiting] = useState<Waiting | null>(null);
+  const lastWaiting = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const target = overseer ? 'all' : branch;
+    if (view !== 'home' || !target || (branches?.length || 0) === 0) return;
+    if (Date.now() - (lastWaiting.current[target] || 0) < 5 * 60 * 1000) return;
+    lastWaiting.current[target] = Date.now(); setWaiting(null);
+    officeFetch(`${API}&action=waiting&branch=${encodeURIComponent(target)}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setWaiting(result); }).catch(() => setWaiting({ claims: null, leave: 0, requests: 0, reviews: 0 }));
+  }, [view, branch, overseer, branches?.length]);
   const load = async () => {
     if (!branch) return;
     try { setDay(await (await officeFetch(`${API}&action=day&branch=${encodeURIComponent(branch)}`)).json()); }
@@ -877,7 +894,7 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
     report: day.tasks.filter((task) => !task.doneOn).length,
   } : {}, [day]);
 
-  return <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
+  return <div className={embedded ? 'coo-compact text-compact text-[#14233b]' : 'coo-compact text-compact min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
     {!embedded && <Sidebar view={view} open={menuOpen} branches={branches || []} branch={branch} viewAs={viewAs} counts={counts} onViewAs={(name) => { setViewAs(name); if (name !== 'all') setBranch(name); }} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />}
     <div className={embedded ? '' : 'min-h-screen lg:pl-[300px]'}>
       <header className={`sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden${embedded ? ' !hidden' : ''}`}>
@@ -887,14 +904,15 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
         </div>
       </header>
       <main className={embedded ? 'pt-1' : 'p-4 sm:p-6 lg:p-[38px]'}>
-        {embedded && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center gap-3">
-          {view !== 'home' && <button onClick={() => navigate('home')} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-[#0b587b] shadow-sm ring-1 ring-slate-100 hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />Clinical Admin home</button>}
+<StackTables>
+        {embedded && <EmbeddedTabs tabs={[{ id: 'home' as View, label: 'Home', icon: Home }, ...TABS.map((item) => ({ id: item.id as View, label: item.label, icon: item.icon, badge: counts[item.id] }))]} active={view} onSelect={navigate} />}
+        {embedded && (branches?.length || 0) > 1 && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center gap-3">
           {(branches?.length || 0) > 1 && <div className="inline-flex rounded-xl bg-white p-1 text-sm shadow-sm ring-1 ring-slate-100"><span className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">View as</span>{['all', ...(branches || [])].map((name) => <button key={name} onClick={() => { setViewAs(name); if (name !== 'all') setBranch(name); }} className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${viewAs === name ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{name === 'all' ? 'All branches' : name}</button>)}</div>}
         </div>}
         {branches && branches.length === 0 && <Banner tone="error">This account is not linked to a branch yet. Ask System Admin to link it to Kajang or Seri Kembangan.</Banner>}
         {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
-        {view === 'home' && <HomeView day={day} overseer={overseer} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
+        {view === 'home' && <HomeView day={day} overseer={overseer} waiting={waiting} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
         {view === 'roster' && <HRRoster readOnly defaultView="calendar" onError={onError} />}
         {view === 'caoffice' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the CA office…</p>}><CAOffice key="ca" embedded /></Suspense>}
         {view !== 'home' && view !== 'caoffice' && view !== 'roster' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
@@ -908,6 +926,7 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
         {view === 'panel' && <PanelTrainingView training={panel} canEdit={canEdit} title="Panel" />}
         {view === 'links' && (links ? <LinksView links={links} canEdit={canEdit} onSave={saveLinks} /> : <p className="text-sm text-slate-500">Loading…</p>)}
         {view === 'incentives' && branch && <ClinicalIncentives key={branch} branch={branch} branches={branches || []} onError={onError} />}
+</StackTables>
       </main>
     </div>
   </div>;

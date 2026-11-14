@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { PayrollCharts } from './PayrollCharts';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
@@ -133,7 +134,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
         <button type="button" onClick={summary} disabled={!show} title={show ? '' : 'Press Show amounts first'} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Summary (CSV)</button>
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1900px] text-left text-xs">
+      <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[1900px] text-left text-xs">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Basic</th>{FIELDS.map(([, label]) => <th key={label} className="pr-2">{label}</th>)}<th className="pr-3 text-right">Gross</th><th className="pr-3 text-right">KWSP</th><th className="pr-3 text-right">PERKESO</th><th className="pr-3 text-right">EIS</th><th className="pr-3 text-right">SKBBK</th><th className="pr-3 text-right">PCB</th><th className="text-right">Net</th></tr></thead>
         <tbody>{rows.map(({ member, out }) => { const slipLocked = member.payslip?.status === 'locked'; return <tr key={member.id} className="border-t border-slate-100">
           <td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{member.fullName}</p><p className="text-[10px] text-slate-400">{member.employeeCode}{!member.hasYtd && ' · no year-to-date'}{member.status === 'Inactive' && ' · left, final pay'}{slipLocked && ' · locked'}</p></td>
@@ -222,7 +223,7 @@ function IncentivePay({ onError }: { onError: (message: string) => void }) {
       </div>
     </div>
     {items === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : !items.length ? <p className="mt-4 text-sm text-slate-500">No claims were sent to HR for this month.</p> : <>
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
+      <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[640px] text-left text-sm">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Approved entries</th><th className="pr-3 text-right">Amount (RM)</th><th>Status</th></tr></thead>
         <tbody>{items.map((item) => <tr key={`${item.employeeId}-${item.name}`} className="border-t border-slate-100"><td className="py-2 pr-3"><p className="font-semibold text-[#14233b]">{item.name || 'Not linked to a staff record'}</p><p className="text-[10px] text-slate-400">{item.code}</p></td><td className="pr-3 text-right">{item.procedures}</td><td className="pr-3 text-right font-semibold">{cell(item.confirmed ? item.confirmedAmount || 0 : item.amount)}</td>
           <td className="text-xs">{item.confirmed ? <span className="font-semibold text-emerald-600">Confirmed</span> : !item.linked ? <span className="text-amber-700">Not linked: ask System Admin</span> : !item.received ? <span className="text-slate-400">Not received by HR yet</span> : item.amount <= 0 ? <span className="text-slate-400">Nothing approved</span> : <span className="text-[#0b587b]">Ready to confirm</span>}</td></tr>)}</tbody>
@@ -248,7 +249,7 @@ export function HRPayroll({ onError = () => {} }: { onError?: (message: string) 
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>
-    <div role="tablist" aria-label="Payroll" className="inline-flex rounded-xl bg-slate-100 p-1">{([['run', 'Pay run'], ['chart', 'Chart']] as const).map(([key, text]) => <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500'}`}>{text}</button>)}</div>
+    <SubTabs label="Payroll" active={tab} onSelect={setTab} tabs={[{ id: 'run', label: 'Pay run' }, { id: 'chart', label: 'Chart' }]} />
     {tab === 'chart' ? <PayrollCharts /> : <>
       <PayRun onError={onError} />
       <IncentivePay onError={onError} />

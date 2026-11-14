@@ -35,10 +35,10 @@ export default function HRHomeSummary({ people, config, events, today, month, on
   ];
   return <section aria-label="HR overview" className="space-y-2">
     <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-base font-semibold tracking-tight">At a glance</h3><p className="text-xs text-slate-500">Staff overview today · to-do for the selected month</p></div>
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">{cards.map((item) => <button key={item.title} type="button" disabled={!people} onClick={item.action} className="group rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-[0_5px_20px_rgba(20,35,59,0.03)] transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-600 disabled:pointer-events-none">
-      <div className="flex items-center justify-between"><span className={`grid h-8 w-8 place-items-center rounded-lg ${item.tone}`}><item.icon size={16} /></span><ArrowUpRight size={14} className="text-slate-300 transition group-hover:text-sky-600" /></div>
-      <p className="mt-3 text-xs font-medium text-slate-500">{item.title}</p><p className="text-2xl font-semibold tracking-tight text-[#17364c]">{item.count ?? '—'}</p>
-      <p className="mt-1.5 text-xs font-semibold leading-4 text-slate-700">{people ? item.detail : 'Loading overview…'}</p><p className="mt-0.5 text-[11px] leading-4 text-slate-500">{people ? item.note : ' '}</p>
+    <div className="grid grid-cols-3 gap-2 sm:grid-cols-2 xl:grid-cols-5">{cards.map((item) => <button key={item.title} type="button" disabled={!people} onClick={item.action} className="group min-w-0 rounded-lg border border-slate-200 bg-white p-2 text-left sm:rounded-2xl sm:p-3.5 shadow-[0_5px_20px_rgba(20,35,59,0.03)] transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-600 disabled:pointer-events-none">
+      <div className="flex items-center justify-between"><span className={`grid h-6 w-6 place-items-center rounded-md sm:h-8 sm:w-8 sm:rounded-lg ${item.tone}`}><item.icon size={13} /></span><ArrowUpRight size={14} className="hidden text-slate-300 transition group-hover:text-sky-600 sm:block" /><p className="text-lg font-semibold leading-none tracking-tight text-[#17364c] sm:hidden">{item.count ?? '—'}</p></div>
+      <p className="mt-1.5 truncate text-[10px] font-medium text-slate-500 sm:mt-3 sm:text-xs">{item.title}</p><p className="hidden text-2xl font-semibold tracking-tight text-[#17364c] sm:block">{item.count ?? '—'}</p>
+      <p className="mt-1 hidden text-xs font-semibold leading-4 text-slate-700 sm:mt-1.5 sm:block">{people ? item.detail : 'Loading overview…'}</p><p className="mt-0.5 hidden text-[11px] leading-4 text-slate-500 sm:block">{people ? item.note : ' '}</p>
     </button>)}</div>
   </section>;
 }

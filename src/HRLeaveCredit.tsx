@@ -58,17 +58,17 @@ export function HRLeaveCredit({ onError }: { onError: (message: string) => void 
     <section className={`${card} leave-report print:rounded-none print:p-0 print:shadow-none`}>
       <header className="mb-4 flex items-center gap-4"><img src="/forms/ara-logo.jpg" alt="Klinik ARA 24 Jam" className="h-14 w-14 shrink-0 object-contain" /><div><p className="text-base font-bold text-[#1f3a6b]">{shown.company ? COMPANY[shown.company] : 'HSO HEALTHCARE SDN. BHD. (KJ and SK)'}</p><p className="text-[11px] font-semibold text-slate-600">Klinik ARA 24 Jam</p><p className="mt-1 text-sm font-bold text-[#1f3a6b]">Credit Annual Leave Report (Individual)</p><p className="text-[11px] text-slate-500">Period from {dmyDash(shown.from)} to {dmyDash(shown.to)} · Report as on {dmy(today())}</p></div></header>
       {!people ? <p className="text-sm text-slate-500">Loading…</p> : !people.length ? <p className="text-sm text-slate-500">No credits in this period.</p> :
-        <table className="w-full border-separate border-spacing-0 text-xs">
-          <thead><tr className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500"><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Remarks</th><th className="px-3 py-2">Created date</th><th className="px-3 py-2 text-right">Days</th><th className="w-10 px-2 py-2 print:hidden" /></tr></thead>
+        <table className="w-full max-sm:table-fixed border-separate border-spacing-0 text-[10px] sm:text-xs">
+          <thead><tr className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500"><th className="px-1.5 py-1.5 max-sm:w-[27%] sm:px-3 sm:py-2">Employee</th><th className="px-1.5 py-1.5 sm:px-3 sm:py-2">Remarks</th><th className="px-1.5 py-1.5 max-sm:w-[22%] sm:px-3 sm:py-2">Created date</th><th className="px-1.5 py-1.5 sm:px-3 sm:py-2 text-right">Days</th><th className="w-10 px-2 py-2 print:hidden" /></tr></thead>
           <tbody>{people.map((person) => <>{person.credits.map((credit, index) => <tr key={credit.id}>
-            <td className="border-t border-slate-100 px-3 py-2 align-top">{index === 0 && <><span className="font-semibold text-slate-800">{person.code} - {person.name}</span></>}</td>
-            <td className="border-t border-slate-100 px-3 py-2">{credit.remarks}{credit.source === 'Infotech' && <span className="ml-2 text-[10px] text-slate-400 print:hidden">from Infotech</span>}</td>
-            <td className="border-t border-slate-100 px-3 py-2">{dmy(credit.date)}</td>
-            <td className="border-t border-slate-100 px-3 py-2 text-right tabular-nums">{n2(credit.days)}</td>
+            <td className="border-t border-slate-100 px-1.5 py-1.5 align-top break-words sm:px-3 sm:py-2">{index === 0 && <><span className="font-semibold text-slate-800">{person.code} - {person.name}</span></>}</td>
+            <td className="border-t border-slate-100 px-1.5 py-1.5 break-words sm:px-3 sm:py-2">{credit.remarks}{credit.source === 'Infotech' && <span className="ml-2 text-[10px] text-slate-400 print:hidden">from Infotech</span>}</td>
+            <td className="border-t border-slate-100 px-1.5 py-1.5 sm:px-3 sm:py-2">{dmy(credit.date)}</td>
+            <td className="border-t border-slate-100 px-1.5 py-1.5 sm:px-3 sm:py-2 text-right tabular-nums">{n2(credit.days)}</td>
             <td className="border-t border-slate-100 px-2 py-2 print:hidden"><button onClick={() => void remove(credit, person)} title="Take this credit back" aria-label="Take this credit back" className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button></td>
           </tr>)}
-          <tr key={`${person.id}-total`}><td colSpan={3} className="px-3 pb-2 text-right font-bold text-slate-500">Total:</td><td className="px-3 pb-2 text-right font-bold tabular-nums text-[#0b587b]">{n2(person.credits.reduce((sum, credit) => sum + credit.days, 0))}</td><td className="print:hidden" /></tr></>)}</tbody>
-          <tfoot><tr className="bg-slate-50 font-bold"><td colSpan={3} className="px-3 py-2 text-right text-slate-500">{people.length} staff · all credits</td><td className="px-3 py-2 text-right tabular-nums">{n2(grand)}</td><td className="print:hidden" /></tr></tfoot>
+          <tr key={`${person.id}-total`}><td colSpan={3} className="px-1.5 pb-2 sm:px-3 text-right font-bold text-slate-500">Total:</td><td className="px-1.5 pb-2 sm:px-3 text-right font-bold tabular-nums text-[#0b587b]">{n2(person.credits.reduce((sum, credit) => sum + credit.days, 0))}</td><td className="print:hidden" /></tr></>)}</tbody>
+          <tfoot><tr className="bg-slate-50 font-bold"><td colSpan={3} className="px-1.5 py-1.5 sm:px-3 sm:py-2 text-right text-slate-500">{people.length} staff · all credits</td><td className="px-1.5 py-1.5 sm:px-3 sm:py-2 text-right tabular-nums">{n2(grand)}</td><td className="print:hidden" /></tr></tfoot>
         </table>}
     </section>
   </div>;
@@ -107,10 +107,10 @@ function GiveCredit({ onError, onDone }: { onError: (message: string) => void; o
     <div className="rounded-2xl border border-slate-100">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" className={`${field} w-48`} />
-        <button onClick={() => pickAll(true)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">Select all shown</button>
-        <button onClick={() => pickAll(true, 'KJ')} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">All KJ</button>
-        <button onClick={() => pickAll(true, 'SK')} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">All SK</button>
-        <button onClick={() => setPicked(new Set())} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">Clear</button>
+        <button onClick={() => pickAll(true)} className="rounded-lg bg-slate-100 px-1.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">Select all shown</button>
+        <button onClick={() => pickAll(true, 'KJ')} className="rounded-lg bg-slate-100 px-1.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">All KJ</button>
+        <button onClick={() => pickAll(true, 'SK')} className="rounded-lg bg-slate-100 px-1.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">All SK</button>
+        <button onClick={() => setPicked(new Set())} className="rounded-lg px-1.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">Clear</button>
         <span className="ml-auto text-xs font-semibold text-[#0b587b]">{picked.size} selected</span>
       </div>
       <div className="grid max-h-64 gap-x-4 overflow-y-auto p-3 sm:grid-cols-2 lg:grid-cols-3">{!staff ? <p className="text-sm text-slate-500">Loading…</p> : list.map((person) => <label key={person.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50"><input type="checkbox" checked={picked.has(person.id)} onChange={() => toggle(person.id)} className="h-4 w-4 accent-[#0b587b]" /><span className="min-w-0 flex-1 truncate">{person.name}</span><span className="text-[10px] text-slate-400">{person.code}</span></label>)}</div>

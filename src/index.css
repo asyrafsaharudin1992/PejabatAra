@@ -433,3 +433,111 @@
   .coo-compact .mb-6 { margin-bottom: 0.75rem; }
 }
 
+
+
+/* Performance Review on a phone (HR, COO and CEO): smaller text, tables laid out as one card for each row, and nothing wider than the screen, so there is no sideways scrolling. */
+@media (max-width: 639px) {
+  .review-compact { max-width: 100%; overflow-wrap: anywhere; }
+  .review-compact h2 { font-size: 1.05rem; line-height: 1.4rem; }
+  .review-compact h3 { font-size: 0.875rem; line-height: 1.25rem; }
+  .review-compact h4 { font-size: 0.8rem; line-height: 1.1rem; }
+  .review-compact .text-base { font-size: 0.8125rem; line-height: 1.2rem; }
+  .review-compact .text-sm { font-size: 0.75rem; line-height: 1.1rem; }
+  .review-compact .text-xs { font-size: 0.6875rem; line-height: 1rem; }
+  .review-compact .text-\[13px\], .review-compact .text-\[14px\] { font-size: 0.75rem; }
+  .review-compact .leading-6, .review-compact .leading-7 { line-height: 1.25rem; }
+  .review-compact input, .review-compact select, .review-compact textarea, .review-compact button { max-width: 100%; font-size: 0.75rem; }
+  .review-compact input, .review-compact select, .review-compact textarea { min-height: 2rem; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .review-compact [class*="min-w-["] { min-width: 0 !important; }
+  .review-compact .overflow-x-auto { overflow-x: visible; }
+  .review-compact table, .review-compact tbody, .review-compact tr, .review-compact td { display: block; width: 100%; min-width: 0; }
+  .review-compact thead { display: none; }
+  .review-compact tr { border: 1px solid rgb(226 232 240); border-radius: 0.75rem; padding: 0.5rem 0.625rem; margin-bottom: 0.5rem; background: #fff; }
+  .review-compact td, .review-compact th { padding: 0.125rem 0 !important; border: 0 !important; text-align: left !important; font-size: 0.75rem; }
+  .review-compact td .flex { justify-content: flex-start; }
+  .review-compact .grid:not([role="tablist"]) { grid-template-columns: minmax(0, 1fr); }
+  .review-compact .grid.grid-cols-2:not([role="tablist"]), .review-compact .grid.grid-cols-3:not([role="tablist"]), .review-compact .grid.grid-cols-4:not([role="tablist"]), .review-compact .grid.grid-cols-5:not([role="tablist"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+/* Smaller text on a phone for the HR pages that were too big (Leave and its sub-tabs): headings, body text, fields, buttons and table cells. Layout is not changed. */
+@media (max-width: 639px) {
+  .text-compact h2 { font-size: 1.05rem; line-height: 1.4rem; }
+  .text-compact h3 { font-size: 0.875rem; line-height: 1.25rem; }
+  .text-compact h4 { font-size: 0.8rem; line-height: 1.1rem; }
+  .text-compact .text-3xl, .text-compact .text-2xl { font-size: 1.15rem; line-height: 1.5rem; }
+  .text-compact .text-xl { font-size: 0.95rem; line-height: 1.3rem; }
+  .text-compact .text-lg { font-size: 0.875rem; line-height: 1.25rem; }
+  .text-compact .text-base { font-size: 0.8125rem; line-height: 1.2rem; }
+  .text-compact .text-sm { font-size: 0.75rem; line-height: 1.1rem; }
+  .text-compact .text-xs { font-size: 0.6875rem; line-height: 1rem; }
+  .text-compact .leading-6, .text-compact .leading-7 { line-height: 1.25rem; }
+  .text-compact input, .text-compact select, .text-compact textarea, .text-compact button { font-size: 0.75rem; }
+  .text-compact .h-12, .text-compact .h-11, .text-compact .h-10, .text-compact .min-h-10 { min-height: 2.25rem; height: auto; }
+  .text-compact input:not([type="checkbox"]):not([type="radio"]), .text-compact select { height: 2.25rem; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .text-compact table, .text-compact table th, .text-compact table td { font-size: 0.6875rem; }
+  .text-compact table th, .text-compact table td { padding-left: 0.375rem; padding-right: 0.375rem; }
+  .text-compact td.py-4, .text-compact td.py-3, .text-compact td.py-2\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+  .text-compact .px-5, .text-compact .px-4 { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .text-compact .mt-6, .text-compact .mt-5 { margin-top: 0.75rem; }
+}
+
+
+/* The Leave History page shown as a small A4 on a phone: when printing it is the full page again. */
+@media print {
+  .leave-a4-thumb { border: 0 !important; box-shadow: none !important; }
+  .leave-a4-thumb > div { height: auto !important; overflow: visible !important; }
+  .leave-a4-thumb .leave-a4-inner { transform: none !important; width: auto !important; }
+  .leave-a4-thumb > p { display: none !important; }
+}
+
+
+/* Tables on a phone (HR, COO and CEO): one small card for each row, the columns three to a line with their headings, so there is no sideways scrolling. */
+@media (max-width: 639px) {
+  .stack-tables table:not(.no-stack) { display: block; width: 100%; min-width: 0 !important; }
+  .stack-tables table:not(.no-stack) thead { display: none; }
+  .stack-tables table:not(.no-stack) tbody, .stack-tables table:not(.no-stack) tfoot { display: block; }
+  .stack-tables table:not(.no-stack) tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.125rem 0.5rem; border: 1px solid rgb(226 232 240); border-radius: 0.75rem; background: #fff; padding: 0.5rem 0.625rem; margin-bottom: 0.5rem; }
+  .stack-tables table:not(.no-stack) td, .stack-tables table:not(.no-stack) th { display: block; min-width: 0; padding: 0 !important; border: 0 !important; text-align: left !important; font-size: 0.6875rem; overflow-wrap: anywhere; }
+  .stack-tables table:not(.no-stack) td::before { content: attr(data-label); display: block; font-size: 0.5625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; }
+  .stack-tables table:not(.no-stack) td[data-label=""]::before, .stack-tables table:not(.no-stack) td:not([data-label])::before { display: none; }
+  .stack-tables table:not(.no-stack) td:first-child, .stack-tables table:not(.no-stack) td[colspan] { grid-column: 1 / -1; }
+  .stack-tables table:not(.no-stack) td:first-child { font-size: 0.75rem; }
+  .stack-tables table:not(.no-stack) td:first-child::before { display: none; }
+  .stack-tables .overflow-x-auto:not(:has(table.no-stack)) { overflow-x: visible; }
+}
+
+
+/* Phone: text that has no size of its own starts small, and form fields inside a stacked table card take the whole line. */
+@media (max-width: 639px) {
+  .text-compact { font-size: 0.75rem; line-height: 1.1rem; }
+  .stack-tables table:not(.no-stack) td:has(select), .stack-tables table:not(.no-stack) td:has(textarea), .stack-tables table:not(.no-stack) td:has(input:not([type="checkbox"]):not([type="radio"])), .stack-tables table:not(.no-stack) td:has(.flex-wrap) { grid-column: 1 / -1; }
+  .stack-tables table:not(.no-stack) td select, .stack-tables table:not(.no-stack) td input:not([type="checkbox"]):not([type="radio"]), .stack-tables table:not(.no-stack) td textarea { width: 100%; max-width: 100%; }
+}
+
+
+/* The HR memos on a phone: one tight row for each memo (date, title, open). */
+@media (max-width: 639px) {
+  [data-memo-row="compact"] { font-size: 0.75rem; }
+  [data-memo-row="compact"] .text-\[15px\] { font-size: 0.75rem; line-height: 1.1rem; letter-spacing: 0; }
+}
+
+
+/* Compact Reference Hub inside the CEO and COO Clinic Assistant views. */
+@media (max-width: 639px) {
+  [data-reference-hub="compact"] [data-reference-filters] { padding: 0.75rem; border-radius: 1rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .gap-4 { gap: 0.625rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .gap-3 { gap: 0.5rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .mt-4 { margin-top: 0.625rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .mt-3 { margin-top: 0.5rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .pt-4 { padding-top: 0.625rem; }
+  [data-reference-hub="compact"] [data-reference-filters] button { padding: 0.25rem 0.5rem; font-size: 0.6875rem; line-height: 1rem; }
+  [data-reference-hub="compact"] [data-reference-filters] input { min-width: 0; }
+  [data-reference-hub="compact"] [data-reference-filters] .overflow-x-auto { flex-wrap: wrap; overflow-x: visible; }
+  [data-reference-hub="compact"] [data-reference-filters] .grid { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+  [data-reference-hub="compact"] [data-reference-filters] .grid > button { justify-self: start; }
+  [data-reference-hub="compact"] [data-memo-row="compact"] > :first-child { font-size: 0.625rem; line-height: 0.9rem; }
+  [data-reference-hub="compact"] [data-memo-row="compact"] input,
+  [data-reference-hub="compact"] [data-memo-row="compact"] textarea { padding: 0.25rem; }
+  [data-reference-hub="compact"] [data-memo-row="compact"] > :last-child { font-size: 0.625rem; }
+}

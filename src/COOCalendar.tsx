@@ -17,14 +17,16 @@ const dayLabel = (date: string) => new Date(`${date}T12:00:00+08:00`).toLocaleDa
 const monthLabel = (month: string) => new Date(`${month}-01T12:00:00+08:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
 const shiftMonth = (month: string, amount: number) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + amount); return date.toISOString().slice(0, 7); };
 const blankRule = (date: string): CalendarRule => ({ id: crypto.randomUUID(), title: '', category: 'other', employeeId: '', company: '', anchor: 'date', date, offsetMonths: 0, offsetDays: 0, repeat: 'none', every: 1, notes: '', enabled: true });
-async function api(action: string, month: string, body?: unknown): Promise<any> {
-  const response = await officeFetch(`/api/status?resource=coo&action=${action}&month=${month}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body as object, month }) } : {});
+async function api(action: string, month: string, scope: 'coo' | 'ceo', body?: unknown): Promise<any> {
+  const response = await officeFetch(`/api/status?resource=coo&action=${action}&month=${month}&scope=${scope}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body as object, month }) } : {});
   const result = await response.json();
   if (!response.ok || result.error) throw new Error(result.error || 'Something went wrong. Please try again.');
   return result;
 }
 
-export default function COOCalendar() {
+// `scope`: whose calendar this is. The COO's and the CEO's are kept apart.
+// `stacked`: the day's schedule goes below the month instead of beside it (for a narrow space).
+export default function COOCalendar({ scope = 'coo', stacked = false }: { scope?: 'coo' | 'ceo'; stacked?: boolean } = {}) {
   const today = useMalaysiaToday();
   const [month, setMonth] = useState(today.slice(0, 7));
   const [selected, setSelected] = useState(today);
@@ -35,23 +37,23 @@ export default function COOCalendar() {
   const [draft, setDraft] = useState<CalendarRule | null>(null);
   const [editVersion, setEditVersion] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
-  const load = useCallback(async () => { setLoading(true); setError(''); try { setData(await api('calendar_month', month)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load the calendar.'); } finally { setLoading(false); } }, [month]);
+  const load = useCallback(async () => { setLoading(true); setError(''); try { setData(await api('calendar_month', month, scope)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load the calendar.'); } finally { setLoading(false); } }, [month]);
   useEffect(() => { void load(); }, [load]);
   const go = (next: string) => { setMonth(next); setSelected(next === today.slice(0, 7) ? today : `${next}-01`); };
   const open = (rule?: CalendarRule) => { setDraft(rule ? { ...rule } : blankRule(selected)); setEditVersion(data?.configVersion || null); setFormError(''); };
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!draft) return;
     setBusy(true); setFormError('');
-    try { await api('calendar_rule_save', month, { rule: draft, version: editVersion }); setDraft(null); await load(); } catch (cause) { setFormError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
+    try { await api('calendar_rule_save', month, scope, { rule: draft, version: editVersion }); setDraft(null); await load(); } catch (cause) { setFormError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
   };
   const remove = async (rule: CalendarRule) => {
     if (!window.confirm(`Delete the reminder "${rule.title}"? Every date of it goes.`)) return;
     setBusy(true);
-    try { await api('calendar_rule_delete', month, { id: rule.id, version: data?.configVersion || null }); setDraft(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to delete.'); } finally { setBusy(false); }
+    try { await api('calendar_rule_delete', month, scope, { id: rule.id, version: data?.configVersion || null }); setDraft(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to delete.'); } finally { setBusy(false); }
   };
   const mark = async (event: CalendarEvent, state: 'done' | 'open') => {
     setBusy(true);
-    try { await api('calendar_state', month, { id: event.id, state, version: data?.stateVersion || null }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save.'); await load(); } finally { setBusy(false); }
+    try { await api('calendar_state', month, scope, { id: event.id, state, version: data?.stateVersion || null }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save.'); await load(); } finally { setBusy(false); }
   };
   const events = data?.events || [];
   const monthly = events.filter(isMonthlyHrTask), others = events.filter((event) => !isMonthlyHrTask(event));
@@ -72,7 +74,7 @@ export default function COOCalendar() {
     <div className="hidden flex-wrap items-center gap-2 sm:flex"><button type="button" disabled={busy || loading} aria-label="Previous month" onClick={() => go(shiftMonth(month, -1))} className={button}><ChevronLeft size={17} /></button><h4 className="min-w-[170px] text-center text-lg font-semibold">{monthLabel(month)}</h4><button type="button" disabled={busy || loading} aria-label="Next month" onClick={() => go(shiftMonth(month, 1))} className={button}><ChevronRight size={17} /></button>{month !== today.slice(0, 7) && <button type="button" onClick={() => go(today.slice(0, 7))} className="text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}</div>
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     {!loading && <div className="flex flex-wrap gap-2 text-xs"><span className="rounded-lg bg-sky-50 px-3 py-2 text-sky-800">{events.filter((event) => event.state !== 'done').length} pending</span><span className="rounded-lg bg-rose-50 px-3 py-2 text-rose-800">{events.filter((event) => calendarEventOverdue(event, today)).length} overdue</span><span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">{events.filter((event) => event.state === 'done').length} done</span></div>}
-    <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
+    <div className={`grid items-start gap-5${stacked ? '' : ' xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]'}`}>
       <div className="min-w-0 overflow-x-auto"><div className="sm:min-w-[480px]">
         {/* Phone: the month on a dark card with square day tiles and coloured dots, like AraLocum; the day's reminders show below. */}
         <div className="rounded-[24px] bg-gradient-to-br from-[#082f49] via-[#0a3b5d] to-[#0d5078] p-3 text-white shadow-[0_12px_30px_rgba(8,47,73,0.14)] sm:hidden">

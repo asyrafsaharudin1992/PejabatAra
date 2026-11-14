@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Printer } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { SubTabs } from './SubTabs';
+import { Printer, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRLeaveConsolidate } from './HRLeaveConsolidate';
@@ -27,6 +28,38 @@ function perDay(rows: Row[]): Row[] {
     const notes = row.reason.split('; ');
     return Array.from({ length: span }, (_, index) => ({ ...row, start: addDay(row.start, index), end: addDay(row.start, index), days: 1, reason: notes.length === span ? notes[index] : row.reason }));
   });
+}
+
+// On a phone each person's page is shown as a small A4 (the whole page, scaled down to the screen). Tap it to read it full size, and pinch or scroll to move.
+// On a tablet or computer, and when printing, the page is shown as it is.
+const A4_WIDTH = 794;
+function A4Preview({ label, children }: { key?: string; label: string; children: ReactNode }) {
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches);
+  const [open, setOpen] = useState(false);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  const outer = useRef<HTMLDivElement>(null), inner = useRef<HTMLDivElement>(null);
+  useEffect(() => { const query = window.matchMedia('(max-width: 639px)'); const change = () => setPhone(query.matches); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
+  useEffect(() => {
+    if (!phone) return;
+    const measure = () => setBox({ width: outer.current?.clientWidth || 0, height: inner.current?.offsetHeight || 0 });
+    measure();
+    const watch = new ResizeObserver(measure); if (outer.current) watch.observe(outer.current); if (inner.current) watch.observe(inner.current);
+    return () => watch.disconnect();
+  }, [phone]);
+  if (!phone) return <>{children}</>;
+  const scale = box.width ? Math.min(1, box.width / A4_WIDTH) : 0.4;
+  return <>
+    <button type="button" onClick={() => setOpen(true)} aria-label={`Open the leave history of ${label} full size`} className="leave-a4-thumb block w-full rounded-lg border border-slate-200 bg-white p-0 text-left shadow-sm">
+      <div ref={outer} className="w-full overflow-hidden" style={{ height: box.height * scale || undefined }}>
+        <div ref={inner} className="leave-a4-inner pointer-events-none" style={{ width: A4_WIDTH, transform: `scale(${scale})`, transformOrigin: 'top left' }}>{children}</div>
+      </div>
+      <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] font-semibold text-[#0b587b]">{label} · tap to open</p>
+    </button>
+    {open && <div role="dialog" aria-modal="true" aria-label={`Leave history of ${label}`} className="fixed inset-0 z-50 overflow-auto bg-slate-900/70 p-2 print:hidden">
+      <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="sticky left-0 top-0 z-10 mb-2 inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-semibold text-slate-700 shadow"><X className="h-4 w-4" />Close</button>
+      <div style={{ width: A4_WIDTH }} className="bg-white">{children}</div>
+    </div>}
+  </>;
 }
 
 export function LeaveHistory({ onError }: { onError: (message: string) => void }) {
@@ -64,15 +97,15 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
       <div className="leave-report space-y-6 print:space-y-0">{people.map((person) => {
         const groups: string[] = Array.from(new Set<string>(person.requests.map((row) => row.type))).sort((a, b) => Object.keys(TYPE_NAME).indexOf(a) - Object.keys(TYPE_NAME).indexOf(b));
         const al = person.al, ml = person.ml;
-        return <article key={person.id} className="leave-report-page rounded-2xl bg-white p-6 text-[12px] text-slate-800 shadow-sm print:break-after-page print:rounded-none print:p-0 print:shadow-none">
+        const page = <article className="leave-report-page rounded-2xl bg-white p-6 text-[12px] text-slate-800 shadow-sm print:break-after-page print:rounded-none print:p-0 print:shadow-none">
           <header className="flex items-center justify-center gap-4"><img src="/forms/ara-logo.jpg" alt="Klinik ARA 24 Jam" className="h-14 w-14 shrink-0 object-contain" /><div className="text-center"><p className="font-bold text-[#1f3a6b]">{COMPANY[person.company] || person.company}</p><p className="text-[11px] font-semibold text-slate-600">Klinik ARA 24 Jam</p><p className="mt-1 font-bold text-[#1f3a6b]">Leave History Report (Individual)</p></div></header>
           <div className="mt-3 flex justify-between border-y border-[#1f3a6b] py-1.5 text-[11px]"><span>Date : {shown?.at}</span><span>Period From: {dmy(shown?.from || from)} To: {dmy(shown?.to || to)}</span></div>
           <p className="mt-3 border-b border-[#1f3a6b] pb-1.5 text-center text-[11px] font-bold text-[#1f3a6b]">Emp Code: {person.code} &nbsp; Employee: {person.name} {person.joinDate && <>&nbsp; Leave Calculation Date: {dmy(person.joinDate)}</>}</p>
-          <div className="mt-1.5 grid grid-cols-[40px_95px_85px_1fr_70px] gap-2 border-b border-slate-300 pb-1 text-[11px] font-bold"><span>S No.</span><span>Leave Date</span><span>Day</span><span>Remarks</span><span className="text-right">Day / Hr</span></div>
+          <div className="mt-1.5 grid grid-cols-[40px_95px_85px_1fr_70px] gap-2 gap-2 border-b border-slate-300 pb-1 text-[11px] font-bold"><span>S No.</span><span>Leave Date</span><span>Day</span><span>Remarks</span><span className="text-right">Day / Hr</span></div>
           {!groups.length && <p className="py-4 text-slate-500">No approved leave in this period.</p>}
           {groups.map((type) => { const rows = perDay(person.requests.filter((row) => row.type === type)); return <div key={type} className="mt-4 break-inside-avoid">
             <p className="text-[11px]"><b>Leave Type:</b> &nbsp;<span className="text-[#1f3a6b]">{type} - {TYPE_NAME[type] || type}</span></p>
-            {rows.map((row, index) => { serial += 1; return <div key={`${row.start}-${index}`} className="mt-1.5 grid grid-cols-[40px_95px_85px_1fr_70px] gap-2"><span>{serial}</span><span>{dmy(row.start)}{row.end !== row.start && <><br />to {dmy(row.end)}</>}</span><span>{dayName(row.start)}</span><span className="whitespace-pre-line font-mono text-[11px]">{row.reason}</span><span className="text-right">{n2(row.days)} day{row.half ? ` (${row.half})` : ''}</span></div>; })}
+            {rows.map((row, index) => { serial += 1; return <div key={`${row.start}-${index}`} className="mt-1.5 grid grid-cols-[40px_95px_85px_1fr_70px] gap-2 gap-2"><span>{serial}</span><span>{dmy(row.start)}{row.end !== row.start && <><br />to {dmy(row.end)}</>}</span><span>{dayName(row.start)}</span><span className="whitespace-pre-line font-mono text-[11px]">{row.reason}</span><span className="text-right">{n2(row.days)} day{row.half ? ` (${row.half})` : ''}</span></div>; })}
             <p className="mt-1 text-right text-[11px]"><b className="text-orange-600">Total :</b> &nbsp;{n2(rows.reduce((sum, row) => sum + row.days, 0))}</p>
           </div>; })}
           <div className="mt-6 grid grid-cols-[1.1fr_0.9fr_0.9fr] border border-[#1f3a6b] text-[11px] break-inside-avoid">
@@ -83,6 +116,7 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
             <div className="border-l border-[#1f3a6b] p-2"><p className="mb-1 text-center font-bold text-green-700">Medical Claim</p><p className="text-center text-slate-400">Not used</p></div>
           </div>
         </article>;
+        return <A4Preview key={person.id} label={`${person.code} · ${person.name}`}>{page}</A4Preview>;
       })}</div>}
   </div>;
 }
@@ -91,7 +125,7 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
 export function HRLeaveReport({ onError }: { onError: (message: string) => void }) {
   const [which, setWhich] = useState<'history' | 'consolidate' | 'credit' | 'gcr'>('consolidate');
   return <div className="space-y-5">
-    <div role="tablist" className="inline-flex rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-100 print:hidden">{([['consolidate', 'Leave Consolidate'], ['credit', 'Credit Annual Leave'], ['gcr', 'GCR'], ['history', 'Leave History']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={which === id} onClick={() => setWhich(id)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${which === id ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-500 hover:bg-slate-50'}`}>{label}</button>)}</div>
+    <SubTabs className="print:hidden" active={which} onSelect={setWhich} tabs={[{ id: 'consolidate', label: 'Leave Consolidate', short: 'Consolidate' }, { id: 'credit', label: 'Credit Annual Leave', short: 'Credit' }, { id: 'gcr', label: 'GCR' }, { id: 'history', label: 'Leave History', short: 'History' }]} />
     {which === 'consolidate' ? <HRLeaveConsolidate onError={onError} /> : which === 'credit' ? <HRLeaveCredit onError={onError} /> : which === 'gcr' ? <HRLeaveGcr onError={onError} /> : <LeaveHistory onError={onError} />}
   </div>;
 }

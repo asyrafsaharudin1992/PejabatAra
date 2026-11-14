@@ -131,7 +131,7 @@ export default function AssessmentAdmin({ embedded = false }: { embedded?: boole
   // Staff who have submitted at least once, not the number of tries.
   const attemptCount = (quizId: string) => new Set(data?.attempts.filter((attempt) => attempt.quizId === quizId).map((attempt) => attempt.staffId)).size;
 
-  return <main className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16'}>
+  return <main className={embedded ? 'text-compact text-[#14233b]' : 'min-h-screen bg-[#f5f7f9] px-6 py-8 text-[#14233b] sm:px-10 lg:px-16'}>
     <div className="mx-auto max-w-5xl">
       {!embedded && <>
       <a href="#office/admin" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />Back to Control Centre</a>

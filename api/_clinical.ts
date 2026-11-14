@@ -1,5 +1,7 @@
 import { officeAccess, errorReply } from './_office-db.js';
 import { extraIncentiveCodes } from './_assessment.js';
+import { locationGroup } from '../src/lib/staffGroup.js';
+import { waitingCounts } from './_waiting.js';
 
 // Office Clinical Administration. Served from /api/status?resource=clinical
 // because the Vercel Hobby plan allows only 12 functions.
@@ -140,7 +142,8 @@ async function history(db: any, branch: Branch, month: string) {
   const next = `${monthNumber === 12 ? year + 1 : year}-${String(monthNumber === 12 ? 1 : monthNumber + 1).padStart(2, '0')}-01`;
   const [reports, tasks, monthly, orders, first_report] = await Promise.all([
     db.from('clinical_reports').select('report_date,prepared_by,checks,issues,updated_at').eq('branch_id', branch.id).gte('report_date', first).lt('report_date', next).order('report_date'),
-    db.from('clinical_tasks').select('id,title,details,created_on,done_on').eq('branch_id', branch.id).gte('done_on', first).lt('done_on', next).order('done_on'),
+    // Every ad hoc task that was on the list at some point in the month: added before the month ended, and not finished before it began.
+    db.from('clinical_tasks').select('id,title,details,created_on,done_on').eq('branch_id', branch.id).lt('created_on', next).or(`done_on.is.null,done_on.gte.${first}`).order('created_on'),
     db.from('clinical_monthly_done').select('task_id,done_on,status').eq('branch_id', branch.id).eq('month', month).eq('status', 'done'),
     // Deliveries are dated per item, so look at orders touched since the month began.
     db.from('clinical_orders').select('supplier,items,updated_at').eq('branch_id', branch.id).gte('updated_at', `${first}T00:00:00+08:00`),
@@ -205,6 +208,28 @@ export async function clinicalHandler(req: any, res: any) {
     if (req.method === 'GET' && action === 'history') return res.status(200).json(await history(db, pickBranch(scope, req.query.branch), text(req.query.month, 7)));
     // Staff incentive claims for one branch and month. Drafts are listed too, so the
     // admin can see who is still filling theirs in.
+    // What waits for this admin (or for both branch admins): staff incentive claims to approve, and the leave, OT and clock requests and reviews that wait in their
+    // Individual Sign In. Numbers only.
+    if (req.method === 'GET' && action === 'waiting') {
+      const targets = req.query.branch === 'all' ? scope : [pickBranch(scope, req.query.branch)];
+      let claims: number | null = null;
+      try {
+        let result: any = await db.from('incentive_claims').select('id', { count: 'exact', head: true }).in('branch', targets.map((branch) => branch.name)).eq('status', 'submitted').neq('form', 'doctor');
+        if (result.error?.code === '42703') result = await db.from('incentive_claims').select('id', { count: 'exact', head: true }).in('branch', targets.map((branch) => branch.name)).eq('status', 'submitted');
+        claims = result.error ? null : result.count ?? 0;
+      } catch { claims = null; }
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('company,employee_code,designation,assessment_staff_id').eq('status', 'Active');
+      if (peopleError) throw peopleError;
+      const total = { leave: 0, requests: 0, reviews: 0 };
+      for (const branch of targets) {
+        const company = branch.name === 'Seri Kembangan' ? 'SK' : 'KJ';
+        const admin = (people || []).find((person: any) => person.company === company && person.assessment_staff_id && locationGroup({ designation: person.designation || '', employeeCode: person.employee_code, company: person.company }) === 'Admin Klinikal');
+        if (!admin) continue;
+        const counts = await waitingCounts(db, admin.assessment_staff_id, req.headers);
+        total.leave += counts.leave || 0; total.requests += counts.requests || 0; total.reviews += counts.reviews || 0;
+      }
+      return res.status(200).json({ claims, ...total });
+    }
     if (req.method === 'GET' && action === 'incentives') {
       // branch=all and month=all list every branch this account can see, or every month.
       const names = req.query.branch === 'all' ? scope.map((branch) => branch.name) : [pickBranch(scope, req.query.branch).name];

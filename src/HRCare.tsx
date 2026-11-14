@@ -29,6 +29,7 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
   const [receiver, setReceiver] = useState(() => { try { return localStorage.getItem(RECEIVER_KEY) || ''; } catch { return ''; } });
   const [viewing, setViewing] = useState<CareClaim | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openRow, setOpenRow] = useState('');
   const [editing, setEditing] = useState<{ id: string; month: string; amount: string } | null>(null);
   const loadClaims = () => { setClaims(null); call(`action=care_claims&month=${month}`).then((result) => { setClaims(result.claims); setNotSetUp(Boolean(result.notSetUp)); }).catch((cause: Error) => { setClaims([]); onError(cause.message); }); };
   const loadStaff = () => call('action=care_staff').then((result) => { setStaff(result.staff || []); setCandidates(result.candidates || []); }).catch((cause: Error) => onError(cause.message));
@@ -43,7 +44,7 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
   };
   const saveEdit = () => { if (editing) void act('action=care_edit', { id: editing.id, month: editing.month, amount: Number(editing.amount) }, () => { setEditing(null); loadClaims(); }); };
   const toReceive = (claims || []).filter((claim) => claim.status === 'approved' && !claim.hrReceivedAt).length;
-  return <div className="space-y-4">
+  return <div className="text-compact space-y-3 sm:space-y-4">
     <section className={`${card} flex flex-wrap items-center gap-3`}>
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{months.map((value) => <option key={value} value={value}>{careMonth(value)}</option>)}</select>
       <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">Received by<input value={receiver} maxLength={80} onChange={(event) => setReceiver(event.target.value)} placeholder="Your name (optional)" className={`${field} w-56 font-normal`} /></label>
@@ -53,7 +54,23 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
     <section className={`${card} overflow-x-auto`}>
       <h3 className="text-lg font-semibold">Care Coordination Allowance (AraCare)</h3>
       <p className="mt-1 text-sm text-slate-500">RM 100 a month. The coordinator sends the claim, the COO checks the KPIs, and a payable claim arrives here. Mark it Received once the paperwork is in hand.</p>
-      {!claims ? <p className="mt-3 text-sm text-slate-500">Loading…</p> : !claims.length ? <p className="mt-3 text-sm text-slate-500">No AraCare claims yet.</p> : <table className="mt-3 w-full min-w-[760px] text-sm">
+      {!claims ? <p className="mt-3 text-sm text-slate-500">Loading…</p> : !claims.length ? <p className="mt-3 text-sm text-slate-500">No AraCare claims yet.</p> : <>
+        <ul className="mt-2 divide-y divide-slate-100 sm:hidden" aria-label="AraCare claims">{claims.map((claim) => <li key={claim.id}>
+          <button type="button" aria-expanded={openRow === claim.id} onClick={() => setOpenRow(openRow === claim.id ? '' : claim.id)} className="flex w-full items-center gap-2 py-2 text-left">
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-slate-800">{claim.staffName}</span><span className="block truncate text-[10.5px] text-slate-500">{careMonth(claim.month)} · RM {claim.amount.toFixed(2)}</span></span>
+            <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${careStatusTone(claim)}`}>{careStatusLabel(claim)}</span>
+          </button>
+          {openRow === claim.id && <div className="space-y-1.5 pb-2.5 text-[10.5px] text-slate-600">
+            <p className="text-slate-500">{claim.staffCode} · {claim.branch}{claim.kpi ? ` · COO: ${claim.kpi.eligible ? 'Layak' : 'Tidak layak'} · ${claim.kpi.by}` : ''}{claim.hrReceivedAt ? ` · received ${claim.hrReceivedBy} ${new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}` : ''}</p>
+            {editing?.id === claim.id && <div className="flex flex-wrap items-center gap-1.5"><input type="month" value={editing.month} min="2026-10" onChange={(event) => setEditing({ ...editing, month: event.target.value })} aria-label="Month" className={`${field} h-8 w-36`} /><input type="number" step="0.01" min="0" value={editing.amount} onChange={(event) => setEditing({ ...editing, amount: event.target.value })} aria-label="Amount (RM)" className={`${field} h-8 w-20 text-right`} /><button onClick={saveEdit} disabled={busy} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">Save</button><button onClick={() => setEditing(null)} disabled={busy} className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-500">Cancel</button></div>}
+            <div className="flex flex-wrap gap-1.5">
+              {editing?.id !== claim.id && <button onClick={() => setEditing({ id: claim.id, month: claim.month, amount: String(claim.amount) })} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-[#0b587b]"><Pencil className="h-3 w-3" />Edit</button>}
+              <button onClick={() => setViewing(claim)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-[#0b587b]"><FileText className="h-3 w-3" />Form / PDF</button>
+              {claim.status === 'approved' && (claim.hrReceivedAt ? <button onClick={() => receive(claim, false)} disabled={busy} className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 disabled:opacity-40">Undo received</button> : <button onClick={() => receive(claim, true)} disabled={busy} className="rounded-lg bg-[#0b587b] px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">Mark received</button>)}
+            </div>
+          </div>}
+        </li>)}</ul>
+        <div className="hidden overflow-x-auto sm:block"><table className="mt-3 w-full min-w-[760px] text-sm">
         <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Month</th><th className="pr-3 text-right">RM</th><th className="pr-3">Status</th><th className="pr-3">COO</th><th /></tr></thead>
         <tbody>{claims.map((claim) => <tr key={claim.id} className="border-t border-slate-100">
           <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{claim.staffName}</p><p className="text-[11px] text-slate-400">{claim.staffCode} · {claim.branch}</p></td>
@@ -67,7 +84,7 @@ export function HRCare({ onError }: { onError: (message: string) => void }) {
             : <><button onClick={() => setEditing({ id: claim.id, month: claim.month, amount: String(claim.amount) })} className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Edit</button><button onClick={() => setViewing(claim)} className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileText className="h-3.5 w-3.5" />Form / PDF</button>
             {claim.status === 'approved' && (claim.hrReceivedAt ? <button onClick={() => receive(claim, false)} disabled={busy} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Undo received</button> : <button onClick={() => receive(claim, true)} disabled={busy} className="rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40">Mark received</button>)}</>}</td>
         </tr>)}</tbody>
-      </table>}
+      </table></div></>}
     </section>
     <section className={`${card} space-y-3`}>
       <div><h3 className="text-lg font-semibold">Who can claim AraCare</h3><p className="mt-1 text-sm text-slate-500">Only these staff see the AraCare form on their Incentive page.</p></div>

@@ -74,6 +74,11 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
   const [picked, setPicked] = useState('');
   // The grid shows AraOffice's codes; HR can switch to the codes as they were imported from Infotech.
   const [codes, setCodes] = useState<'new' | 'original'>('new');
+  // On a phone, and for anyone who can only look at the roster (COO, CEO), the roster is the calendar with AraOffice's codes: no Codes or Table / Calendar choice.
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches);
+  useEffect(() => { const query = window.matchMedia('(max-width: 639px)'); const change = () => setPhone(query.matches); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
+  const calendarOnly = phone || readOnly;
+  useEffect(() => { if (calendarOnly) { setView('calendar'); setCompany((current) => current || 'KJ'); } if (phone) setCodes('new'); }, [calendarOnly, phone]);
   const shown = (shift: string) => codes === 'new' ? newCode(shift) : shift;
   const [data, setData] = useState<{ people: Person[]; days: Day[] } | null>(null);
   const [notice, setNotice] = useState('');
@@ -146,7 +151,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
   return <div className="mx-auto max-w-[1500px] space-y-5">
     {printing && <PrintPortal margin={8}>{printPages.map((page, index) => <PrintPage key={index}><div className="cv-fit roster-print">
       <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><p>KLINIK ARA 24 JAM · HUMAN RESOURCES</p><h1>Duty Roster · {monthName(month)}</h1><p>{company || 'KJ and SK'} · {group === 'doctors' ? 'Doctors' : 'Staff'} · {codes === 'new' ? 'AraOffice codes' : 'Infotech codes'} · Page {index + 1} of {printPages.length}</p></div></header>
-      <table><colgroup><col style={{ width: '42mm' }} />{dates.map((date) => <col key={date} />)}</colgroup><thead><tr><th>Staff</th>{dates.map((date) => <th key={date}>{WEEKDAY[new Date(`${date}T00:00:00`).getDay()]}<br />{Number(date.slice(8))}</th>)}</tr></thead><tbody>{page.map((person) => <tr key={person.id}><th>{person.name}<small>{person.company} · {person.code}</small></th>{dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className={cellTone(day && { ...day, shift: shown(day.shift) })}>{day ? shown(day.shift) : '·'}</td>; })}</tr>)}</tbody></table>
+      <table className="no-stack"><colgroup><col style={{ width: '42mm' }} />{dates.map((date) => <col key={date} />)}</colgroup><thead><tr><th>Staff</th>{dates.map((date) => <th key={date}>{WEEKDAY[new Date(`${date}T00:00:00`).getDay()]}<br />{Number(date.slice(8))}</th>)}</tr></thead><tbody>{page.map((person) => <tr key={person.id}><th>{person.name}<small>{person.company} · {person.code}</small></th>{dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className={cellTone(day && { ...day, shift: shown(day.shift) })}>{day ? shown(day.shift) : '·'}</td>; })}</tr>)}</tbody></table>
       <footer>{(codes === 'original' ? OLD_CODES : [...(group === 'doctors' ? DOCTOR_CODES : STAFF_CODES), ...OTHER_CODES]).map(([code, label]) => <span key={`${code}-${label}`}><b>{code}</b>: {label}</span>)}<span>· = No roster</span></footer>
     </div></PrintPage>)}</PrintPortal>}
 
@@ -165,8 +170,8 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 pt-3 sm:gap-x-5 sm:gap-y-3 sm:pt-4">
         <Choice label="Who" value={group} onChange={setGroup} options={[['staff', 'Staff'], ['doctors', 'Doctors']]} />
         <Choice label="Clinic" value={company} onChange={setCompany} options={[...(view === 'table' ? [['', 'KJ and SK'] as [string, string]] : []), ['KJ', 'KJ'], ['SK', 'SK']]} />
-        {!readOnly && <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />}
-        <Choice label="View" value={view} onChange={(next) => { setView(next); if (next === 'calendar' && !company) setCompany('KJ'); }} options={[['table', 'Table'], ['calendar', 'Calendar']]} />
+        {!readOnly && !phone && <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />}
+        {!calendarOnly && <Choice label="View" value={view} onChange={(next) => { setView(next); if (next === 'calendar' && !company) setCompany('KJ'); }} options={[['table', 'Table'], ['calendar', 'Calendar']]} />}
         {view === 'calendar' && <select value={personId} onChange={(event) => { setPersonId(event.target.value); setPicked(''); }} aria-label="Person" className={`${field} max-w-[130px] sm:max-w-none`}><option value="">Everyone</option>{people.map((person) => <option key={person.id} value={person.id}>{label(person)}</option>)}</select>}
       </div>
     </section>
@@ -175,7 +180,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>
       {!data ? <p className="text-sm text-slate-500">Loading…</p> : !people.length ? <p className="text-sm text-slate-500">{empty}</p> : view === 'table' ?
-        <table className="border-separate border-spacing-0 text-xs">
+        <table className="no-stack border-separate border-spacing-0 text-xs">
           <thead><tr><th className="sticky left-0 z-10 min-w-[110px] bg-white px-3 py-2 text-left sm:min-w-[210px] text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
             <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800" title={person.name}>{label(person)}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
@@ -236,12 +241,12 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
         <div className="mt-5 flex justify-end gap-3"><button type="button" disabled={edit.saving} onClick={() => setEdit(null)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">Cancel</button><button type="button" disabled={edit.saving || (edit.shift === (edit.day ? newCode(edit.day.shift) : ''))} onClick={() => void saveEdit()} className="rounded-xl bg-[#0b587b] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50">{edit.saving ? 'Saving…' : 'Save change'}</button></div>
       </div>
     </div>}
-    <section className={`${card} space-y-3`}>
+    {!phone && <section className={`${card} space-y-3`}>
       <h3 className="font-semibold">Changes made on screen · {monthName(month)}</h3>
       {!log.length ? <p className="text-sm text-slate-500">No changes yet. Click a day in the table to change it; each change is recorded here.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">When</th><th className="pr-3">Changed by</th><th className="pr-3">Staff</th><th className="pr-3">Date</th><th className="pr-3">Change</th><th>Reason</th></tr></thead>
         <tbody>{logPage.rows.map((item, index) => <tr key={index} className="border-t border-slate-100"><td className="py-2 pr-3 whitespace-nowrap text-slate-500">{new Date(item.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td className="pr-3">{item.by || 'Someone'}</td><td className="pr-3"><span className="font-semibold text-slate-800">{item.name}</span> <span className="text-slate-400">{item.company} · {item.code}</span></td><td className="pr-3 whitespace-nowrap">{item.date}</td><td className="pr-3 whitespace-nowrap font-mono font-bold text-[#0b587b]">{item.from ? newCode(item.from) : 'none'} → {item.to || 'none'}</td><td className="text-slate-600">{item.reason || '—'}</td></tr>)}</tbody></table></div>}
       <Pager page={logPage.page} pages={logPage.pages} total={logPage.total} onPage={logPage.setPage} />
-    </section>
+    </section>}
     <section className={`${card} space-y-4`}>
       <h3 className="font-semibold">What the codes mean</h3>
       <div className="grid gap-6 lg:grid-cols-2">

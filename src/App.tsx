@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { AraLogo } from './AraLogo';
 import { 
   LayoutDashboard, 
   Check,
@@ -41,6 +42,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, isSameMonth, startOfWeek, endOfWeek } from "date-fns";
 import { cn } from "./lib/utils";
 import { LinkLogo } from "./LinkLogo";
+import { EmbeddedTabs } from "./EmbeddedTabs";
 import { isSupabaseConfigured, signOutSupabase } from "./lib/supabase";
 import { officeFetch as fetch } from "./lib/officeApi";
 import { loadQualityWorkspace } from "./lib/qualityData";
@@ -182,7 +184,8 @@ function PageHero({ eyebrow, title, description, children }: { eyebrow: string; 
   );
 }
 
-export default function App() {
+// `embedded`: shown inside the CEO office. The office keeps its own menu, as a row of tabs above the page instead of a sidebar.
+export default function App({ embedded = false }: { embedded?: boolean } = {}) {
   const [taskCategories, setTaskCategories] = useState<CategoryData[]>(INITIAL_CATEGORIES);
   const [activeTab, setActiveTab] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1235,14 +1238,23 @@ export default function App() {
   // directly to this office without a session, return to that single sign-in.
   if (!sessionResolved || !user) return null;
 
+  const qualityMenu = [
+    { id: "Overview", icon: LayoutDashboard, tone: "text-[#818cf8]", roles: ["Superadmin", "Staff"] },
+    { id: "All Tasks", icon: CheckSquare, tone: "text-emerald-400", roles: ["Superadmin", "Staff"] },
+    { id: "Notes", icon: StickyNote, tone: "text-[#ffb000]", roles: ["Superadmin", "Staff"] },
+    { id: "History", icon: Clock, tone: "text-[#a78bfa]", roles: ["Superadmin", "Staff"] },
+    { id: "Portal", icon: Globe, tone: "text-[#20c7f4]", roles: ["Superadmin", "Staff"] },
+    { id: "Reference", icon: Library, tone: "text-[#ff7ab6]", roles: ["Superadmin", "Staff"] },
+  ].filter(item => item.roles.includes(user?.role || "Staff"));
+
   return (
-    <div className="quality-office-shell min-h-screen bg-[#f7f8fb] text-text-primary font-sans overflow-x-hidden">
+    <div className={embedded ? "quality-office-shell text-text-primary font-sans overflow-x-hidden" : "quality-office-shell min-h-screen bg-[#f7f8fb] text-text-primary font-sans overflow-x-hidden"}>
       {/* Sidebar: same layout as the other offices (fixed on desktop, drawer on phones) */}
-      {mobileNavOpen && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={() => setMobileNavOpen(false)} />}
-      <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0", mobileNavOpen ? "translate-x-0" : "-translate-x-full")}>
+      {mobileNavOpen && !embedded && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0", mobileNavOpen ? "translate-x-0" : "-translate-x-full", embedded && "hidden")}>
         <div className="flex items-center justify-between px-2 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><LayoutDashboard className="h-6 w-6" /></div>
+            <AraLogo className="h-11 w-11 rounded-[14px]" />
             <div>
               <p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p>
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Quality & Corporate</p>
@@ -1252,14 +1264,7 @@ export default function App() {
         </div>
         <div className="mx-1 mt-6 h-px bg-white/10" />
         <nav className="mt-6 flex-1 space-y-1 overflow-y-auto">
-          {[
-            { id: "Overview", icon: LayoutDashboard, tone: "text-[#818cf8]", roles: ["Superadmin", "Staff"] },
-            { id: "All Tasks", icon: CheckSquare, tone: "text-emerald-400", roles: ["Superadmin", "Staff"] },
-            { id: "Notes", icon: StickyNote, tone: "text-[#ffb000]", roles: ["Superadmin", "Staff"] },
-            { id: "History", icon: Clock, tone: "text-[#a78bfa]", roles: ["Superadmin", "Staff"] },
-            { id: "Portal", icon: Globe, tone: "text-[#20c7f4]", roles: ["Superadmin", "Staff"] },
-            { id: "Reference", icon: Library, tone: "text-[#ff7ab6]", roles: ["Superadmin", "Staff"] },
-          ].filter(item => item.roles.includes(user?.role || "Staff")).map((item) => (
+          {qualityMenu.map((item) => (
             <button
               key={item.id}
               onClick={() => { setActiveTab(item.id); setMobileNavOpen(false); }}
@@ -1294,12 +1299,13 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex min-h-screen flex-col gap-6 p-4 sm:p-6 lg:pl-[338px] lg:pr-[38px] lg:py-[38px]">
-        <div className="flex items-center gap-3 lg:hidden">
+      <main className={embedded ? "flex flex-col gap-6 pt-1" : "flex min-h-screen flex-col gap-6 p-4 sm:p-6 lg:pl-[338px] lg:pr-[38px] lg:py-[38px]"}>
+        {embedded && <EmbeddedTabs tabs={qualityMenu.map((item) => ({ id: item.id, label: item.id, icon: item.icon }))} active={activeTab} onSelect={(id) => setActiveTab(id as typeof activeTab)} />}
+        <div className={cn("flex items-center gap-3 lg:hidden", embedded && "hidden")}>
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMobileNavOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">AraOffice · Quality</p>
         </div>
-        {systemAdminAccount && (
+        {systemAdminAccount && !embedded && (
           <section className="flex flex-col gap-3 rounded-[20px] border border-[#dce4ed] bg-white px-5 py-4 shadow-[0_10px_30px_rgba(21,53,72,0.05)] sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#0b9aca]">System Admin preview</p>
@@ -1322,9 +1328,9 @@ export default function App() {
             <button type="button" onClick={() => fetchData()} className="font-semibold">Try again</button>
           </div>
         )}
-        <header className="flex justify-end items-center">
+        <header className={cn("flex justify-end items-center", embedded && "hidden")}>
           <div className="flex items-center space-x-4">
-            <div className="hidden lg:flex flex-col items-end gap-0.5 border-r border-border-apple/40 pr-4 mr-2">
+            <div className={cn("hidden lg:flex flex-col items-end gap-0.5 border-r border-border-apple/40 pr-4 mr-2", embedded && "!hidden")}>
               <div className="flex items-center gap-2">
                 <span className="text-[14px] font-bold text-text-primary tracking-tight">
                   {format(currentTime, "EEEE, d MMM yyyy")}

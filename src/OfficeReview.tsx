@@ -152,7 +152,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
     setSaving(false);
   };
 
-  return <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] px-4 py-8 text-[#14233b] sm:px-8 lg:px-14'}>
+  return <div className={embedded ? 'review-compact text-[#14233b]' : 'review-compact min-h-screen bg-[#f7f8fb] px-4 py-8 text-[#14233b] sm:px-8 lg:px-14'}>
     <div className="mx-auto max-w-[1100px] space-y-6">
       {!embedded && <div className="flex items-center justify-between"><a href="#" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b587b]"><ArrowLeft className="h-4 w-4" />AraOffice lobby</a><button onClick={() => { void signOutSupabase().finally(onSignedOut); }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-white"><LogOut className="h-4 w-4" />Sign out</button></div>}
       <section className="rounded-[30px] bg-[#0b3d59] p-7 text-white sm:p-9">
@@ -194,7 +194,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
       {!thanks && !open && view === 'done' && <section className={card}>
         <h2 className="text-lg font-semibold">Reviews you have submitted</h2>
         {done === null ? <p className="mt-4 text-sm text-slate-500">Loading…</p> : done.length === 0 ? <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No reviews yet.</p> : <ul className="mt-4 divide-y divide-slate-100">{done.map((review) => <li key={review.id} className="flex flex-wrap items-center gap-3 py-3.5">
-          <div className="min-w-0 flex-1"><p className="truncate font-semibold">{review.staffName}</p><p className="truncate text-xs text-slate-500">{[review.position, review.department].filter(Boolean).join(' · ') || '—'} · {review.periodLabel || 'Review'} · {dmy((review.submittedAt || review.createdAt).slice(0, 10))}</p></div>
+          <div className="min-w-0 basis-full sm:basis-0 sm:flex-1"><p className="break-words font-semibold leading-snug">{review.staffName}</p><p className="break-words text-xs text-slate-500">{[review.position, review.department].filter(Boolean).join(' · ') || '—'} · {review.periodLabel || 'Review'} · {dmy((review.submittedAt || review.createdAt).slice(0, 10))}</p></div>
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreTone(review.totalScore)}`}>{review.totalScore?.toFixed(2)} · {percentLabel(review.totalScore)} · {review.overall?.replace(' Expectations', '')}</span>
           <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${review.hrReceivedOn ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{review.hrReceivedOn ? 'Received by HR' : 'With HR'}</span>
           <button type="button" onClick={() => void saveCopy(review)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><FileDown className="h-3.5 w-3.5" />Save PDF</button>

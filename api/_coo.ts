@@ -1,10 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { branchId, errorReply, officeAccess } from './_office-db.js';
 import { Employee, TEAM_COLUMNS } from './_attendance.js';
-import { careClaimsToReview, reviewCare, isCooTitle } from './_care.js';
+import { careClaimsToReview, careWaitingCount, reviewCare, isCooTitle } from './_care.js';
 import { leaveAction, reviewAction } from './_assessment.js';
 import { attendanceHrAction, attendanceStaffAction } from './_attendance.js';
 import { hrCalendarAction } from './_hr-calendar.js';
+import { ceoTasksAction } from './_ceo-tasks.js';
+import { ceoCharts, headcount } from './_ceo-charts.js';
+import { waitingCounts } from './_waiting.js';
 
 // Office COO: the COO leads operations: Clinical Admin, the Clinical Assistants and the doctors. The team is every active staff member whose job title is
 // Clinical Assistant (or Officer) or Admin Clinical, and every doctor, the four directors (CEO, COO, CHRO, CPO) included.
@@ -27,13 +30,77 @@ async function team(db: any) {
 
 export async function cooHandler(req: any, res: any) {
   try {
-    const { db, user } = await officeAccess(req, false, 'coo');
+    const { db, user, profile } = await officeAccess(req, false, ['coo', 'ceo']);
+    const offices: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
+    const isCoo = profile.role === 'super_admin' || offices.includes('coo');
+    const isCeo = profile.role === 'super_admin' || offices.includes('ceo');
     const action = String(req.query?.action || '');
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 
-    // The COO's own calendar and reminders (kept apart from HR's).
-    if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body, 'coo');
+    if (['ceo_tasks', 'ceo_tasks_save', 'ceo_task_toggle'].includes(action)) {
+      if (!isCeo) throw fail(403, 'Access restricted.');
+      return await ceoTasksAction(req, res, db, user, action, body);
+    }
+
+    // What waits for the COO: leave, OT and clock requests, reviews, and the AraCare claims to check.
+    if (req.method === 'GET' && action === 'coo_waiting') {
+      if (!isCoo) throw fail(403, 'Access restricted.');
+      const { data: heads, error: headsError } = await db.from('hr_employees').select('id,designation,assessment_staff_id').eq('status', 'Active');
+      if (headsError) throw headsError;
+      const coo = (heads || []).find((person: any) => isCooTitle(person.designation) && person.assessment_staff_id);
+      const counts = coo ? await waitingCounts(db, coo.assessment_staff_id, req.headers) : { leave: null, requests: null, reviews: null };
+      let care: number | null = null;
+      try { care = await careWaitingCount(db); } catch { care = null; }
+      return res.status(200).json({ ...counts, care });
+    }
+
+    // What waits for the CEO: leave and reviews (OT and clock requests never go to the CEO). The CEO is the person with the CEO job title in the staff records
+    // (as the COO is found by the COO title); these are the same requests and rules as in their Individual Sign In.
+    if (/^ceo_(leave_|review_|waiting$)/.test(action)) {
+      if (!isCeo) throw fail(403, 'Access restricted.');
+      const { data: heads, error: headsError } = await db.from('hr_employees').select('id,designation,assessment_staff_id').eq('status', 'Active');
+      if (headsError) throw headsError;
+      const ceo = (heads || []).find((person: any) => /\bCEO\b/i.test(String(person.designation || '')) && person.assessment_staff_id);
+      if (!ceo) throw fail(403, 'The CEO sign-in is not linked to a staff record yet. Ask HR.');
+      const staff = { id: ceo.assessment_staff_id };
+      const base = action.slice(4);
+      if (action === 'ceo_waiting') {
+        // The counts only: each list is read the same way the full screens read it, with the answer caught instead of sent.
+        const count = async (run: (sink: any, readReq: any) => Promise<unknown>, pick: (body: any) => unknown[] | undefined) => {
+          let out: any = null;
+          const sink: any = { status: () => sink, json: (body: unknown) => { out = body; return sink; }, setHeader: () => sink };
+          try { await run(sink, { method: 'GET', query: {}, headers: req.headers }); } catch { return null; }
+          return pick(out)?.length ?? null;
+        };
+        const [leave, reviews] = await Promise.all([
+          count((sink, readReq) => leaveAction(readReq, sink, db, staff, 'leave_approvals', {}), (body) => body?.pending),
+          count((sink, readReq) => reviewAction(readReq, sink, db, staff, 'review_todo', {}), (body) => body?.reviews),
+        ]);
+        return res.status(200).json({ leave, reviews });
+      }
+      if (base.startsWith('leave_')) return await leaveAction(req, res, db, staff, base, body);
+      return await reviewAction(req, res, db, staff, base, body);
+    }
+
+    // The numbers for the Charts tab (read only, cached for a few minutes). The CEO sees everything; the COO does not see pay or tax.
+    if (req.method === 'GET' && action === 'ceo_charts') {
+      if (!isCoo && !isCeo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
+      return res.status(200).json(await ceoCharts(db, String(req.query?.refresh || '') === '1', isCeo));
+    }
+    // How many people there are, for the home and the Charts tab: all active staff, doctors (directors included), Clinical Assistants and admins, by clinic.
+    if (req.method === 'GET' && action === 'headcount') {
+      if (!isCoo && !isCeo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
+      return res.status(200).json(await headcount(db));
+    }
+
+    // The COO's own calendar and reminders (kept apart from HR's), and the CEO's own (kept apart from the COO's). The CEO reaches nothing else here.
+    if (action.startsWith('calendar_')) {
+      const scope = String(req.query?.scope || '') === 'ceo' ? 'ceo' : 'coo';
+      if (scope === 'ceo' ? !isCeo : !isCoo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
+      return await hrCalendarAction(req, res, db, user, action, body, scope);
+    }
+    if (!isCoo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
 
     // Leave the COO has to approve (as a supervisor): the same requests and the same rules as in their Individual Sign In.
     if (action === 'leave_approvals' || action === 'leave_decide' || action === 'leave_attachment_url') {

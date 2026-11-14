@@ -184,7 +184,7 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
     <footer>Printed {dateLabel(day())} · Page {index + 1} of {pages.length}</footer>
   </div>;
   return <>
-    <dialog ref={dialog} onCancel={(event) => { if (busy || printing || exporting) event.preventDefault(); else onClose(); }} className={`report-options m-auto max-h-[90vh] w-[calc(100%_-_32px)] ${ready ? 'max-w-[1120px]' : 'max-w-[560px]'} overflow-y-auto rounded-3xl bg-white p-6 text-[#14233b] shadow-2xl backdrop:bg-slate-950/40`} aria-labelledby="report-options-title">
+    <dialog ref={dialog} onCancel={(event) => { if (busy || printing || exporting) event.preventDefault(); else onClose(); }} className={`review-compact report-options m-auto max-h-[90vh] w-[calc(100%_-_32px)] ${ready ? 'max-w-[1120px]' : 'max-w-[560px]'} overflow-y-auto rounded-3xl bg-white p-6 text-[#14233b] shadow-2xl backdrop:bg-slate-950/40`} aria-labelledby="report-options-title">
       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wider text-[#0b9aca]">Report options</p><h2 id="report-options-title" className="mt-1 text-xl font-semibold">{title}</h2></div><button type="button" disabled={busy || printing || exporting} onClick={onClose} aria-label="Close report options" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
       <form onSubmit={(event) => void run(event)} className="mt-5 space-y-4">
         <fieldset disabled={busy || printing || exporting} className="grid gap-4 sm:grid-cols-2">

@@ -1,8 +1,11 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
-import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, Home, Link2, LogOut, Menu, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
+import { AraLogo } from './AraLogo';
+import { StackTables } from './StackTables';
+import { ArrowRight, BookOpen, Banknote, ClipboardCheck, IdCard, CalendarCheck, CalendarDays, ChevronRight, Clock3, FileBarChart, BarChart3, Home, Link2, LogOut, Menu, Receipt, Search, Tags, UserRoundSearch, Users, Wallet, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { signOutSupabase } from './lib/supabase';
+import { clearGreeting, readGreeting } from './lib/officeGreeting';
 import { card } from './AssessmentStaff';
 import { LEAVE_GROUPS, LEAVE_TYPES } from './lib/leaveTypes';
 import { HRProfiles } from './HRProfiles';
@@ -14,6 +17,9 @@ import { HRLeave } from './HRLeave';
 import { HRIncentives } from './HRIncentives';
 import { HRReports } from './HRReports';
 import { HRPayroll } from './HRPayroll';
+import { HRTax } from './HRTax';
+import { CeoChartsPage } from './CeoCharts';
+import { EmbeddedTabs } from './EmbeddedTabs';
 const HRMemoGuide = lazy(() => import('./HRMemoGuide'));
 const HRHomeCalendar = lazy(() => import('./HRHomeCalendar'));
 const PayrollCharts = lazy(() => import('./PayrollCharts').then((module) => ({ default: module.PayrollCharts })));
@@ -23,9 +29,10 @@ const PayrollCharts = lazy(() => import('./PayrollCharts').then((module) => ({ d
 // requests, attendance and the roster follow.
 const API = '/api/status?resource=hr';
 
-type View = 'home' | 'profiles' | 'reviews' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'reports' | 'memos' | 'misc';
+type View = 'home' | 'profiles' | 'reviews' | 'leaveTypes' | 'leave' | 'attendance' | 'roster' | 'incentives' | 'payroll' | 'tax' | 'charts' | 'reports' | 'memos' | 'misc';
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string; soon?: boolean }[] = [
+  { id: 'charts', label: 'Charts', note: 'People, attendance, pay and reviews', icon: BarChart3, tone: 'text-violet-400' },
   { id: 'profiles', label: 'Staff Profiles', note: 'Personal, job & pay details', icon: IdCard, tone: 'text-[#20c7f4]' },
   { id: 'reviews', label: 'Performance Reviews', note: 'Reviews from supervisors', icon: ClipboardCheck, tone: 'text-[#4ade80]' },
   { id: 'leave', label: 'Leave', note: 'Requests & leave types', icon: CalendarCheck, tone: 'text-emerald-400' },
@@ -33,11 +40,12 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'attendance', label: 'Attendance', note: 'Clock in / out & OT', icon: Clock3, tone: 'text-[#ff7ab6]' },
   { id: 'roster', label: 'Roster', note: 'Duty roster by month', icon: CalendarDays, tone: 'text-[#9b8cff]' },
   { id: 'payroll', label: 'Payroll', note: 'Monthly pay & payslips', icon: Banknote, tone: 'text-[#f59e0b]' },
+  { id: 'tax', label: 'Tax', note: 'Yearly tax figures (EA)', icon: Receipt, tone: 'text-[#fb7185]' },
   { id: 'memos', label: 'Memo/Guide', note: 'Memos and guides from HR', icon: BookOpen, tone: 'text-[#70d8fa]' },
   { id: 'misc', label: 'Miscellaneous', note: 'Links, posters and notes', icon: Link2, tone: 'text-[#70d8fa]' },
   { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
-const TITLES: Record<View, string> = { misc: 'Miscellaneous', home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', reports: 'Reports', memos: 'Memo/Guide' };
+const TITLES: Record<View, string> = { misc: 'Miscellaneous', home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', tax: 'Tax', charts: 'Charts', reports: 'Reports', memos: 'Memo/Guide' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
   leave: ['Staff apply for leave from their phones (same sign-in as Incentive Claims)', 'Clinical Admin or HR approve or reject, with a note', 'Leave balance worked out for each staff member', 'Calendar of who is on leave, by branch'],
@@ -60,7 +68,7 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { b
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
     <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto overscroll-contain border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="flex items-center justify-between px-2 py-3">
-        <div className="flex items-center gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-white/20 bg-white/10 text-[#70d8fa]"><UserRoundSearch className="h-6 w-6" /></div><div><p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Human Resources</p></div></div>
+        <div className="flex items-center gap-3"><AraLogo className="h-11 w-11 rounded-[14px]" /><div><p className="text-[15px] font-bold tracking-tight">ARAOFFICE</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#70d8fa]">Human Resources</p></div></div>
         <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 lg:hidden" aria-label="Close menu"><X className="h-5 w-5" /></button>
       </div>
       <div className="mx-1 mt-5 h-px bg-white/10" />
@@ -81,12 +89,13 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { b
 
 function HomeView({ onNavigate, onForecast }: { onNavigate: (view: View) => void; onForecast: () => void }) {
   const today = useMalaysiaToday();
+  const greeting = readGreeting('hr');
   const date = new Date(`${today}T12:00:00+08:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
-  return <div className="mx-auto max-w-[1500px] space-y-8">
-    <section className="ara-hero rounded-[30px] px-7 py-9 text-white sm:px-10 lg:px-12">
-      <div className="flex flex-col gap-7 md:flex-row md:items-start md:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Human Resources</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.045em] sm:text-[2.45rem]">Welcome to Office HR</h2><p className="mt-3 text-base text-[#bed2df]">Your people, upcoming milestones and monthly priorities.</p></div>
-        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-5 py-2.5 text-sm font-semibold text-[#d9e7ef]">{date}</span><p className="mt-4 text-sm italic leading-6 text-[#a9c1d0] md:ml-auto md:max-w-[360px]">“Train people well enough so they can leave, treat them well enough so they don’t want to.”</p></div>
+  return <div className="mx-auto max-w-[1500px] space-y-5 sm:space-y-8">
+    <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
+      <div className="flex flex-col gap-4 sm:gap-7 md:flex-row md:items-start md:justify-between">
+        <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.24em]">Klinik ARA 24 Jam · Human Resources</p><h2 className="mt-0.5 text-lg font-semibold tracking-[-0.03em] sm:mt-3 sm:text-[2.45rem]">{greeting ? `Welcome, ${greeting}` : 'Welcome to Office HR'}</h2><p className="mt-3 hidden text-base text-[#bed2df] sm:block">Your people, upcoming milestones and monthly priorities.</p></div>
+        <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-3 py-1.5 text-[11px] font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-2 text-[11px] italic leading-4 text-[#a9c1d0] sm:mt-4 sm:text-sm sm:leading-6 md:ml-auto md:max-w-[360px]">“Train people well enough so they can leave, treat them well enough so they don’t want to.”</p></div>
       </div>
     </section>
     <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR overview…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} onProfiles={() => onNavigate('profiles')} onForecast={onForecast} /></Suspense>
@@ -116,7 +125,8 @@ function ComingSoon({ view }: { view: View }) {
   </div>;
 }
 
-export default function OfficeHR() {
+// `embedded`: shown inside the CEO office. The office keeps its own menu, as a row of tabs above the page instead of a sidebar.
+export default function OfficeHR({ embedded = false }: { embedded?: boolean } = {}) {
   const [view, setView] = useState<View>('home');
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState('');
@@ -137,35 +147,42 @@ export default function OfficeHR() {
   const navigate = (next: View) => { setProfileTab('list'); setView(next); setMenuOpen(false); window.scrollTo({ top: 0 }); };
   const logout = async () => {
     await signOutSupabase();
+    clearGreeting();
     localStorage.removeItem('ara_portal_session');
     localStorage.removeItem('araoffice_user');
     localStorage.removeItem('ara_view_mode');
     window.location.hash = '';
   };
 
-  return <div className="min-h-screen bg-[#f7f8fb] text-[#14233b]">
-    <Sidebar badges={{ profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />
-    <div className="min-h-screen lg:pl-[300px]">
-      <header className="sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden">
+  const badges = { profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed };
+  return <div className={embedded ? 'coo-compact text-[#14233b]' : 'coo-compact min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
+    {!embedded && <Sidebar badges={{ profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />}
+    <div className={embedded ? '' : 'min-h-screen lg:pl-[300px]'}>
+      <header className={`sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden${embedded ? ' !hidden' : ''}`}>
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
           <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">Office HR</p><h1 className="truncate text-xl font-semibold tracking-tight">{TITLES[view]}</h1></div>
         </div>
       </header>
-      <main className="p-4 sm:p-6 lg:p-[38px]">
+      <main className={embedded ? 'pt-1' : 'p-4 sm:p-6 lg:p-[38px]'}>
+<StackTables>
+        {embedded && <EmbeddedTabs tabs={[{ id: 'home' as View, label: 'Home', icon: Home }, ...TABS.map((item) => ({ id: item.id as View, label: item.label, icon: item.icon, badge: badges[item.id as keyof typeof badges] }))]} active={view === 'leaveTypes' ? 'leave' : view} onSelect={navigate} />}
         {error && <p className="mx-auto mb-4 max-w-[1500px] rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
         {view === 'home' && <HomeView onNavigate={navigate} onForecast={() => { navigate('profiles'); setProfileTab('projection'); }} />}
         {view === 'profiles' && <HRProfiles initialTab={profileTab} onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
         {view === 'reviews' && <HRReviews onError={setError} />}
-        {view === 'roster' && <HRRoster onError={setError} />}
+        {view === 'roster' && <div className="text-compact"><HRRoster onError={setError} defaultView={window.matchMedia('(max-width: 639px)').matches ? 'calendar' : 'table'} /></div>}
         {view === 'incentives' && <HRIncentives onError={setError} />}
         {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
+        {view === 'tax' && <HRTax onError={setError} />}
+        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><CeoChartsPage source="hr" onError={setError} /></div>}
         {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
         {view === 'misc' && <HRMisc onError={setError} />}
         {view === 'reports' && <HRReports onError={setError} />}
+</StackTables>
       </main>
     </div>
   </div>;

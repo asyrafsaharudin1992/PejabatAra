@@ -651,21 +651,25 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
-  // The COO opens the COO office from their Individual Sign In without typing the office email and password again, and without the
-  // device key: their own sign-in (name, staff code, password) is the proof. Only the person whose job title is COO gets this.
-  if (req.method === 'POST' && action === 'coo_office_session') {
+  // The COO, the CEO and the CHRO open their office from their Individual Sign In without typing the office email and password again, and without
+  // the device key: their own sign-in (name, staff code, password) is the proof. Only the person whose job title is COO, CEO or CHRO gets this.
+  if (req.method === 'POST' && /^(coo|ceo|hr)_office_session$/.test(action)) {
+    const office = OFFICE_SESSIONS[action.slice(0, action.indexOf('_')) as keyof typeof OFFICE_SESSIONS];
     const { data: me, error: meError } = await db.from('hr_employees').select('id,designation,status').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
-    if (!me || me.status !== 'Active' || !isCooTitle(me.designation)) throw fail(403, 'This is for the COO only.');
-    const { data: link, error: linkError } = await db.auth.admin.generateLink({ type: 'magiclink', email: COO_OFFICE_EMAIL });
-    if (linkError || !link?.properties?.hashed_token || !link.user) throw fail(500, 'The COO office account is not ready. Ask System Admin.');
+    // Local development only (never in production): the System Admin (Atikah, ARA0035) can look at what the COO, the CEO or the CHRO gets with "View as" in
+    // Individual Sign In, using the CEO's own office account. The server on this computer is the only place it runs.
+    const preview = body?.preview === true && !process.env.VERCEL && process.env.NODE_ENV !== 'production' && SYSTEM_ADMIN_STAFF.includes(String((staff as any).staff_code || '').toUpperCase());
+    if (!preview && (!me || me.status !== 'Active' || !office.title.test(String(me.designation || '')))) throw fail(403, `This is for the ${office.label} only.`);
+    const { data: link, error: linkError } = await db.auth.admin.generateLink({ type: 'magiclink', email: preview ? OFFICE_SESSIONS.ceo.email : office.email });
+    if (linkError || !link?.properties?.hashed_token || !link.user) throw fail(500, `The ${office.label} office account is not ready. Ask System Admin.`);
     // A phone that is not registered yet is registered here (30 days), as the sign-in already proves who it is.
     let device: { token: string; name: string } | null = null;
     if (await deviceLockEnabled(db) && !(await currentDevice(db, req))) {
       const token = randomBytes(32).toString('base64url');
-      const { error: deviceError } = await db.from('registered_devices').insert({ name: 'COO phone', token_hash: hashSecret(token), registered_by: link.user.id, expires_at: new Date(Date.now() + 30 * 24 * 3600000).toISOString(), last_seen_at: new Date().toISOString() });
+      const { error: deviceError } = await db.from('registered_devices').insert({ name: `${office.label} phone`, token_hash: hashSecret(token), registered_by: link.user.id, expires_at: new Date(Date.now() + 30 * 24 * 3600000).toISOString(), last_seen_at: new Date().toISOString() });
       if (deviceError) throw deviceError;
-      device = { token, name: 'COO phone' };
+      device = { token, name: `${office.label} phone` };
     }
     return res.status(200).json({ tokenHash: link.properties.hashed_token, device });
   }
@@ -828,13 +832,15 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // The COO checks the AraCare claims: shown as a tile with the number waiting.
     const careApprover = isCooTitle(designation);
     const careWaiting = careApprover ? await careWaitingCount(db) : 0;
+    const ceoOffice = /\bCEO\b/i.test(String(designation || ''));
+    const hrOffice = /\bCHRO\b/i.test(String(designation || ''));
     // The red number on the Announcements icon (only for the staff who must read them).
     try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };
@@ -992,7 +998,14 @@ async function adminAction(req: any, res: any, action: string, body: any) {
   throw fail(405, 'Method not allowed.');
 }
 
-const COO_OFFICE_EMAIL = 'operation@hsohealthcare.com';
+// The office account each of them opens, and the job title that is allowed to.
+// The Individual Sign In accounts of System Admins (staff codes).
+const SYSTEM_ADMIN_STAFF = ['ARA0035'];
+const OFFICE_SESSIONS = {
+  coo: { label: 'COO', email: 'operation@hsohealthcare.com', title: /^\s*COO\b/i },
+  ceo: { label: 'CEO', email: 'asyrafsaharudin@hsohealthcare.com', title: /\bCEO\b/i },
+  hr: { label: 'HR', email: 'hr@hsohealthcare.com', title: /\bCHRO\b/i },
+};
 const ADMIN_ACTIONS = new Set(['staff', 'admin', 'save_staff', 'delete_staff', 'save_quiz', 'set_quiz_active', 'delete_quiz', 'attempt_detail', 'reset_attempt', 'reset_password']);
 
 export async function assessmentHandler(req: any, res: any) {

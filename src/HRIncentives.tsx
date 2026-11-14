@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { CheckCheck, ChevronDown, FileDown, Printer, RefreshCw, ScrollText, Settings, Undo2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
@@ -77,26 +78,26 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
     } catch (cause) { const message = cause instanceof Error ? cause.message : 'Unable to save.'; setProblem(message); onError(message); }
     finally { setBusy(false); }
   };
-  const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm';
+  const field = 'h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm';
   const sent = (claim: Claim) => claim.hrSubmittedAt ? new Date(claim.hrSubmittedAt).toLocaleDateString('en-GB') : '';
 
-  return <div className="mx-auto max-w-[1500px] space-y-5">
-    {!embedded && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Staff incentives</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Incentive claims that Clinical Admin has checked, approved and sent to HR. Claims still being filled in or waiting for approval are listed too (use the progress filter) and are not counted until they are sent. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>}
-    <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['claims', 'Claims'], ['staff', 'Staff form'], ['doctor', 'Doctor form'], ['care', 'AraCare']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>
+  return <div className="text-compact mx-auto max-w-[1500px] space-y-3 sm:space-y-5">
+    {!embedded && <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:p-9"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.22em]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-0.5 text-lg font-semibold tracking-tight sm:mt-3 sm:text-3xl">Staff incentives</h2><p className="mt-3 hidden max-w-2xl leading-7 text-[#b9cfdd] sm:block">Incentive claims that Clinical Admin has checked, approved and sent to HR. Claims still being filled in or waiting for approval are listed too (use the progress filter) and are not counted until they are sent. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>}
+    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'claims', label: 'Claims' }, { id: 'staff', label: 'Staff form', short: 'Staff' }, { id: 'doctor', label: 'Doctor form', short: 'Doctor' }, { id: 'care', label: 'AraCare' }]} />
     {(tab === 'staff' || tab === 'doctor') && <HRIncentiveForms key={tab} form={tab} onError={onError} />}
     {tab === 'care' && <HRCare onError={onError} />}
-    <div className={tab === 'claims' ? 'space-y-5' : 'hidden'}>
-    <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} min-w-[200px] flex-1`} />
+    <div className={tab === 'claims' ? 'space-y-3 sm:space-y-5' : 'hidden'}>
+    <section className={`${card} grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3`}>
+      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} col-span-4 min-w-0 sm:min-w-[200px] sm:flex-1`} />
       <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className={field}><option value="all">All months</option>{claimMonths().map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select>
       <select value={state} onChange={(event) => setState(event.target.value)} aria-label="Status" className={field}><option value="">All progress</option><option value="draft">Not submitted yet</option><option value="approval">Waiting for approval</option><option value="waiting">Sent to HR, not received</option><option value="received">Received</option></select>
       <select value={kind} onChange={(event) => setKind(event.target.value)} aria-label="Type" className={field}><option value="">All types</option><option value="staff">CA</option><option value="doctor">Doctor</option></select>
       <select value={branch} onChange={(event) => setBranch(event.target.value)} aria-label="Branch" className={field}><option value="">All branches</option>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-      <button onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Incentive flow</button>
-      <button onClick={() => setRatesOpen(!ratesOpen)} aria-expanded={ratesOpen} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Settings className="h-3.5 w-3.5" />Incentive rates</button>
-      <button onClick={load} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button>
-      <button onClick={() => setPrinting('pdf')} disabled={!sentOnly.length} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" />Save PDF ({sentOnly.length})</button>
-      <button onClick={() => setPrinting('print')} disabled={!sentOnly.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" />Print all</button>
+      <button onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg sm:h-10 sm:rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" /><span className="max-sm:hidden">Incentive flow</span></button>
+      <button onClick={() => setRatesOpen(!ratesOpen)} aria-expanded={ratesOpen} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg sm:h-10 sm:rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><Settings className="h-3.5 w-3.5" /><span className="max-sm:hidden">Incentive rates</span></button>
+      <button onClick={load} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg sm:h-10 sm:rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /><span className="max-sm:hidden">Refresh</span></button>
+      <button onClick={() => setPrinting('pdf')} disabled={!sentOnly.length} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg sm:h-10 sm:rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><FileDown className="h-3.5 w-3.5" /><span className="max-sm:hidden">Save PDF</span> ({sentOnly.length})</button>
+      <button onClick={() => setPrinting('print')} disabled={!sentOnly.length} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg sm:h-10 sm:rounded-xl border border-slate-200 px-3 text-xs font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-3.5 w-3.5" /><span className="max-sm:hidden">Print all</span></button>
     </section>
     {ratesOpen && <HRIncentiveRates onError={onError} />}
     {flowOpen && <section className={card}>
@@ -115,10 +116,25 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
     {claims && waiting.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-[#f4fafd] p-4"><p className="min-w-[200px] flex-1 text-sm text-slate-700"><strong>{waiting.length} {waiting.length === 1 ? 'claim' : 'claims'}</strong> {waiting.length === 1 ? 'has' : 'have'} not been marked received.</p>
       <input value={receiver} onChange={(event) => setReceiver(event.target.value)} placeholder="Your name (optional)" aria-label="Your name" className={`${field} w-52`} />
       <button onClick={() => void mark(waiting.map((claim) => claim.id), true)} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><CheckCheck className="h-4 w-4" />Mark {waiting.length} received</button></div>}
-    <div className="grid gap-3 sm:grid-cols-3">{[['Claims sent to HR', claims ? String(sentOnly.length) : '…'], ['Total claimed', claims ? rm(claimTotal(entries)) : '…'], ['Total approved', claims ? rm(approvedTotal(entries)) : '…']].map(([label, value]) => <div key={label} className={card}><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-1 text-3xl font-semibold text-[#0b587b]">{value}</p></div>)}</div>
+    <div className="grid grid-cols-3 gap-1.5 sm:gap-3">{[['Claims sent to HR', 'Sent', claims ? String(sentOnly.length) : '…'], ['Total claimed', 'Claimed', claims ? rm(claimTotal(entries)) : '…'], ['Total approved', 'Approved', claims ? rm(approvedTotal(entries)) : '…']].map(([label, short, value]) => <div key={label} className={`${card} max-sm:!rounded-lg max-sm:!p-2`}><p className="truncate text-[10px] font-semibold text-slate-500 sm:text-xs"><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span></p><p className="mt-0.5 truncate text-sm font-semibold text-[#0b587b] sm:mt-1 sm:text-3xl">{value}</p></div>)}</div>
     <section className={`${card} overflow-x-auto`}>
       {!claims ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{claims.length ? 'No claim matches these filters.' : `Nothing has been submitted or sent to HR for ${month === 'all' ? 'any month' : monthLabel(month)} yet. Clinical Admin sends approved claims from Staff incentives.`}</p> :
-        <table className="w-full min-w-[820px] text-left text-sm">
+        <>
+        <ul className="divide-y divide-slate-100 sm:hidden" aria-label="Incentive claims">{shown.map((claim) => { const state = !claim.hrSubmittedAt && claim.status !== 'submitted' ? (claim.status === 'returned' ? ['Returned', 'bg-slate-100 text-slate-600'] : ['Draft', 'bg-slate-100 text-slate-600']) : !claim.hrSubmittedAt ? ['Waiting', 'bg-amber-50 text-amber-800'] : claim.hrReceivedAt ? ['Received', 'bg-teal-50 text-teal-700'] : ['To receive', 'bg-sky-50 text-sky-700']; return <li key={claim.id}>
+          <button type="button" aria-expanded={openId === claim.id} onClick={() => setOpenId(openId === claim.id ? '' : claim.id)} className="flex w-full items-center gap-2 py-2 text-left">
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[#14233b]">{claim.staffName}{claim.form === 'doctor' && <span className="ml-1 rounded-full bg-violet-50 px-1.5 py-px text-[9px] font-bold text-violet-700">Doctor</span>}</span><span className="block truncate text-[10.5px] text-slate-500">{monthLabel(claim.month)} · {claim.branch} · {rm(approvedTotal(claim.entries))}</span></span>
+            <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${state[1]}`}>{state[0]}</span>
+          </button>
+          {openId === claim.id && <div className="space-y-1.5 pb-2.5 text-[10.5px] text-slate-600">
+            <p className="text-slate-500">{claim.staffCode} · {claim.entries.length} entries · claimed {rm(claimTotal(claim.entries))} · approved by {claim.approvedBy || '—'}{claim.hrSubmittedAt ? ` · sent ${sent(claim)}` : ''}</p>
+            <ul className="space-y-0.5">{claim.entries.map((entry) => <li key={entry.id} className={entry.review === 'rejected' ? 'text-slate-400 line-through' : ''}>{dmy(entry.date)} · <b className="font-mono text-[#0b587b]">{entry.code}</b> · {entry.patient || '—'} · {entry.rm.toFixed(2)} {entry.review === 'approved' ? '✓' : entry.review === 'rejected' ? '✗' : ''}</li>)}</ul>
+            {claim.hrSubmittedAt && (claim.hrReceivedAt
+              ? <p>Received {new Date(claim.hrReceivedAt).toLocaleDateString('en-GB')}{claim.hrReceivedBy ? ` by ${claim.hrReceivedBy}` : ''} <button onClick={() => void mark([claim.id], false)} disabled={busy} className="ml-1 inline-flex items-center gap-1 font-semibold text-slate-500 disabled:opacity-50"><Undo2 className="h-3 w-3" />Undo</button></p>
+              : <button onClick={() => void mark([claim.id], true)} disabled={busy} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 disabled:opacity-50">Mark received</button>)}
+            {!claim.hrSubmittedAt && claim.status === 'submitted' && claim.form === 'doctor' && <span className="flex gap-1.5"><button onClick={() => void decide(claim, 'approve')} disabled={busy} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 disabled:opacity-50">Approve</button><button onClick={() => void decide(claim, 'return')} disabled={busy} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-[11px] font-semibold text-rose-700 disabled:opacity-50">Return</button></span>}
+          </div>}
+        </li>; })}</ul>
+        <div className="hidden sm:block"><table className="w-full min-w-[820px] text-left text-sm">
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Month</th><th className="py-2 pr-4 text-right font-semibold">Entries</th><th className="py-2 pr-4 text-right font-semibold">Claimed (RM)</th><th className="py-2 pr-4 text-right font-semibold">Approved (RM)</th><th className="py-2 pr-4 font-semibold">Approved by</th><th className="py-2 pr-4 font-semibold">Sent to HR</th><th className="py-2 font-semibold">HR</th></tr></thead>
           <tbody>{shown.map((claim) => <Fragment key={claim.id}>
             <tr onClick={() => setOpenId(openId === claim.id ? '' : claim.id)} className="cursor-pointer border-b border-slate-50 hover:bg-[#f4fafd]">
@@ -138,7 +154,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
               {claim.form !== 'doctor' && claim.entries.some((entry) => entry.code === NIGHT_CODE) && <p className="mt-2 text-xs font-semibold text-slate-700">Incentives (without Night Shift) {rm(otherTotal(claim.entries))} · Night Shift Allowance {rm(nightTotal(claim.entries))} · Total {rm(claimTotal(claim.entries))}</p>}
               {claim.adminNote && <p className="mt-2 text-xs text-slate-500">Clinical Admin note: {claim.adminNote}</p>}</td></tr>}
           </Fragment>)}</tbody>
-        </table>}
+        </table></div></>}
     </section>
     </div>
     {printing === 'pdf' && <PdfHint />}

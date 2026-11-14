@@ -9,14 +9,14 @@ const payroll = result.events.find(e => e.category === 'payroll')!;
 assert.equal(payroll.start, '2026-11-15'); assert.equal(payroll.date, '2026-11-15');
 assert.equal(calendarEventOverdue(payroll, '2026-11-15'), false);
 assert.equal(calendarEventOverdue(payroll, '2026-11-16'), true);
-assert.equal(result.events.filter(e => e.employeeId === 'a').length, 1); // Merges first CA evaluation + probation check.
+assert.equal(result.events.filter(e => e.employeeId === 'a').length, 2); // Two-week check and first monthly evaluation in November.
 assert.equal(result.events.find(e => e.employeeId === 'a')!.date, '2026-11-03');
 assert.equal(result.events.find(e => e.employeeId === 'b')!.date, '2026-11-08');
 assert.ok(!result.events.some(e => e.employeeId === 'b' && e.category === 'evaluation'));
 result = buildHrCalendar('2026-12', [ca], config);
-assert.equal(result.events.find(e => e.category === 'evaluation')!.date, '2026-12-03'); // Monthly from first 14-day evaluation.
+assert.equal(result.events.find(e => e.category === 'evaluation')!.date, '2026-12-20'); // Monthly from the joining date, matching the probation policy.
 result = buildHrCalendar('2027-01', [ca], config);
-assert.equal(result.events.find(e => e.category === 'evaluation')!.date, '2027-01-03');
+assert.equal(result.events.find(e => e.category === 'evaluation')!.date, '2027-01-20');
 assert.ok(!result.events.some(e => e.category === 'probation')); // No separate third-month CA reminder.
 assert.ok(!buildHrCalendar('2027-02', [ca], config).events.some(e => e.category === 'evaluation'));
 result = buildHrCalendar('2027-01', [{ ...ca, confirmDate: '2026-12-01' }], config);
@@ -53,7 +53,7 @@ assert.equal(result.events.find(e => e.id === event.id)!.state, 'done'); // Actu
 const payrollKey = payroll.id;
 assert.equal(buildHrCalendar('2026-11', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events.find(e => e.category === 'payroll')!.state, 'done');
 assert.equal(buildHrCalendar('2026-12', [], config, { [payrollKey]: { state: 'done', at: '', by: 'HR' } }).events.find(e => e.category === 'payroll')!.state, 'open'); // Monthly completion never leaks.
-assert.equal(buildHrCalendar('2026-11', [], { settings: { statutoryPayments: false, shareForecast: false, payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false, payrollDay: 15, forecastDay: 7, statutoryDay: 15, probationDays: 14, confirmMonths: 3 }, rules: [], probation: {} }).events.length, 0);
+assert.equal(buildHrCalendar('2026-11', [], { settings: { statutoryPayments: false, shareForecast: false, payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false, sotm: false, payrollDay: 15, forecastDay: 7, statutoryDay: 15, probationDays: 14, confirmMonths: 3 }, rules: [], probation: {} }).events.length, 0);
 assert.throws(() => validateCalendarRule({ ...rule, date: '2026-02-30' }));
 assert.throws(() => validateCalendarRule({ ...rule, every: 0 }));
 assert.throws(() => validateCalendarRule({ ...rule, anchor: 'join', employeeId: '' }));
@@ -102,7 +102,8 @@ console.log('Probation-only CA evaluation tests passed: unknown status, HR verif
 
 const { calendarEventOnDate, occurrenceCompletedOn, isMonthlyHrTask } = await import('../src/lib/hrCalendar');
 const monthly = buildHrCalendar('2026-11', [], config).events.filter(isMonthlyHrTask);
-assert.equal(monthly.length, 3);
+assert.equal(monthly.length, 4);
+assert.equal(monthly.find((e) => e.category === 'sotm')!.date, '2026-11-05');
 assert.equal(monthly.find((e) => e.category === 'forecast')!.date, '2026-11-07');
 assert.equal(monthly.find((e) => e.category === 'payroll')!.date, '2026-11-15');
 assert.equal(monthly.find((e) => e.category === 'statutory')!.date, '2026-11-15');

@@ -55,7 +55,7 @@ export function HRIncentiveForms({ form, onError }: { key?: string; form: Incent
   const extraOf = (item: { code: string }) => all.find((entry) => entry.code === item.code) as ExtraIncentive | undefined;
   if (!loaded) return <section className={card}><p className="text-sm text-slate-500">Loading…</p></section>;
 
-  return <div className="space-y-5">
+  return <div className="review-compact space-y-3 sm:space-y-5">
     <section className={`${card} space-y-4`}>
       <div><h3 className="text-lg font-semibold">Add an incentive to the {form === 'doctor' ? 'doctor' : 'staff'} form</h3><p className="mt-1 text-sm text-slate-500">The new incentive appears on the form for {form === 'doctor' ? 'doctors' : 'staff'} straight away. To change its rate later, use Incentive rates.</p></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

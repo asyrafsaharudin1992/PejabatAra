@@ -1,10 +1,12 @@
 import { branchId } from './_office-db.js';
 import { malaysiaToday } from '../src/lib/reviewReminders.js';
 import { emptyProjectionPlan, mergeProjectionPlans, shiftProjectionMonth, validateProjectionPlan } from '../src/lib/hrProjection.js';
-import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, validateCalendarRule, validateCalendarSettings, type CalendarConfig, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
+import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, occurrenceCompletedOn, validateCalendarRule, validateCalendarSettings, type CalendarConfig, type CalendarEvent, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
 const BRANCH = 'AraOffice HR Private';
 // The COO keeps a calendar of their own reminders, stored apart from HR's. It has none of HR's automatic reminders.
 const COO_BRANCH = 'AraOffice COO Private';
+// The CEO keeps a calendar of their own too, apart from the COO's and HR's.
+const CEO_BRANCH = 'AraOffice CEO Private';
 const CONFIG_KEY = 'hr_calendar_config';
 const stateKey = (month: string) => `hr_calendar_done:${month}`;
 const storedConfig = (payload: any): CalendarConfig => ({ settings: { ...defaultCalendarConfig().settings, ...(payload?.settings || {}) }, rules: Array.isArray(payload?.rules) ? payload.rules : [], probation: payload?.probation && typeof payload.probation === 'object' && !Array.isArray(payload.probation) ? payload.probation : {} });
@@ -25,16 +27,27 @@ async function writeRecord(db: any, userId: string, branch: string, key: string,
   if (error) throw error;
   return data.updated_at;
 }
-export async function hrCalendarAction(req: any, res: any, db: any, user: { id: string }, action: string, body: any, scope: 'hr' | 'coo' = 'hr') {
-  if (scope === 'coo' && !['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_state'].includes(action)) throw fail(403, 'Access restricted.');
+// The statutory dates the CEO should have in view, added to the CEO's own calendar. They use the same ids as HR's statutory task, so a tick is saved the same way.
+function ceoStatutoryEvents(month: string, states: Record<string, CalendarOccurrence>): CalendarEvent[] {
+  const events: CalendarEvent[] = [];
+  const add = (title: string, date: string, notes: string) => {
+    const id = `statutory:${date}`;
+    events.push({ id, title, category: 'statutory', date, start: date, employeeId: '', person: '', company: '', notes, source: 'automatic', state: states[id]?.state || 'open', completedOn: occurrenceCompletedOn(states[id]) });
+  };
+  add('KWSP / PERKESO / EIS / PCB due', `${month}-15`, "Due by the 15th: last month's KWSP, PERKESO, EIS and PCB go to the authorities. HR makes the files in Payroll. Tick it Done once paid.");
+  if (month.slice(5) === '02') add('EA forms to staff & CP8D to LHDN', calendarMonthEnd(month), 'Due by the end of February: give each staff member their Borang EA and send the CP8D to LHDN through e-Data Praisi. HR prints them in HR > Tax.');
+  return events;
+}
+export async function hrCalendarAction(req: any, res: any, db: any, user: { id: string }, action: string, body: any, scope: 'hr' | 'coo' | 'ceo' = 'hr') {
+  if (scope !== 'hr' && !['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_state'].includes(action)) throw fail(403, 'Access restricted.');
   // (The COO reads the forecast through the HR route, which only lets the COO's GET of calendar_projection through.)
   if (!['calendar_projection_save', 'calendar_projection', 'calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
   if (req.method !== (['calendar_month', 'calendar_projection'].includes(action) ? 'GET' : 'POST')) throw fail(405, 'Method not allowed.');
   const month = req.method === 'GET' ? req.query.month : body.month;
   if (!calendarMonth(month)) throw fail(400, 'Choose a valid calendar month.');
   let branch: string | null;
-  try { branch = await branchId(db, scope === 'coo' ? COO_BRANCH : BRANCH, req.method === 'POST'); }
-  catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, scope === 'coo' ? COO_BRANCH : BRANCH, false); }
+  try { branch = await branchId(db, scope === 'ceo' ? CEO_BRANCH : scope === 'coo' ? COO_BRANCH : BRANCH, req.method === 'POST'); }
+  catch (cause) { if ((cause as any)?.code !== '23505') throw cause; branch = await branchId(db, scope === 'ceo' ? CEO_BRANCH : scope === 'coo' ? COO_BRANCH : BRANCH, false); }
   if (action === 'calendar_projection') {
     const through = req.query.through || `${month.slice(0, 4)}-12`;
     if (!calendarMonth(through) || through < month || through > shiftProjectionMonth(month, 11)) throw fail(400, 'Choose a projection window of at most 12 months.');
@@ -68,11 +81,13 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     const version = await writeRecord(db, user.id, branch, key, current, body.version, plan);
     return res.status(200).json({ version });
   }
-  if (req.method === 'GET' && action === 'calendar_month' && scope === 'coo') {
+  if (req.method === 'GET' && action === 'calendar_month' && scope !== 'hr') {
     const [configRow, stateRow] = await Promise.all([readRecord(db, branch, CONFIG_KEY), readRecord(db, branch, stateKey(month))]);
     const stored = storedConfig(configRow?.payload);
     const config: CalendarConfig = { ...stored, settings: { ...stored.settings, statutoryPayments: false, shareForecast: false, payroll: false, probationWeeks: false, probationMonths: false, caEvaluation: false, appraisal: false, birthdays: false, sotm: false }, probation: {} };
-    const built = buildHrCalendar(month, [], config, stateRow?.payload?.states || {}, []);
+    const states = stateRow?.payload?.states || {};
+    const built = buildHrCalendar(month, [], config, states, []);
+    if (scope === 'ceo') built.events = [...built.events, ...ceoStatutoryEvents(month, states)].sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
     return res.status(200).json({ ...built, people: [], config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });
   }
   if (req.method === 'GET' && action === 'calendar_month') {
@@ -115,7 +130,7 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
       next = { ...config, settings };
     } else if (action === 'calendar_rule_save') {
       let rule; try { rule = validateCalendarRule(body.rule); } catch (cause) { throw fail(400, (cause as Error).message); }
-      if (scope === 'coo' && (rule.anchor !== 'date' || rule.employeeId)) throw fail(400, 'Choose a date for your reminder.');
+      if (scope !== 'hr' && (rule.anchor !== 'date' || rule.employeeId)) throw fail(400, 'Choose a date for your reminder.');
       if (rule.employeeId) {
         const { data, error } = await db.from('hr_employees').select('company').eq('id', rule.employeeId).eq('status', 'Active').maybeSingle();
         if (error) throw error;

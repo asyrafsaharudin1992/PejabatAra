@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, ScrollText, Search, Tags, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { shrinkAttachment } from './lib/shrinkImage';
@@ -67,6 +68,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   }, [year, refresh]);
 
   const [removing, setRemoving] = useState('');
+  const [openRow, setOpenRow] = useState('');
   const [tab, setTab] = useState<'requests' | 'enter' | 'staff' | 'year_end' | 'holidays' | 'reports'>('requests');
   // Deleting is final: approved leave that AraOffice took off the balance goes back on it; the person's HR history records it.
   const remove = async (row: Request) => {
@@ -99,27 +101,41 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
   const numbers = Array.from({ length: pages }, (_, index) => index + 1).filter((number) => pages <= 7 || number === 1 || number === pages || Math.abs(number - current) <= 1);
   const tiles: [string, number, string][] = [['Waiting for supervisor', count('pending'), 'text-amber-600'], ['Waiting for final approver', count('supervisor_approved'), 'text-sky-600'], ['Approved', count('approved'), 'text-emerald-600'], ['On leave today', onLeaveToday.length, 'text-[#0b587b]']];
 
-  return <div className="mx-auto max-w-[1500px] space-y-5">
-    <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
-      <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Leave</h2><p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Every leave request from Individual Sign In. Each goes to the staff member's supervisor first, then to the final approver, and the balance only comes off after the final approval.</p></div>
-        <button onClick={onTypes} className="inline-flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/12 px-5 text-sm font-semibold text-white ring-1 ring-white/25 hover:bg-white/20"><Tags className="h-4 w-4" />Leave types</button>
+  return <div className="text-compact mx-auto max-w-[1500px] space-y-5">
+    <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:p-9">
+      <div className="flex flex-row items-center justify-between gap-3 sm:flex-col sm:items-stretch sm:gap-5 md:flex-row md:items-end">
+        <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.22em]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-0.5 text-lg font-semibold tracking-tight sm:mt-3 sm:text-3xl">Leave</h2><p className="mt-3 hidden max-w-2xl leading-7 text-[#b9cfdd] sm:block">Every leave request from Individual Sign In. Each goes to the staff member's supervisor first, then to the final approver, and the balance only comes off after the final approval.</p></div>
+        <button onClick={onTypes} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-white/12 px-3 text-xs font-semibold text-white ring-1 ring-white/25 hover:bg-white/20 sm:h-12 sm:gap-2 sm:rounded-xl sm:px-5 sm:text-sm"><Tags className="h-3.5 w-3.5 sm:h-4 sm:w-4" />Leave types</button>
       </div>
     </section>
-    <div role="tablist" className="inline-flex flex-wrap rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['requests', 'Leave requests'], ['enter', 'Enter leave'], ['staff', 'Staff leave'], ['year_end', 'Leave year end'], ['holidays', 'Public holidays'], ['reports', 'Reports']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
+    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'requests', label: 'Leave requests', short: 'Requests' }, { id: 'enter', label: 'Enter leave', short: 'Enter' }, { id: 'staff', label: 'Staff leave', short: 'Staff' }, { id: 'year_end', label: 'Leave year end', short: 'Year end' }, { id: 'holidays', label: 'Public holidays', short: 'Holidays' }, { id: 'reports', label: 'Reports' }]} />
     {tab === 'enter' ? <HRLeaveApply onError={onError} onSaved={() => setRefresh((count) => count + 1)} /> : tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'reports' ? <HRLeaveReport onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : tab === 'holidays' ? <HRLeaveHolidays onError={onError} /> : <>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={card}><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-1 text-3xl font-semibold ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
+    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={`${card} max-sm:!rounded-lg max-sm:!p-2`}><p className="truncate text-[10px] font-semibold text-slate-500 sm:text-xs"><span className="sm:hidden">{label === 'Waiting for supervisor' ? 'Supervisor' : label === 'Waiting for final approver' ? 'Final' : label === 'On leave today' ? 'Today' : label}</span><span className="hidden sm:inline">{label}</span></p><p className={`mt-0.5 text-lg font-semibold sm:mt-1 sm:text-3xl ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
     {onLeaveToday.length > 0 && <p className="rounded-xl bg-[#f4fafd] p-3 text-sm text-slate-700"><strong className="text-[#0b587b]">On leave today:</strong> {onLeaveToday.map((row) => `${row.applicant} (${row.type})`).join(', ')}</p>}
-    <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, staff code or leave type" className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm" /></div>
-      <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Status" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All statuses</option>{(Object.keys(LABEL) as Request['status'][]).map((key) => <option key={key} value={key}>{LABEL[key]}</option>)}</select>
-      <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
-      <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All months</option>{Array.from({ length: 12 }, (_, index) => <option key={index} value={String(index + 1)}>{new Date(2026, index, 1).toLocaleDateString('en-GB', { month: 'long' })}</option>)}</select>
-      <select value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Year" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm">{[thisYear + 1, thisYear, thisYear - 1].map((value) => <option key={value} value={value}>{value}</option>)}</select>
+    <section className={`${card} grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3`}>
+      <div className="relative col-span-4 min-w-0 flex-1 sm:min-w-[220px]"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, staff code or leave type" className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs sm:h-10 sm:rounded-xl sm:text-sm" /></div>
+      <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Status" className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-[11px] sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm"><option value="">All statuses</option>{(Object.keys(LABEL) as Request['status'][]).map((key) => <option key={key} value={key}>{LABEL[key]}</option>)}</select>
+      <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-[11px] sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm"><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
+      <select value={month} onChange={(event) => setMonth(event.target.value)} aria-label="Month" className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-[11px] sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm"><option value="">All months</option>{Array.from({ length: 12 }, (_, index) => <option key={index} value={String(index + 1)}>{new Date(2026, index, 1).toLocaleDateString('en-GB', { month: 'long' })}</option>)}</select>
+      <select value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Year" className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-[11px] sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm">{[thisYear + 1, thisYear, thisYear - 1].map((value) => <option key={value} value={value}>{value}</option>)}</select>
     </section>
     <section className={`${card} overflow-x-auto`}>
       {!rows ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{rows.length ? 'No request matches these filters.' : `No leave requests in ${year} yet.`}</p> :
-        <table className="w-full min-w-[980px] text-left text-sm">
+        <>
+        <ul className="divide-y divide-slate-100 sm:hidden" aria-label="Leave requests">{visible.map((row) => <li key={row.id}>
+          <button type="button" aria-expanded={openRow === row.id} onClick={() => setOpenRow(openRow === row.id ? '' : row.id)} className="flex w-full items-center gap-2 py-2 text-left">
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[#14233b]">{row.applicant}</span><span className="block truncate text-[10.5px] text-slate-500"><span className="font-mono font-bold text-[#0b587b]">{row.type}</span> · {range(row)} · {days(row.days)}d</span></span>
+            <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${TONE[row.status]}`}>{LABEL[row.status]}</span>
+          </button>
+          {openRow === row.id && <div className="space-y-1.5 pb-2.5 text-[10.5px] text-slate-600">
+            <p className="text-slate-500">{row.company} · {row.code}{imported(row) ? ' · From Infotech' : ''}</p>
+            {row.reason && <p>{row.reason}</p>}
+            <p>Supervisor: {row.supervisor || 'Not set'}{row.supervisorNote ? ` — “${row.supervisorNote}”` : ''} · Backup: {row.backupApprover || '—'} · Final: {row.finalApprover || '—'}{row.note && !imported(row) ? ` — “${row.note}”` : ''}</p>
+            <AttachmentLinks items={row.attachments} getUrl={hrFileUrl} canDownload onError={onError} /><AddFile row={row} onAdded={() => setRefresh((count) => count + 1)} onError={onError} />
+            <button onClick={() => void remove(row)} disabled={removing === row.id} aria-label={`Delete ${row.applicant}'s leave`} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+          </div>}
+        </li>)}</ul>
+        <div className="hidden sm:block"><table className="w-full min-w-[980px] text-left text-sm">
           <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Leave</th><th className="py-2 pr-4 font-semibold">Dates</th><th className="py-2 pr-4 font-semibold">Days</th><th className="py-2 pr-4 font-semibold">Status</th><th className="py-2 pr-4 font-semibold">Supervisor</th><th className="py-2 pr-4 font-semibold">Backup officer</th><th className="py-2 pr-4 font-semibold">Final approver</th><th className="py-2 font-semibold"><span className="sr-only">Delete</span></th></tr></thead>
           <tbody>{visible.map((row) => <tr key={row.id} className="border-b border-slate-50 align-top">
             <td className="py-3 pr-4"><p className="font-semibold">{row.applicant}</p><p className="text-xs text-slate-400">{row.company} · {row.code}</p></td>
@@ -132,7 +148,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
             <td className="py-3 text-xs text-slate-600">{row.finalApprover || <span className="text-slate-300">{imported(row) || row.note.startsWith('Entered by HR') ? '—' : 'None (supervisor is final)'}</span>}{row.note && !imported(row) && <p className="mt-0.5 text-slate-400">“{row.note}”</p>}</td>
             <td className="py-3 text-right"><button onClick={() => void remove(row)} disabled={removing === row.id} aria-label={`Delete ${row.applicant}'s leave`} title="Delete this leave request" className="grid h-8 w-8 place-items-center rounded-lg text-slate-300 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button></td>
           </tr>)}</tbody>
-        </table>}
+        </table></div></>}
       {rows && pages > 1 && <nav className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4" aria-label="Leave request pages">
         <p className="text-sm text-slate-500">Showing {(current - 1) * PAGE_SIZE + 1}–{Math.min(current * PAGE_SIZE, shown.length)} of {shown.length}</p>
         <div className="flex flex-wrap items-center gap-1.5">

@@ -1,17 +1,10 @@
 import { useState } from 'react';
 import { Search, Users } from 'lucide-react';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
+import { locationGroup } from './lib/staffGroup';
 
 type Person = { id?: string; fullName: string; employeeCode: string; company: string; designation: string; department: string; status: string; joinDate: string | null };
-export const locationGroup = (person: Pick<Person, 'designation' | 'employeeCode' | 'company'>) => {
-  const job = person.designation.toUpperCase();
-  if (/\b(CEO|CFO|CHRO|COO|CPO)\b|CHIEF.*OFFICER/.test(job)) return 'Directors';
-  if (person.company === 'KJ' && person.employeeCode === 'ARA0041') return 'Admin Klinikal';
-  if (/ADMIN.*CLINI|CLINI.*ADMIN/.test(job)) return 'Admin Klinikal';
-  if (/CLINIC ASSISTANT|PEMBANTU KLINIK/.test(job)) return 'CAs';
-  if (/\bDR\b|DOCTOR|DOKTOR/.test(job)) return 'Doctors';
-  return 'Admins';
-};
+export { locationGroup };
 const groups = ['Directors', 'Admins', 'Admin Klinikal', 'CAs', 'Doctors'];
 const inGroup = (person: Person, group: string) => group === 'Doctors' ? locationGroup(person) === 'Directors' || locationGroup(person) === 'Doctors' : locationGroup(person) === group;
 const position = (person: Person) => person.company === 'KJ' && person.employeeCode === 'ARA0041' ? 'ADMIN CLINICAL' : person.designation;

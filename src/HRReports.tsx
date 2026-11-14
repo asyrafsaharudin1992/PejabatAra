@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { ArrowRight, CalendarCheck, ClipboardCheck, Clock3, Search, Wallet, CalendarDays, IdCard } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { HRReportDialog } from './HRReportDialog';
@@ -30,23 +31,23 @@ export function HRReports(_props: { onError: (message: string) => void }) {
   const shown = REPORTS.filter((item) => (category === 'All' || category === item.category) && words.every((word) => `${item.title} ${item.category} ${item.description} ${item.format}`.toLowerCase().includes(word)));
   const open = (id: ReportId | null) => { setSelected(id); window.scrollTo({ top: 0 }); };
 
-  return <div className="mx-auto max-w-[1500px] space-y-5">
-    <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9 print:hidden">
-      <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p>
-      <h2 className="mt-3 text-3xl font-semibold tracking-tight">Reports</h2>
-      <p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Staff profiles, rosters, leave, attendance, performance reviews and incentive reports, together in one place. Choose a report, select your options and print or save as PDF.</p>
+  return <div className="text-compact mx-auto max-w-[1500px] space-y-3 sm:space-y-5">
+    <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:p-9 print:hidden">
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.22em]">Office HR · Klinik ARA 24 Jam</p>
+      <h2 className="mt-0.5 text-lg font-semibold tracking-tight sm:mt-3 sm:text-3xl">Reports</h2>
+      <p className="mt-2 hidden max-w-2xl leading-7 text-[#b9cfdd] sm:block">Staff profiles, rosters, leave, attendance, performance reviews and incentive reports, together in one place. Choose a report, select your options and print or save as PDF.</p>
     </section>
 
       <section className={`${card} space-y-4`}>
         <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3"><Search className="h-4 w-4 text-slate-400" /><input aria-label="Search reports" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reports" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
-        <div role="group" aria-label="Report category" className="flex flex-wrap gap-2">{CATEGORIES.map((item) => <button key={item} type="button" aria-pressed={category === item} onClick={() => setCategory(item)} className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${category === item ? 'bg-[#0b587b] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{item}</button>)}</div>
+        <SubTabs label="Report category" active={category} onSelect={setCategory} tabs={CATEGORIES.map((item) => ({ id: item, label: item, short: item === 'Performance Reviews' ? 'Reviews' : item === 'Staff Profiles' ? 'Profiles' : undefined }))} />
       </section>
       <p role="status" className="text-sm text-slate-500">{shown.length} {shown.length === 1 ? 'report' : 'reports'}</p>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{shown.map((item) => <button key={item.id} type="button" onClick={() => open(item.id)} className={`${card} flex flex-col text-left transition hover:ring-2 hover:ring-[#0b587b]/30 focus-visible:outline-2 focus-visible:outline-[#0b587b]`}>
-        <span className="flex w-full items-center justify-between gap-3"><item.icon className="h-6 w-6 text-[#0b9aca]" /><span className="text-xs font-semibold text-slate-400">{item.category}</span></span>
-        <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-        <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">{item.description}</p>
-        <span className="mt-5 flex w-full items-center justify-between gap-3 text-xs font-semibold text-[#0b587b]">{item.format}<ArrowRight className="h-4 w-4" /></span>
+      <div className="grid gap-1.5 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">{shown.map((item) => <button key={item.id} type="button" onClick={() => open(item.id)} className={`${card} flex flex-col text-left max-sm:flex-row max-sm:items-center max-sm:gap-2.5 max-sm:!rounded-xl max-sm:!p-2.5 transition hover:ring-2 hover:ring-[#0b587b]/30 focus-visible:outline-2 focus-visible:outline-[#0b587b]`}>
+        <span className="flex items-center justify-between gap-3 sm:w-full"><item.icon className="h-5 w-5 text-[#0b9aca] sm:h-6 sm:w-6" /><span className="text-xs font-semibold text-slate-400 max-sm:hidden">{item.category}</span></span>
+        <h3 className="mt-5 text-lg font-semibold max-sm:mt-0 max-sm:min-w-0 max-sm:flex-1 max-sm:truncate max-sm:text-[13px]">{item.title}</h3>
+        <p className="mt-2 flex-1 text-sm leading-6 text-slate-500 max-sm:hidden">{item.description}</p>
+        <span className="mt-5 flex w-full items-center justify-between gap-3 text-xs font-semibold text-[#0b587b] max-sm:mt-0 max-sm:w-auto"><span className="max-sm:hidden">{item.format}</span><ArrowRight className="h-4 w-4" /></span>
       </button>)}</div>
       {!shown.length && <p className={`${card} text-sm text-slate-500`}>No reports match. Try another search or category.</p>}
     {report && <div key={report.id}><HRReportDialog id={report.id} title={report.title} onClose={() => open(null)} /></div>}

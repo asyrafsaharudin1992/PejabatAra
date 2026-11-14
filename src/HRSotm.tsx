@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { Download, ImagePlus, MessageCircle, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
@@ -241,7 +242,7 @@ export function HRSotm({ onError }: { onError: (message: string) => void }) {
   };
   const field = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
   const label = 'block text-xs font-semibold text-slate-500';
-  const tabs = <div role="tablist" className="inline-flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">{([['create', 'Create poster'], ['cert', 'Certificate'], ['past', 'Past SOTM']] as const).map(([id, text]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); setNotice(''); }} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-[#0b587b] text-white' : 'text-slate-500'}`}>{text}</button>)}</div>;
+  const tabs = <SubTabs active={tab} onSelect={(id) => { setTab(id); setNotice(''); }} tabs={[{ id: 'create', label: 'Create poster', short: 'Poster' }, { id: 'cert', label: 'Certificate' }, { id: 'past', label: 'Past SOTM', short: 'Past' }]} />;
 
   const pastMonths: string[] = [...new Set<string>((past || []).map((item) => item.month))];
   const pastBranches: string[] = [...new Set<string>((past || []).map((item) => item.branch).filter(Boolean))].sort();

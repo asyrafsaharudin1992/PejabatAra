@@ -1,4 +1,5 @@
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
+import { greetingName } from './lib/officeGreeting';
 import { ArrowLeft, ArrowRight, Baby, Building2, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
@@ -14,8 +15,8 @@ const MedicalToolkit = lazy(() => import('./MedicalToolkit'));
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
-type View = 'home' | 'coo' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
+type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; ceoOffice?: boolean; hrOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type View = 'home' | 'coo' | 'ceo' | 'hr' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
@@ -191,10 +192,14 @@ function MyProfile() {
 // written anywhere, and screens still show the real account's data.
 const AS_KEY = 'ara_dev_view_as';
 const VIEW_AS: Record<string, Partial<Me['staff']>> = {
-  Staff: { isDoctor: false, preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Doctor: { isDoctor: true, preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Supervisor: { isDoctor: false, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
-  Admin: { isDoctor: false, preview: true, isApprover: true, canReview: true, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Staff: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: false, preview: false, isApprover: false, canReview: false, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Doctor: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: true, preview: false, isApprover: false, canReview: false, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Supervisor: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: false, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  Admin: { ceoOffice: false, hrOffice: false, careApprover: false, isDoctor: false, preview: true, isApprover: true, canReview: true, canAssess: true, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  // The directors, with the office icon each of them gets. (Their own screens still show the real account's data.)
+  CHRO: { name: 'AHMAD SYAFIQ BIN SO IB', ceoOffice: false, hrOffice: true, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  COO: { name: 'LUQMAN HAKIM BIN MOHD KAMAL', ceoOffice: false, hrOffice: false, careApprover: true, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
+  CEO: { name: 'MOHAMAD ASYRAF BIN SAHARUDIN', ceoOffice: true, hrOffice: false, careApprover: false, isDoctor: true, preview: false, isApprover: true, canReview: true, canAssess: false, leaveWaiting: 0, reviewWaiting: 0, announcementsUnread: 0 },
 };
 const readViewAs = () => { try { const value = localStorage.getItem(AS_KEY) || ''; return value in VIEW_AS ? value : ''; } catch { return ''; } };
 
@@ -246,7 +251,9 @@ export default function IndividualHub() {
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'toolkit' && me?.staff.isDoctor) return <Screen nav={phoneNav} title="Medical Toolkit" onBack={() => setView('home')}><Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening Medical Toolkit…</p>}><MedicalToolkit /></Suspense></Screen>;
   if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
-  if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry /></Screen>;
+  if (view === 'coo' && me?.staff.careApprover) return <Screen nav={phoneNav} title="Office COO" onBack={() => setView('home')}><CooOfficeEntry preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'hr' && me?.staff.hrOffice) return <Screen nav={phoneNav} title="Office HR" onBack={() => setView('home')}><CooOfficeEntry office="hr" preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
+  if (view === 'ceo' && me?.staff.ceoOffice) return <Screen nav={phoneNav} title="Office CEO" onBack={() => setView('home')}><CooOfficeEntry office="ceo" preview={import.meta.env.DEV && Boolean(viewAs)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
   if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
@@ -265,27 +272,29 @@ export default function IndividualHub() {
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
   type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
   const items: Item[] = [
-    ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
+    ...(me?.staff.ceoOffice ? [{ label: 'Office - CEO', desc: 'Open your CEO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('ceo') } as Item] : []),
+    ...(me?.staff.hrOffice ? [{ label: 'Office - HR', desc: 'Open your HR office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('hr') } as Item] : []),
+    ...(me?.staff.careApprover ? [{ label: 'Office - COO', desc: 'Open your COO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('coo') } as Item] : []),
     { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
     { label: 'OT request', desc: 'Ask for overtime or rest-day work', icon: Timer, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('ot') },
     ...([{ label: 'Announcements', desc: me?.staff.announcementsUnread ? `${me.staff.announcementsUnread} to read` : 'Team updates and memos', icon: Bell, tone: 'bg-[#ffe4e8] text-[#e0314f]', onClick: () => setView('announcements'), badge: me?.staff.announcementsUnread || 0 } as Item]),
     { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
-    ...(me?.staff.careApprover ? [{ label: 'Office - COO', desc: 'Open your COO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('coo') } as Item] : []),
     { label: 'Payslip', desc: 'Password protected · your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip'), locked: true },
     { label: 'Income Tax', desc: 'Your EA and CP58 forms', icon: PiggyBank, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', soon: true },
     { label: 'My Profile', desc: 'Your staff details', icon: UserRound, tone: 'bg-[#f1e9ff] text-[#6b4bd8]', onClick: () => setView('profile') },
     { label: 'Assessment Room', desc: 'Periodic staff assessments', icon: ClipboardCheck, tone: 'bg-[#91d7ed]/40 text-[#0b3046]', href: '#office/assessment' },
     ...(me?.staff.preview ? [] : [{ label: 'Incentive Claims', desc: me?.staff.careWaiting ? `${me.staff.careWaiting} AraCare waiting for your check` : 'Record your procedures and claim your incentive', icon: Coins, tone: 'bg-[#ffd36b]/50 text-[#3b2a00]', href: '#office/incentives', badge: me?.staff.careWaiting || 0 } as Item]),
+    ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
     { label: 'Settings', desc: 'Change your password, sign out', icon: Settings, tone: 'bg-slate-100 text-slate-600', onClick: () => setView('settings') },
   ];
   const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge, locked: item.locked }));
   const facts: [string, string][] = profile ? [['Position', profile.position], ['Department', profile.department], ['Joined', dmy(profile.joinDate)]] : [];
 
   return <>
-    {import.meta.env.DEV && <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-1 bg-slate-900/90 px-2 py-1.5 text-[11px] font-semibold text-white" aria-label="Development: view as">
-      <span className="mr-1 text-slate-400">View as</span>{['', ...Object.keys(VIEW_AS)].map((name) => <button key={name || 'real'} type="button" onClick={() => chooseViewAs(name)} className={`rounded-full px-2.5 py-1 ${viewAs === name ? 'bg-white text-slate-900' : 'bg-white/10'}`}>{name || 'Me'}</button>)}
+    {import.meta.env.DEV && <div className="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center justify-center gap-1 bg-slate-900/90 px-2 py-1 text-[10px] font-semibold text-white" aria-label="Development: view as">
+      <span className="mr-1 text-slate-400">View as</span>{['', ...Object.keys(VIEW_AS)].map((name) => <button key={name || 'real'} type="button" onClick={() => chooseViewAs(name)} className={`rounded-full px-2 py-0.5 ${viewAs === name ? 'bg-white text-slate-900' : 'bg-white/10'}`}>{name || 'Me'}</button>)}
     </div>}
     {/* Phone: the photo of the clinic, a greeting and the icons in a white card */}
     <div className="min-h-[100svh] bg-[#f3f6fb] pb-[84px] text-[#14233b] md:hidden">
@@ -297,7 +306,7 @@ export default function IndividualHub() {
           <div><p className="text-[34px] font-extrabold leading-none tracking-tight"><span className="text-[#0b2a4a]">Ara</span><span className="text-[#1f6feb]">Office</span></p><p className="mt-1.5 text-[11px] font-medium tracking-[0.34em] text-[#0b2a4a]">KLINIK ARA 24 JAM</p></div>
           <button onClick={() => { if (me?.staff.announcementsUnread) setView('announcements'); else if (me?.staff.leaveWaiting) setView('leave'); else if (me?.staff.reviewWaiting) setView('review'); }} aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full bg-white/70 text-[#0b2a4a] backdrop-blur"><Bell className="h-6 w-6" strokeWidth={1.7} />{((me?.staff.leaveWaiting || 0) + (me?.staff.reviewWaiting || 0) + (me?.staff.announcementsUnread || 0)) > 0 && <i className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full border-2 border-white bg-rose-500" />}</button>
         </div>
-        <div className="relative mt-4 flex items-center gap-3.5 px-5"><span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full bg-[#cfe3f9] text-xl font-bold text-[#1f6feb]">{me ? initials(name) : '…'}</span><div className="min-w-0"><h1 className="truncate text-[23px] font-bold leading-tight tracking-tight text-[#0b2a4a]">Hi, {me ? name.split(' ')[0] : '…'}</h1><p className="text-[14px] text-slate-600">Have a good day ahead!</p><p className="mt-0.5 text-[12.5px] font-semibold text-[#1f6feb]">{now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' })} · {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p></div></div>
+        <div className="relative mt-4 flex items-center gap-3.5 px-5"><span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full bg-[#cfe3f9] text-xl font-bold text-[#1f6feb]">{me ? initials(name) : '…'}</span><div className="min-w-0"><h1 className="truncate text-[23px] font-bold leading-tight tracking-tight text-[#0b2a4a]">Hi, {me ? (me.staff.isDoctor ? greetingName(name, true) : '') || name.split(' ')[0] : '…'}</h1><p className="text-[14px] text-slate-600">Have a good day ahead!</p><p className="mt-0.5 text-[12.5px] font-semibold text-[#1f6feb]">{now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' })} · {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p></div></div>
         <div className="absolute inset-x-0 bottom-9 px-5"><p className="max-w-[290px] text-[21px] font-semibold leading-snug tracking-tight text-white [text-shadow:0_1px_8px_rgba(8,44,66,0.55)]">{quote}</p><i className="mt-2 block h-1 w-12 rounded-full bg-[#7cc4ff]" /></div>
       </header>
       <main className="relative z-10 -mt-6 mx-3 rounded-[26px] bg-white px-1.5 pb-4 pt-4 shadow-[0_10px_34px_rgba(11,42,74,0.1)]">
@@ -317,7 +326,7 @@ export default function IndividualHub() {
             <div className="min-w-0">
               <p className="text-[34px] font-extrabold leading-none tracking-tight"><span>Ara</span><span className="text-[#7cc4ff]">Office</span></p>
               <p className="mt-1.5 text-[11px] font-medium tracking-[0.34em] text-white/80">KLINIK ARA 24 JAM</p>
-              <h1 className="mt-9 truncate text-[40px] font-semibold leading-tight tracking-tight">Hello, {me ? name.split(' ')[0] : '…'}.</h1>
+              <h1 className="mt-9 truncate text-[40px] font-semibold leading-tight tracking-tight">Hello, {me ? (me.staff.isDoctor ? greetingName(name, true) : '') || name.split(' ')[0] : '…'}.</h1>
               <p className="mt-2 max-w-xl text-[15px] text-white/80">{quote}</p><i className="mt-3 block h-1 w-12 rounded-full bg-[#7cc4ff]" />
             </div>
             <div className="shrink-0 text-right"><p className="text-[44px] font-semibold leading-none tabular-nums tracking-tight">{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p><p className="mt-2 text-sm text-white/80">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kuala_Lumpur' })}</p></div>

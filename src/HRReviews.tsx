@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { SubTabs } from './SubTabs';
 import { Printer, Search, Send } from 'lucide-react';
 import { ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { AssistantDetail } from './AssistantReview';
@@ -97,9 +98,9 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
     setSaving(false);
   };
 
-  return <div className="mx-auto max-w-[1500px] space-y-5">
+  return <div className="review-compact mx-auto max-w-[1500px] space-y-5">
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
-    {!reportOnly && <div role="tablist" aria-label="Performance reviews" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1">{([['assign', 'Assign Review'], ['reports', 'View Report'], ['reminders', 'Reminder'], ['samples', 'Review samples']] as const).map(([key, label]) => <button key={key} id={`review-tab-${key}`} role="tab" aria-selected={tab === key} aria-controls={`review-panel-${key}`} type="button" onClick={() => setTab(key)} className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${tab === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}{key === 'reminders' && dueReminders > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">{dueReminders}</span>}</button>)}</div>}
+    {!reportOnly && <SubTabs label="Performance reviews" idPrefix="review" active={tab} onSelect={setTab} tabs={[{ id: 'assign', label: 'Assign Review', short: 'Assign' }, { id: 'reports', label: 'View Report', short: 'Report' }, { id: 'reminders', label: 'Reminder', badge: dueReminders }, { id: 'samples', label: 'Review samples', short: 'Samples' }]} />}
     {tab === 'samples' && <HRReviewSamples />}
     {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
       onAssign={(item) => { setAssign({ formType: 'standard', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}

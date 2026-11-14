@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { hrCalendarAction } from '../api/_hr-calendar';
 import type { CalendarRule } from '../src/lib/hrCalendar';
 // In-memory Supabase-shaped fixture: these tests never open a network connection.
-const tables: Record<string, any[]> = { branches: [], portal_state: [], hr_employees: [{ id: 'a', full_name: 'CA A', employee_code: 'A', company: 'KJ', designation: 'CLINIC ASSISTANT', join_date: '2026-10-20', confirm_date: '2025-11-15', date_of_birth: '1994-11-07', status: 'Active' }], hr_reviews: [] };
+const tables: Record<string, any[]> = { branches: [], portal_state: [], hr_employees: [{ id: 'a', full_name: 'CA A', employee_code: 'A', company: 'KJ', designation: 'CLINIC ASSISTANT', join_date: '2026-10-20', confirm_date: '2025-11-15', date_of_birth: '1994-11-07', status: 'Active' }], hr_reviews: [], hr_misc_items: [] };
 class Query {
   filters: ((row: any) => boolean)[] = []; cap = Infinity; mode = 'read'; value: any; counted = false;
   constructor(public table: string) {}
