@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { AraLogo } from './AraLogo';
 import { EmbeddedTabs } from './EmbeddedTabs';
+import { StackTables } from './StackTables';
 import { ArrowLeft, 
   AlertCircle,
   ArrowRight,
@@ -247,6 +248,8 @@ export default function PortalApp({ embedded = false }: { embedded?: boolean } =
 
   if (!user) return <LoginScreen onLogin={login} />;
 
+  const compactCaPage = (page: ReactNode) => embedded ? <StackTables className="ca-mobile-compact text-compact">{page}</StackTables> : page;
+
   return (
     <div className={embedded ? 'text-[#14233b]' : 'min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
       {!embedded && <Sidebar
@@ -363,10 +366,10 @@ export default function PortalApp({ embedded = false }: { embedded?: boolean } =
           )}
           {view === "panelTraining" && <PanelTrainingView training={panelTraining} canEdit={user.role === "Superadmin"} />}
           {view === "services" && <ManagedServices catalog={serviceCatalog} canEdit={user.role === "Superadmin"} />}
-          {view === "procedures" && <ClinicalProcedures key={openProcedure} startId={openProcedure} state={procedures} canEdit={user.role === "Superadmin"} />}
-          {view === "forms" && <PrintForms state={printForms} canEdit={user.role === "Superadmin"} />}
-          {view === "teamara" && <TeamAra canEdit={user.role === "Superadmin"} />}
-          {view === "announcements" && <AnnouncementsView announcements={content.announcements} resources={content.resources} onOpenResource={setSelectedResource} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} />}
+          {view === "procedures" && compactCaPage(<ClinicalProcedures key={openProcedure} startId={openProcedure} state={procedures} canEdit={user.role === "Superadmin"} />)}
+          {view === "forms" && compactCaPage(<PrintForms state={printForms} canEdit={user.role === "Superadmin"} />)}
+          {view === "teamara" && compactCaPage(<TeamAra compact={embedded} canEdit={user.role === "Superadmin"} />)}
+          {view === "announcements" && compactCaPage(<AnnouncementsView announcements={content.announcements} resources={content.resources} onOpenResource={setSelectedResource} canEdit={user.role === "Superadmin"} onSave={saveAnnouncements} readState={announcementReads} />)}
           {view === "links" && <LinksView links={content.links} canEdit={user.role === "Superadmin"} onSave={saveLinks} />}
           {view === "video" && <CaVideo canEdit={user.role === "Superadmin"} />}
           {view === "admin" && user.role === "Superadmin" && (

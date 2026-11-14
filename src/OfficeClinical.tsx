@@ -306,7 +306,7 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
   const pendingOrders = day.orders.filter((order) => !order.closed && !order.cancelled);
 
   // Sticky at the top: the bottom-right corner belongs to the office switcher.
-  return <div className="mx-auto max-w-[1500px] pb-10">
+  return <div className="clinical-checklist mx-auto max-w-[1500px] pb-10">
     <Hero branch={day.branch} title="Daily checklist" text="Tick each item, then send the report to the WhatsApp group in one tap. Orders, vaccine bookings and ad hoc tasks are added for you." />
     <div className="sticky top-[76px] z-20 -mx-4 mt-4 lg:top-0 sm:-mx-6 lg:mx-0 border-b border-slate-200 bg-[#f5f7f9]/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-b-2xl">
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -325,15 +325,16 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
       <label className="mt-4 block"><span className="mb-2 block text-xs font-bold text-slate-700">‼️ Outstanding issues <span className="font-normal text-slate-400">(one issue per line; leave empty if none)</span></span><textarea value={draft.issues} onChange={(event) => change({ issues: event.target.value })} rows={2} className={`${input} h-auto py-3`} /></label>
     </section>
 
+    <p className="mt-3 text-[10px] text-slate-500 sm:hidden">✓ Done · ◷ Not done · − Not needed</p>
     {SECTIONS.map((section) => <section key={section.id} className={`mt-4 ${card}`}>
       <h2 className="text-lg font-semibold">{section.label}</h2>
       <div className="mt-3 divide-y divide-slate-100">{section.items.map(([id, label]) => {
         const check = draft.checks[id];
-        return <div key={id} className="py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3"><TickCircle status={check?.status} label={label} onClick={() => choose(id, 'done')} /><p className={`text-sm leading-6 ${check?.status === 'done' ? 'text-slate-500' : check?.status === 'na' ? 'text-slate-400' : ''}`}>{label}</p></div>
-            <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
-              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([status, text, active]) => <button key={status} onClick={() => choose(id, status)} aria-pressed={check?.status === status} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${check?.status === status ? active : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>
+        return <div key={id} data-checklist-item className="py-3">
+          <div data-checklist-row className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-start gap-3"><TickCircle status={check?.status} label={label} onClick={() => choose(id, 'done')} /><p className={`text-sm leading-6 ${check?.status === 'done' ? 'text-slate-500' : check?.status === 'na' ? 'text-slate-400' : ''}`}>{label}</p></div>
+            <div data-checklist-controls className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
+              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([status, text, active]) => <button key={status} title={text} aria-label={`${text}: ${label}`} onClick={() => choose(id, status)} aria-pressed={check?.status === status} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${check?.status === status ? active : 'text-slate-500 hover:text-slate-700'}`}><span className="hidden sm:inline">{text}</span><span className="sm:hidden">{status === 'done' ? <Check className="h-3 w-3" /> : status === 'pending' ? <Clock3 className="h-3 w-3" /> : <Minus className="h-3 w-3" />}</span></button>)}</div>
               <button onClick={() => setOpenNote(openNote === id ? null : id)} title="Note" aria-label={`Note for ${label}`} className={`rounded-lg p-1.5 ${check?.note ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-400 hover:bg-slate-100'}`}><Pencil className="h-3.5 w-3.5" /></button>
             </div>
           </div>
@@ -359,8 +360,8 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
         const custom = (day.customMonthly || []).some((item) => item.id === task.id) && !MONTHLY.some((item) => item.id === task.id);
         const renamed = (day.customMonthly || []).some((item) => item.id === task.id);
         const text = task.label(monthName(day.date), monthName(day.date, -1));
-        return <div key={task.id} className="py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        return <div key={task.id} data-checklist-item className="py-3">
+          <div data-checklist-row className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-1 items-start gap-3"><TickCircle status={status} label={text} onClick={() => void setMonthly(task.id, 'done')} />{editing?.id === task.id
               ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 <input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveTitle(); } if (event.key === 'Escape') setEditing(null); }} maxLength={160} aria-label="Task title" className={`${input} min-w-0 flex-1`} autoFocus />
@@ -370,13 +371,14 @@ function DailyReport({ day, reload, onError, onPatch }: { day: Day; reload: () =
               </div>
               : <><p className={`text-sm leading-6 ${status === 'done' ? 'text-slate-500' : status === 'na' ? 'text-slate-400' : ''}`}>{text}</p>
                 <button type="button" onClick={() => setEditing({ id: task.id, label: text })} title="Edit title" aria-label={`Edit title of ${text}`} className="mt-0.5 shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><SquarePen className="h-3.5 w-3.5" /></button></>}{late && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700">Overdue</span>}</div>
-            <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
-              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([value, name, active]) => <button key={value} type="button" onClick={() => void setMonthly(task.id, value)} aria-pressed={status === value} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${status === value ? active : 'text-slate-500 hover:text-slate-700'}`}>{name}</button>)}</div>
-              <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">Due date<input type="date" value={picked} onChange={(event) => void setMonthlyDue(task.id, event.target.value)} aria-label={`Due date for ${text}`} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700" /></label>
+            <div data-checklist-controls className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
+              <div className="inline-flex rounded-xl bg-slate-100 p-0.5">{STATUS_BUTTONS.map(([value, name, active]) => <button key={value} type="button" title={name} aria-label={`${name}: ${text}`} onClick={() => void setMonthly(task.id, value)} aria-pressed={status === value} className={`rounded-[10px] px-2.5 py-1 text-xs font-semibold transition ${status === value ? active : 'text-slate-500 hover:text-slate-700'}`}><span className="hidden sm:inline">{name}</span><span className="sm:hidden">{value === 'done' ? <Check className="h-3 w-3" /> : value === 'pending' ? <Clock3 className="h-3 w-3" /> : <Minus className="h-3 w-3" />}</span></button>)}</div>
+              <label className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">Due date<input type="date" value={picked} onChange={(event) => void setMonthlyDue(task.id, event.target.value)} aria-label={`Due date for ${text}`} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700" /></label>
               <button type="button" onClick={() => setOpenMonthlyNote(openMonthlyNote === task.id ? null : task.id)} title="Note" aria-label={`Note for ${text}`} className={`rounded-lg p-1.5 ${note ? 'bg-[#e9f6fb] text-[#0b587b]' : 'text-slate-400 hover:bg-slate-100'}`}><Pencil className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => void deleteMonthly(task)} title="Delete task" aria-label={`Delete ${text}`} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           </div>
+          <details className="mt-1 text-[10px] text-slate-500 sm:hidden"><summary className="cursor-pointer">Due{picked ? ` ${dmy(picked)}` : task.due !== null ? ` day ${task.due}` : ' date'}</summary><input type="date" value={picked} onChange={(event) => void setMonthlyDue(task.id, event.target.value)} aria-label={`Due date for ${text}`} className="mt-1 h-8 max-w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700" /></details>
           {(openMonthlyNote === task.id || note) && <textarea value={note} onChange={(event) => changeMonthlyNote(task.id, event.target.value)} onBlur={() => void saveMonthlyNote(task.id)} rows={1} maxLength={500} placeholder="Note (e.g. Waiting for Dr. to confirm)" className={`${input} mt-2 h-auto py-2`} />}
         </div>;
       })}</div>
