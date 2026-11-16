@@ -5,6 +5,8 @@ import { errorReply, officeAccess } from './_office-db.js';
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 const addDays = (date: string, days: number) => new Date(new Date(`${date}T00:00:00Z`).getTime() + days * 86400000).toISOString().slice(0, 10);
+const isPaid = (order: any) => order.paid_manual ?? order.paid; // the CPO's own mark wins over Plato's flag
+const withDue = (order: any) => ({ ...order, due_date: order.due_manual ?? order.due_date }); // the CPO's own due date wins over Plato's
 const INTERNAL = /^KLINIK ARA 24 JAM/i; // the clinics' own branches as supplier: stock sent between KJ and SK
 const yyyymm = (date: string) => date.slice(0, 4) + date.slice(5, 7);
 
@@ -52,16 +54,17 @@ export async function procurementHandler(req: any, res: any) {
 
     // The home page: what needs a decision or a call today, and the totals.
     if (action === 'summary') {
-      const [orders, stockKJ, stockSK, itemCount] = await Promise.all([
-        all((from, to) => db.from('proc_orders').select('order_date,status,total,paid,due_date,supplier,location').neq('location', 'SY').order('order_date', { ascending: false }).range(from, to)),
+      const [rawOrders, stockKJ, stockSK, itemCount] = await Promise.all([
+        all((from, to) => db.from('proc_orders').select('order_date,status,total,paid,paid_manual,due_date,due_manual,supplier,location').neq('location', 'SY').order('order_date', { ascending: false }).range(from, to)),
         stockRows(db, 'KJ'), stockRows(db, 'SK'),
         all((from, to) => db.from('proc_items').select('plato_id,kind').range(from, to)),
       ]);
+      const orders = rawOrders.map(withDue);
       const stock = [...stockKJ, ...stockSK].filter((row) => !row.inactive);
       const permanent = orders.filter((order) => order.status === 'Permanent');
       // Money owed: unpaid, a value above zero (the clinics' own transfers count too), and not older than 90 days.
       // Older unpaid invoices are almost always paid but never marked in Plato, so they are counted apart to be checked.
-      const owing = permanent.filter((order) => !order.paid && Number(order.total) > 0);
+      const owing = permanent.filter((order) => !isPaid(order) && Number(order.total) > 0);
       const staleDay = addDays(day, -90);
       const stale = owing.filter((order) => String(order.order_date) < staleDay);
       const unpaid = owing.filter((order) => String(order.order_date) >= staleDay);
@@ -139,7 +142,7 @@ export async function procurementHandler(req: any, res: any) {
     // The charts page: money bought, who we buy from, what is owed, what the stock is worth, what sells and what is about to expire. Read once when the tab opens.
     if (action === 'charts') {
       const [orders, stockKJ, stockSK, sales] = await Promise.all([
-        all((from, to) => db.from('proc_orders').select('order_date,status,total,paid,supplier,location').eq('status', 'Permanent').neq('location', 'SY').range(from, to)),
+        all((from, to) => db.from('proc_orders').select('order_date,status,total,paid,paid_manual,supplier,location').eq('status', 'Permanent').neq('location', 'SY').range(from, to)),
         stockRows(db, 'KJ'), stockRows(db, 'SK'),
         all((from, to) => db.from('proc_sales').select('location,period_from,qty,revenue,cost').range(from, to)),
       ]);
@@ -150,7 +153,7 @@ export async function procurementHandler(req: any, res: any) {
       const bySupplier = new Map<string, { KJ: number; SK: number }>();
       orders.forEach((o) => { const row = bySupplier.get(o.supplier) || { KJ: 0, SK: 0 }; row[o.location as 'KJ' | 'SK'] += Number(o.total || 0); bySupplier.set(o.supplier, row); });
       const topSuppliers = [...bySupplier.entries()].sort((a, b) => (b[1].KJ + b[1].SK) - (a[1].KJ + a[1].SK)).slice(0, 8).map(([name, row]) => ({ name, KJ: round(row.KJ), SK: round(row.SK) }));
-      const owing = orders.filter((o) => !o.paid && Number(o.total) > 0);
+      const owing = orders.filter((o) => !isPaid(o) && Number(o.total) > 0);
       const buckets = [['0–30 days', 0, 30], ['31–60 days', 31, 60], ['61–90 days', 61, 90], ['Over 90 days', 91, 9999]] as const;
       const age = (o: any) => Math.round((new Date(`${day}T00:00:00Z`).getTime() - new Date(`${o.order_date}T00:00:00Z`).getTime()) / 86400000);
       const owedByAge = { labels: buckets.map((b) => b[0]), ...Object.fromEntries(places.map((place) => [place, buckets.map(([, lo, hi]) => round(owing.filter((o) => o.location === place && age(o) >= lo && age(o) <= hi).reduce((sum, o) => sum + Number(o.total || 0), 0)))])) };
@@ -170,8 +173,8 @@ export async function procurementHandler(req: any, res: any) {
     if (action === 'orders') {
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.from)) ? String(req.query.from) : addDays(day, -90);
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.to)) ? String(req.query.to) : day;
-      const rows = await all((a, b) => db.from('proc_orders').select('id,order_date,location,supplier,po_no,invoice_no,status,subtotal,tax,total,paid,pay_mode,ref,due_date').neq('location', 'SY').gte('order_date', from).lte('order_date', to).order('order_date', { ascending: false }).order('id').range(a, b));
-      return res.status(200).json({ from, to, orders: rows });
+      const rows = await all((a, b) => db.from('proc_orders').select('id,order_date,location,supplier,po_no,invoice_no,status,subtotal,tax,total,paid,paid_manual,paid_on,paid_note,paid_by,pay_mode,ref,due_date,due_manual').neq('location', 'SY').gte('order_date', from).lte('order_date', to).order('order_date', { ascending: false }).order('id').range(a, b));
+      return res.status(200).json({ from, to, canEdit, orders: rows.map((row) => ({ ...row, platoPaid: row.paid, paid: isPaid(row), platoDue: row.due_date, due_date: row.due_manual ?? row.due_date })) });
     }
 
     if (action === 'order_lines') {
@@ -184,10 +187,10 @@ export async function procurementHandler(req: any, res: any) {
     if (action === 'suppliers') {
       const [suppliers, orders] = await Promise.all([
         all((from, to) => db.from('proc_suppliers').select('*').order('name').range(from, to)),
-        all((from, to) => db.from('proc_orders').select('supplier,total,paid,status,order_date,due_date').eq('status', 'Permanent').neq('location', 'SY').range(from, to)),
+        all((from, to) => db.from('proc_orders').select('supplier,total,paid,paid_manual,status,order_date,due_date').eq('status', 'Permanent').neq('location', 'SY').range(from, to)),
       ]);
       const stats = new Map<string, { orders: number; spend: number; unpaid: number; last: string }>();
-      orders.forEach((order) => { const row = stats.get(order.supplier) || { orders: 0, spend: 0, unpaid: 0, last: '' }; row.orders += 1; row.spend += Number(order.total || 0); if (!order.paid) row.unpaid += Number(order.total || 0); if (order.order_date > row.last) row.last = order.order_date; stats.set(order.supplier, row); });
+      orders.forEach((order) => { const row = stats.get(order.supplier) || { orders: 0, spend: 0, unpaid: 0, last: '' }; row.orders += 1; row.spend += Number(order.total || 0); if (!isPaid(order)) row.unpaid += Number(order.total || 0); if (order.order_date > row.last) row.last = order.order_date; stats.set(order.supplier, row); });
       return res.status(200).json({ suppliers: suppliers.map((s) => ({ ...s, ...(stats.get(s.name) || { orders: 0, spend: 0, unpaid: 0, last: '' }) })) });
     }
 
@@ -266,6 +269,35 @@ export async function procurementHandler(req: any, res: any) {
       if (error) throw error;
       const rows = (data || []).map((row: any) => { const order = Array.isArray(row.proc_orders) ? row.proc_orders[0] : row.proc_orders; const { proc_orders: _drop, ...line } = row; return { ...line, date: order?.order_date, supplier: order?.supplier, location: order?.location, invoice: order?.invoice_no }; });
       return res.status(200).json({ rows, total: count || 0, page });
+    }
+
+    // The CPO marks an invoice paid (with the date and a note, e.g. the transfer reference) or unpaid. Plato's own flag is left as it is.
+    if (action === 'order_paid') {
+      if (!canEdit) throw fail(403, 'Only Procurement can change this.');
+      if (req.method !== 'POST') throw fail(405, 'Use POST.');
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const id = text(body.id, 60);
+      const paid = body.paid === true;
+      const paidOn = paid && /^\d{4}-\d{2}-\d{2}$/.test(String(body.paidOn)) ? String(body.paidOn) : paid ? day : null;
+      if (paidOn && paidOn > day) throw fail(400, 'The payment date cannot be in the future.');
+      const { data, error } = await db.from('proc_orders').update({ paid_manual: paid, paid_on: paidOn, paid_note: paid ? text(body.note, 200) : '', paid_by: String((user as any).email || '').slice(0, 120) }).eq('id', id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(404, 'Invoice not found.');
+      return res.status(200).json({ saved: true });
+    }
+
+    // The CPO sets or clears an invoice's due date. Plato's own due date is left as it is; clearing falls back to it.
+    if (action === 'order_due') {
+      if (!canEdit) throw fail(403, 'Only Procurement can change this.');
+      if (req.method !== 'POST') throw fail(405, 'Use POST.');
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const id = text(body.id, 60);
+      const due = body.due === null || body.due === '' ? null : String(body.due);
+      if (due !== null && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw fail(400, 'Enter a valid due date.');
+      const { data, error } = await db.from('proc_orders').update({ due_manual: due }).eq('id', id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(404, 'Invoice not found.');
+      return res.status(200).json({ saved: true });
     }
 
     throw fail(400, 'Unknown request.');
