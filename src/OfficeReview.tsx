@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, LogOut, Plus } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, FileText, LogOut, Plus } from 'lucide-react';
 import { AuthError, AuthShell, authButton, authInput, authLabel } from './AssessmentRoom';
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
 import { card } from './AssessmentStaff';
@@ -170,7 +170,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
         <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
         <h2 className="mt-3 text-xl font-semibold">Review submitted for {thanks.staffName}</h2>
         <p className="mt-2 text-sm text-slate-500">{thanks.formType === 'assistant' || thanks.formType === 'custom' ? <>{thanks.formType === 'assistant' ? 'Jumlah markah' : 'Total marks'} <strong className="text-[#14233b]">{percentLabel(thanks.totalScore)}</strong> · {thanks.overall}.</> : <>Total score <strong className="text-[#14233b]">{thanks.totalScore?.toFixed(2)}</strong> ({percentLabel(thanks.totalScore)}) · {thanks.overall}.</>} Office HR can now see it.</p>
-        <button onClick={() => { setThanks(null); setView('todo'); }} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white hover:bg-[#0a4c6a]"><Plus className="h-4 w-4" />Back to my reviews</button>
+        <div className="mt-5 flex flex-wrap justify-center gap-3"><button onClick={() => setCopy(thanks as ReviewFull)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50"><FileText className="h-4 w-4" />Save PDF</button><button onClick={() => { setThanks(null); setView('todo'); }} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white hover:bg-[#0a4c6a]"><Plus className="h-4 w-4" />Back to my reviews</button></div>
       </section>}
 
       {!thanks && !open && view === 'todo' && (due.due.length > 0 || due.skipped.length > 0) && <section className={card}>
@@ -204,7 +204,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
       </section>}
 
       {!thanks && open && open.formType === 'assistant' && <AssistantReviewForm key={`${open.id}-${editFull ? 'edit' : 'new'}`} review={open} assessorName={form.assessorName} initial={editFull} api={api} onCancel={() => { setOpen(null); setEditFull(null); }} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); setEditFull(null); void load(); }} />}
-      {!thanks && open && open.formType === 'custom' && <CustomReviewForm key={`${open.id}-${editFull ? 'edit' : 'new'}`} review={open} assessorName={form.assessorName} initial={editFull} api={api} onCancel={() => { setOpen(null); setEditFull(null); }} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); setEditFull(null); void load(); }} />}
+      {!thanks && open && open.formType === 'custom' && <CustomReviewForm key={`${open.id}-${editFull ? 'edit' : 'new'}`} review={open} assessorName={form.assessorName} initial={editFull} api={api} onPreview={(preview) => setCopy(preview)} onCancel={() => { setOpen(null); setEditFull(null); }} onFailed={failed} onDone={(review) => { setThanks(review); setOpen(null); setEditFull(null); void load(); }} />}
       {!thanks && open && open.formType !== 'assistant' && open.formType !== 'custom' && <form onSubmit={submit} className="space-y-6">
         <section className={card}>
           <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">Staff being reviewed</h2><button type="button" onClick={() => setOpen(null)} className="text-sm font-semibold text-slate-500 hover:text-[#0b587b]">Back to list</button></div>

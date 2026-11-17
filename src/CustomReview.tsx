@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, FileText } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { Letterhead } from './AssistantReview';
 import { ReviewFull, ReviewSummary, dmy } from './lib/performanceReview';
@@ -11,7 +11,7 @@ const field = 'w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 
 const label = 'block text-sm font-semibold text-slate-600';
 const num = (value: number) => String(Math.round(value * 100) / 100);
 
-export function CustomReviewForm({ review, assessorName, initial, api, onDone, onCancel, onFailed }: { key?: string; review: ReviewSummary; assessorName: string; initial?: ReviewFull | null; api: (query: string, body?: unknown) => Promise<any>; onDone: (review: ReviewFull) => void; onCancel: () => void; onFailed: (cause: unknown, fallback: string) => void }) {
+export function CustomReviewForm({ review, assessorName, initial, api, onDone, onCancel, onFailed, onPreview }: { key?: string; review: ReviewSummary; assessorName: string; initial?: ReviewFull | null; api: (query: string, body?: unknown) => Promise<any>; onDone: (review: ReviewFull) => void; onCancel: () => void; onFailed: (cause: unknown, fallback: string) => void; onPreview?: (review: ReviewFull) => void }) {
   const template = initial?.template || review.template || null;
   const items = template?.items || [];
   const [marks, setMarks] = useState<string[]>(() => items.map((item, index) => !isChoice(item) && initial?.custom?.marks?.[index] !== undefined ? String(initial.custom.marks[index]) : ''));
@@ -31,6 +31,8 @@ export function CustomReviewForm({ review, assessorName, initial, api, onDone, o
   const total = customTotal(liveMarks);
   const grade = complete ? gradeFor(total, template.grades || []) : '';
   const needsOutcome = template.outcomes.length > 0;
+  // The form as it stands, laid out like the printed sheet, so the supervisor can look at the PDF (and save it) before submitting.
+  const preview = () => onPreview?.({ ...review, formType: 'custom', template, assessorName: assessor, submittedAt: null, preview: true, custom: { marks: liveMarks as number[], choices, outcome, grade, comments } } as ReviewFull);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
@@ -84,7 +86,7 @@ export function CustomReviewForm({ review, assessorName, initial, api, onDone, o
     </section>
 
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-    <div className="flex justify-end"><button disabled={saving || !complete || (needsOutcome && !outcome) || !signed} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-6 py-3.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{saving ? 'Submitting…' : initial ? 'Save changes' : 'Submit review'}</button></div>
+    <div className="flex flex-wrap justify-end gap-3">{onPreview && <button type="button" onClick={preview} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-bold text-[#0b587b] hover:bg-slate-50"><FileText className="h-4 w-4" />Preview PDF</button>}<button disabled={saving || !complete || (needsOutcome && !outcome) || !signed} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-6 py-3.5 text-sm font-bold text-white hover:bg-[#0a4c6a] disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{saving ? 'Submitting…' : initial ? 'Save changes' : 'Submit review'}</button></div>
   </form>;
 }
 
@@ -102,6 +104,23 @@ export function CustomDetail({ review }: { review: ReviewFull }) {
   </div>;
 }
 
+// A template with "choose one" items is printed on one A4 page like the paper form: the criterion on the left, the choices side by side, then the total, the grade,
+// the result, the comments and the signature underneath. The height is estimated; if it would not fit, the page is shrunk a little (never below 62%), and a form too
+// long for that falls back to several pages.
+const PAGE_MM = 248;
+export function estimateCompactMm(template: ReviewTemplate): number {
+  const rows = template.items.reduce((sum, item) => {
+    if (!isChoice(item)) return sum + 5 + item.points.length * 2.6;
+    const width = (180 - 30) / item.options!.length;
+    const lines = Math.max(...item.options!.map((option) => Math.ceil(option.label.length / Math.max(8, Math.floor((width - 2) / 1.1)))));
+    const side = Math.ceil(item.name.length / 16) * 2.9 + Math.ceil(item.points.reduce((n, point) => n + point.length, 0) / 26) * 2.5;
+    return sum + Math.max(lines * 2.65 + 5.2, side + 1.6);
+  }, 0);
+  const grades = template.grades?.length ? Math.ceil(template.grades.length / 2) * 3.6 + 6 : 0;
+  return 31 + 7 + 17 + rows + 40 + grades + 18;   // letterhead, title, details, items, result / comments / total / signature, grades, HR box (measured against a real print)
+}
+export const compactZoom = (template: ReviewTemplate) => Math.min(1, PAGE_MM / estimateCompactMm(template));
+
 // The printed sheet, with the clinic letterhead and logo as on the other forms. A template with only marked items is laid out as a table (like Review 2); one with
 // "choose one" items is laid out item by item with the choices side by side and the chosen one filled. The items are spread over A4 pages by how many lines they need;
 // the total, the grade, the result, the comments and the signature are on the last page.
@@ -114,8 +133,10 @@ export function CustomDocument({ review }: { review: ReviewFull }) {
   const choices = review.custom?.choices || [];
   const candidate = template?.subject === 'candidate';
   const blocks = items.some(isChoice);
-  const groups = pagesOf(items);
-  const pageCount = groups.length + 1;
+  const zoom = template ? compactZoom(template) : 1;
+  const compact = blocks && zoom >= 0.62;
+  const groups = compact ? [] : pagesOf(items);
+  const pageCount = compact ? 1 : groups.length + 1;
   const dated = dmy((review.submittedAt || '').slice(0, 10) || null);
   const period = [review.periodStart ? `${dmy(review.periodStart)}${review.periodEnd ? ` - ${dmy(review.periodEnd)}` : ''}` : '', review.periodLabel ? `(${review.periodLabel})` : ''].filter(Boolean).join(' ');
   const cols = <colgroup><col style={{ width: '9mm' }} /><col style={{ width: '40mm' }} /><col style={{ width: '82mm' }} /><col style={{ width: '22mm' }} /><col style={{ width: '27mm' }} /></colgroup>;
@@ -128,22 +149,55 @@ export function CustomDocument({ review }: { review: ReviewFull }) {
       {at === 0 && <td rowSpan={points.length} style={{ ...cell, textTransform: 'uppercase', fontSize: '7pt' }}>{item.name}</td>}
       <td style={{ ...cell, fontSize: '7pt' }}>{point}</td>
       {at === 0 && <td rowSpan={points.length} style={{ ...cell, textAlign: 'center' }}>{num(item.max)}</td>}
-      {at === 0 && <td rowSpan={points.length} style={{ ...cell, textAlign: 'center', fontWeight: 700, fontSize: '9pt' }}>{marks[index] !== undefined ? num(marks[index]) : ''}</td>}
+      {at === 0 && <td rowSpan={points.length} style={{ ...cell, textAlign: 'center', fontWeight: 700, fontSize: '9pt' }}>{marks[index] != null ? num(marks[index]) : ''}</td>}
     </tr>);
   });
   const box = (on: boolean) => <span className={`rv-check${on ? ' rv-on' : ''}`} />;
   const blockOf = (index: number) => {
     const item = items[index];
     return <div key={index} style={{ border: '0.25mm solid #000', marginTop: '-0.25mm', breakInside: 'avoid' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4mm', padding: '0.6mm 1.2mm', background: '#e8eef4', fontWeight: 700, fontSize: '8pt' }}><span style={{ textTransform: 'uppercase' }}>{index + 1}. {item.name}</span><span style={{ whiteSpace: 'nowrap' }}>Full {num(item.max)} · Obtained <span style={{ display: 'inline-block', minWidth: '8mm', borderBottom: '0.2mm solid #000', textAlign: 'center' }}>{marks[index] !== undefined ? num(marks[index]) : ''}</span></span></div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4mm', padding: '0.6mm 1.2mm', background: '#e8eef4', fontWeight: 700, fontSize: '8pt' }}><span style={{ textTransform: 'uppercase' }}>{index + 1}. {item.name}</span><span style={{ whiteSpace: 'nowrap' }}>Full {num(item.max)} · Obtained <span style={{ display: 'inline-block', minWidth: '8mm', borderBottom: '0.2mm solid #000', textAlign: 'center' }}>{marks[index] != null ? num(marks[index]) : ''}</span></span></div>
       {item.points.length > 0 && <ul style={{ margin: 0, padding: '0.6mm 1.2mm 0.6mm 5mm', fontSize: '7pt', lineHeight: 1.2 }}>{item.points.map((point) => <li key={point}>{point}</li>)}</ul>}
       {isChoice(item) && <div style={{ display: 'flex', borderTop: '0.25mm solid #000' }}>{item.options!.map((option, at) => <div key={at} style={{ flex: 1, borderLeft: at ? '0.25mm solid #000' : 'none', padding: '0.8mm 1mm', fontSize: '7pt', textAlign: 'center', lineHeight: 1.2, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.8mm' }}><span>{option.label}</span><span style={{ fontWeight: 700 }}>{box(choices[index] === at)} {num(option.score)}</span></div>)}</div>}
     </div>;
   };
   const row = (name: string, value: string) => <p style={{ display: 'flex', gap: '2mm', borderBottom: '0.2mm solid #000', padding: '0.2mm 0', fontSize: '8pt' }}><span style={{ width: '42mm' }}>{name}</span><span style={{ fontWeight: 700 }}>: {value}</span></p>;
   const footer = (page: number) => <p style={{ textAlign: 'center', marginTop: '2mm', fontSize: '7pt' }}>Page {page} of {pageCount}</p>;
-  const done = marks.length === items.length && items.length > 0;
+  const done = marks.length === items.length && items.length > 0 && marks.every((mark) => mark != null);
   const comments = (review.custom?.comments || '').split('\n');
+  const compactRow = (index: number) => {
+    const item = items[index];
+    return <div key={index} style={{ display: 'flex', borderTop: index ? '0.25mm solid #000' : 'none', breakInside: 'avoid' }}>
+      <div style={{ width: '30mm', flexShrink: 0, padding: '0.8mm 1mm', background: '#e8eef4', display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: 'center', gap: '0.6mm' }}><strong style={{ fontSize: '7pt', textTransform: 'uppercase', lineHeight: 1.15 }}>{index + 1}. {item.name}</strong>{item.points.map((point) => <span key={point} style={{ fontSize: '6pt', lineHeight: 1.15 }}>{point}</span>)}</div>
+      {isChoice(item)
+        ? <div style={{ flex: 1, display: 'flex' }}>{item.options!.map((option, at) => <div key={at} style={{ flex: 1, borderLeft: '0.25mm solid #000', padding: '0.7mm 0.8mm', fontSize: '6.6pt', lineHeight: 1.15, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.8mm' }}><span>{option.label}</span><span style={{ fontWeight: 700, fontSize: '7.5pt' }}>{box(choices[index] === at)} {num(option.score)}</span></div>)}</div>
+        : <div style={{ flex: 1, borderLeft: '0.25mm solid #000', padding: '0.8mm 2mm', fontSize: '8pt', display: 'flex', alignItems: 'center', gap: '2mm' }}>Mark : <strong style={{ display: 'inline-block', minWidth: '10mm', borderBottom: '0.25mm solid #000', textAlign: 'center' }}>{marks[index] != null ? num(marks[index]) : ''}</strong> / {num(item.max)}</div>}
+    </div>;
+  };
+  const sortedGrades = [...(template?.grades || [])].sort((a, b) => b.min - a.min);
+  if (compact) return <div className="rv-print">
+    <section className="rv-page"><div style={{ zoom }}>
+      <Letterhead page={1} />
+      <p style={{ marginTop: '1mm', fontWeight: 700, fontSize: '9.5pt', textTransform: 'uppercase' }}>{template?.name}</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '4mm', margin: '0.5mm 0 1.5mm' }}>{candidate ? <>{row(candidate ? 'Candidate' : 'Name', review.staffName)}{row('Assessor', review.assessorName)}{row('Position applied', review.position)}{row('Date', period)}{review.department ? row('Company', review.department) : null}</> : <>{row('Name', review.staffName)}{row('Assessor', review.assessorName)}{row('Employee ID', review.employeeCode)}{row('Position', review.position)}{row('Department', review.department)}{row('Period', period)}</>}</div>
+      {template?.description && <p style={{ fontSize: '7pt', fontStyle: 'italic', margin: '0 0 1mm' }}>({template.description})</p>}
+      <div style={{ border: '0.25mm solid #000' }}>{items.map((_, index) => compactRow(index))}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 58mm', gap: '3mm', marginTop: '2.5mm', fontSize: '8pt' }}>
+        <div>
+          {(template?.outcomes.length || 0) > 0 && <p style={{ margin: '0 0 1.5mm' }}><strong>Result :</strong> {template!.outcomes.map((option) => <span key={option} style={{ marginLeft: '3mm' }}>{box(review.custom?.outcome === option)}{option}</span>)}</p>}
+          <p style={{ margin: 0, fontWeight: 700 }}>Comments :</p>
+          <div className="rv-lines">{comments.slice(0, 3).map((line, index) => <p key={index}>{line || ' '}</p>)}{Array.from({ length: Math.max(0, 3 - comments.length) }, (_, index) => <p key={`b${index}`}>&nbsp;</p>)}</div>
+        </div>
+        <div>
+          <div style={{ border: '0.3mm solid #000', padding: '1.5mm 2mm', textAlign: 'center' }}><span style={{ fontSize: '7pt' }}>TOTAL SCORE</span><br /><strong style={{ fontSize: '13pt' }}>{done ? num(customTotal(marks)) : ''}</strong><span style={{ fontSize: '10pt' }}> / {num(templateMax(items))}</span>{review.custom?.grade && <><br /><strong style={{ fontSize: '8pt' }}>{review.custom.grade}</strong></>}</div>
+          <div style={{ marginTop: '2mm', fontSize: '7.5pt', textAlign: 'center' }}>{review.submittedAt ? <span className="rv-sigline rv-esign" style={{ height: '10mm' }}><span>{review.assessorName}</span><small>Digitally signed {dated}</small></span> : <span className="rv-sigline" style={{ height: '10mm' }} />}Assessor's signature<br /><strong>{review.assessorName}</strong><br />Date : {review.submittedAt ? dated : ''}</div>
+        </div>
+      </div>
+      {sortedGrades.length > 0 && <div style={{ marginTop: '2mm', fontSize: '7pt' }}><strong>Grade by total score :</strong><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '4mm' }}>{sortedGrades.map((grade) => <span key={`${grade.min}-${grade.label}`}>{box(review.custom?.grade === grade.label)}{num(grade.min)} and above : {grade.label}</span>)}</div></div>}
+      <p style={{ marginTop: '2mm', border: '0.3mm solid #000', padding: '1mm 2mm', fontSize: '7pt' }}><strong><em>For Human Resource/Admin Use</em></strong> &nbsp; Received on : {dmy(review.hrReceivedOn)} &nbsp; Received by : {review.hrReceivedBy} &nbsp; Remarks : {review.hrRemarks}</p>
+      {review.preview && <p style={{ marginTop: '1mm', textAlign: 'center', fontSize: '7pt', color: '#b45309' }}>PREVIEW - not yet submitted</p>}
+    </div></section>
+  </div>;
   return <div className="rv-print">
     {groups.map((indexes, page) => <section key={page} className="rv-page">
       <Letterhead page={page + 1} />
