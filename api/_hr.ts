@@ -375,7 +375,8 @@ export async function hrHandler(req: any, res: any) {
     // The weekdays a person works (0 = Sunday ... 6 = Saturday); leave is counted on these only.
     if (req.method === 'POST' && action === 'set_work_days') {
       const id = text(body.id, 60);
-      const days: number[] = [...new Set<number>((Array.isArray(body.days) ? body.days : []).map(Number).filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
+      // 'As per roster' is stored as [-1]: no weekday matches it, so only the roster decides the working days.
+      const days: number[] = body.roster === true ? [-1] : [...new Set<number>((Array.isArray(body.days) ? body.days : []).map(Number).filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
       if (!days.length) throw fail(400, 'Choose at least one working day.');
       const { error } = await db.from('hr_employees').update({ work_days: days, updated_at: now, updated_by: user.id }).eq('id', id);
       if (error) throw error;

@@ -1,7 +1,7 @@
 import { branchId } from './_office-db.js';
 import { malaysiaToday } from '../src/lib/reviewReminders.js';
 import { emptyProjectionPlan, mergeProjectionPlans, shiftProjectionMonth, validateProjectionPlan } from '../src/lib/hrProjection.js';
-import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, occurrenceCompletedOn, validateCalendarRule, validateCalendarSettings, type CalendarConfig, type CalendarEvent, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
+import { buildHrCalendar, calendarMonth, calendarMonthEnd, defaultCalendarConfig, occurrenceCompletedOn, calendarCategories, validateCalendarRule, validateCalendarSettings, validateCategoryLabel, type CalendarConfig, type CalendarEvent, type CalendarOccurrence, type CalendarPerson } from '../src/lib/hrCalendar.js';
 const BRANCH = 'AraOffice HR Private';
 // The COO keeps a calendar of their own reminders, stored apart from HR's. It has none of HR's automatic reminders.
 const COO_BRANCH = 'AraOffice COO Private';
@@ -9,7 +9,7 @@ const COO_BRANCH = 'AraOffice COO Private';
 const CEO_BRANCH = 'AraOffice CEO Private';
 const CONFIG_KEY = 'hr_calendar_config';
 const stateKey = (month: string) => `hr_calendar_done:${month}`;
-const storedConfig = (payload: any): CalendarConfig => ({ settings: { ...defaultCalendarConfig().settings, ...(payload?.settings || {}) }, rules: Array.isArray(payload?.rules) ? payload.rules : [], probation: payload?.probation && typeof payload.probation === 'object' && !Array.isArray(payload.probation) ? payload.probation : {} });
+const storedConfig = (payload: any): CalendarConfig => ({ settings: { ...defaultCalendarConfig().settings, ...(payload?.settings || {}) }, rules: Array.isArray(payload?.rules) ? payload.rules : [], probation: payload?.probation && typeof payload.probation === 'object' && !Array.isArray(payload.probation) ? payload.probation : {}, categories: Array.isArray(payload?.categories) ? payload.categories.filter((item: any) => item && /^c-[a-z0-9]{8}$/.test(item.id) && typeof item.label === 'string') : [] });
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 async function readRecord(db: any, branch: string | null, key: string) {
   if (!branch) return null;
@@ -41,7 +41,7 @@ function ceoStatutoryEvents(month: string, states: Record<string, CalendarOccurr
 export async function hrCalendarAction(req: any, res: any, db: any, user: { id: string }, action: string, body: any, scope: 'hr' | 'coo' | 'ceo' = 'hr') {
   if (scope !== 'hr' && !['calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_state'].includes(action)) throw fail(403, 'Access restricted.');
   // (The COO reads the forecast through the HR route, which only lets the COO's GET of calendar_projection through.)
-  if (!['calendar_projection_save', 'calendar_projection', 'calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
+  if (!['calendar_projection_save', 'calendar_projection', 'calendar_month', 'calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_category_save', 'calendar_category_delete', 'calendar_state'].includes(action)) throw fail(400, 'Unknown calendar action.');
   if (req.method !== (['calendar_month', 'calendar_projection'].includes(action) ? 'GET' : 'POST')) throw fail(405, 'Method not allowed.');
   const month = req.method === 'GET' ? req.query.month : body.month;
   if (!calendarMonth(month)) throw fail(400, 'Choose a valid calendar month.');
@@ -111,10 +111,11 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     return res.status(200).json({ ...built, people: people.map(({ birthday, ...safe }) => safe), config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });
   }
   if (req.method !== 'POST' || !branch) throw fail(405, 'Method not allowed.');
-  if (['calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation'].includes(action)) {
+  if (['calendar_rule_save', 'calendar_rule_delete', 'calendar_settings', 'calendar_probation', 'calendar_category_save', 'calendar_category_delete'].includes(action)) {
     const current = await readRecord(db, branch, CONFIG_KEY);
     const config: CalendarConfig = storedConfig(current?.payload);
     let next: CalendarConfig;
+    let createdId = '';
     if (action === 'calendar_probation') {
       if (!body.statuses || typeof body.statuses !== 'object' || Array.isArray(body.statuses) || Object.keys(body.statuses).length > 500) throw fail(400, 'Enter a valid staff probation list.');
       const entries = Object.entries(body.statuses);
@@ -129,7 +130,7 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
       let settings; try { settings = validateCalendarSettings(body.settings); } catch (cause) { throw fail(400, (cause as Error).message); }
       next = { ...config, settings };
     } else if (action === 'calendar_rule_save') {
-      let rule; try { rule = validateCalendarRule(body.rule); } catch (cause) { throw fail(400, (cause as Error).message); }
+      let rule; try { rule = validateCalendarRule(body.rule, (config.categories || []).map((item) => item.id)); } catch (cause) { throw fail(400, (cause as Error).message); }
       if (scope !== 'hr' && (rule.anchor !== 'date' || rule.employeeId)) throw fail(400, 'Choose a date for your reminder.');
       if (rule.employeeId) {
         const { data, error } = await db.from('hr_employees').select('company').eq('id', rule.employeeId).eq('status', 'Active').maybeSingle();
@@ -140,12 +141,24 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
       const rules = [...config.rules.filter((r) => r.id !== rule.id), rule];
       if (rules.length > 100) throw fail(400, 'Keep at most 100 custom reminder schedules. Remove older schedules first.');
       next = { ...config, rules };
+    } else if (action === 'calendar_category_save') {
+      if (scope !== 'hr') throw fail(403, 'Only HR can add a category.');
+      const custom = config.categories || [];
+      if (custom.length >= 20) throw fail(400, 'Keep at most 20 custom categories.');
+      let label; try { label = validateCategoryLabel(body.label, [...Object.values(calendarCategories), ...custom.map((item) => item.label)]); } catch (cause) { throw fail(400, (cause as Error).message); }
+      createdId = `c-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+      next = { ...config, categories: [...custom, { id: createdId, label }] };
+    } else if (action === 'calendar_category_delete') {
+      if (scope !== 'hr') throw fail(403, 'Only HR can remove a category.');
+      if (typeof body.id !== 'string' || !(config.categories || []).some((item) => item.id === body.id)) throw fail(404, 'Category not found.');
+      // Reminders that used it fall back to Other so none is lost.
+      next = { ...config, categories: (config.categories || []).filter((item) => item.id !== body.id), rules: config.rules.map((r) => r.category === body.id ? { ...r, category: 'other' } : r) };
     } else {
       if (typeof body.id !== 'string' || !config.rules.some((r) => r.id === body.id)) throw fail(404, 'Reminder schedule not found.');
       next = { ...config, rules: config.rules.filter((r) => r.id !== body.id) };
     }
     const version = await writeRecord(db, user.id, branch, CONFIG_KEY, current, body.version, next);
-    return res.status(200).json({ version });
+    return res.status(200).json({ version, ...(createdId ? { id: createdId } : {}) });
   }
   if (action === 'calendar_state') {
     if (typeof body.id !== 'string' || body.id.length > 300 || !/^(payroll|share-forecast|statutory|sotm|(?:manual|review|probation-14|probation-3|ca-evaluation|birthday|appraisal):[a-zA-Z0-9-]{1,80}):\d{4}-\d{2}-\d{2}$/.test(body.id) || !body.id.endsWith(`:${month}-${body.id.slice(-2)}`) || !['done', 'skipped', 'open'].includes(body.state)) throw fail(400, 'Choose a valid reminder occurrence and status.');

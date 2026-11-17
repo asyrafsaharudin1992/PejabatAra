@@ -1,11 +1,21 @@
 import { addReviewMonths, isProbationAssessment, malaysiaToday, probationAssessmentAllowed, probationEvaluationDates, validReminderDate } from './reviewReminders.js';
-export type CalendarCategory = 'statutory' | 'forecast' | 'payroll' | 'sotm' | 'probation' | 'evaluation' | 'review' | 'contract' | 'appraisal' | 'birthday' | 'other';
-export const calendarCategories: Record<CalendarCategory, string> = { statutory: 'KWSP / Tax / SOCSO', forecast: 'Forecast', payroll: 'Payroll', sotm: 'Staff of the Month', probation: 'Probation / Confirmation', evaluation: 'CA Evaluation', review: 'Performance Review', contract: 'Contract renewal', appraisal: 'Appraisal', birthday: 'Birthday / Gift', other: 'Other' };
+export type BuiltInCategory = 'statutory' | 'forecast' | 'payroll' | 'sotm' | 'probation' | 'evaluation' | 'review' | 'contract' | 'appraisal' | 'birthday' | 'other';
+// HR can add its own categories (kept in the calendar config); a custom category id starts with 'c-'.
+export type CalendarCategory = string;
+export type CustomCategory = { id: string; label: string };
+export const calendarCategories: Record<BuiltInCategory, string> = { statutory: 'KWSP / Tax / SOCSO', forecast: 'Forecast', payroll: 'Payroll', sotm: 'Staff of the Month', probation: 'Probation / Confirmation', evaluation: 'CA Evaluation', review: 'Performance Review', contract: 'Contract renewal', appraisal: 'Appraisal', birthday: 'Birthday / Gift', other: 'Other' };
 export type CalendarPerson = { id: string; name: string; code: string; company: string; designation: string; joinDate: string | null; confirmDate: string | null; resignDate?: string | null; birthday?: string | null };
 export type CalendarRule = { id: string; title: string; category: CalendarCategory; employeeId: string; company: string; anchor: 'date' | 'join' | 'confirmation' | 'birthday'; date: string; offsetMonths: number; offsetDays: number; repeat: 'none' | 'monthly' | 'yearly'; every: number; notes: string; enabled: boolean; monthlyTask?: boolean };
 export type CalendarSettings = { statutoryPayments: boolean; shareForecast: boolean; payroll: boolean; probationWeeks: boolean; probationMonths: boolean; caEvaluation: boolean; appraisal: boolean; birthdays: boolean; sotm?: boolean; sotmDay?: number; payrollDay: number; forecastDay: number; statutoryDay: number; probationDays: number; confirmMonths: number };
 export type ProbationState = 'probation' | 'not-probation';
-export type CalendarConfig = { settings: CalendarSettings; rules: CalendarRule[]; probation: Record<string, ProbationState> };
+export type CalendarConfig = { settings: CalendarSettings; rules: CalendarRule[]; probation: Record<string, ProbationState>; categories?: CustomCategory[] };
+export const allCalendarCategories = (config?: { categories?: CustomCategory[] } | null): Record<string, string> => ({ ...calendarCategories, ...Object.fromEntries((config?.categories || []).map((item) => [item.id, item.label])) });
+export function validateCategoryLabel(input: unknown, existing: string[]): string {
+  const label = typeof input === 'string' ? input.trim().replace(/\s+/g, ' ') : '';
+  if (!label || label.length > 40) throw new Error('Enter a category name with 1–40 characters.');
+  if (existing.some((name) => name.toLowerCase() === label.toLowerCase())) throw new Error('That category already exists.');
+  return label;
+}
 export type CalendarOccurrence = { state: 'done' | 'skipped'; at: string; by: string };
 export type CalendarEvent = { id: string; title: string; category: CalendarCategory; date: string; start: string; completedOn?: string; employeeId: string; person: string; company: string; notes: string; source: 'automatic' | 'manual' | 'review'; monthly?: boolean; ruleId?: string; reviewId?: string; reviewDone?: boolean; state: 'open' | 'done' | 'skipped' | 'assigned' };
 export type CalendarReview = { id: string; employeeId: string; label: string; due: string; status: string };
@@ -26,11 +36,11 @@ export const calendarMonth = (value: unknown): value is string => typeof value =
 export const calendarMonthEnd = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
 export const isCalendarCa = (person: CalendarPerson) => /^(CLINIC ASSISTANT(?:\s*\([^)]*\))?|PEMBANTU KLINIK)$/i.test(person.designation.trim());
 const integer = (value: unknown, min: number, max: number, label: string) => { if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw new Error(`${label}: enter a whole number from ${min} to ${max}.`); return value; };
-export function validateCalendarRule(input: unknown): CalendarRule {
+export function validateCalendarRule(input: unknown, customIds: string[] = []): CalendarRule {
   const rule = input as CalendarRule;
   if (!rule || typeof rule !== 'object' || !/^[a-zA-Z0-9-]{1,80}$/.test(rule.id || '')) throw new Error('Enter a valid reminder ID.');
   if (typeof rule.title !== 'string' || !rule.title.trim() || rule.title.trim().length > 160) throw new Error('Enter a title with 1–160 characters.');
-  if (!Object.hasOwn(calendarCategories, rule.category)) throw new Error('Choose a reminder category.');
+  if (!Object.hasOwn(calendarCategories, rule.category) && !customIds.includes(rule.category)) throw new Error('Choose a reminder category.');
   if (!['date', 'join', 'confirmation', 'birthday'].includes(rule.anchor) || !['none', 'monthly', 'yearly'].includes(rule.repeat)) throw new Error('Choose a reminder date and repeat schedule.');
   if (rule.anchor === 'birthday' && rule.repeat !== 'yearly') throw new Error('Birthday-based reminders must repeat yearly.');
   if (rule.anchor === 'date' && !validReminderDate(rule.date)) throw new Error('Enter a valid date.');

@@ -43,20 +43,24 @@ async function chartsData(db: any, refresh: boolean) {
     if (branch) { const { data: row } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', CACHE_KEY).maybeSingle(); stored = row?.payload || null; }
   } catch { /* no saved copy: work it out */ }
   if (!refresh && stored?.data && Date.now() - Date.parse(stored.data.generatedAt || '') < DAY) { cache = { at: Date.parse(stored.data.generatedAt), data: stored.data }; return stored.data; }
-  const fresh = await computeCharts(db);
+  const { data: fresh, closed } = await computeCharts(db, refresh ? {} : stored?.closed || {});
   try {
     const branch = await branchId(db, CACHE_BRANCH, true);
-    const row = { branch_id: branch, state_key: CACHE_KEY, payload: { data: fresh }, updated_at: new Date().toISOString() };
+    const row = { branch_id: branch, state_key: CACHE_KEY, payload: { data: fresh, closed }, updated_at: new Date().toISOString() };
     if (stored) await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', CACHE_KEY); else await db.from('portal_state').insert(row);
   } catch { /* the figures are still returned; they are just not kept */ }
   return fresh;
 }
 
-async function computeCharts(db: any) {
+// `kept` holds the lateness and OT of months already closed: they are reused, so only this month and last month are worked out again.
+type Kept = Record<string, Partial<Record<Clinic, { late: number; ot: number }>>>;
+async function computeCharts(db: any, kept: Kept = {}) {
   const today = malaysiaToday();
   const thisMonth = today.slice(0, 7);
   const months = Array.from({ length: 12 }, (_, index) => shiftMonth(thisMonth, index - 11));
   const first = `${months[0]}-01`;
+  const closed: Kept = { ...kept };
+  const lastSettled = `${shiftMonth(thisMonth, -1)}-01`; // a month ending before last month's first day is settled
   const slot = (month: string) => months.indexOf(month);
 
   const read = async (query: any) => { const { data, error } = await query; if (error) { if (['42P01', 'PGRST205', '42703'].includes(error.code)) return []; throw error; } return data || []; };
@@ -95,10 +99,13 @@ async function computeCharts(db: any) {
         if (monthEnd(month) < recordsFromFor(clinic)) return;
         const people = activeStaff.filter((row) => row.company === clinic);
         if (!people.length) return;
+        const settled = monthEnd(month) < lastSettled, keptRow = settled ? kept[month]?.[clinic] : undefined;
+        if (keptRow) { late[clinic][slot(month)] = keptRow.late; ot[clinic][slot(month)] = keptRow.ot; return; }
         const days = buildDaysFrom(await fetchData(db, `${month}-01`, lastDay, people.map((row) => row.id)), people, `${month}-01`, lastDay, rules);
         let lateDays = 0, otMinutes = 0;
         for (const person of people) for (const day of days.get(person.id) || []) { if (day.lateCounted > 0) lateDays++; otMinutes += day.otCounted; }
         late[clinic][slot(month)] = lateDays; ot[clinic][slot(month)] = round(otMinutes / 60);
+        if (settled) closed[month] = { ...closed[month], [clinic]: { late: lateDays, ot: round(otMinutes / 60) } };
       }));
     }
   }
@@ -161,5 +168,5 @@ async function computeCharts(db: any) {
     reviews: reviewed,
   };
   cache = { at: Date.now(), data };
-  return data;
+  return { data, closed: Object.fromEntries(Object.entries(closed).filter(([month]) => months.includes(month))) as Kept };
 }

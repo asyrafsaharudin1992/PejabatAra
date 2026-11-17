@@ -66,6 +66,7 @@ export function HRProfiles({ onError, pendingRequests = 0, onPendingChange = () 
   const [query, setQuery] = useState('');
   const [company, setCompany] = useState('');
   const [status, setStatus] = useState('Active');
+  const [bulk, setBulk] = useState<'' | 'supervisor' | 'backup' | 'final'>('');
   const [sort, setSort] = useState<{ key: keyof Summary; dir: 1 | -1 }>({ key: 'employeeCode', dir: 1 });
   const [importNotice, setImportNotice] = useState('');
   // What an import would fill, shown for HR to confirm; nothing is saved until then.
@@ -170,9 +171,8 @@ export function HRProfiles({ onError, pendingRequests = 0, onPendingChange = () 
       <select value={company} onChange={(event) => setCompany(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ & SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
       <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Any status</option>{['Active', 'Inactive'].map((item) => <option key={item}>{item}</option>)}</select>
       <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 max-sm:hidden" title="Fill blank profile details from files read off Infotech"><Upload className="h-4 w-4" />Import from Infotech<input type="file" accept=".json,application/json" multiple onChange={(event) => void importFromInfotech(event)} className="hidden" /></label>
-      <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; if (window.confirm(`Make ${approverName(target)} the leave approver of the ${shown.filter((row) => row.id !== target).length} staff shown?`)) void assignApprover(shown.filter((row) => row.id !== target).map((row) => row.id || ''), target); }} aria-label="Set the leave approver for all staff shown" className="max-sm:hidden h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set leave supervisor for all shown…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
-      <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; if (window.confirm(`Make ${approverName(target)} the backup leave officer of the ${shown.filter((row) => row.id !== target).length} staff shown?`)) void assignApprover(shown.filter((row) => row.id !== target).map((row) => row.id || ''), target, 'backup'); }} aria-label="Set backup leave officer for all staff shown" className="max-sm:hidden h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set backup officer for all shown…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
-      <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; if (window.confirm(`Make ${approverName(target)} the final approver of the ${shown.filter((row) => row.id !== target).length} staff shown?`)) void assignApprover(shown.filter((row) => row.id !== target).map((row) => row.id || ''), target, 'final'); }} aria-label="Set the final approver for all staff shown" className="max-sm:hidden h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set final approver for all shown…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
+      <select value={bulk} onChange={(event) => setBulk(event.target.value as typeof bulk)} aria-label="Set for all staff shown" className="max-sm:hidden h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Set for all shown…</option><option value="supervisor">Leave supervisor</option><option value="backup">Backup leave officer</option><option value="final">Final approver</option></select>
+      {bulk && <select value="" onChange={(event) => { const target = event.target.value; if (!target || !shown.length) return; const who = shown.filter((row) => row.id !== target); if (window.confirm(`Make ${approverName(target)} the ${bulk === 'supervisor' ? 'leave supervisor' : bulk === 'backup' ? 'backup leave officer' : 'final approver'} of the ${who.length} staff shown?`)) { void assignApprover(who.map((row) => row.id || ''), target, bulk); setBulk(''); } }} aria-label="Choose who to set for all staff shown" className="max-sm:hidden h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Choose who…</option>{approvers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>}
       <span className="ml-auto text-xs text-slate-400">{employees ? `${shown.length} of ${employees.length}` : 'Loading…'}</span>
     </section>}
     {employees && !employees.length && !notSetUp && <p className={`${card} text-sm text-slate-500`}>No staff profiles yet. Press Add staff, or import them from Infotech.</p>}
@@ -219,22 +219,26 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return <div className="flex gap-3 py-2 text-sm"><dt className="w-40 shrink-0 text-slate-500">{label}</dt><dd className="min-w-0 flex-1 break-words">{children || '—'}</dd></div>;
 }
 
+// 'As per roster' is saved as [-1]: no weekday matches, so only the roster decides who works (leave and attendance already read the roster first).
 const WEEK = [['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6], ['Sun', 0]] as const;
 // The weekdays a person works. Leave is counted only on these days, so a rest day is never taken off the balance.
-function WorkDaysCard({ employeeId, days, onSaved, onError }: { employeeId: string; days: number[]; onSaved: () => void; onError: (message: string) => void }) {
-  const [picked, setPicked] = useState<number[]>(days);
+function WorkDaysCard({ employeeId, days, isCa, onSaved, onError }: { employeeId: string; days: number[]; isCa: boolean; onSaved: () => void; onError: (message: string) => void }) {
+  const onRoster = days.includes(-1);
+  const [mode, setMode] = useState<'roster' | 'fixed'>(onRoster ? 'roster' : 'fixed');
+  useEffect(() => { setMode(days.includes(-1) ? 'roster' : 'fixed'); }, [days.join(',')]);
+  const [picked, setPicked] = useState<number[]>(days.filter((day) => day >= 0));
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setPicked(days); }, [days.join(',')]);
-  const changed = [...picked].sort().join(',') !== [...days].sort().join(',');
+  useEffect(() => { setPicked(days.filter((day) => day >= 0)); }, [days.join(',')]);
+  const changed = mode === 'roster' ? !onRoster : onRoster || [...picked].sort().join(',') !== [...days].sort().join(',');
   const save = async () => {
     setSaving(true);
-    try { const result = await api('action=set_work_days', { id: employeeId, days: picked }); if (result.error) throw new Error(result.error); await onSaved(); }
+    try { const result = await api('action=set_work_days', mode === 'roster' ? { id: employeeId, roster: true } : { id: employeeId, days: picked }); if (result.error) throw new Error(result.error); await onSaved(); }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the working days.'); }
     setSaving(false);
   };
-  return <section className={`${card} !p-4`}><div className="flex flex-col gap-3"><div><h3 className="font-semibold">Working days</h3><p className="mt-0.5 text-xs text-slate-500">Leave counts only on these days.</p></div>
-    <div className="flex flex-wrap items-center gap-1.5">{WEEK.map(([label, value]) => { const on = picked.includes(value); return <button key={label} type="button" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((day) => day !== value) : [...picked, value])} className={`h-8 w-9 rounded-lg border text-[11px] font-semibold transition ${on ? 'border-[#0b587b] bg-[#0b587b] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{label}</button>; })}
-      <button type="button" onClick={() => void save()} disabled={!changed || saving || !picked.length} className="h-8 rounded-lg bg-[#0b587b] px-3 text-xs font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div></div></section>;
+  return <section className={`${card} !p-4`}><div className="flex flex-col gap-3"><div><h3 className="font-semibold">Working days</h3><p className="mt-0.5 text-xs text-slate-500">{mode === 'roster' ? 'Leave and attendance follow this person\'s roster.' : 'Leave counts only on these days.'}</p></div>
+    <div className="flex flex-wrap items-center gap-1.5">{(isCa || onRoster) && <select value={mode} onChange={(event) => setMode(event.target.value as 'roster' | 'fixed')} aria-label="Working days" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="roster">As per roster</option><option value="fixed">Fixed days</option></select>}{mode === 'fixed' && WEEK.map(([label, value]) => { const on = picked.includes(value); return <button key={label} type="button" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((day) => day !== value) : [...picked, value])} className={`h-8 w-9 rounded-lg border text-[11px] font-semibold transition ${on ? 'border-[#0b587b] bg-[#0b587b] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{label}</button>; })}
+      <button type="button" onClick={() => void save()} disabled={!changed || saving || (mode === 'fixed' && !picked.length)} className="h-8 rounded-lg bg-[#0b587b] px-3 text-xs font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div></div></section>;
 }
 
 // Which public holidays are left out of this person's leave days (the groups are the ones set up in Infotech).
@@ -401,7 +405,7 @@ export function ProfileView({ id, onBack, onError }: { id: string; onBack: () =>
     <section className="ara-hero rounded-[28px] px-7 py-6 text-white"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#70d8fa]">{e.company} · {e.employeeCode}</p><h2 className="mt-2 text-2xl font-semibold sm:text-3xl">{e.fullName}</h2><p className="mt-2 text-[#b9cfdd]"><span className={`mr-2 rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_TONE[e.status]}`}>{e.status}</span>{[e.designation, e.department, e.branch].filter(Boolean).join(' · ')}{e.joinDate ? ` · joined ${dmy(e.joinDate)} (${service(e.joinDate)})` : ''}</p></section>
     <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
     <section className={`${card} !p-4`}><div className="flex flex-col items-start gap-3"><div><h3 className="font-semibold">Individual sign-in</h3><p className="mt-0.5 text-xs text-slate-500">{!data.signIn?.linked ? 'No sign-in yet.' : data.signIn.hasPassword === null ? 'Status not available yet.' : data.signIn.hasPassword ? 'Password set.' : 'Password not set yet (first sign-in uses the last 4 IC digits).'}</p></div>{!data.signIn?.linked ? <CreateSignIn employeeId={id} fullName={data.employee.fullName} hasIc={Boolean(data.employee.icNo)} onDone={load} onError={onError} /> : null}<button disabled={!data.signIn?.linked || !data.signIn.hasPassword} title={data.signIn?.hasPassword ? '' : 'There is no password to reset yet'} onClick={async () => { if (!window.confirm(`Reset the sign-in password of ${data.employee.fullName}? They will sign in with the last 4 digits of their IC and choose a new one.`)) return; try { const result = await api('action=reset_sign_in', { id }); if (result.error) throw new Error(result.error); await load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to reset.'); } }} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Reset password</button></div></section>
-    <WorkDaysCard employeeId={id} days={e.workDays || [1, 2, 3, 4, 5, 6]} onSaved={load} onError={onError} />
+    <WorkDaysCard employeeId={id} days={e.workDays || [1, 2, 3, 4, 5, 6]} isCa={/CLINIC ASSISTANT|PEMBANTU KLINIK/i.test(e.designation || '')} onSaved={load} onError={onError} />
     <HolidayGroupCard employeeId={id} group={e.holidayGroup || ''} onSaved={load} onError={onError} />
     <CalendarAccessCard employeeId={id} companies={e.leaveCalendarCompanies || []} onSaved={load} onError={onError} />
     </div>
