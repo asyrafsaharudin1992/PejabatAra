@@ -258,7 +258,7 @@ export default function IndividualHub() {
   if (view === 'procurement' && me?.staff.cpoOffice) return <Screen nav={phoneNav} title="Office Procurement" onBack={() => setView('home')}><CooOfficeEntry office="procurement" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
-  if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance /></Screen>;
+  if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'ot') return <Screen nav={phoneNav} title="OT request" onBack={() => setView('home')}><MyAttendance mode="ot" isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster companies={me?.staff.rosterCompanies || []} /></Screen>;
   if (view === 'payslip') return <Screen nav={phoneNav} title="Payslip" onBack={() => setView('home')}><MyPayslips /></Screen>;

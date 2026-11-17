@@ -141,9 +141,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     const reasons = missed ? MISSED_REASONS : OT_REASONS;
     const mineHere = mine.filter((request) => isMissedClock(request.reason) === missed);
     const waitingHere = waiting.filter((request) => isMissedClock(request.reason) === missed);
-    return <>
-    {(waitingHere.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
-      <h3 className="font-semibold">{missed ? 'Approve missed clock' : 'Approve OT'} <span className="text-xs font-normal text-slate-400">· waiting for your approval</span></h3>
+    const approveBox = (waitingHere.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
+      <h3 className="font-semibold">{missed ? 'Forgot to clock' : 'Approve OT'} <span className="text-xs font-normal text-slate-400">· {missed ? 'for your approval' : 'waiting for your approval'}</span></h3>
       {!waitingHere.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
       <ul className="divide-y divide-slate-100">{waitingHere.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
@@ -151,7 +150,9 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
         {request.stage === 'hr' && request.otMinutes > 0 && <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">OT rate<select value={rates[request.id] || '1.5'} onChange={(event) => setRates({ ...rates, [request.id]: event.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option><option value="3">3.0x</option></select></label>}
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
       </li>)}</ul>
-    </section>}
+    </section>;
+    return <>
+    {!missed && approveBox}
 
     <section className={`${card} space-y-3`}>
       <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && <button onClick={() => { setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' }); if (!missed) void autofill(addDay(state.today, -1)); }} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
@@ -166,6 +167,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
       </div>}
       {mineHere.length > 0 && <ul className="divide-y divide-slate-100">{mineHere.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
     </section>
+    {missed && approveBox}
   </>;
   };
   if (mode === 'ot') return <div className="space-y-4">{requestSections('ot')}</div>;
