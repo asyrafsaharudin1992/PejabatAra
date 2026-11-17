@@ -60,6 +60,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmId, setConfirmId] = useState('');
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [days, setDays] = useState<Day[] | null>(null);
   const [monthDays, setMonthDays] = useState<Day[] | null>(null);
@@ -162,7 +163,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         {request.stage === 'hr' && <p className="mt-1 inline-block rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700">Supervisor approved · waiting for HR</p>}
         {request.otPreview && <p className="mt-1 text-xs font-semibold text-[#0b587b]">Pay: {request.otPreview}</p>}
-        <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
+        {confirmId === request.id ? <div className="mt-2 rounded-xl border border-[#0b587b]/20 bg-sky-50/60 p-3"><p className="text-sm font-semibold text-slate-800">Do you want to confirm this {missed ? 'missed clock' : 'OT'}?</p><p className="mt-0.5 text-xs font-semibold text-rose-700">This is final. Payroll will use it.</p><div className="mt-2 flex gap-2"><button onClick={() => { setConfirmId(''); void decide(request.id, 'approved'); }} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Yes, confirm</button><button onClick={() => setConfirmId('')} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Cancel</button></div></div> : <div className="mt-2 flex gap-2"><button onClick={() => request.stage === 'hr' ? setConfirmId(request.id) : void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">{request.stage === 'hr' ? 'Confirm' : 'Approve'}</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>}
       </li>)}</ul>
     </section>;
     return <>

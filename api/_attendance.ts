@@ -225,7 +225,10 @@ async function otDecision(db: any, person: any, date: string, grossMinutes: numb
 async function clockOtFor(db: any, person: any, date: string, rules?: Rules) {
   const day = ((await buildDays(db, [person], date, date, rules || await loadRules(db))).get(person.id) || [])[0];
   const hasClocks = Boolean(day?.inAt && day?.outAt);
-  return { hasClocks, counted: day ? day.otCounted : 0 };
+  // On a public holiday of the person's group the whole time worked counts (even a rostered shift), not only the time after the shift.
+  const policy = (rules || await loadRules(db)).policyFor(date);
+  const holiday = hasClocks && (await dayKindFor(db, person, date)) === 'ph';
+  return { hasClocks, counted: day ? (holiday ? Math.max(day.otCounted, wholeHours(day.worked, policy)) : day.otCounted) : 0 };
 }
 const hoursMinutesText = (minutes: number) => `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} m` : ''}`;
 // For the lists HR and supervisors decide from: one line saying how an OT request will be paid.
@@ -273,7 +276,7 @@ async function otDetails(db: any, lines: OtLine[]) {
         pay = paySummary(kind, net, Array.isArray(saved.parts) && saved.parts.length ? saved.parts : [{ minutes: net, multiplier: Number(saved.multiplier) }], net < gross && gross - net === policy.restMinutes && gross > policy.restAfterMinutes, policy);
       } else pay = otSummary(kind, line.asked, policy);
     } else {
-      const hasClocks = Boolean(day?.inAt && day?.outAt), shown = day ? day.otCounted : 0;
+      const hasClocks = Boolean(day?.inAt && day?.outAt), shown = day ? (kind === 'ph' ? Math.max(day.otCounted, wholeHours(day.worked, policy)) : day.otCounted) : 0;
       const capped = hasClocks && wholeHours(line.asked, policy) > shown;
       const counted = capped ? shown : line.asked;
       pay = capped ? (counted < policy.minMinutes ? `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show less than ${hoursMinutesText(policy.minMinutes)} of extra time: no OT can be confirmed` : `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show ${hoursMinutesText(shown)}. ${otSummary(kind, counted, policy)}`) : otSummary(kind, counted, policy);

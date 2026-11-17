@@ -54,13 +54,13 @@ export function cleanPolicy(input: any): OtPolicy {
 export const wholeHours = (minutes: number, policy: OtPolicy = DEFAULT_OT_POLICY) => Math.floor(Math.max(0, minutes) / policy.roundMinutes) * policy.roundMinutes;
 
 // Which kind of day a date is for one person.
+// - public holiday of the person's group (operation and management have their own lists), even when a shift is rostered: ph
 // - working day (a shift is expected): normal
-// - public holiday that is not a working day: ph
 // - the last day off of the week (Monday to Sunday), once a week: rest
 // - any other day off: off
 export function classifyDay(date: string, isWorking: (date: string) => boolean, isHoliday: (date: string) => boolean): DayKind {
-  if (isWorking(date)) return 'normal';
   if (isHoliday(date)) return 'ph';
+  if (isWorking(date)) return 'normal';
   const base = Date.parse(`${date}T00:00:00Z`);
   const weekday = new Date(base).getUTCDay(); // 0 = Sunday
   const monday = base - ((weekday + 6) % 7) * 86400000;
@@ -107,7 +107,13 @@ function payText(kind: DayKind, net: number, parts: OtPart[], policy: OtPolicy) 
   if (single && kind === 'rest' && single.minutes === policy.restHalfHours * HOUR && single.multiplier === policy.restHalfRate && net / HOUR <= policy.restHalfHours) return `half a day pay (${orpText(single.minutes, single.multiplier)})`;
   if (single && kind === 'rest' && single.minutes === policy.restFullHours * HOUR && single.multiplier === policy.restFullRate) return `a day pay (${orpText(single.minutes, single.multiplier)})`;
   if (single && kind === 'ph' && single.minutes === policy.phHours * HOUR && single.multiplier === policy.phRate) return orpText(single.minutes, single.multiplier);
-  return parts.map((part) => `${hoursText(part.minutes)} at ${part.multiplier.toFixed(1)}x`).join(' + ');
+  // A fixed amount for a day first, then the hours beyond it at their rate: "2 x ORP + 3 h at 3.0x".
+  const part = (item: OtPart, index: number) => {
+    if (index === 0 && parts.length > 1 && kind === 'rest' && item.minutes === policy.restFullHours * HOUR && item.multiplier === policy.restFullRate) return orpText(item.minutes, item.multiplier);
+    if (index === 0 && parts.length > 1 && kind === 'ph' && item.minutes === policy.phHours * HOUR && item.multiplier === policy.phRate) return orpText(item.minutes, item.multiplier);
+    return `${hoursText(item.minutes)} at ${item.multiplier.toFixed(1)}x`;
+  };
+  return parts.map(part).join(' + ');
 }
 // One line for people: "Rest day · 8 h (1 h rest not counted) · a day pay (1 x ORP)".
 export function otSummary(kind: DayKind, grossMinutes: number, policy: OtPolicy = DEFAULT_OT_POLICY) {

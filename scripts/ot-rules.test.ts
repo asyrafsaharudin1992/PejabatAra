@@ -43,6 +43,10 @@ const none = () => false;
 assert.equal(classifyDay('2026-11-16', monToFri, none), 'normal');
 assert.equal(classifyDay('2026-11-21', monToFri, none), 'off');
 assert.equal(classifyDay('2026-11-22', monToFri, none), 'rest');
+// A public holiday of the group is a public holiday even when a shift is rostered that day (operation staff work the shift and claim it at the public holiday rate).
+assert.equal(classifyDay('2026-11-16', monToFri, (date) => date === '2026-11-16'), 'ph');
+assert.match(otSummary('ph', 12 * H), /11 h \(1 h rest not counted\) · 2 x ORP \+ 3 h at 3\.0x/);
+assert.match(otSummary('rest', 12 * H), /1 x ORP \+ 3 h at 2\.0x/);
 // A public holiday on a day off is a public holiday; the rest day is the last off day that is not a holiday.
 assert.equal(classifyDay('2026-11-22', monToFri, (date) => date === '2026-11-22'), 'ph');
 assert.equal(classifyDay('2026-11-21', monToFri, (date) => date === '2026-11-22'), 'rest');
