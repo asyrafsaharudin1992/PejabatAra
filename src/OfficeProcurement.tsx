@@ -340,10 +340,38 @@ function ItemsPage({ onError }: { onError: (message: string) => void }) {
   const [term, setTerm] = useState('');
   const [openId, setOpenId] = useState('');
   const [version, setVersion] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [bulkField, setBulkField] = useState<'categories' | 'ingredients'>('categories');
+  const [bulkOp, setBulkOp] = useState<'add' | 'remove' | 'replace'>('add');
+  const [bulkValues, setBulkValues] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { setSelected(new Set()); setAllMatching(false); setConfirming(false); }, [term, kind, category, ingredient, untagged]);
   useEffect(() => { const timer = setTimeout(() => { setPage(0); setTerm(q); }, 400); return () => clearTimeout(timer); }, [q]);
   useEffect(() => { call<Facets>('action=facets').then(setFacets).catch((cause: Error) => onError(cause.message)); }, [version]);
   useEffect(() => { setData(null); call<{ items: Item[]; total: number; canEdit: boolean }>(`action=items&q=${encodeURIComponent(term)}&kind=${kind}&category=${encodeURIComponent(category)}&ingredient=${encodeURIComponent(ingredient)}${untagged ? '&untagged=1' : ''}&page=${page}`).then(setData).catch((cause: Error) => { setData({ items: [], total: 0, canEdit: false }); onError(cause.message); }); }, [term, kind, category, ingredient, untagged, page, version]);
   const reset = () => setPage(0);
+  const canEdit = data?.canEdit === true;
+  const target = allMatching ? data?.total || 0 : selected.size;
+  const pageIds = (data?.items || []).map((item) => item.plato_id);
+  const pageAllOn = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggle = (id: string) => { setAllMatching(false); setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); };
+  const togglePage = () => { setAllMatching(false); setSelected((current) => { const next = new Set(current); pageIds.forEach((id) => { if (pageAllOn) next.delete(id); else next.add(id); }); return next; }); };
+  const clearSelection = () => { setSelected(new Set()); setAllMatching(false); setConfirming(false); };
+  const applyBulk = async () => {
+    setBulkBusy(true);
+    try {
+      const payload = { field: bulkField, op: bulkOp, values: bulkValues, ...(allMatching ? { filter: { q: term, kind, category, ingredient, untagged } } : { ids: [...selected] }) };
+      const response = await officeFetch('/api/status?resource=procurement&action=item_bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const result = await response.json();
+      if (!response.ok || result.error) throw new Error(result.error || 'Could not save.');
+      setNotice(`${result.changed} of ${result.selected} items updated.`);
+      setBulkValues([]); clearSelection(); setVersion((current) => current + 1);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Could not save.'); setConfirming(false); } finally { setBulkBusy(false); }
+  };
+  const fieldName = bulkField === 'categories' ? 'categories' : 'active ingredients';
   return <div className="space-y-4">
     <SubTabs active={kind || 'all'} onSelect={(next) => { setKind(next === 'all' ? '' : next as Kind); reset(); }} tabs={[{ id: 'all', label: 'All kinds', short: 'All' }, { id: 'purchased', label: 'Bought', short: 'Bought' }, { id: 'stocked', label: 'Stock only', short: 'Stock' }, { id: 'service', label: 'Service / other', short: 'Service' }]} />
     <div className="flex flex-wrap items-center gap-2">
@@ -353,10 +381,19 @@ function ItemsPage({ onError }: { onError: (message: string) => void }) {
       <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); reset(); }} className="h-4 w-4 accent-[#0b587b]" />No ingredient yet</label>
     </div>
     <p className="text-xs text-slate-500">{data ? `${data.total} items` : 'Loading…'}{facets ? ` · ${facets.tagged} of ${facets.total} have an active ingredient` : ''}</p>
+    {notice && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{notice}</p>}
+    {canEdit && !!data?.items.length && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600"><label className="inline-flex items-center gap-1.5 font-semibold"><input type="checkbox" checked={pageAllOn} onChange={togglePage} className="h-4 w-4 accent-[#0b587b]" />Select this page</label>{!allMatching && data.total > pageIds.length && <button type="button" onClick={() => { setAllMatching(true); setConfirming(false); }} className="font-semibold text-[#0b587b] hover:underline">Select all {data.total} that match</button>}</div>}
+    {canEdit && target > 0 && <section className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/50 p-3 sm:p-4" aria-label="Bulk edit">
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-[#14233b]">{allMatching ? `All ${target} items that match` : `${target} selected`}</p><button type="button" onClick={clearSelection} className="text-xs font-semibold text-slate-500 hover:underline">Clear selection</button></div>
+      <div className="flex flex-wrap items-center gap-2"><select value={bulkOp} onChange={(event) => { setBulkOp(event.target.value as 'add' | 'remove' | 'replace'); setConfirming(false); }} aria-label="What to do" className={field}><option value="add">Add</option><option value="remove">Remove</option><option value="replace">Replace all with</option></select><select value={bulkField} onChange={(event) => { setBulkField(event.target.value as 'categories' | 'ingredients'); setBulkValues([]); setConfirming(false); }} aria-label="Which list" className={field}><option value="categories">Categories</option><option value="ingredients">Active ingredients</option></select></div>
+      <ChipInput label={bulkField === 'categories' ? 'Categories' : 'Active ingredients'} values={bulkValues} onChange={(next) => { setBulkValues(next); setConfirming(false); }} options={(bulkField === 'categories' ? facets?.categories : facets?.ingredients || [])?.map((entry) => entry.name) || []} listId="proc-bulk-values" placeholder={bulkField === 'categories' ? 'e.g. Antihistamine' : 'e.g. Cetirizine'} />
+      {confirming ? <div className="flex flex-wrap items-center gap-2 text-xs"><span className="font-semibold text-slate-700">{bulkOp === 'add' ? 'Add' : bulkOp === 'remove' ? 'Remove' : 'Replace all'} {fieldName} {bulkOp === 'remove' ? 'from' : bulkOp === 'add' ? 'to' : 'on'} {target} items{bulkOp === 'replace' ? ' (their current list is removed)' : ''}?</span><button type="button" disabled={bulkBusy} onClick={() => void applyBulk()} className="rounded-lg bg-[#0b587b] px-3 py-1.5 font-semibold text-white disabled:opacity-40">{bulkBusy ? 'Saving…' : 'Yes, apply'}</button><button type="button" disabled={bulkBusy} onClick={() => setConfirming(false)} className="rounded-lg px-3 py-1.5 font-semibold text-slate-500 hover:bg-white">Cancel</button></div>
+        : <button type="button" disabled={!bulkValues.length} onClick={() => setConfirming(true)} className="rounded-lg bg-[#0b587b] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Apply to {target} items…</button>}
+    </section>}
     {data && <Pager page={page} total={data.total} onPage={(next) => { setPage(next); window.scrollTo({ top: 0 }); }} />}
     {data && !data.items.length ? <Empty>Nothing matches.</Empty> : <ul className="space-y-2">{(data?.items || []).map((item) => openId === item.plato_id
       ? <li key={item.plato_id}><ItemEditor item={item} facets={facets} canEdit={data?.canEdit || false} onClose={() => setOpenId('')} onSaved={() => { setOpenId(''); setVersion((current) => current + 1); }} onError={onError} /></li>
-      : <li key={item.plato_id}><button type="button" onClick={() => setOpenId(item.plato_id)} className="block w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50">
+      : <li key={item.plato_id} className="flex items-start gap-2">{canEdit && <input type="checkbox" checked={allMatching || selected.has(item.plato_id)} disabled={allMatching} onChange={() => toggle(item.plato_id)} aria-label={`Select ${item.name}`} className="mt-4 h-4 w-4 shrink-0 accent-[#0b587b]" />}<button type="button" onClick={() => setOpenId(item.plato_id)} className="block min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="min-w-0 flex-1 text-sm font-semibold text-[#14233b]">{item.name}</span><KindBadge kind={item.kind} /><span className="text-xs tabular-nums text-slate-600">{rm(item.selling_price)}{item.unit ? ` / ${item.unit}` : ''}</span></div>
         <p className="mt-0.5 text-[11px] text-slate-500">{item.plato_id} · {item.type}</p>
         {!!item.proc_item_suppliers?.length && <p className="mt-0.5 text-[11px] text-slate-600"><b>Suppliers:</b> {[...item.proc_item_suppliers].sort((a, b) => Number(b.preferred) - Number(a.preferred)).map((entry) => entry.preferred ? `${entry.supplier} (preferred)` : entry.supplier).join(' · ')}</p>}

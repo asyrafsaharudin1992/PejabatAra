@@ -262,6 +262,64 @@ export async function procurementHandler(req: any, res: any) {
       return res.status(200).json({ saved: true });
     }
 
+    // Bulk edit: add, remove or replace categories or active ingredients on many items at once. The items are either listed (ids) or every item the filters match.
+    if (action === 'item_bulk') {
+      if (!canEdit) throw fail(403, 'Only Procurement can change items.');
+      if (req.method !== 'POST') throw fail(405, 'Use POST.');
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const field = body.field === 'ingredients' ? 'ingredients' : body.field === 'categories' ? 'categories' : '';
+      const op = ['add', 'remove', 'replace'].includes(body.op) ? String(body.op) : '';
+      if (!field || !op) throw fail(400, 'Choose what to change.');
+      const values = [...new Map((Array.isArray(body.values) ? body.values : []).map((entry: unknown) => text(entry, 80)).filter(Boolean).map((entry: string) => [entry.toLowerCase(), entry])).values()].slice(0, 12) as string[];
+      if (!values.length) throw fail(400, 'Enter at least one value.');
+      const LIMIT = 3000;
+      let ids: string[] = [];
+      if (Array.isArray(body.ids)) ids = [...new Set<string>(body.ids.map((entry: unknown) => text(entry, 200)).filter(Boolean))];
+      else {
+        const filter = body.filter || {};
+        const q = text(filter.q, 60).replace(/[%,()]/g, ' '), kind = text(filter.kind, 12), category = text(filter.category, 80), ingredient = text(filter.ingredient, 80);
+        for (let from = 0; ids.length < LIMIT; from += 1000) {
+          let query = db.from('proc_items').select('plato_id').order('plato_id');
+          if (['purchased', 'stocked', 'service'].includes(kind)) query = query.eq('kind', kind);
+          if (category) query = query.contains('categories', [category]);
+          if (ingredient) query = query.contains('ingredients', [ingredient]);
+          if (filter.untagged === true || filter.untagged === '1') query = query.eq('ingredients', '{}');
+          if (q) query = query.or(`name.ilike.%${q}%,plato_id.ilike.%${q}%,category.ilike.%${q}%`);
+          const { data, error } = await query.range(from, from + 999);
+          if (error) throw error;
+          ids.push(...(data || []).map((row: any) => row.plato_id));
+          if ((data || []).length < 1000) break;
+        }
+      }
+      if (!ids.length) throw fail(400, 'No items selected.');
+      if (ids.length > LIMIT) throw fail(400, `Change at most ${LIMIT} items at a time. Narrow the filters first.`);
+      const lower = (list: string[]) => new Set(list.map((entry) => entry.toLowerCase()));
+      // Items that end up with the same list are updated together, so a thousand items take a few writes, not a thousand.
+      const groups = new Map<string, { list: string[]; ids: string[] }>();
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data, error } = await db.from('proc_items').select(`plato_id,${field}`).in('plato_id', ids.slice(i, i + 100));
+        if (error) throw error;
+        for (const row of data || []) {
+          const current: string[] = Array.isArray((row as any)[field]) ? (row as any)[field] : [];
+          let next: string[];
+          if (op === 'replace') next = values;
+          else if (op === 'remove') { const drop = lower(values); next = current.filter((entry) => !drop.has(entry.toLowerCase())); }
+          else { const have = lower(current); next = [...current, ...values.filter((entry) => !have.has(entry.toLowerCase()))].slice(0, 12); }
+          if (JSON.stringify(next) === JSON.stringify(current)) continue;
+          const key = JSON.stringify(next), group = groups.get(key) || { list: next, ids: [] };
+          group.ids.push((row as any).plato_id); groups.set(key, group);
+        }
+      }
+      let changed = 0;
+      for (const group of groups.values()) for (let i = 0; i < group.ids.length; i += 100) {
+        const part = group.ids.slice(i, i + 100);
+        const { error } = await db.from('proc_items').update({ [field]: group.list, tags_auto: false }).in('plato_id', part);
+        if (error) throw error;
+        changed += part.length;
+      }
+      return res.status(200).json({ saved: true, selected: ids.length, changed });
+    }
+
     // Purchase history: every item bought on a permanent order since 1 January 2026, newest first, with filters. Read one page at a time.
     if (action === 'history') {
       const q = text(req.query?.q, 60).replace(/[%,()]/g, ' ');
