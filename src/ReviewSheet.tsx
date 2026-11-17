@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { AssistantDocument } from './AssistantReview';
+import { CustomDocument } from './CustomReview';
 import { AREAS, LEVELS, ReviewFull, areaScore, dmy, percentLabel } from './lib/performanceReview';
 
 // The Performance Assessment Review laid out like the paper form (two A4 pages), filled in with the
@@ -46,6 +47,7 @@ export function ReviewSheet({ review }: { review: ReviewFull }) {
 
 export function ReviewDocument({ review }: { review: ReviewFull }) {
   if (review.formType === 'assistant') return <AssistantDocument review={review} />;
+  if (review.formType === 'custom') return <CustomDocument review={review} />;
   const score = review.totalScore;
   const band = bandOf(score);
   const period = [review.periodStart ? `${dmy(review.periodStart)} - ${dmy(review.periodEnd)}` : '', review.periodLabel ? `(${review.periodLabel})` : ''].filter(Boolean).join(' ');

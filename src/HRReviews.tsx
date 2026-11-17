@@ -3,6 +3,9 @@ import { SubTabs } from './SubTabs';
 import { Printer, Search, Send } from 'lucide-react';
 import { ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { AssistantDetail } from './AssistantReview';
+import { CustomDetail } from './CustomReview';
+import { HRReviewTemplates } from './HRReviewTemplates';
+import type { ReviewTemplate } from './lib/reviewTemplate';
 import { HRReviewSamples } from './HRReviewSamples';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
@@ -16,10 +19,10 @@ import { AREAS, LEVELS, ReviewFull, ReviewSummary, dmy, percentLabel, reviewApi,
 const field = 'w-full rounded-xl border border-[#dce4ed] bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 
 type Person = { id: string; fullName: string; employeeCode: string; designation: string; department: string; status: string; company: string };
-const blankAssign = () => ({ formType: 'standard' as 'standard' | 'assistant', employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
+const blankAssign = () => ({ formType: 'standard' as 'standard' | 'assistant', templateId: '', candidateName: '', candidatePosition: '', candidateCompany: '', employeeId: '', assessorId: '', periodLabel: '3rd Month', periodStart: '', periodEnd: '', remarks: '' });
 
 export function HRReviews({ onError, reportOnly = false }: { onError: (message: string) => void; reportOnly?: boolean }) {
-  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders' | 'samples'>(reportOnly ? 'reports' : 'assign');
+  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders' | 'samples' | 'templates'>(reportOnly ? 'reports' : 'assign');
   const [staff, setStaff] = useState<Person[]>([]);
   const [supervisors, setSupervisors] = useState<{ id: string; name: string; person?: string }[]>([]);
   const [assign, setAssign] = useState(blankAssign);
@@ -34,6 +37,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
   const [hr, setHr] = useState({ receivedOn: '', receivedBy: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [templates, setTemplates] = useState<ReviewTemplate[] | null>(null);
   const [reminders, setReminders] = useState<ReviewReminder[] | null>(null);
   const [remindersNotSetUp, setRemindersNotSetUp] = useState(false);
   const [reviewSettings, setReviewSettings] = useState<ReviewSettings>(defaultReviewSettings);
@@ -63,13 +67,16 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
   useReviewPrint(printing, `Performance Review - ${review?.staffName || ''} - ${review?.periodLabel || ''}`, () => setPrinting(false));
   const rows = useMemo(() => (list || []).filter((item) => !search.trim() || `${item.staffName} ${item.employeeCode} ${item.department} ${item.assessorName}`.toLowerCase().includes(search.trim().toLowerCase())), [list, search]);
 
+  const candidate = (templates || []).find((template) => template.id === assign.templateId)?.subject === 'candidate';
+  const loadTemplates = async () => { try { setTemplates((await reviewApi('action=hr_templates')).templates || []); } catch (cause) { setTemplates([]); onError(cause instanceof Error ? cause.message : 'Unable to load the templates.'); } };
+  useEffect(() => { if (!reportOnly) void loadTemplates(); }, []);
   const reload = async () => { try { setList((await reviewApi('action=hr_list')).reviews); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to load reviews.'); } };
   const giveReview = async () => {
     setAssigning(true); setNotice('');
     try {
       const result = await reviewApi('action=hr_assign', assign);
       setNotice(`Review assigned: ${result.review.staffName} to ${result.review.assessorName}.`);
-      setAssign({ ...blankAssign(), formType: assign.formType, assessorId: assign.assessorId, periodLabel: assign.periodLabel, periodStart: assign.periodStart, periodEnd: assign.periodEnd });
+      setAssign({ ...blankAssign(), formType: assign.formType, templateId: assign.templateId, assessorId: assign.assessorId, periodLabel: assign.periodLabel, periodStart: assign.periodStart, periodEnd: assign.periodEnd });
       await reload(); await loadReminders();
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to assign the review.'); }
     setAssigning(false);
@@ -100,17 +107,18 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
 
   return <div className="review-compact mx-auto max-w-[1500px] space-y-5">
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
-    {!reportOnly && <SubTabs label="Performance reviews" idPrefix="review" active={tab} onSelect={setTab} tabs={[{ id: 'assign', label: 'Assign Review', short: 'Assign' }, { id: 'reports', label: 'View Report', short: 'Report' }, { id: 'reminders', label: 'Reminder', badge: dueReminders }, { id: 'samples', label: 'Review samples', short: 'Samples' }]} />}
-    {tab === 'samples' && <HRReviewSamples />}
+    {!reportOnly && <SubTabs label="Performance reviews" idPrefix="review" active={tab} onSelect={setTab} tabs={[{ id: 'assign', label: 'Assign Review', short: 'Assign' }, { id: 'reports', label: 'View Report', short: 'Report' }, { id: 'reminders', label: 'Reminder', badge: dueReminders }, { id: 'templates', label: 'Templates', short: 'Templates' }, { id: 'samples', label: 'Review samples', short: 'Samples' }]} />}
+    {tab === 'samples' && <HRReviewSamples templates={(templates || []).filter((template) => !template.archived)} />}
+    {tab === 'templates' && <HRReviewTemplates templates={templates} onReload={loadTemplates} onError={onError} />}
     {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
-      onAssign={(item) => { setAssign({ formType: 'standard', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
+      onAssign={(item) => { setAssign({ formType: 'standard', templateId: '', candidateName: '', candidatePosition: '', candidateCompany: '', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice('Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}
       onView={(id) => { setSelected(id); setTab('reports'); window.scrollTo({ top: 0 }); }} />}
     {tab === 'assign' && <section id="review-panel-assign" role="tabpanel" aria-labelledby="review-tab-assign" className={card}>
       <h3 className="text-lg font-semibold">Assign a review</h3>
       <p className="text-sm text-slate-500">Choose who is reviewed, who does the review and for which period. It appears in that supervisor's Performance Review to fill in.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Which review<select value={assign.formType} onChange={(event) => setAssign({ ...assign, formType: event.target.value as 'standard' | 'assistant' })} className={`${field} mt-1.5`}><option value="standard">Review 1 · Performance Assessment Review (4 areas, rated 1 to 4)</option><option value="assistant">Review 2 · Penilaian Bulanan Pembantu Klinik (19 items out of 100)</option></select></label>
-        <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Staff to review<select value={assign.employeeId} onChange={(event) => setAssign({ ...assign, employeeId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose staff…</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.employeeCode}{person.designation ? ` · ${person.designation}` : ''}</option>)}</select></label>
+        <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Which review<select value={assign.templateId ? `t:${assign.templateId}` : assign.formType} onChange={(event) => { const value = event.target.value; setAssign(value.startsWith('t:') ? { ...assign, templateId: value.slice(2) } : { ...assign, templateId: '', formType: value as 'standard' | 'assistant' }); }} className={`${field} mt-1.5`}><option value="standard">Review 1 · Performance Assessment Review (4 areas, rated 1 to 4)</option><option value="assistant">Review 2 · Penilaian Bulanan Pembantu Klinik (19 items out of 100)</option>{(templates || []).some((template) => !template.archived) && <optgroup label="Your templates">{(templates || []).filter((template) => !template.archived).map((template) => <option key={template.id} value={`t:${template.id}`}>{template.name} ({template.items.length} items, {Math.round(template.items.reduce((sum, item) => sum + item.max, 0) * 100) / 100} marks)</option>)}</optgroup>}</select></label>
+        {candidate ? <><label className="block text-sm font-semibold text-slate-600">Candidate's name<input value={assign.candidateName} maxLength={120} onChange={(event) => setAssign({ ...assign, candidateName: event.target.value })} className={`${field} mt-1.5`} /></label><label className="block text-sm font-semibold text-slate-600">Position applied<input value={assign.candidatePosition} maxLength={120} onChange={(event) => setAssign({ ...assign, candidatePosition: event.target.value })} className={`${field} mt-1.5`} /></label></> : <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Staff to review<select value={assign.employeeId} onChange={(event) => setAssign({ ...assign, employeeId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose staff…</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.fullName} · {person.employeeCode}{person.designation ? ` · ${person.designation}` : ''}</option>)}</select></label>}
         <label className="block text-sm font-semibold text-slate-600 lg:col-span-2">Supervisor (assessor)<select value={assign.assessorId} onChange={(event) => setAssign({ ...assign, assessorId: event.target.value })} className={`${field} mt-1.5`}><option value="">Choose supervisor…</option>{supervisors.map((person) => <option key={person.id} value={person.id}>{person.name}{person.person ? ` · ${person.person}` : ''}</option>)}</select></label>
         <label className="block text-sm font-semibold text-slate-600">Review<input list="hr-review-periods" value={assign.periodLabel} onChange={(event) => setAssign({ ...assign, periodLabel: event.target.value })} className={`${field} mt-1.5`} /><datalist id="hr-review-periods">{PERIODS.map((period) => <option key={period} value={period} />)}</datalist></label>
         <label className="block text-sm font-semibold text-slate-600">Period from<input type="date" value={assign.periodStart} onChange={(event) => setAssign({ ...assign, periodStart: event.target.value })} className={`${field} mt-1.5`} /></label>
@@ -118,7 +126,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
         <div className="hidden lg:block" />
         <label className="block text-sm font-semibold text-slate-600 sm:col-span-2 lg:col-span-4">Remarks for the supervisor (optional)<textarea rows={2} value={assign.remarks} onChange={(event) => setAssign({ ...assign, remarks: event.target.value })} placeholder="e.g. Please also comment on attendance since confirmation." className={`${field} mt-1.5`} /></label>
       </div>
-      <div className="mt-4 flex flex-wrap items-center justify-end gap-3">{notice && <span className="mr-auto text-sm font-semibold text-emerald-700">{notice}</span>}<button onClick={() => void giveReview()} disabled={assigning || !assign.employeeId || !assign.assessorId} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50"><Send className="h-4 w-4" />{assigning ? 'Assigning…' : 'Assign review'}</button></div>
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-3">{notice && <span className="mr-auto text-sm font-semibold text-emerald-700">{notice}</span>}<button onClick={() => void giveReview()} disabled={assigning || (candidate ? !assign.candidateName.trim() : !assign.employeeId) || !assign.assessorId} className="inline-flex items-center gap-2 rounded-xl bg-[#0b587b] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0a4c6a] disabled:opacity-50"><Send className="h-4 w-4" />{assigning ? 'Assigning…' : 'Assign review'}</button></div>
     </section>}
     {tab === 'reports' && skipped.length > 0 && <details className={card}><summary className="cursor-pointer text-sm font-semibold">Assessments marked "Not needed" by Admin Klinikal ({skipped.length})</summary>
       <ul className="mt-3 space-y-1 text-sm text-slate-600">{skipped.map((item) => <li key={`${item.code}|${item.stage}`}><strong>{item.name}</strong> <span className="text-xs text-slate-400">{item.company} · {item.code}</span> · {item.stage} assessment · skipped by {item.by || 'Admin Klinikal'} on {dmy(item.at.slice(0, 10))}{item.reason ? ` · ${item.reason}` : ''}</li>)}</ul></details>}
@@ -143,7 +151,7 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
           <div className="flex flex-wrap items-center justify-end gap-2">{deletable(review) ? <button onClick={() => void deleteReview()} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete review</button> : <span className="mr-auto text-xs text-slate-400">Can only be deleted on the day it was submitted.</span>}<button onClick={() => setPrinting(true)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-[#0b587b] hover:bg-[#edf9fe]"><Printer className="h-4 w-4" />Print form</button></div>
           {printing && <ReviewSheet review={review} />}
           {Boolean(review.editCount) && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">Edited by the supervisor {review.editCount} {review.editCount === 1 ? 'time' : 'times'}, last on {dmy((review.lastEditedAt || '').slice(0, 10) || null)}. The earlier answers are kept.</p>}
-          {review.formType === 'assistant' ? <AssistantDetail review={review} /> : <>
+          {review.formType === 'assistant' ? <AssistantDetail review={review} /> : review.formType === 'custom' ? <CustomDetail review={review} /> : <>
           <div className="flex items-baseline justify-between gap-3 rounded-2xl bg-slate-50 p-4"><span className="flex items-baseline gap-3"><span className="text-3xl font-semibold tracking-tight">{review.totalScore?.toFixed(2)}</span><span className="text-xl font-semibold text-[#0b587b]">{percentLabel(review.totalScore)}</span></span><span className={`rounded-full px-3 py-1 text-xs font-bold ${scoreTone(review.totalScore)}`}>{review.overall}</span></div>
           <div className="space-y-4">{AREAS.map((area) => { const levels = review.ratings[area.key] || []; const average = levels.length === 4 ? levels.reduce((sum, value) => sum + value, 0) / 4 : null; return <div key={area.key}>
             <div className="flex items-baseline justify-between gap-3 text-sm"><span className="font-semibold">{area.label} <span className="text-xs font-normal text-slate-400">{area.weight}%</span></span><span className="font-semibold">{average === null ? '—' : `${average.toFixed(2)} · ${((area.weight * average) / 4).toFixed(2).replace(/\.?0+$/, '')} of ${area.weight}%`}</span></div>

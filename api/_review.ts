@@ -1,6 +1,7 @@
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
 import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, isValidTerm, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
+import { customScore, gradeFor, resolveAnswers, templateMax, validateTemplate, type ReviewTemplate } from '../src/lib/reviewTemplate.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
 
 // Performance Review, served from /api/status?resource=review (the Vercel Hobby plan allows
@@ -53,9 +54,9 @@ async function personNames(db: any) {
   };
 }
 
-export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at,form_type';
-export const reviewRow = (r: any) => ({ formType: r.form_type === 'assistant' ? 'assistant' : 'standard', id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
-export const reviewFull = (r: any) => ({ ...reviewRow(r), editCount: Array.isArray(r.edit_log) ? r.edit_log.length : 0, lastEditedAt: Array.isArray(r.edit_log) && r.edit_log.length ? r.edit_log[r.edit_log.length - 1].at : null, assistant: r.assistant || {}, ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
+export const REVIEW_SUMMARY = 'id,status,staff_name,employee_code,position,department,assessor_name,period_label,period_start,period_end,assign_remarks,total_score,overall,pip,hr_received_on,created_at,submitted_at,form_type,template';
+export const reviewRow = (r: any) => ({ formType: r.form_type === 'assistant' ? 'assistant' : r.form_type === 'custom' ? 'custom' : 'standard', template: r.template || null, templateName: r.template?.name || '', id: r.id, status: r.status, staffName: r.staff_name, employeeCode: r.employee_code, position: r.position, department: r.department, assessorName: r.assessor_name, periodLabel: r.period_label, periodStart: r.period_start, periodEnd: r.period_end, assignRemarks: r.assign_remarks, totalScore: r.total_score === null ? null : Number(r.total_score), overall: r.overall, pip: r.pip, hrReceivedOn: r.hr_received_on, createdAt: r.created_at, submittedAt: r.submitted_at });
+export const reviewFull = (r: any) => ({ ...reviewRow(r), editCount: Array.isArray(r.edit_log) ? r.edit_log.length : 0, lastEditedAt: Array.isArray(r.edit_log) && r.edit_log.length ? r.edit_log[r.edit_log.length - 1].at : null, assistant: r.assistant || {}, custom: r.custom || {}, ratings: r.ratings || {}, improvement: r.improvement, training: r.training, employeeComments: r.employee_comments, pipRemarks: r.pip_remarks, pipStart: r.pip_start, hodName: r.hod_name, hrReceivedBy: r.hr_received_by, hrRemarks: r.hr_remarks });
 
 // Submits a review (the supervisor's digital signature). `allow` says whether the review is this person's to fill in.
 export async function submitReview(db: any, body: any, allow: (assigned: any) => boolean, myName: string) {
@@ -71,10 +72,30 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
       if (assigned.hr_received_on) throw fail(409, 'HR has already received this review, so it can no longer be edited.');
     } else if (assigned.status !== 'pending') throw fail(409, 'This review has already been submitted.');
     // What the review said before this edit, kept with who edited it and when.
-    const trail = editing ? { edit_log: [...(Array.isArray(assigned.edit_log) ? assigned.edit_log : []), { at: new Date().toISOString(), by: myName, before: { total_score: assigned.total_score, overall: assigned.overall, ratings: assigned.ratings, assistant: assigned.assistant, improvement: assigned.improvement, training: assigned.training, employee_comments: assigned.employee_comments, pip: assigned.pip, pip_remarks: assigned.pip_remarks, pip_start: assigned.pip_start, hod_name: assigned.hod_name, assessor_name: assigned.assessor_name } }] } : {};
+    const trail = editing ? { edit_log: [...(Array.isArray(assigned.edit_log) ? assigned.edit_log : []), { at: new Date().toISOString(), by: myName, before: { total_score: assigned.total_score, overall: assigned.overall, ratings: assigned.ratings, assistant: assigned.assistant, custom: assigned.custom, improvement: assigned.improvement, training: assigned.training, employee_comments: assigned.employee_comments, pip: assigned.pip, pip_remarks: assigned.pip_remarks, pip_start: assigned.pip_start, hod_name: assigned.hod_name, assessor_name: assigned.assessor_name } }] } : {};
     if (!allow(assigned)) throw fail(403, 'This review is not assigned to you.');
     // Submitting is the supervisor's digital signature, so they must confirm it.
     if (body.signed !== true) throw fail(400, 'Confirm the review and sign it before submitting.');
+    // A template HR made: every item marked up to its full mark, one result if the template has any, and the assessor's comments.
+    if (assigned.form_type === 'custom') {
+      const template = assigned.template as ReviewTemplate | null;
+      if (!template || !Array.isArray(template.items) || !template.items.length) throw fail(409, 'This review has no template. Ask HR to assign it again.');
+      const answers = resolveAnswers(template.items, body.marks, body.choices);
+      if ('error' in answers) throw fail(400, answers.error);
+      const { marks, choices } = answers;
+      const outcomes = Array.isArray(template.outcomes) ? template.outcomes : [];
+      const outcome = outcomes.length ? outcomes.find((option) => option === body.outcome) : '';
+      if (outcomes.length && !outcome) throw fail(400, 'Choose the result of this review.');
+      const grade = gradeFor(marks.reduce((sum: number, mark: number) => sum + mark, 0), template.grades || []);
+      const nowAt = new Date().toISOString();
+      const { data: saved, error: saveError } = await db.from('hr_reviews').update({
+        status: 'submitted', ...(editing ? {} : { submitted_at: nowAt }), ...trail, updated_at: nowAt, assessor_name: text(body.assessorName, 160) || assigned.assessor_name || myName,
+        total_score: customScore(marks, template.items), overall: [outcome, grade].filter(Boolean).join(' · '),
+        custom: { marks, choices, outcome: outcome || '', grade, comments: text(body.comments, 3000), position: text(body.position, 120) },
+      }).eq('id', id).eq('status', editing ? 'submitted' : 'pending').select('*').single();
+      if (saveError) throw saveError;
+      return reviewFull(saved);
+    }
     // The clinic assistant form: 19 items marked out of 100 and a result for a contract locum or a probation.
     if (assigned.form_type === 'assistant') {
       const marks = Array.isArray(body.marks) ? body.marks.map(Number) : [];
@@ -164,7 +185,7 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save', 'hr_templates', 'hr_template_save', 'hr_template_archive', 'hr_template_delete'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_reminders') {
@@ -255,6 +276,42 @@ export async function reviewHandler(req: any, res: any) {
       if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ skipped: [] }); throw error; }
       return res.status(200).json({ skipped: (data || []).map((row: any) => ({ name: row.staff?.full_name || '', code: row.staff?.employee_code || '', company: row.staff?.company || '', stage: row.stage, reason: row.reason, by: row.skipped_by, at: row.skipped_at })) });
     }
+    // Templates HR makes: the list (archived ones too, marked), one saved (new or changed), one archived or brought back.
+    if (req.method === 'GET' && action === 'hr_templates') {
+      const { data, error } = await db.from('hr_review_templates').select('id,name,description,items,outcomes,grades,subject,archived,updated_at').order('archived').order('name').limit(200);
+      if (error) throw error;
+      return res.status(200).json({ templates: (data || []).map((row: any) => ({ id: row.id, name: row.name, description: row.description, items: row.items || [], outcomes: row.outcomes || [], grades: row.grades || [], subject: row.subject === 'candidate' ? 'candidate' : 'staff', archived: row.archived, updatedAt: row.updated_at })) });
+    }
+    if (req.method === 'POST' && action === 'hr_template_save') {
+      let clean; try { clean = validateTemplate(body.template); } catch (cause) { throw fail(400, (cause as Error).message); }
+      const now = new Date().toISOString();
+      if (isId(body.template?.id)) {
+        const { data, error } = await db.from('hr_review_templates').update({ ...clean, updated_at: now }).eq('id', body.template.id).select('id').maybeSingle();
+        if (error) throw error;
+        if (!data) throw fail(404, 'Template not found.');
+        return res.status(200).json({ id: data.id });
+      }
+      const { data: existing } = await db.from('hr_review_templates').select('id').limit(101);
+      if ((existing || []).length > 100) throw fail(400, 'Keep at most 100 templates. Archive the ones you no longer use.');
+      const { data, error } = await db.from('hr_review_templates').insert({ ...clean, created_by: user.id }).select('id').single();
+      if (error) throw error;
+      return res.status(200).json({ id: data.id });
+    }
+    if (req.method === 'POST' && action === 'hr_template_archive') {
+      if (!isId(body.id)) throw fail(400, 'Choose a template.');
+      const { data, error } = await db.from('hr_review_templates').update({ archived: body.archived !== false, updated_at: new Date().toISOString() }).eq('id', body.id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(404, 'Template not found.');
+      return res.status(200).json({ success: true });
+    }
+    // Deletes a template for good. Reviews already assigned or submitted keep their own copy of it, so none of them changes.
+    if (req.method === 'POST' && action === 'hr_template_delete') {
+      if (!isId(body.id)) throw fail(400, 'Choose a template.');
+      const { data, error } = await db.from('hr_review_templates').delete().eq('id', body.id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) throw fail(404, 'Template not found.');
+      return res.status(200).json({ success: true });
+    }
     if (req.method === 'GET' && action === 'hr_list') {
       const { data, error } = await db.from('hr_reviews').select(REVIEW_SUMMARY).order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
@@ -279,10 +336,21 @@ export async function reviewHandler(req: any, res: any) {
     // Gives one review to a supervisor for one staff member and period. The staff details are
     // copied from HR's record so the review keeps them even if the record changes later.
     if (req.method === 'POST' && action === 'hr_assign') {
-      if (!isId(body.employeeId)) throw fail(400, 'Choose the staff member to review.');
       if (!isId(body.assessorId)) throw fail(400, 'Choose the supervisor who will do the review.');
+      let template: ReviewTemplate | null = null;
+      if (body.templateId) {
+        if (!isId(body.templateId)) throw fail(400, 'Choose a valid template.');
+        const { data: found, error: templateError } = await db.from('hr_review_templates').select('id,name,description,items,outcomes,grades,subject,archived').eq('id', body.templateId).maybeSingle();
+        if (templateError) throw templateError;
+        if (!found || found.archived) throw fail(404, 'That template is not available. It may have been archived.');
+        template = { id: found.id, name: found.name, description: found.description, items: found.items || [], outcomes: found.outcomes || [], grades: found.grades || [], subject: found.subject === 'candidate' ? 'candidate' : 'staff' };
+        if (!template.items.length || !templateMax(template.items)) throw fail(400, 'That template has no items to mark.');
+      }
+      // A template for a candidate (an interview form) is about someone who is not on the staff list: the name and the job applied for are typed.
+      const candidate = template?.subject === 'candidate';
+      if (candidate ? !text(body.candidateName, 120) : !isId(body.employeeId)) throw fail(400, candidate ? 'Enter the candidate\'s name.' : 'Choose the staff member to review.');
       const [{ data: member, error: memberError }, { data: assessor, error: assessorError }] = await Promise.all([
-        db.from('hr_employees').select('id,full_name,employee_code,designation,department,status').eq('id', body.employeeId).maybeSingle(),
+        candidate ? Promise.resolve({ data: { id: null, full_name: text(body.candidateName, 120), employee_code: '', designation: text(body.candidatePosition, 120), department: text(body.candidateCompany, 120) }, error: null }) : db.from('hr_employees').select('id,full_name,employee_code,designation,department,status').eq('id', body.employeeId).maybeSingle(),
         db.from('hr_employees').select('id,full_name,designation,status').eq('id', body.assessorId).maybeSingle(),
       ]);
       if (memberError || assessorError) throw memberError || assessorError;
@@ -292,7 +360,7 @@ export async function reviewHandler(req: any, res: any) {
         status: 'pending', employee_id: member.id, staff_name: member.full_name, employee_code: member.employee_code, position: member.designation || '', department: member.department || '',
         assessor_employee_id: assessor.id, assessor_name: `${/DR RESIDENT|DOCTOR/i.test(assessor.designation || '') ? 'DR ' : ''}${assessor.full_name}`, assigned_by: user.id,
         period_label: text(body.periodLabel, 40), period_start: isDate(body.periodStart) ? body.periodStart : null, period_end: isDate(body.periodEnd) ? body.periodEnd : null,
-        assign_remarks: text(body.remarks, 2000), form_type: body.formType === 'assistant' ? 'assistant' : 'standard',
+        assign_remarks: text(body.remarks, 2000), form_type: template ? 'custom' : body.formType === 'assistant' ? 'assistant' : 'standard', ...(template ? { template } : {}),
       }).select('*').single();
       if (error) throw error;
       return res.status(200).json({ review: reviewFull(data) });

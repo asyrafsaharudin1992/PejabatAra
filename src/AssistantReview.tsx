@@ -104,7 +104,7 @@ export function AssistantDetail({ review }: { review: ReviewFull }) {
 const branchOf = (code: string) => /^ARASK/i.test(code) ? 'Klinik ARA 24 Jam Seri Kembangan' : 'Klinik ARA 24 Jam Kajang';
 const cell = { border: '0.25mm solid #000', padding: '0.4mm 1mm', verticalAlign: 'middle' as const, lineHeight: 1.15 };
 
-function Letterhead({ page }: { page: number }) {
+export function Letterhead({ page }: { page: number }) {
   const co = ASSISTANT_COMPANY;
   return <div className="rv-letterhead" style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
     <div style={{ flexDirection: 'row', alignItems: 'center', gap: '3mm' }}><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" style={{ width: '11mm', height: '11mm' }} /><strong>Klinik ARA 24 Jam</strong></div>
