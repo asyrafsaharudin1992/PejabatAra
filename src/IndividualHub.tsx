@@ -2,6 +2,7 @@ import { INDIVIDUAL_PREVIEW_KEY, PREVIEW_ROLES, readIndividualPreview, clearIndi
 import { lazy, ReactNode, Suspense, useEffect, useState } from 'react';
 import { clearGreeting, greetingName } from './lib/officeGreeting';
 import { ArrowLeft, ArrowRight, Baby, Building2, BookOpen, Bell, CalendarClock, CalendarDays, ClipboardCheck, Clock3, Coins, GraduationCap, House, KeyRound, Lock, LogOut, MoreHorizontal, Phone, PiggyBank, ReceiptText, ScanFace, Settings, Star, Timer, UserRound, Users } from 'lucide-react';
+import { isMissedClock, missedClockDates, unclaimedOtDays } from './lib/attendanceRequests';
 import { assessmentFetch, HERO_PHOTO, SetPassword, Shell, SignIn, TOKEN_KEY } from './AssessmentRoom';
 import LeaveSection from './LeaveScreens';
 import MyAttendance from './MyAttendance';
@@ -64,10 +65,10 @@ function PhoneTile({ item }: { key?: string; item: PhoneItem }) {
   return item.href ? <a href={item.href} className={base}>{body}</a> : <button type="button" onClick={item.onClick} className={base}>{body}</button>;
 }
 
-function PhoneNav({ view, onGo }: { view: string; onGo: (next: View) => void }) {
+function PhoneNav({ view, onGo, badges = {} }: { view: string; onGo: (next: View) => void; badges?: Partial<Record<View, number>> }) {
   const tabs: [View, string, typeof Settings, string[]][] = [['home', 'Home', House, ['home']], ['roster', 'Roster', CalendarDays, ['roster']], ['attendance', 'Attendance', Clock3, ['attendance']], ['ot', 'OT request', Timer, ['ot']], ['settings', 'More', MoreHorizontal, ['settings', 'profile']]];
   return <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 rounded-t-[26px] bg-white px-3 pb-[max(env(safe-area-inset-bottom),10px)] pt-2 shadow-[0_-6px_26px_rgba(11,42,74,0.1)] md:hidden">
-    <div className="grid grid-cols-5">{tabs.map(([target, label, Icon, active]) => { const on = active.includes(view); return <button key={label} onClick={() => onGo(target)} aria-current={on ? 'page' : undefined} className={`flex flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-semibold ${on ? 'text-[#1f6feb]' : 'text-slate-400'}`}><Icon className="h-6 w-6" strokeWidth={on ? 2 : 1.6} />{label}</button>; })}</div>
+    <div className="grid grid-cols-5">{tabs.map(([target, label, Icon, active]) => { const on = active.includes(view); return <button key={label} onClick={() => onGo(target)} aria-current={on ? 'page' : undefined} className={`flex flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-semibold ${on ? 'text-[#1f6feb]' : 'text-slate-400'}`}><span className="relative"><Icon className="h-6 w-6" strokeWidth={on ? 2 : 1.6} />{!!badges[target] && <span aria-label={`${badges[target]} to do`} className="absolute -right-2.5 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white shadow">{badges[target]}</span>}</span>{label}</button>; })}</div>
   </nav>;
 }
 
@@ -229,6 +230,25 @@ export default function IndividualHub() {
     return () => { live = false; };
   }, [signedIn]);
 
+  // Red numbers on the phone tabs: clocks the person forgot this month, and requests waiting for their approval.
+  const [todo, setTodo] = useState({ attendance: 0, ot: 0 });
+  const [otDate, setOtDate] = useState('');
+  useEffect(() => {
+    if (!signedIn || !me || me.staff.hasPassword === false) return;
+    let live = true;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
+    Promise.all([
+      assessmentFetch(`action=attendance_history&month=${today.slice(0, 7)}`).catch(() => ({ days: [] })),
+      assessmentFetch('action=attendance_requests').catch(() => ({ requests: [] })),
+      assessmentFetch('action=attendance_request_approvals').catch(() => ({ requests: [] })),
+    ]).then(([history, mine, waiting]) => {
+      if (!live) return;
+      const approvals: { reason: string }[] = waiting.requests || [];
+      setTodo({ attendance: missedClockDates(history.days || [], mine.requests || [], today).length + approvals.filter((request) => isMissedClock(request.reason)).length, ot: approvals.filter((request) => !isMissedClock(request.reason)).length + unclaimedOtDays(history.days || [], mine.requests || [], today).length });
+    });
+    return () => { live = false; };
+  }, [signedIn, me?.staff.code, view]);
+
   // A few details for the desktop profile card (the same safe subset My Profile shows).
   useEffect(() => {
     if (!me || me.staff.hasPassword === false || !window.matchMedia('(min-width: 768px)').matches) return;
@@ -248,7 +268,7 @@ export default function IndividualHub() {
   // Signed in with the IC digits but no password chosen yet: choose one first.
   if (me && me.staff.hasPassword === false) return <Shell><SetPassword first onDone={() => setMe({ staff: { ...me.staff, hasPassword: true } })} /></Shell>;
 
-  const phoneNav = <PhoneNav view={view} onGo={setView} />;
+  const phoneNav = <PhoneNav view={view} onGo={(next) => { setOtDate(""); setView(next); }} badges={{ attendance: todo.attendance, ot: todo.ot }} />;
   if (view === 'password') return <Shell><SetPassword onDone={() => setView('settings')} onCancel={() => setView('settings')} /></Shell>;
   if (view === 'toolkit' && me?.staff.isDoctor) return <Screen nav={phoneNav} title="Medical Toolkit" onBack={() => setView('home')}><Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening Medical Toolkit…</p>}><MedicalToolkit /></Suspense></Screen>;
   if (view === 'announcements') return <Screen nav={phoneNav} title="Announcements" onBack={() => setView('home')}><MyAnnouncements onChange={(unread) => setMe((current) => current ? { staff: { ...current.staff, announcementsUnread: unread } } : current)} /></Screen>;
@@ -258,8 +278,8 @@ export default function IndividualHub() {
   if (view === 'procurement' && me?.staff.cpoOffice) return <Screen nav={phoneNav} title="Office Procurement" onBack={() => setView('home')}><CooOfficeEntry office="procurement" preview={Boolean(selectedPreview)} greeting={greetingName(me.staff.name, Boolean(me.staff.isDoctor))} /></Screen>;
   if (view === 'leave') return <Screen nav={phoneNav} title="Leave" onBack={() => setView('home')}><LeaveSection isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
   if (view === 'review') return <Screen nav={phoneNav} title="Performance review" onBack={() => setView('home')}><ReviewRoom embedded onSignedOut={() => setSignedIn(false)} api={(query, body) => assessmentFetch(query.replace('action=', 'action=review_'), body ? { method: 'POST', body: JSON.stringify(body) } : undefined)} /></Screen>;
-  if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
-  if (view === 'ot') return <Screen nav={phoneNav} title="OT request" onBack={() => setView('home')}><MyAttendance mode="ot" isApprover={Boolean(me?.staff.isApprover)} /></Screen>;
+  if (view === 'attendance') return <Screen nav={phoneNav} title="Attendance" onBack={() => setView('home')}><MyAttendance isApprover={Boolean(me?.staff.isApprover)} onApplyOt={(date) => { setOtDate(date); setView('ot'); }} /></Screen>;
+  if (view === 'ot') return <Screen nav={phoneNav} title="OT request" onBack={() => setView('home')}><MyAttendance mode="ot" isApprover={Boolean(me?.staff.isApprover)} startDate={otDate} /></Screen>;
   if (view === 'roster') return <Screen nav={phoneNav} title="My roster" onBack={() => setView('home')}><MyRoster companies={me?.staff.rosterCompanies || []} /></Screen>;
   if (view === 'payslip') return <Screen nav={phoneNav} title="Payslip" onBack={() => setView('home')}><MyPayslips /></Screen>;
   if (view === 'profile') return <Screen nav={phoneNav} title="My profile" onBack={() => setView('home')}><MyProfile /></Screen>;
@@ -278,10 +298,10 @@ export default function IndividualHub() {
     ...(me?.staff.ceoOffice ? [{ label: 'Office - CEO', desc: 'Open your CEO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('ceo') } as Item] : []),
     ...(me?.staff.hrOffice ? [{ label: 'Office - HR', desc: 'Open your HR office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('hr') } as Item] : []),
     ...(me?.staff.careApprover ? [{ label: 'Office - COO', desc: 'Open your COO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('coo') } as Item] : []),
-    { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance') },
-    { label: 'OT request', desc: 'Ask for overtime or rest-day work', icon: Timer, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('ot') },
+    { label: 'Attendance', desc: 'Clock in and out with your location', icon: ScanFace, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('attendance'), badge: todo.attendance },
+    { label: 'OT request', desc: 'Ask for overtime or rest-day work', icon: Timer, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => { setOtDate(''); setView('ot'); }, badge: todo.ot },
     ...([{ label: 'Announcements', desc: me?.staff.announcementsUnread ? `${me.staff.announcementsUnread} to read` : 'Team updates and memos', icon: Bell, tone: 'bg-[#ffe4e8] text-[#e0314f]', onClick: () => setView('announcements'), badge: me?.staff.announcementsUnread || 0 } as Item]),
-    { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} waiting for your approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave'), badge: me?.staff.leaveWaiting || 0 },
+    { label: 'Leave', desc: me?.staff.leaveWaiting ? `${me.staff.leaveWaiting} pending approval` : 'Your leave balance', icon: CalendarDays, tone: 'bg-[#e9f6fb] text-[#0b587b]', onClick: () => setView('leave') },
     { label: 'My Roster', desc: 'The dates and shifts you work', icon: CalendarClock, tone: 'bg-[#e6f7ec] text-[#1f8a4c]', onClick: () => setView('roster') },
     ...(me?.staff.canReview ? [{ label: 'Performance Review', desc: me.staff.reviewWaiting ? `${me.staff.reviewWaiting} to fill in` : 'Reviews HR has given you', icon: Star, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('review'), badge: me.staff.reviewWaiting || 0 } as Item] : []),
     { label: 'Payslip', desc: 'Password protected · your monthly payslips', icon: ReceiptText, tone: 'bg-[#fff1d6] text-[#b57a00]', onClick: () => setView('payslip'), locked: true },

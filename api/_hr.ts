@@ -224,12 +224,18 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const periodTo = `${year}-${String(month).padStart(2, '0')}-19`;
   // OT that HR approved in Attendance for this pay period (20th to 19th), as hours at each rate.
-  const otRead = await db.from('hr_attendance_ot').select('employee_id,approved_minutes,multiplier').eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
+  const readOt = (columns: string) => db.from('hr_attendance_ot').select(columns).eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
+  let otRead = await readOt('employee_id,approved_minutes,multiplier,parts');
+  if (otRead.error) otRead = await readOt('employee_id,approved_minutes,multiplier'); // before the parts column exists
   const attendanceOt = new Map<string, { ot10: number; ot15: number; ot20: number; ot30: number }>();
   for (const row of otRead.error ? [] : otRead.data || []) {
     const sums = attendanceOt.get(row.employee_id) || { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
-    const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, 'ot10' | 'ot15' | 'ot20' | 'ot30'>)[Number(row.multiplier)];
-    if (key) sums[key] += Number(row.approved_minutes || 0) / 60;
+    // A day can be paid in parts at different rates (a rest day, a public holiday); older rows have one rate for the whole approved time.
+    const parts: { minutes: number; multiplier: number }[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }];
+    for (const part of parts) {
+      const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, 'ot10' | 'ot15' | 'ot20' | 'ot30'>)[Number(part.multiplier)];
+      if (key) sums[key] += Number(part.minutes || 0) / 60;
+    }
     attendanceOt.set(row.employee_id, sums);
   }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
@@ -1380,12 +1386,37 @@ export async function hrHandler(req: any, res: any) {
       const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
       const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
       if (error) throw error;
-      const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
+      // Staff with a fixed weekly schedule (admin office: Monday to Friday, a default shift on the profile) have no stored roster rows
+      // except for leave and the like. Their days without a row are shown from the profile, so the grid is not empty. Leave and public holidays stay as they are.
+      const { data: fixedPeople } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id,work_days,default_shift,holiday_group').eq('status', 'Active').not('default_shift', 'is', null).neq('default_shift', '').limit(500);
+      const fixed = (fixedPeople || []).filter((p: any) => Array.isArray(p.work_days) && p.work_days.length && !p.work_days.includes(-1));
+      const ids = [...new Set([...(data || []).map((row: any) => row.employee_id), ...fixed.map((p: any) => p.id)])];
       const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').in('id', ids) : { data: [] };
+      const stored = new Set((data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
+      const fixedIds = fixed.map((p: any) => p.id);
+      const [{ data: leaves }, { data: holidays }] = fixedIds.length ? await Promise.all([
+        db.from('hr_leave_requests').select('employee_id,start_date,end_date,leave_type').eq('status', 'approved').lte('start_date', end).gte('end_date', start).in('employee_id', fixedIds).limit(2000),
+        db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', start).lte('holiday_date', end).limit(500),
+      ]) : [{ data: [] }, { data: [] }];
+      const holidayOn = new Set((holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
+      const automatic: any[] = [];
+      // The roster codes for the leave types (unpaid leave is UPL there).
+      const LEAVE_CODE: Record<string, string> = { AL: 'AL', ML: 'ML', EL: 'EL', UL: 'UPL', ULEL: 'UPL', HOSP: 'HOSP', MATN: 'MATN', MARRG: 'MARRG' };
+      for (const person of fixed) {
+        for (let date = start; date <= end; date = new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) {
+          if (stored.has(`${person.id}|${date}`)) continue;
+          // A public holiday (for the groups that are off on it) shows as PH on any day; leave and the usual shift show on the working weekdays.
+          if (['SG-MNG', 'MLHL'].includes(person.holiday_group || '') && holidayOn.has(`${person.holiday_group}|${date}`)) { automatic.push({ id: person.id, date, shift: 'PH', works: false, note: 'Public holiday', auto: true }); continue; }
+          if (!person.work_days.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) continue;
+          const leave = (leaves || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date);
+          if (leave) { automatic.push({ id: person.id, date, shift: LEAVE_CODE[leave.leave_type] || leave.leave_type, works: false, note: 'Approved leave', auto: true }); continue; }
+          automatic.push({ id: person.id, date, shift: person.default_shift, works: true, note: 'From the profile: the usual shift, Monday to Friday', auto: true });
+        }
+      }
       const linked = (people || []).map((p: any) => p.assessment_staff_id).filter(Boolean);
       const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name').in('id', linked) : { data: [] };
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
-      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: (data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })) });
+      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];

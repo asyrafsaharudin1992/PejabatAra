@@ -1,4 +1,5 @@
 import { isMissedClock } from './lib/attendanceRequests';
+import { OtPolicyBody } from './OtPolicy';
 import { SubTabs } from './SubTabs';
 import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
@@ -29,8 +30,8 @@ type Place = { id: string; name: string; company: string; latitude: number; long
 type Person = { id: string; company: string; code: string; name: string; doctor: boolean; mode: 'places' | 'anywhere'; placeIds: string[]; clockRequired: 'full' | 'in_only' | 'none'; defaultShift: string };
 type Clock = { id: string; source: 'phone' | 'infotech' | 'hr' | 'request'; kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string };
 type TimeRow = { kind: 'staff' | 'doctor'; code: string; start: string; end: string };
-type OtRow = { id: string; company: string; code: string; name: string; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; dayOff: boolean; captured: number; status: '' | 'approved' | 'rejected'; approved: number; rate: number; note: string };
-type Req = { id: string; employeeId: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorDecidedBy: string; supervisorNote: string; decidedBy: string; note: string; rate: number | null };
+type OtRow = { group?: string; id: string; company: string; code: string; name: string; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; dayOff: boolean; captured: number; status: '' | 'approved' | 'rejected'; approved: number; rate: number; note: string };
+type Req = { id: string; employeeId: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; readOnly?: boolean; company?: string; otPreview?: string; otShown?: number; clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; reason: string; remarks: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorDecidedBy: string; supervisorNote: string; decidedBy: string; note: string; rate: number | null };
 
 const field = 'h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10 sm:h-10 sm:rounded-xl sm:px-3 sm:text-sm';
 const button = 'inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0b587b] px-3 text-xs font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-50 sm:h-10 sm:gap-2 sm:rounded-xl sm:px-4 sm:text-sm';
@@ -181,7 +182,9 @@ function Month({ onError, source }: { onError: (message: string) => void; source
 // so HR can check whether the person did overtime and ask them to apply. Nothing is approved from here.
 function OtAlerts({ onError }: { onError: (message: string) => void }) {
   const [month, setMonth] = useState(monthOf(new Date()));
-  const [rows, setRows] = useState<OtRow[] | null>(null);
+  const [allRows, setRows] = useState<OtRow[] | null>(null);
+  const [group, setGroup] = useState('');
+  const rows = allRows && allRows.filter((row) => !group || row.group === group);
   useEffect(() => {
     let live = true; setRows(null);
     Promise.all([api(`action=attendance_ot&month=${month}`), api('action=attendance_requests&status=all')]).then(([ot, requests]) => {
@@ -192,7 +195,7 @@ function OtAlerts({ onError }: { onError: (message: string) => void }) {
     return () => { live = false; };
   }, [month]);
   return <section className={`${card} space-y-3`}>
-    <MonthBar month={month} setMonth={setMonth}>{rows && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${rows.length ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{rows.length ? `${rows.length} possible OT without a request` : 'No unreported extra time'}</span>}</MonthBar>
+    <MonthBar month={month} setMonth={setMonth}><select aria-label="Staff group" value={group} onChange={(event) => setGroup(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All staff</option><option value="CA">CA</option><option value="Others">Others</option></select>{rows && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${rows.length ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{rows.length ? `${rows.length} possible OT without a request` : 'No unreported extra time'}</span>}</MonthBar>
     <p className="text-sm text-slate-500">Alert only: these staff clocked extra time (before the shift, after it ended, or on a day off) but have not applied for OT. Check whether it was overtime and ask them to apply. Doctors have no OT.</p>
     {!rows ? <p className="text-sm text-slate-500">Loading…</p> : rows.length > 0 && <table className="w-full min-w-[640px] text-sm">
       <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Date</th><th className="pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">Clocks</th><th>Extra time</th></tr></thead>
@@ -207,25 +210,41 @@ function OtAlerts({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
+const monthEndOf = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
 function Requests({ onError, kind }: { onError: (message: string) => void; kind: 'ot' | 'missed' }) {
-  const [all, setAll] = useState(false);
+  // Everything is listed (waiting, approved, rejected, cancelled); the filters narrow it down.
+  const all = true;
   const [requests, setRequests] = useState<Req[] | null>(null);
   const [busy, setBusy] = useState('');
   // This tab shows only the requests that belong to it: a missed clock (forgot to clock in or out), or OT / a rest-day request.
   const [monthFilter, setMonthFilter] = useState('');
+  const [payrollFilter, setPayrollFilter] = useState('');
+  const [placeFilter, setPlaceFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [confirming, setConfirming] = useState('');
   const ofKind = requests && requests.filter((request) => isMissedClock(request.reason) === (kind === 'missed'));
-  const months: string[] = [...new Set<string>((ofKind || []).map((request) => String(request.date).slice(0, 7)))].sort().reverse();
-  const shown = ofKind && ofKind.filter((request) => !monthFilter || request.date.startsWith(monthFilter));
-  const [rates, setRates] = useState<Record<string, string>>({});
-  const load = () => { setRequests(null); api(`action=attendance_requests&status=${all ? 'all' : 'pending'}`).then((result) => { if (result.error) throw new Error(result.error); setRequests(result.requests); }).catch((cause: Error) => { setRequests([]); onError(cause.message); }); };
-  useEffect(load, [all]);
-  const decide = async (request: Req, decision: 'approved' | 'rejected') => { setBusy(request.id); try { const result = await api('action=attendance_request_decide', { id: request.id, decision, rate: Number(rates[request.id] || 1.5) }); if (result.error) throw new Error(result.error); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(''); } };
+  // The last 12 months are always on the list (so any month can be chosen), plus any month a request is in.
+  const recent = Array.from({ length: 12 }, (_, index) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - index); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+  const months: string[] = [...new Set<string>([...recent, ...(ofKind || []).map((request) => String(request.date).slice(0, 7))])].sort().reverse();
+  const PLACE_NAME: Record<string, string> = { KJ: 'Kajang', SK: 'Seri Kembangan' };
+  // Both clinics are always listed, even when the list shown has requests from only one of them.
+  const places: string[] = [...new Set<string>([...Object.keys(PLACE_NAME), ...(ofKind || []).map((request) => request.company || '').filter(Boolean)])].sort();
+  // A payroll month runs from the 20th of the month before to the 19th (Nov payroll: 20 Oct to 19 Nov).
+  const payrollRange = (value: string) => { const [year, month] = value.split('-').map(Number); const before = new Date(year, month - 2, 1); return { from: `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-20`, to: `${value}-19` }; };
+  const payrolls: string[] = recent;
+  const range = payrollFilter ? payrollRange(payrollFilter) : monthFilter ? { from: `${monthFilter}-01`, to: `${monthFilter}-31` } : null;
+  const shown = ofKind && ofKind.filter((request) => (!range || (request.date >= range.from && request.date <= range.to)) && (!placeFilter || request.company === placeFilter) && (!statusFilter || request.status === statusFilter));
+  const load = () => { setRequests(null); api(`action=attendance_requests&status=${all ? 'all' : 'pending'}${range ? `&from=${range.from}&to=${monthFilter ? monthEndOf(monthFilter) : range.to}` : ''}`).then((result) => { if (result.error) throw new Error(result.error); setRequests(result.requests); }).catch((cause: Error) => { setRequests([]); onError(cause.message); }); };
+  useEffect(load, [monthFilter, payrollFilter]);
+  const decide = async (request: Req, decision: 'approved' | 'rejected') => { setBusy(request.id); try { const result = await api('action=attendance_request_decide', { id: request.id, decision }); if (result.error) throw new Error(result.error); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(''); } };
   const stage = (request: Req) => request.status === 'pending' ? 'Waiting for supervisor' : request.status === 'supervisor_approved' ? (request.supervisorDecidedBy ? `Supervisor approved (${request.supervisorDecidedBy}) · waiting for HR` : 'Waiting for HR') : request.status === 'approved' ? `Approved · ${request.decidedBy}${request.rate ? ` · OT ${request.rate}x` : ''}` : request.status === 'cancelled' ? 'Cancelled by staff' : `Rejected · ${request.decidedBy}`;
   return <section className={`${card} space-y-3`}>
-    <div className="flex flex-wrap items-center gap-3"><select aria-label="Month" value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All months</option>{months.map((value) => <option key={value} value={value}>{new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</option>)}</select><p className="order-last basis-full text-[11px] leading-4 text-slate-500 sm:order-none sm:basis-0 sm:flex-1 sm:text-sm">{kind === 'missed' ? 'Staff ask for a clock they forgot (in or out) to be added.' : 'Staff ask for OT hours or for work on a rest day.'} The supervisor approves first, then HR confirms here: confirming adds the clock and the OT (at the rate you choose) that Payroll uses. HR can also decide while the supervisor is still pending.</p><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} />Show decided too</label></div>
+    <div className="flex flex-wrap items-center gap-3"><select aria-label="Month" value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setPayrollFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All months</option>{months.map((value) => <option key={value} value={value}>{new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</option>)}</select><select aria-label="Payroll" value={payrollFilter} onChange={(event) => { setPayrollFilter(event.target.value); setMonthFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All payrolls</option>{payrolls.map((value) => { const r = payrollRange(value); const d = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); return <option key={value} value={value}>{`Payroll ${new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} · ${d(r.from)} to ${d(r.to)}`}</option>; })}</select><select aria-label="Location" value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All locations</option>{places.map((value) => <option key={value} value={value}>{PLACE_NAME[value] ? `${value} · ${PLACE_NAME[value]}` : value}</option>)}</select><select aria-label="Approval status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All statuses</option><option value="pending">Waiting for supervisor</option><option value="supervisor_approved">Waiting for HR</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{kind === 'ot' && <button type="button" onClick={() => setPolicyOpen(!policyOpen)} aria-expanded={policyOpen} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">OT policy {policyOpen ? '▴' : '▾'}</button>}{kind === 'missed' && <p className="order-last basis-full text-[11px] leading-4 text-slate-500 sm:order-none sm:basis-0 sm:flex-1 sm:text-sm">Staff ask for a clock they forgot (in or out) to be added. The supervisor approves first, then HR confirms here.</p>}</div>
+    {kind === 'ot' && policyOpen && <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-sm leading-6 text-slate-600"><p className="font-semibold text-slate-800">OT policy</p><OtPolicyBody /></div>}
     {!shown ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{all ? 'No requests yet.' : 'Nothing waiting.'}</p> : <ul className="divide-y divide-slate-100">{shown.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 text-sm sm:py-3">
-      <div className="min-w-0 basis-full sm:basis-0 sm:flex-1"><p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {[request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${Math.floor(request.otMinutes / 60)} h ${request.otMinutes % 60} m`].filter(Boolean).join(' · ')}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>{request.supervisorNote && <p className="mt-0.5 text-xs text-slate-400">Supervisor: {request.supervisorNote}</p>}</div>
-      {['pending', 'supervisor_approved'].includes(request.status) ? <><span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">{stage(request)}</span>{request.otMinutes > 0 && <select aria-label={`OT rate for ${request.name}`} value={rates[request.id] || '1.5'} onChange={(event) => setRates({ ...rates, [request.id]: event.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="1">OT 1.0x</option><option value="1.5">OT 1.5x</option><option value="2">OT 2.0x</option><option value="3">OT 3.0x</option></select>}<button onClick={() => void decide(request, 'approved')} disabled={busy === request.id} className={button}>Confirm</button><button onClick={() => void decide(request, 'rejected')} disabled={busy === request.id} className={ghost}>Reject</button></> : <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{stage(request)}</span>}
+      <div className="min-w-0 basis-full sm:basis-0 sm:flex-1"><p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {request.shiftCode !== undefined && <><span className="font-semibold text-[#0b587b]">{request.shiftCode ? `${newCode(request.shiftCode)} ${request.shiftStart}–${request.shiftEnd}` : 'No shift'}</span> · </>}{[(request.clockIn || request.inTime) && `in ${request.clockIn || request.inTime}`, (request.clockOut || request.outTime) && `out ${request.clockOut || request.outTime}`, (request.otShown ?? request.otMinutes) > 0 && `OT ${Math.floor((request.otShown ?? request.otMinutes) / 60)} h ${(request.otShown ?? request.otMinutes) % 60} m`].filter(Boolean).join(' · ')}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>{request.otPreview && <p className="mt-0.5 text-xs font-semibold text-[#0b587b]">Pay: {request.otPreview}</p>}{request.supervisorNote && <p className="mt-0.5 text-xs text-slate-400">Supervisor: {request.supervisorNote}</p>}</div>
+      {['pending', 'supervisor_approved'].includes(request.status) ? <><span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">{stage(request)}</span>{confirming === request.id ? <div className="basis-full rounded-xl border border-[#0b587b]/20 bg-sky-50/60 p-3 text-sm sm:basis-auto sm:max-w-md"><p className="font-semibold text-slate-800">Confirm {isMissedClock(request.reason) ? 'this missed clock' : 'OT'} for {request.name.replace(/\s*\(.*\)$/, '')}?</p><p className="mt-1 text-xs text-slate-600">{dayName(request.date)}{request.otPreview ? ` · ${request.otPreview.replace(/^.*?\. (?=[A-Z][a-z]+ (day|holiday))/, '')}` : ''}. Payroll will use this; the clock in the request is added to the day.</p><div className="mt-2 flex gap-2"><button onClick={() => { setConfirming(''); void decide(request, 'approved'); }} disabled={busy === request.id} className={button}>Yes, confirm</button><button onClick={() => setConfirming('')} className={ghost}>Cancel</button></div></div> : <><button onClick={() => setConfirming(request.id)} disabled={busy === request.id} className={button}>Confirm</button><button onClick={() => void decide(request, 'rejected')} disabled={busy === request.id} className={ghost}>Reject</button></>}</> : <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{stage(request)}</span>}
     </li>)}</ul>}
   </section>;
 }
@@ -404,6 +423,153 @@ function CreditHours({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
+// ---- OT: Summary and Settings ----
+type OtSum = { id: string; company: string; code: string; name: string; group: string; days: number; worked: number; at: Record<string, number>; hrp: number; waitingMinutes: number; waitingCount: number };
+const lastMonthsList = () => Array.from({ length: 12 }, (_, index) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - index); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+const payrollWindow = (value: string) => { const [year, month] = value.split('-').map(Number); const before = new Date(year, month - 2, 1); return { from: `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-20`, to: `${value}-19` }; };
+const monthLast = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+const hm = (minutes: number) => minutes ? `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${Math.round(minutes % 60)} m` : ''}` : '—';
+const monthLabel = (value: string) => new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+function OtSummary({ onError }: { onError: (message: string) => void }) {
+  // The payroll month we are in: from the 20th it is next month's payroll.
+  const now = new Date(); const current = now.getDate() >= 20 ? new Date(now.getFullYear(), now.getMonth() + 1, 1) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const [payroll, setPayroll] = useState(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`);
+  const [month, setMonth] = useState('');
+  const [place, setPlace] = useState('');
+  const [group, setGroup] = useState('');
+  const [rows, setRows] = useState<OtSum[] | null>(null);
+  const range = month ? { from: `${month}-01`, to: monthLast(month) } : payrollWindow(payroll);
+  useEffect(() => {
+    let live = true; setRows(null);
+    api(`action=attendance_ot_summary&from=${range.from}&to=${range.to}`).then((result) => { if (result.error) throw new Error(result.error); if (live) setRows(result.rows); }).catch((cause: Error) => { if (live) { setRows([]); onError(cause.message); } });
+    return () => { live = false; };
+  }, [range.from, range.to]);
+  const shown = rows && rows.filter((row) => (!place || row.company === place) && (!group || row.group === group));
+  const total = (shown || []).reduce((sum, row) => ({ days: sum.days + row.days, worked: sum.worked + row.worked, hrp: sum.hrp + row.hrp, waiting: sum.waiting + row.waitingMinutes, at: { '1': sum.at['1'] + row.at['1'], '1.5': sum.at['1.5'] + row.at['1.5'], '2': sum.at['2'] + row.at['2'], '3': sum.at['3'] + row.at['3'] } }), { days: 0, worked: 0, hrp: 0, waiting: 0, at: { '1': 0, '1.5': 0, '2': 0, '3': 0 } });
+  const exportCsv = () => {
+    const head = ['Location', 'Code', 'Staff', 'Days', 'Worked (h)', 'At 1.0x (h)', 'At 1.5x (h)', 'At 2.0x (h)', 'At 3.0x (h)', 'Paid hours (x HRP)', 'Waiting (h)'];
+    const lines = (shown || []).map((row) => [row.company, row.code, row.name, row.days, row.worked / 60, row.at['1'] / 60, row.at['1.5'] / 60, row.at['2'] / 60, row.at['3'] / 60, Math.round(row.hrp * 100) / 100, row.waitingMinutes / 60]);
+    downloadBlob([[head, ...lines].map((line) => line.map(csvCell).join(',')).join('\n')], `ot-summary-${range.from}-to-${range.to}.csv`, 'text/csv');
+  };
+  return <section className={`${card} space-y-4`}>
+    <div className="flex flex-wrap items-center gap-3">
+      <select aria-label="Payroll" value={month ? '' : payroll} onChange={(event) => { setPayroll(event.target.value); setMonth(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="" disabled>Payroll…</option>{lastMonthsList().map((value) => { const r = payrollWindow(value); return <option key={value} value={value}>{`Payroll ${monthLabel(value)} · ${shortDate(r.from)} to ${shortDate(r.to)}`}</option>; })}</select>
+      <select aria-label="Month" value={month} onChange={(event) => setMonth(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">By payroll</option>{lastMonthsList().map((value) => <option key={value} value={value}>{`Month ${monthLabel(value)}`}</option>)}</select>
+      <select aria-label="Location" value={place} onChange={(event) => setPlace(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All locations</option><option value="KJ">KJ · Kajang</option><option value="SK">SK · Seri Kembangan</option></select>
+      <select aria-label="Staff group" value={group} onChange={(event) => setGroup(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All staff</option><option value="CA">CA</option><option value="Others">Others</option></select>
+      <button onClick={exportCsv} disabled={!shown || !shown.length} className={`${ghost} ml-auto`}><Download className="h-4 w-4" />Download CSV</button>
+    </div>
+    <p className="text-sm text-slate-500">OT that HR has approved, from {shortDate(range.from)} to {shortDate(range.to)}, as the hours Payroll will pay at each rate. "Waiting" is OT asked for and not decided yet.</p>
+    {!shown ? <p className="text-sm text-slate-500">Loading…</p> : <>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{([['Staff', String(shown.length)], ['OT days', String(total.days)], ['Hours worked', hm(total.worked)], ['Waiting', hm(total.waiting)]] as const).map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-lg font-bold text-slate-800">{value}</p></div>)}</div>
+      {!shown.length ? <p className="text-sm text-slate-500">No OT in this period.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
+        <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Days</th><th className="pr-3 text-right">Worked</th><th className="pr-3 text-right">1.0x</th><th className="pr-3 text-right">1.5x</th><th className="pr-3 text-right">2.0x</th><th className="pr-3 text-right">3.0x</th><th className="pr-3 text-right" title="Hours x rate: multiply by the hourly rate to get the pay">Paid hrs</th><th className="text-right">Waiting</th></tr></thead>
+        <tbody>{shown.map((row) => <tr key={row.id} className="border-t border-slate-100"><td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td><td className="pr-3 text-right">{row.days}</td><td className="pr-3 text-right">{hm(row.worked)}</td><td className="pr-3 text-right">{hm(row.at['1'])}</td><td className="pr-3 text-right">{hm(row.at['1.5'])}</td><td className="pr-3 text-right">{hm(row.at['2'])}</td><td className="pr-3 text-right">{hm(row.at['3'])}</td><td className="pr-3 text-right font-semibold text-[#0b587b]">{Math.round(row.hrp * 100) / 100}</td><td className="text-right text-amber-700">{row.waitingMinutes ? `${hm(row.waitingMinutes)} (${row.waitingCount})` : '—'}</td></tr>)}</tbody>
+        <tfoot><tr className="border-t-2 border-slate-200 font-bold text-slate-800"><td className="py-2.5 pr-3">Total</td><td className="pr-3 text-right">{total.days}</td><td className="pr-3 text-right">{hm(total.worked)}</td><td className="pr-3 text-right">{hm(total.at['1'])}</td><td className="pr-3 text-right">{hm(total.at['1.5'])}</td><td className="pr-3 text-right">{hm(total.at['2'])}</td><td className="pr-3 text-right">{hm(total.at['3'])}</td><td className="pr-3 text-right text-[#0b587b]">{Math.round(total.hrp * 100) / 100}</td><td className="text-right text-amber-700">{hm(total.waiting)}</td></tr></tfoot>
+      </table></div>}
+      <p className="text-[11px] leading-4 text-slate-400">Paid hrs = hours x rate (for example 8 h at 2.0x = 16). Multiply by a person's hourly rate (HRP) for the pay; Payroll does this.</p>
+    </>}
+  </section>;
+}
+
+type OtPolicyForm = Record<string, string>;
+function OtSettings({ onError }: { onError: (message: string) => void }) {
+  const [form, setForm] = useState<OtPolicyForm | null>(null);
+  const [defaults, setDefaults] = useState<OtPolicyForm | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [versions, setVersions] = useState<{ from: string; policy: Record<string, number> }[]>([]);
+  const [asking, setAsking] = useState(false);
+  const [from, setFrom] = useState('');
+  const [today, setToday] = useState('');
+  const toForm = (policy: Record<string, number>) => Object.fromEntries(Object.entries(policy).map(([key, value]) => [key, String(value)]));
+  useEffect(() => { api('action=attendance_ot_policy').then((result) => { if (result.error) throw new Error(result.error); setForm(toForm(result.policy)); setDefaults(toForm(result.defaults)); setVersions(result.versions || []); setToday(result.today); setFrom(result.today); }).catch((cause: Error) => onError(cause.message)); }, []);
+  if (!form || !defaults) return <p className="text-sm text-slate-500">Loading…</p>;
+  const changed = Object.keys(defaults).filter((key) => form[key] !== defaults[key]);
+  const set = (key: string, value: string) => { setForm({ ...form, [key]: value }); setMessage(''); };
+  const save = async (reset = false) => {
+    setBusy(true); setMessage('');
+    try {
+      const result = await api('action=attendance_ot_policy_save', reset ? { reset: true } : { policy: form, from });
+      if (result.error) throw new Error(result.error);
+      setForm(toForm(result.policy)); setVersions(result.versions || []); setAsking(false);
+      setMessage(reset ? 'Back to the memo settings.' : `Saved. The new settings start from ${new Date(`${from}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.`);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
+  };
+  const dateText = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const number = (key: string, label: string, unit: string, hint?: string) => <label key={key} className="block text-sm"><span className="mb-1 block text-slate-600">{label}</span><span className="flex items-center gap-2"><input type="number" inputMode="numeric" value={form[key]} onChange={(event) => set(key, event.target.value)} className={`${field} w-24`} /><span className="text-xs text-slate-400">{unit}{form[key] !== defaults[key] ? ` · memo: ${defaults[key]}` : ''}</span></span>{hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}</label>;
+  // The cells of the rate tables (the same two tables as in the memo): a rate to choose, or a number of hours.
+  const selectClass = "h-8 w-[5.5rem] rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-semibold sm:w-28 sm:text-sm";
+  // A pay per hour is shown as in the memo: "1.5 x HRP". A fixed amount for a day is shown as "0.5 x ORP" (hours x rate / 8); the rate behind it is one of Payroll's four.
+  const hrp = (key: string) => <select aria-label={key} value={form[key]} onChange={(event) => set(key, event.target.value)} className={selectClass}>{['1', '1.5', '2', '3'].map((value) => <option key={value} value={value}>{`${Number(value)} x HRP`}</option>)}</select>;
+  const orpBox = (hoursKey: string, rateKey: string) => <select aria-label={rateKey} value={form[rateKey]} onChange={(event) => set(rateKey, event.target.value)} className={selectClass}>{['1', '1.5', '2', '3'].map((value) => <option key={value} value={value}>{`${Math.round(Number(form[hoursKey]) * Number(value) / 8 * 100) / 100} x ORP`}</option>)}</select>;
+  const hoursBox = (key: string) => <input aria-label={key} type="number" inputMode="numeric" value={form[key]} onChange={(event) => set(key, event.target.value)} className="h-8 w-12 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-semibold sm:w-16 sm:text-sm" />;
+  const cell = 'border border-slate-300 p-1 align-middle sm:p-2';
+  const afterHours = Number(form.restAfterMinutes) / 60;
+  return <div className="space-y-4">
+    <section className={`${card} space-y-4`}>
+      <div><h3 className="font-semibold">How OT is counted</h3><p className="mt-1 text-sm text-slate-500">Starts as the memos say (5 Aug and 10 Nov 2026). Change a value here if the policy changes. It applies to OT confirmed after you save; OT already confirmed keeps the pay it was given.</p></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {number('minMinutes', 'Smallest OT', 'minutes', 'Less than this is not OT.')}
+        {number('roundMinutes', 'OT is counted in blocks of', 'minutes', '60 = whole hours, rounded down.')}
+        {number('restMinutes', 'Rest taken off', 'minutes', 'A rest the staff are not paid for.')}
+        {number('restAfterMinutes', 'Taken off when more than', 'minutes worked', Number.isFinite(afterHours) ? `= more than ${Math.round(afterHours * 100) / 100} hours` : '')}
+      </div>
+    </section>
+    <section className={`${card} space-y-4`}>
+      <div><h3 className="font-semibold">Rates and hours</h3><p className="mt-1 text-sm text-slate-500">The same tables as the memo. Payroll has four rates (1.0x, 1.5x, 2.0x, 3.0x). A fixed amount for a day is hours at a rate: 4 hours at 1.0x is half a day (0.5 x ORP), 8 hours at 2.0x is 2 x ORP.</p></div>
+      <div className="overflow-hidden rounded-xl border border-slate-300">
+        <table className="w-full table-fixed border-collapse text-center text-[10px] leading-tight sm:text-xs">
+          <thead><tr><th className={`${cell} bg-amber-400 text-slate-900`}>Hours of work</th><th className={`${cell} bg-green-200 text-slate-900`}>Normal Day</th><th className={`${cell} bg-green-300 text-slate-900`}>Off Day</th></tr></thead>
+          <tbody className="text-slate-700">
+            <tr><td className={`${cell} font-semibold`}>Complete shift</td><td className={cell}>Normal rate</td><td rowSpan={2} className={cell}><div className="flex flex-col items-center gap-1">{hrp('offRate')}<span className="text-slate-400">per hour</span></div></td></tr>
+            <tr><td className={`${cell} font-semibold`}>After complete shift</td><td className={cell}><div className="flex flex-col items-center gap-1">{hrp('normalRate')}<span className="text-slate-400">per hour</span></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-slate-300">
+        <table className="w-full table-fixed border-collapse text-center text-[10px] leading-tight sm:text-xs">
+          <thead><tr><th className={`${cell} bg-amber-400 text-slate-900`}>Hours of work</th><th className={`${cell} bg-sky-300 text-slate-900`}>Rest Day</th><th className={`${cell} bg-orange-300 text-slate-900`}>Public Holiday</th></tr></thead>
+          <tbody className="text-slate-700">
+            <tr><td className={`${cell} font-semibold`}><div className="flex flex-wrap items-center justify-center gap-1">First {hoursBox('restHalfHours')} hours</div></td><td className={cell}><div className="flex flex-col items-center gap-1">{orpBox('restHalfHours', 'restHalfRate')}</div></td><td rowSpan={2} className={cell}><div className="flex flex-col items-center gap-1"><span>first {hoursBox('phHours')} hours</span>{orpBox('phHours', 'phRate')}</div></td></tr>
+            <tr><td className={`${cell} font-semibold`}><div className="flex flex-wrap items-center justify-center gap-1">Next <input aria-label="Next hours" type="number" inputMode="numeric" value={Number.isFinite(Number(form.restFullHours) - Number(form.restHalfHours)) ? String(Number(form.restFullHours) - Number(form.restHalfHours)) : ''} onChange={(event) => set('restFullHours', String(Number(form.restHalfHours) + Number(event.target.value)))} className="h-8 w-12 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-semibold sm:w-16 sm:text-sm" /> hours</div></td><td className={cell}><div className="flex flex-col items-center gap-1">{orpBox('restFullHours', 'restFullRate')}</div></td></tr>
+            <tr><td className={`${cell} font-semibold`}>After {form.restFullHours} hours</td><td className={cell}><div className="flex flex-col items-center gap-1">{hrp('restExtraRate')}<span className="text-slate-400">per hour</span></div></td><td className={cell}><div className="flex flex-col items-center gap-1">{hrp('phExtraRate')}<span className="text-slate-400">per hour</span></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      {changed.length > 0 && <p className="text-xs text-amber-700">{changed.length} value{changed.length === 1 ? '' : 's'} differ from the memo: {changed.map((key) => `${key} (memo ${defaults[key]})`).join(', ')}.</p>}
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        <button onClick={() => { setFrom(today); setAsking(true); }} disabled={busy} className={button}>Save settings</button>
+        <button onClick={() => void save(true)} disabled={busy} className={ghost}>Back to the memo</button>
+        {message && <span className="text-sm font-semibold text-emerald-700">{message}</span>}
+      </div>
+    </section>
+    {versions.length > 1 && <section className={`${card} space-y-2`}><h3 className="font-semibold">Settings by date</h3><ul className="divide-y divide-slate-100 text-sm">{versions.map((version, index) => { const next = versions[index + 1]; const active = version.from <= today && (!next || next.from > today); return <li key={version.from || 'start'} className="flex flex-wrap items-center gap-2 py-2"><span className="font-semibold text-slate-800">{version.from ? `From ${dateText(version.from)}` : 'Before that (the memo)'}</span>{active && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">in force now</span>}{version.from > today && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">starts later</span>}<span className="text-xs text-slate-400">{Object.keys(defaults).filter((key) => String(version.policy[key]) !== defaults[key]).length} value(s) differ from the memo</span></li>; })}</ul><p className="text-[11px] text-slate-400">OT dated on or after a date uses the settings from that date. Going back to the memo clears all of these.</p></section>}
+    <section className={`${card} space-y-3`}><h3 className="font-semibold">The policy in the memos</h3><div className="space-y-3 text-sm leading-6 text-slate-600"><OtPolicyBody /></div></section>
+    {asking && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-label="Start date of the new OT settings">
+      <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+        <div><h3 className="text-lg font-semibold text-slate-900">Change the OT settings from when?</h3><p className="mt-1 text-sm text-slate-500">OT dated <b>on or after</b> this day will use the new settings. OT before it keeps the old settings, and OT that is already confirmed keeps its pay.</p></div>
+        <label className="block text-sm"><span className="mb-1 block text-slate-600">New settings start from</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className={`${field} w-full`} /></label>
+        {from && today && from < today && <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800">This date is in the past. Requests for that period that are still waiting will be counted with the new settings when you confirm them. Pay that is already confirmed does not change.</p>}
+        {changed.length > 0 && <p className="text-xs text-slate-500">{changed.length} value{changed.length === 1 ? '' : 's'} differ from the memo.</p>}
+        <div className="flex justify-end gap-2"><button onClick={() => setAsking(false)} disabled={busy} className={ghost}>Cancel</button><button onClick={() => void save()} disabled={busy || !from} className={button}>Save from this date</button></div>
+      </div>
+    </div>}
+  </div>;
+}
+
+function OtArea({ onError, badges }: { onError: (message: string) => void; badges?: number }) {
+  const [sub, setSub] = useState<'requests' | 'summary' | 'settings'>('requests');
+  return <div className="space-y-5">
+    <SubTabs active={sub} onSelect={setSub} tabs={[{ id: 'requests' as const, label: 'Requests', badge: badges || 0 }, { id: 'summary' as const, label: 'Summary' }, { id: 'settings' as const, label: 'Settings' }]} />
+    {sub === 'requests' && <><Requests onError={onError} kind="ot" /><OtAlerts onError={onError} /></>}
+    {sub === 'summary' && <OtSummary onError={onError} />}
+    {sub === 'settings' && <OtSettings onError={onError} />}
+  </div>;
+}
+
 export function HRAttendance({ onError, badges = {} }: { onError: (message: string) => void; badges?: { ot?: number; missed?: number } }) {
   const [tab, setTab] = useState<Tab>('today');
   const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['missed', 'Missed clock'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
@@ -411,7 +577,7 @@ export function HRAttendance({ onError, badges = {} }: { onError: (message: stri
     <SubTabs active={tab} onSelect={setTab} tabs={tabs.map(([key, label]) => ({ id: key, label, short: key === 'missed' ? 'Missed' : key === 'credit' ? 'Credit' : undefined, badge: key === 'ot' ? badges.ot : key === 'missed' ? badges.missed : 0 }))} />
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
-    {tab === 'ot' && <div className="space-y-5"><Requests onError={onError} kind="ot" /><OtAlerts onError={onError} /></div>}
+    {tab === 'ot' && <OtArea onError={onError} />}
     {tab === 'missed' && <Requests onError={onError} kind="missed" />}
     {tab === 'late' && <Late onError={onError} />}
     {tab === 'credit' && <CreditHours onError={onError} />}

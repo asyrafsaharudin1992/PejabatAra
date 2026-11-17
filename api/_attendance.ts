@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { NEW_CODE } from '../src/lib/shiftCodes.js';
+import { isMissedClock } from '../src/lib/attendanceRequests.js';
+import { classifyDay, cleanPolicy, DEFAULT_OT_POLICY, netMinutes, otParts, otSummary, parseVersions, paySummary, pickPolicy, wholeHours, type DayKind, type OtPart, type OtPolicy, type OtPolicyVersion } from './_ot-rules.js';
 
 // Attendance. Staff clock in and out on their own phone (Individual Sign In); HR sets where clocking is allowed and sees
 // the day and the month. Rules follow Infotech and HR's answers:
 //  - Late: up to the grace is not late; past it the full minutes are counted. It is a record for discipline reference only (no pay is deducted).
 //  - Leaving early is not counted.
 //  - OT: the extra time of a day (before the shift starts, after it ends, or a whole day worked on a day off) is captured
-//    automatically; HR approves or rejects each one and chooses the rate. Pay is worked out later from basic salary.
+//    automatically; HR approves or rejects each one. The rate is worked out from the kind of day (api/_ot-rules.ts). Pay is worked out later from basic salary.
 //  - Everyone clocks in and out, except management (who do not clock). A forgotten clock is fixed with a request that the
 //    supervisor or HR approves.
 // Malaysia time is UTC+8 all year. Served inside the assessment (staff) and hr (office) functions, so no new Vercel function is added.
@@ -36,12 +38,14 @@ const addDay = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:
 const at = (date: string, time: string) => Date.parse(`${date}T${time.slice(0, 5)}:00+08:00`);
 const hhmm = (ms: number) => new Date(ms + 8 * HOUR).toISOString().slice(11, 16);
 const monthEnd = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+// Staff with no OT at all: doctors, and people on flexible hours. The flexi staff are listed by code, because the Flexi flag in a profile is also set for some staff who do get OT.
+const NO_OT_CODES = new Set(['ARA0035']);
+export const hasNoOt = (person: { designation?: string; employee_code?: string }) => /\b(DR|DOCTOR)\b/i.test(person.designation || '') || NO_OT_CODES.has(person.employee_code || '');
 const isDoctor = (designation: string) => /\b(DR|DOCTOR)\b/i.test(designation || '');
 // Roster codes used before the KJ names, and the shift a person without a roster is expected on (office hours).
 const OLD_CODES = NEW_CODE;
 const OFFICE_CODE = 'AM-5';
 const HOLIDAY_OFF_GROUPS = new Set(['SG-MNG', 'MLHL']);
-const OT_RATES = [1, 1.5, 2, 3];
 
 const sha = (value: string) => createHash('sha256').update(`clock:${value}`).digest('hex');
 function metres(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -51,10 +55,17 @@ function metres(lat1: number, lng1: number, lat2: number, lng2: number) {
 }
 
 type Shift = { start: string; end: string };
-type Rules = { lateGrace: number; earlyGrace: number; countEarly: boolean; otMin: number; times: Map<string, Shift> };
+type Rules = { lateGrace: number; earlyGrace: number; countEarly: boolean; otMin: number; policy: OtPolicy; versions: OtPolicyVersion[]; policyFor: (date: string) => OtPolicy; times: Map<string, Shift> };
 export async function loadRules(db: any): Promise<Rules> {
-  const [{ data: settings }, { data: times }] = await Promise.all([db.from('hr_attendance_settings').select('late_grace_min,early_grace_min,count_early_out,ot_min_minutes').eq('id', 1).maybeSingle(), db.from('hr_shift_times').select('code,kind,start_time,end_time')]);
-  return { lateGrace: settings?.late_grace_min ?? 15, earlyGrace: settings?.early_grace_min ?? 15, countEarly: !!settings?.count_early_out, otMin: settings?.ot_min_minutes ?? 60, times: new Map((times || []).map((row: any) => [`${row.kind}|${row.code}`, { start: String(row.start_time).slice(0, 5), end: String(row.end_time).slice(0, 5) }])) };
+  // The OT policy HR edits is one more column; before it exists (or when it is empty) the memo defaults are used.
+  const read = (columns: string) => db.from('hr_attendance_settings').select(columns).eq('id', 1).maybeSingle();
+  let [{ data: settings, error: settingsError }, { data: times }] = await Promise.all([read('late_grace_min,early_grace_min,count_early_out,ot_min_minutes,ot_policy'), db.from('hr_shift_times').select('code,kind,start_time,end_time')]);
+  if (settingsError) settings = (await read('late_grace_min,early_grace_min,count_early_out,ot_min_minutes')).data;
+  const otMin = settings?.ot_min_minutes ?? 60;
+  const versions = parseVersions(settings?.ot_policy, otMin);
+  const policyFor = (date: string) => pickPolicy(versions, date);
+  const policy = policyFor(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10));
+  return { versions, policyFor, lateGrace: settings?.late_grace_min ?? 15, earlyGrace: settings?.early_grace_min ?? 15, countEarly: !!settings?.count_early_out, otMin, policy, times: new Map((times || []).map((row: any) => [`${row.kind}|${row.code}`, { start: String(row.start_time).slice(0, 5), end: String(row.end_time).slice(0, 5) }])) };
 }
 function shiftTimes(rules: Rules, code: string, doctor: boolean) {
   const key = OLD_CODES[code] || code;
@@ -62,7 +73,7 @@ function shiftTimes(rules: Rules, code: string, doctor: boolean) {
 }
 
 export type Employee = { id: string; company: string; employee_code: string; full_name: string; designation: string; work_days: number[] | null; holiday_group: string | null; default_shift?: string | null; clock_required?: string | null; join_date?: string | null; resign_date?: string | null };
-export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; creditHours: number; leave: string };
+export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; otParts: OtPart[]; creditHours: number; leave: string };
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
@@ -79,7 +90,7 @@ export async function fetchData(db: any, from: string, to: string, ids?: string[
     only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').limit(30000),
     only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).limit(5000),
     db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to).limit(1000),
-    only(db.from('hr_attendance_ot').select('employee_id,work_date,status,approved_minutes,multiplier,note').gte('work_date', from).lte('work_date', to)).limit(10000),
+    (async () => { const read = (columns: string) => only(db.from('hr_attendance_ot').select(columns).gte('work_date', from).lte('work_date', to)).limit(10000); const first = await read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note,parts'); return first.error ? read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note') : first; })(),
     only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).limit(5000),
   ]);
   return { roster: roster || [], clocks: clocks || [], leave: leave || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
@@ -108,14 +119,14 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
   const now = Date.now();
 
   for (const person of people) {
-    const doctor = isDoctor(person.designation);
+    const doctor = isDoctor(person.designation), noOt = hasNoOt(person);
     const required = person.clock_required || 'full';
     const mine = clocksOf.get(person.id) || [];
     // A doctor with no usual weekdays follows the doctor roster only: without a roster row nothing is expected.
     const workDays = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : /\b(DR|DOCTOR)\b/i.test(person.designation || '') ? [] : [1, 2, 3, 4, 5, 6];
     const push = (day: Day) => {
       const decision = decided.get(`${person.id}|${day.date}`);
-      if (decision && day.otCounted > 0) { day.otStatus = decision.status; day.otApproved = decision.approved_minutes; day.otRate = Number(decision.multiplier); day.otNote = decision.note || ''; }
+      if (decision && day.otCounted > 0) { day.otStatus = decision.status; day.otApproved = decision.approved_minutes; day.otRate = Number(decision.multiplier); day.otNote = decision.note || ''; day.otParts = Array.isArray(decision.parts) ? decision.parts : []; }
       out.get(person.id)!.push(day);
     };
     for (let date = from; date <= to; date = addDay(date, 1)) {
@@ -126,7 +137,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       else if (workDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) code = person.default_shift || OFFICE_CODE;
       const leaveRow = (leave || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date);
       const shift = code ? shiftTimes(rules, code, doctor) : null;
-      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', creditHours: 0, leave: leaveRow?.leave_type || '' };
+      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', otParts: [], creditHours: 0, leave: leaveRow?.leave_type || '' };
       // Before the person joined and after the last working day nothing is expected: not absent. A clock or approved leave on such a day is still shown.
       if (((person.join_date && date < person.join_date) || (person.resign_date && date > person.resign_date)) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       // Before the records start there is nothing to judge: not absent, not expected. Approved leave is still shown.
@@ -137,7 +148,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
         const first = same.find((clock) => clock.kind === 'in'), last = [...same].reverse().find((clock) => clock.kind === 'out');
         // A lone clock out here is the end of last night's shift, not a day worked.
         const day: Day = { ...blank, status: leaveRow ? 'leave' : first ? 'extra' : code ? 'no-times' : 'off', inAt: first ? new Date(first.at).toISOString() : null, outAt: first && last ? new Date(last.at).toISOString() : null };
-        if (!leaveRow && first && last && last.at > first.at && !doctor && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN); day.ot = day.worked; day.otCounted = day.worked >= rules.otMin ? day.worked : 0; }
+        if (!leaveRow && first && last && last.at > first.at && !noOt && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN); day.ot = day.worked; const pol = rules.policyFor(date); day.otCounted = day.worked >= pol.minMinutes ? wholeHours(day.worked, pol) : 0; }
         push(day); continue;
       }
       // Annual leave credit used in hours moves the start (late arrival) or the end (early leave), so those hours are not counted late or early.
@@ -166,8 +177,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           day.earlyCounted = rules.countEarly && day.early > rules.earlyGrace ? day.early : 0;
           // Extra time: before the shift starts and after it ends (doctors have no OT).
           const before = Math.max(0, Math.round((start - clockIn.at) / MIN)), after = Math.max(0, Math.round((clockOut.at - end) / MIN));
-          day.ot = doctor ? 0 : before + after;
-          day.otCounted = day.ot >= rules.otMin ? day.ot : 0;
+          day.ot = noOt ? 0 : before + after;
+          const pol = rules.policyFor(date); day.otCounted = day.ot >= pol.minMinutes ? wholeHours(day.ot, pol) : 0;
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
         else day.status = now > end + 8 * HOUR ? 'missing-out' : 'working';
@@ -184,6 +195,99 @@ const minutesText = (minutes: number) => `${String(Math.floor(minutes / 60)).pad
 const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', otMinutes: Number(row.ot_minutes || 0), otText: minutesText(Number(row.ot_minutes || 0)), reason: row.reason, remarks: row.remarks || '', status: row.status, supervisorDecidedBy: row.supervisor_decided_by || '', supervisorNote: row.supervisor_note || '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, rate: row.ot_multiplier === null || row.ot_multiplier === undefined ? null : Number(row.ot_multiplier), createdAt: row.created_at });
 
 // Approving a correction adds the clocks it asks for (an out time before the in time means the next day, for a night shift).
+// The kind of day (normal, off, rest or public holiday) for one person, from their roster, usual working days and the holidays of their group.
+// The rest day is the last day off of the week, so the whole week is read.
+async function dayKindFor(db: any, person: any, date: string): Promise<DayKind> {
+  const base = Date.parse(`${date}T00:00:00Z`);
+  const monday = new Date(base - ((new Date(base).getUTCDay() + 6) % 7) * 86400000).toISOString().slice(0, 10), sunday = addDay(monday, 6);
+  const [{ data: roster }, { data: holidays }] = await Promise.all([
+    db.from('hr_roster').select('work_date,shift,works').eq('employee_id', person.id).gte('work_date', monday).lte('work_date', sunday).limit(20),
+    person.holiday_group ? db.from('hr_holidays').select('holiday_date').eq('group_code', person.holiday_group).gte('holiday_date', monday).lte('holiday_date', sunday).limit(20) : Promise.resolve({ data: [] }),
+  ]);
+  const rows = new Map<string, any>((roster || []).map((row: any) => [row.work_date, row]));
+  const holiday = new Set<string>((holidays || []).map((row: any) => row.holiday_date));
+  const workDays = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : /\b(DR|DOCTOR)\b/i.test(person.designation || '') ? [] : [1, 2, 3, 4, 5, 6];
+  const working = (day: string) => {
+    const row = rows.get(day);
+    if (row) return Boolean(row.works && row.shift);
+    if (HOLIDAY_OFF_GROUPS.has(person.holiday_group || '') && holiday.has(day)) return false;
+    return workDays.includes(new Date(`${day}T00:00:00Z`).getUTCDay());
+  };
+  return classifyDay(date, working, (day) => holiday.has(day));
+}
+// What HR approves: the hours worked (rest taken off on a day off or public holiday), and the pay as hours at a rate.
+async function otDecision(db: any, person: any, date: string, grossMinutes: number, policy: OtPolicy) {
+  const kind = await dayKindFor(db, person, date);
+  return { kind, net: netMinutes(kind, grossMinutes, policy), parts: otParts(kind, grossMinutes, policy) };
+}
+// What the clocks and the roster say about a day: the extra time (whole hours) the system counted, and whether there are clock in and out to judge by.
+// An OT request cannot be for more than this when both clocks are there (a wrong entry like 19 h is stopped); with a clock missing the request is judged by HR.
+async function clockOtFor(db: any, person: any, date: string, rules?: Rules) {
+  const day = ((await buildDays(db, [person], date, date, rules || await loadRules(db))).get(person.id) || [])[0];
+  const hasClocks = Boolean(day?.inAt && day?.outAt);
+  return { hasClocks, counted: day ? day.otCounted : 0 };
+}
+const hoursMinutesText = (minutes: number) => `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} m` : ''}`;
+// For the lists HR and supervisors decide from: one line saying how an OT request will be paid.
+// The details shown under every OT line HR reads: the real clock in and out of the day, and how the OT is paid.
+// Works from one read of the clocks, the roster and the holidays for all the lines at once.
+type OtLine = { key: string; employee_id: string; work_date: string; asked: number; state: 'open' | 'approved' | 'closed' };
+async function otDetails(db: any, lines: OtLine[]) {
+  const result = new Map<string, { clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; otMinutes?: number; pay: string }>();
+  if (!lines.length) return result;
+  const ids = [...new Set(lines.map((line) => line.employee_id))];
+  const { data: people } = await db.from('hr_employees').select(PERSON).in('id', ids);
+  const rules = await loadRules(db);
+  const dates = lines.map((line) => line.work_date).sort();
+  const from = dates[0], to = dates[dates.length - 1];
+  const data = await fetchData(db, addDay(from, -7), addDay(to, 7), ids);
+  const days = buildDaysFrom(data, people || [], from, to, rules);
+  const rosterOf = new Map<string, any>((data.roster || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
+  const holidayOn = new Set<string>((data.holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
+  const decided = new Map<string, any>((data.ot || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
+  const kindOf = (person: any, date: string): DayKind => {
+    const workDays = Array.isArray(person.work_days) && person.work_days.length ? person.work_days : /\b(DR|DOCTOR)\b/i.test(person.designation || '') ? [] : [1, 2, 3, 4, 5, 6];
+    const working = (day: string) => {
+      const row = rosterOf.get(`${person.id}|${day}`);
+      if (row) return Boolean(row.works && row.shift);
+      if (HOLIDAY_OFF_GROUPS.has(person.holiday_group || '') && holidayOn.has(`${person.holiday_group}|${day}`)) return false;
+      return workDays.includes(new Date(`${day}T00:00:00Z`).getUTCDay());
+    };
+    return classifyDay(date, working, (day) => holidayOn.has(`${person.holiday_group}|${day}`));
+  };
+  const byId = new Map<string, any>((people || []).map((p: any) => [p.id, p]));
+  for (let line of lines) {
+    const person = byId.get(line.employee_id); if (!person) continue;
+    const policy = rules.policyFor(line.work_date);
+    const day = (days.get(person.id) || []).find((item) => item.date === line.work_date);
+    const kind = kindOf(person, line.work_date);
+    let pay = '', otMinutes: number | undefined;
+    // A request with times and no OT hours (rest day work, an older request): the hours come from what HR approved, or from the clocks.
+    const saved0 = decided.get(`${person.id}|${line.work_date}`);
+    if (!line.asked) { otMinutes = line.state === 'approved' && saved0 ? Number(saved0.captured_minutes || saved0.approved_minutes || 0) : day ? day.otCounted : 0; line = { ...line, asked: otMinutes }; }
+    if (line.state === 'closed') pay = 'none (not approved)';
+    else if (line.state === 'approved') {
+      const saved = decided.get(`${person.id}|${line.work_date}`);
+      if (saved && saved.status === 'approved') {
+        const net = Number(saved.approved_minutes || 0), gross = Number(saved.captured_minutes || 0);
+        pay = paySummary(kind, net, Array.isArray(saved.parts) && saved.parts.length ? saved.parts : [{ minutes: net, multiplier: Number(saved.multiplier) }], net < gross && gross - net === policy.restMinutes && gross > policy.restAfterMinutes, policy);
+      } else pay = otSummary(kind, line.asked, policy);
+    } else {
+      const hasClocks = Boolean(day?.inAt && day?.outAt), shown = day ? day.otCounted : 0;
+      const capped = hasClocks && wholeHours(line.asked, policy) > shown;
+      const counted = capped ? shown : line.asked;
+      pay = capped ? (counted < policy.minMinutes ? `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show less than ${hoursMinutesText(policy.minMinutes)} of extra time: no OT can be confirmed` : `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show ${hoursMinutesText(shown)}. ${otSummary(kind, counted, policy)}`) : otSummary(kind, counted, policy);
+    }
+    result.set(line.key, { ...(day && day.inAt ? { clockIn: hhmm(Date.parse(day.inAt)), clockOut: day.outAt ? hhmm(Date.parse(day.outAt)) : '' } : {}), ...(day ? { shiftCode: day.code || '', shiftStart: day.start ? hhmm(Date.parse(day.start)) : '', shiftEnd: day.end ? hhmm(Date.parse(day.end)) : '' } : {}), ...(otMinutes !== undefined ? { otMinutes } : {}), pay });
+  }
+  return result;
+}
+// For the lists HR and supervisors decide from: every OT line gets its real clocks and a Pay line.
+async function withOtPreview(db: any, rows: any[], requests: any[]) {
+  const otRequests = requests.filter((row: any) => !isMissedClock(row.reason) && (Number(row.ot_minutes) > 0 || /^(overtime|worked on rest day)/i.test(String(row.reason || ''))));
+  const details = await otDetails(db, otRequests.map((row: any) => ({ key: row.id, employee_id: row.employee_id, work_date: String(row.work_date), asked: Number(row.ot_minutes), state: ['pending', 'supervisor_approved'].includes(row.status) ? 'open' : row.status === 'approved' ? 'approved' : 'closed' } as OtLine)));
+  return rows.map((row: any) => { const detail = details.get(row.id); return { ...row, otPreview: detail?.pay || '', ...(detail?.clockIn !== undefined ? { clockIn: detail.clockIn, clockOut: detail.clockOut } : {}), ...(detail?.shiftCode !== undefined ? { shiftCode: detail.shiftCode, shiftStart: detail.shiftStart, shiftEnd: detail.shiftEnd } : {}), ...(detail?.otMinutes !== undefined ? { otShown: detail.otMinutes } : {}) }; });
+}
 async function applyRequest(db: any, request: any) {
   const rows: any[] = [];
   if (request.in_time) rows.push({ employee_id: request.employee_id, kind: 'in', clock_at: new Date(at(request.work_date, String(request.in_time))).toISOString(), within_place: null, device: 'request' });
@@ -212,23 +316,37 @@ async function supervisorDecide(db: any, id: string, decision: string, note: str
   const { error } = await db.from('hr_attendance_requests').update(patch).eq('id', id).eq('status', 'pending');
   if (error) throw error;
 }
-async function hrDecide(db: any, id: string, decision: string, note: string, by: string, rate: number, minutes: unknown) {
+async function hrDecide(db: any, id: string, decision: string, note: string, by: string, _rate: number, minutes: unknown) {
   if (!['approved', 'rejected'].includes(decision)) throw fail(400, 'Choose approve or reject.');
   const request = await readRequest(db, id);
   if (!['pending', 'supervisor_approved'].includes(request.status)) throw fail(409, 'This request has already been decided.');
   const requested = Number(request.ot_minutes || 0);
-  const approvedMinutes = decision === 'approved' && requested > 0 ? Math.max(0, Math.min(requested, Math.round(Number(minutes ?? requested)))) : 0;
-  if (decision === 'approved' && approvedMinutes > 0 && !OT_RATES.includes(rate)) throw fail(400, 'Choose the OT rate: 1.0, 1.5, 2.0 or 3.0.');
-  const { error } = await db.from('hr_attendance_requests').update({ status: decision, decided_by: by, decided_at: new Date().toISOString(), decision_note: note, ot_multiplier: approvedMinutes > 0 ? rate : null }).eq('id', id).in('status', ['pending', 'supervisor_approved']);
+  const rules = await loadRules(db), policy = rules.policyFor(request.work_date);
+  // The hours the person applied for (in whole blocks). The rate and the rest are worked out from the kind of day, not chosen.
+  const gross = decision === 'approved' && requested > 0 ? wholeHours(Math.min(requested, Math.round(Number(minutes ?? requested))), policy) : 0;
+  if (decision === 'approved' && requested > 0 && gross < policy.minMinutes) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(policy.minMinutes)}.`);
+  let pay: { kind: DayKind; net: number; parts: OtPart[] } | null = null;
+  if (gross > 0) {
+    const { data: one } = await db.from('hr_employees').select(PERSON).eq('id', request.employee_id).maybeSingle();
+    if (!one) throw fail(404, 'Staff member not found.');
+    // Never more than the clocks and the roster show (when both clocks are there).
+    if (hasNoOt(one)) throw fail(400, 'This staff member has flexible hours or is a doctor, so there is no OT. Reject the request.');
+    const clock = await clockOtFor(db, one, request.work_date, rules);
+    const allowed = clock.hasClocks ? Math.min(gross, clock.counted) : gross;
+    if (allowed < policy.minMinutes) throw fail(400, `The clocks and roster show less than ${hoursMinutesText(policy.minMinutes)} of extra time that day. Reject it, or fix the clock first.`);
+    pay = await otDecision(db, one, request.work_date, allowed, policy);
+    if (!pay.parts.length) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(policy.minMinutes)}.`);
+  }
+  const { error } = await db.from('hr_attendance_requests').update({ status: decision, decided_by: by, decided_at: new Date().toISOString(), decision_note: note, ot_multiplier: pay ? pay.parts[0].multiplier : null }).eq('id', id).in('status', ['pending', 'supervisor_approved']);
   if (error) throw error;
   if (decision !== 'approved') return;
   await applyRequest(db, request);
-  if (approvedMinutes > 0) {
-    // The OT table is what Payroll reads: record the approved minutes at the chosen rate (never less than what the clocks captured).
+  if (pay) {
+    // The OT table is what Payroll reads: the approved hours, and the parts (hours at each rate) the pay is made of (never less than what the clocks captured).
     const { data: one } = await db.from('hr_employees').select(PERSON).eq('id', request.employee_id).maybeSingle();
-    let captured = approvedMinutes;
-    if (one) { const day = ((await buildDays(db, [one], request.work_date, request.work_date, await loadRules(db))).get(request.employee_id) || [])[0]; captured = Math.max(day?.otCounted || 0, approvedMinutes); }
-    const { error: otError } = await db.from('hr_attendance_ot').upsert({ employee_id: request.employee_id, work_date: request.work_date, captured_minutes: captured, status: 'approved', approved_minutes: approvedMinutes, multiplier: rate, note: text(`Requested by staff. ${note}`, 300), decided_by: by, decided_at: new Date().toISOString() }, { onConflict: 'employee_id,work_date' });
+    let captured = gross;
+    if (one) { const day = ((await buildDays(db, [one], request.work_date, request.work_date, rules)).get(request.employee_id) || [])[0]; captured = Math.max(day?.otCounted || 0, gross); }
+    const { error: otError } = await db.from('hr_attendance_ot').upsert({ employee_id: request.employee_id, work_date: request.work_date, captured_minutes: captured, status: 'approved', approved_minutes: pay.net, multiplier: pay.parts[0].multiplier, parts: pay.parts, note: text(`Requested by staff. ${otSummary(pay.kind, gross, policy)}. ${note}`, 300), decided_by: by, decided_at: new Date().toISOString() }, { onConflict: 'employee_id,work_date' });
     if (otError) throw otError;
   }
 }
@@ -308,12 +426,21 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const date = isDate(body.date) ? String(body.date) : '', inTime = body.inTime ? String(body.inTime) : '', outTime = body.outTime ? String(body.outTime) : '', reason = text(body.reason, 300), remarks = text(body.remarks, 500);
     const otText = body.otTime ? String(body.otTime) : '';
     if (otText && !isTime(otText)) throw fail(400, 'Enter the OT hours as hh:mm.');
-    const otMinutes = otText ? Number(otText.slice(0, 2)) * 60 + Number(otText.slice(3, 5)) : 0;
+    const otRaw = otText ? Number(otText.slice(0, 2)) * 60 + Number(otText.slice(3, 5)) : 0;
+    const policy = rules.policyFor(date);
+    if (otRaw > 0 && otRaw < policy.minMinutes) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(policy.minMinutes)}.`);
+    const otMinutes = wholeHours(otRaw, policy);
     const draft = body.draft === true;
-    if (!date || date > today() || date < addDay(today(), -30)) throw fail(400, 'Choose a date within the last 30 days.');
+    if (!date || date > today() || date.slice(0, 7) !== today().slice(0, 7)) throw fail(400, 'Choose a date in this month. Once the month ends, ask HR.');
     if (!inTime && !outTime && !otMinutes) throw fail(400, 'Enter the time you clocked in or out, the OT hours, or both.');
     if ((inTime && !isTime(inTime)) || (outTime && !isTime(outTime))) throw fail(400, 'Enter the times as hh:mm.');
     if (!reason) throw fail(400, 'Choose or write the reason.');
+    if (otMinutes > 0 && hasNoOt(me)) throw fail(400, 'Your hours are flexible or you are a doctor, so there is no OT to apply for.');
+    // OT cannot be more than the clocks and roster show for that day (when both clocks are there).
+    if (otMinutes > 0) {
+      const clock = await clockOtFor(db, me, date, rules);
+      if (clock.hasClocks && otMinutes > clock.counted) throw fail(400, clock.counted >= policy.minMinutes ? `Your clocks and roster show ${hoursMinutesText(clock.counted)} of OT on that date. Apply for ${hoursMinutesText(clock.counted)} or less.` : 'Your clocks and roster show less than 1 hour of OT on that date. If a clock is missing, send a Forgot to clock request first.');
+    }
     const supervisor = [me.leave_approver_id, me.final_approver_id].find((id: string | null) => id && id !== me.id) || null;
     const waiting = await db.from('hr_attendance_requests').select('id').eq('employee_id', me.id).eq('work_date', date).in('status', ['pending', 'supervisor_approved']).limit(1);
     if (waiting.data?.length && !(action === 'attendance_request_update' && waiting.data[0].id === text(body.id, 60))) throw fail(409, 'You already have a request waiting for that date.');
@@ -343,7 +470,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
   if (req.method === 'GET' && action === 'attendance_request_approvals') {
     const [{ data: mineRows, error: listError }, hrRows] = await Promise.all([
       db.from('hr_attendance_requests').select('*').eq('approver_id', me.id).eq('status', 'pending').order('created_at').limit(50),
-      isHr ? db.from('hr_attendance_requests').select('*').eq('status', 'supervisor_approved').order('created_at').limit(50) : Promise.resolve({ data: [], error: null }),
+      isHr ? db.from('hr_attendance_requests').select('*').eq('status', 'supervisor_approved').neq('employee_id', me.id).order('created_at').limit(50) : Promise.resolve({ data: [], error: null }),
     ]);
     if (listError || hrRows.error) throw listError || hrRows.error;
     const seen = new Set<string>();
@@ -351,11 +478,12 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const ids = [...new Set(rows.map(({ row }) => row.employee_id))];
     const { data: people } = ids.length ? await db.from('hr_employees').select('id,full_name').in('id', ids) : { data: [] };
     const names = new Map<string, string>((people || []).map((p: any) => [p.id, p.full_name] as [string, string]));
-    return res.status(200).json({ requests: rows.map(({ row, stage }) => ({ ...requestRow(row, names), stage })) });
+    return res.status(200).json({ requests: await withOtPreview(db, rows.map(({ row, stage }) => ({ ...requestRow(row, names), stage })), rows.map(({ row }) => row)) });
   }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
     const id = text(body.id, 60);
     const waiting = await readRequest(db, id);
+    if (waiting.employee_id === me.id) throw fail(403, 'You cannot approve your own request. Another HR officer or your supervisor decides it.');
     // A request a supervisor has approved is waiting for HR: an HR officer confirms it here (OT at the chosen rate, or the forgotten clock).
     if (waiting.status === 'supervisor_approved' && isHr) await hrDecide(db, id, String(body.decision), text(body.note, 300), me.full_name, Number(body.rate) || 1.5, body.minutes);
     else await supervisorDecide(db, id, String(body.decision), text(body.note, 300), me.full_name, me.id);
@@ -370,7 +498,7 @@ export const TEAM_COLUMNS = PERSON;
 export async function attendanceHrAction(req: any, res: any, db: any, action: string, body: any, userLabel: string, only?: Set<string>) {
   // `only` limits the people to a team (the COO's own team); HR sees everyone.
   const active = async () => { const { data, error } = await db.from('hr_employees').select(PERSON).eq('status', 'Active').order('full_name').limit(500); if (error) throw error; return ((data || []) as Employee[]).filter((p) => !only || only.has(p.id)); };
-  const person = (p: Employee) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, doctor: isDoctor(p.designation) });
+  const person = (p: Employee) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, doctor: isDoctor(p.designation), group: /CLINIC ASSISTANT/i.test(p.designation || '') ? 'CA' : 'Others' });
   const monthOf = (value: unknown) => { const month = /^\d{4}-\d{2}$/.test(String(value)) ? String(value) : today().slice(0, 7); if (Number(month.slice(5)) < 1 || Number(month.slice(5)) > 12) throw fail(400, 'Choose a valid month.'); return month; };
 
   if (req.method === 'GET' && action === 'attendance_daily') {
@@ -424,7 +552,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, `${month}-01`, monthEnd(month))]);
     const days = buildDaysFrom(data, people, `${month}-01`, monthEnd(month), rules);
     const rows: any[] = [];
-    for (const p of people) for (const day of days.get(p.id) || []) if (day.otCounted > 0) { const view = dayView(day); rows.push({ ...person(p), date: day.date, shift: day.code, startTime: view.startTime, endTime: view.endTime, inTime: view.inTime, outTime: view.outTime, dayOff: !day.start, captured: day.otCounted, status: day.otStatus, approved: day.otApproved, rate: day.otRate, note: day.otNote }); }
+    for (const p of people) for (const day of days.get(p.id) || []) if (day.otCounted > 0) { const view = dayView(day); rows.push({ ...person(p), date: day.date, shift: day.code, startTime: view.startTime, endTime: view.endTime, inTime: view.inTime, outTime: view.outTime, dayOff: !day.start, captured: day.otCounted, status: day.otStatus, approved: day.otApproved, rate: day.otRate, parts: day.otParts, note: day.otNote }); }
     rows.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
     return res.status(200).json({ month, rows });
   }
@@ -432,15 +560,15 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : '', status = String(body.status);
     if (!id || !date) throw fail(400, 'Choose a person and a date.');
     if (!['approved', 'rejected'].includes(status)) throw fail(400, 'Choose approve or reject.');
-    const rate = Number(body.rate);
-    if (status === 'approved' && !OT_RATES.includes(rate)) throw fail(400, 'Choose the OT rate: 1.0, 1.5, 2.0 or 3.0.');
     const { data: one } = await db.from('hr_employees').select(PERSON).eq('id', id).maybeSingle();
     if (!one) throw fail(404, 'Staff member not found.');
     const rules = await loadRules(db);
     const day = ((await buildDays(db, [one], date, date, rules)).get(id) || [])[0];
     if (!day || day.otCounted <= 0) throw fail(400, 'There is no extra time to decide on that date.');
-    const minutes = status === 'approved' ? Math.max(0, Math.min(day.otCounted, Math.round(Number(body.minutes ?? day.otCounted)))) : 0;
-    const { error } = await db.from('hr_attendance_ot').upsert({ employee_id: id, work_date: date, captured_minutes: day.otCounted, status, approved_minutes: minutes, multiplier: status === 'approved' ? rate : 1.5, note: text(body.note, 300), decided_by: userLabel, decided_at: new Date().toISOString() }, { onConflict: 'employee_id,work_date' });
+    const gross = status === 'approved' ? wholeHours(Math.min(day.otCounted, Math.round(Number(body.minutes ?? day.otCounted))), rules.policyFor(date)) : 0;
+    const pay = gross > 0 ? await otDecision(db, one, date, gross, rules.policyFor(date)) : null;
+    if (status === 'approved' && !pay?.parts.length) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(rules.policyFor(date).minMinutes)}.`);
+    const { error } = await db.from('hr_attendance_ot').upsert({ employee_id: id, work_date: date, captured_minutes: day.otCounted, status, approved_minutes: pay ? pay.net : 0, multiplier: pay ? pay.parts[0].multiplier : 1.5, parts: pay ? pay.parts : [], note: text(body.note, 300), decided_by: userLabel, decided_at: new Date().toISOString() }, { onConflict: 'employee_id,work_date' });
     if (error) throw error;
     return res.status(200).json({ success: true });
   }
@@ -448,14 +576,38 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   // Corrections asked by staff: HR can decide any of them.
   if (req.method === 'GET' && action === 'attendance_requests') {
     const status = req.query.status === 'all' ? 'all' : 'pending';
-    let query = db.from('hr_attendance_requests').select('*').neq('status', 'draft').order('created_at', { ascending: false }).limit(100);
+    // A range of dates (from and to, YYYY-MM-DD): a calendar month, or a payroll period (20th to 19th). Any range can be looked at, not only the latest 100 requests.
+    const dateOk = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    const from = dateOk(req.query.from) ? String(req.query.from) : '', to = dateOk(req.query.to) ? String(req.query.to) : '';
+    let query = db.from('hr_attendance_requests').select('*').neq('status', 'draft').order('created_at', { ascending: false }).limit(from && to ? 400 : 100);
+    if (from && to) query = query.gte('work_date', from).lte('work_date', to);
     if (status === 'pending') query = query.in('status', ['pending', 'supervisor_approved']);
     const { data, error } = await query;
     if (error) throw error;
-    const ids = [...new Set((data || []).map((row: any) => row.employee_id))];
+    // OT that HR approved without a request (the ones brought over from Infotech) is listed too, read only, when decided requests are shown.
+    let extra: any[] = [];
+    if (status === 'all') {
+      const since = from || addDay(today(), -90);
+      let otQuery = db.from('hr_attendance_ot').select('id,employee_id,work_date,status,approved_minutes,multiplier,parts,note,decided_by,decided_at').eq('status', 'approved').gte('work_date', since).order('work_date', { ascending: false }).limit(400);
+      if (to) otQuery = otQuery.lte('work_date', to);
+      const { data: otRows } = await otQuery;
+      const asked = new Set((data || []).filter((row: any) => !['rejected', 'cancelled'].includes(row.status) && !isMissedClock(row.reason)).map((row: any) => `${row.employee_id}|${row.work_date}`));
+      extra = (otRows || []).filter((row: any) => !asked.has(`${row.employee_id}|${row.work_date}`));
+    }
+    const ids = [...new Set([...(data || []), ...extra].map((row: any) => row.employee_id))];
     const { data: people } = ids.length ? await db.from('hr_employees').select('id,full_name,company,employee_code').in('id', ids) : { data: [] };
     const names = new Map<string, string>((people || []).map((p: any) => [p.id, `${p.full_name} (${p.company} ${p.employee_code})`]));
-    return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, names)) });
+    const companyOf = new Map<string, string>((people || []).map((p: any) => [p.id, p.company]));
+    const extraDetails = await otDetails(db, extra.map((row: any) => ({ key: `ot-${row.id}`, employee_id: row.employee_id, work_date: String(row.work_date), asked: Number(row.approved_minutes || 0), state: 'approved' as const })));
+    const listed = (extra || []).map((row: any) => {
+      const detail = extraDetails.get(`ot-${row.id}`), there = /approved there: ([^)]*)\)/.exec(String(row.note || ''))?.[1];
+      return {
+        id: `ot-${row.id}`, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: '', outTime: '', otMinutes: Number(row.approved_minutes || 0), otText: minutesText(Number(row.approved_minutes || 0)), reason: 'Overtime', remarks: row.decided_by === 'Infotech migration' ? `Brought over from Infotech${there ? ` (${there} there)` : ''}` : String(row.note || ''),
+        status: 'approved', supervisorDecidedBy: '', supervisorNote: '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: '', rate: null, createdAt: row.decided_at, company: companyOf.get(row.employee_id) || '', otPreview: detail?.pay || '', ...(detail?.clockIn !== undefined ? { clockIn: detail.clockIn, clockOut: detail.clockOut } : {}), ...(detail?.shiftCode !== undefined ? { shiftCode: detail.shiftCode, shiftStart: detail.shiftStart, shiftEnd: detail.shiftEnd } : {}), readOnly: true,
+      };
+    });
+    const requests = await withOtPreview(db, (data || []).map((row: any) => ({ ...requestRow(row, names), company: companyOf.get(row.employee_id) || '' })), data || []);
+    return res.status(200).json({ requests: [...requests, ...listed] });
   }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
     await hrDecide(db, text(body.id, 60), String(body.decision), text(body.note, 300), userLabel || 'HR', Number(body.rate), body.minutes);
@@ -649,6 +801,58 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (error) throw error;
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { clock_mode: mode, clock_place_ids: placeIds, clock_required: required, default_shift: defaultShift, by: userLabel } });
     return res.status(200).json({ success: true });
+  }
+  // ---- OT policy (HR edits it in OT > Settings) and the OT summary ----
+  if (req.method === 'GET' && action === 'attendance_ot_policy') {
+    if (only) throw fail(403, 'Only HR can see the OT policy.');
+    const rules = await loadRules(db);
+    return res.status(200).json({ policy: rules.policy, defaults: DEFAULT_OT_POLICY, versions: rules.versions, today: today() });
+  }
+  // A change is saved as a new version "from" a date: OT dated on or after it follows the new settings, OT before it keeps the old ones.
+  if (req.method === 'POST' && action === 'attendance_ot_policy_save') {
+    if (only) throw fail(403, 'Only HR can change the OT policy.');
+    let versions: OtPolicyVersion[] | null = null;
+    if (body.reset !== true) {
+      if (!isDate(body.from)) throw fail(400, 'Choose the date the new settings start from.');
+      let policy: OtPolicy;
+      try { policy = cleanPolicy(body.policy); } catch (cause) { throw fail(400, cause instanceof Error ? cause.message : 'Check the OT settings.'); }
+      const current = await loadRules(db);
+      versions = [...current.versions.filter((version) => version.from !== String(body.from)), { from: String(body.from), policy }].sort((a, b) => a.from.localeCompare(b.from));
+      // The first version covers every date; it is kept only when it is not just the memo defaults.
+      if (versions[0].from === '' && JSON.stringify({ ...versions[0].policy, minMinutes: 0 }) === JSON.stringify({ ...DEFAULT_OT_POLICY, minMinutes: 0 })) versions = versions.slice(1);
+    }
+    const patch: any = { id: 1, ot_policy: versions };
+    if (versions && versions.length) patch.ot_min_minutes = versions[versions.length - 1].policy.minMinutes;
+    const { error } = await db.from('hr_attendance_settings').upsert(patch, { onConflict: 'id' });
+    if (error) { if (error.code === '42703') throw fail(400, 'The OT settings are not set up yet. Run supabase/migrations/202611170005_ot_policy.sql in Supabase first.'); throw error; }
+    await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { ot_policy: versions ? { from: String(body.from), settings: versions[versions.length - 1].policy } : 'reset to the memo defaults' }, changed_by: null });
+    const rules = await loadRules(db);
+    return res.status(200).json({ success: true, policy: rules.policy, versions: rules.versions });
+  }
+  // OT approved in a date range (a month, or a payroll period), per staff member: hours at each rate, and what is still waiting.
+  if (req.method === 'GET' && action === 'attendance_ot_summary') {
+    const dateOk = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    const from = dateOk(req.query.from) ? String(req.query.from) : `${today().slice(0, 7)}-01`, to = dateOk(req.query.to) ? String(req.query.to) : today();
+    const [{ data: approved, error: otError }, { data: waiting, error: waitError }] = await Promise.all([
+      db.from('hr_attendance_ot').select('employee_id,work_date,approved_minutes,multiplier,parts').eq('status', 'approved').gte('work_date', from).lte('work_date', to).limit(5000),
+      db.from('hr_attendance_requests').select('employee_id,work_date,ot_minutes,reason').in('status', ['pending', 'supervisor_approved']).gt('ot_minutes', 0).gte('work_date', from).lte('work_date', to).limit(2000),
+    ]);
+    if (otError || waitError) throw otError || waitError;
+    const ids = [...new Set([...(approved || []), ...(waiting || [])].map((row: any) => row.employee_id))];
+    const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] };
+    const scope = only ? new Set<string>(only) : null;
+    type Sum = { id: string; company: string; code: string; name: string; group: string; days: number; worked: number; at: Record<string, number>; hrp: number; waitingMinutes: number; waitingCount: number };
+    const sums = new Map<string, Sum>();
+    for (const p of people || []) { if (scope && !scope.has(p.id)) continue; sums.set(p.id, { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, group: /CLINIC ASSISTANT/i.test(p.designation || '') ? 'CA' : 'Others', days: 0, worked: 0, at: { '1': 0, '1.5': 0, '2': 0, '3': 0 }, hrp: 0, waitingMinutes: 0, waitingCount: 0 }); }
+    for (const row of approved || []) {
+      const sum = sums.get(row.employee_id); if (!sum) continue;
+      const parts: OtPart[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }];
+      sum.days += 1; sum.worked += Number(row.approved_minutes || 0);
+      for (const part of parts) { const key = String(Number(part.multiplier)); if (key in sum.at) sum.at[key] += Number(part.minutes || 0); sum.hrp += (Number(part.minutes || 0) / 60) * Number(part.multiplier); }
+    }
+    for (const row of waiting || []) { const sum = sums.get(row.employee_id); if (!sum || isMissedClock(row.reason)) continue; sum.waitingMinutes += Number(row.ot_minutes || 0); sum.waitingCount += 1; }
+    const rows = [...sums.values()].filter((sum) => sum.days || sum.waitingCount).sort((a, b) => b.hrp - a.hrp || a.name.localeCompare(b.name));
+    return res.status(200).json({ from, to, rows });
   }
   if (req.method === 'GET' && action === 'attendance_rules') {
     const rules = await loadRules(db);

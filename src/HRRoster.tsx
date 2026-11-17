@@ -14,7 +14,7 @@ import { HRRosterDraft } from './HRRosterDraft';
 // person's usual working weekdays.
 const API = '/api/status?resource=hr';
 type Person = { id: string; company: string; code: string; name: string; short?: string; designation: string };
-type Day = { id: string; date: string; shift: string; works: boolean; note: string };
+type Day = { id: string; date: string; shift: string; works: boolean; note: string; auto?: boolean };
 
 async function api(query: string, body?: unknown) {
   const response = await officeFetch(`${API}&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
@@ -27,7 +27,7 @@ const WEEKDAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const isDoctor = (person: Person) => /\b(DR|DOCTOR)\b/i.test(person.designation);
 // "AHMAD SYAFIQ BIN SO'IB" becomes "Syafiq": the first name that is not a common first word.
 export const guessName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
-const isLeave = (day: Day) => !day.works && ['AL', 'UPL', 'MC', 'ML', 'EL'].includes(day.shift);
+const isLeave = (day: Day) => !day.works && ['AL', 'UPL', 'MC', 'ML', 'EL', 'HOSP', 'MATN', 'MARRG'].includes(day.shift);
 const isOffice = (shift: string) => ['OH', 'AM-6', 'AM-5'].includes(shift);
 // Colour by what the day is: a day shift, a night shift, office hours, a rest day, leave, a public holiday, or not yet scheduled.
 const shiftTone = (shift: string) => shift === 'PM' ? 'bg-amber-100 text-amber-900' : isOffice(shift) ? 'bg-sky-100 text-sky-900' : 'bg-emerald-100 text-emerald-900';
@@ -184,7 +184,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
           <thead><tr><th className="sticky left-0 z-10 min-w-[110px] bg-white px-3 py-2 text-left sm:min-w-[210px] text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
             <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800" title={person.name}>{label(person)}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
-            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><button type="button" onClick={() => startEdit(person, date, day)} title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}` : 'No roster'} className={`grid h-9 w-full cursor-pointer place-items-center rounded-md px-0.5 text-[11px] font-bold transition hover:ring-2 hover:ring-[#0b587b]/40 ${cellTone(day && { ...day, shift: shown(day.shift) })}`}>{day ? shown(day.shift) : '·'}</button></td>; })}
+            {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><button type="button" onClick={() => startEdit(person, date, day)} title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}${day.auto ? ' · from the profile (not saved in the roster)' : ''}` : 'No roster'} className={`grid h-9 w-full cursor-pointer place-items-center rounded-md px-0.5 text-[11px] font-bold transition hover:ring-2 hover:ring-[#0b587b]/40 ${cellTone(day && { ...day, shift: shown(day.shift) })}${day?.auto ? ' opacity-60' : ''}`}>{day ? shown(day.shift) : '·'}</button></td>; })}
           </tr>)}</tbody>
         </table> :
         <div className="sm:min-w-[760px]">

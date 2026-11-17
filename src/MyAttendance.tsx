@@ -1,5 +1,6 @@
-import { isMissedClock, MISSED_REASONS, OT_REASONS } from './lib/attendanceRequests';
+import { isMissedClock, MISSED_REASONS, missedClockDates, OT_REASONS, unclaimedOtDays } from './lib/attendanceRequests';
 import { useEffect, useRef, useState } from 'react';
+import { OtPolicy } from './OtPolicy';
 import { newCode } from './lib/shiftCodes';
 import { ChevronLeft, ChevronRight, Clock3, LogIn, LogOut, MapPin } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
@@ -10,7 +11,7 @@ import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 // sees the requests waiting for them here.
 type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; leave: string };
 type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
-type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr' };
+type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; otPreview?: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr' };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
 const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${Math.floor(request.otMinutes / 60)} h ${request.otMinutes % 60} m`].filter(Boolean).join(' · ');
@@ -54,13 +55,14 @@ export function LocationHelp({ onClose, onRetry, kind = phoneKind(), app = homeS
   </div>;
 }
 
-export default function MyAttendance({ mode = 'clock', isApprover = false }: { key?: string; mode?: 'clock' | 'ot'; isApprover?: boolean }) {
+export default function MyAttendance({ mode = 'clock', isApprover = false, onApplyOt, startDate }: { key?: string; mode?: 'clock' | 'ot'; isApprover?: boolean; onApplyOt?: (date: string) => void; startDate?: string }) {
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [days, setDays] = useState<Day[] | null>(null);
+  const [monthDays, setMonthDays] = useState<Day[] | null>(null);
   const [mine, setMine] = useState<Req[]>([]);
   const [waiting, setWaiting] = useState<Req[]>([]);
   const [form, setForm] = useState<{ id?: string; date: string; inTime: string; outTime: string; otTime: string; reason: string; remarks: string } | null>(null);
@@ -75,6 +77,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
   const loadRequests = () => { assessmentFetch('action=attendance_requests').then((result: { requests: Req[] }) => setMine(result.requests)).catch(() => setMine([])); assessmentFetch('action=attendance_request_approvals').then((result: { requests: Req[] }) => setWaiting(result.requests)).catch(() => setWaiting([])); };
   useEffect(() => { void loadState(); loadRequests(); }, []);
   useEffect(loadDays, [month]);
+  const loadMonthDays = () => { assessmentFetch(`action=attendance_history&month=${monthOf(new Date())}`).then((result: { days: Day[] }) => setMonthDays(result.days)).catch(() => setMonthDays(null)); };
+  useEffect(loadMonthDays, []);
 
   const clock = async () => {
     if (!state || busy) return;
@@ -124,17 +128,27 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
       setNoClock(!day?.inTime);
     } catch { /* the person can still type the times */ }
   };
-  const [rates, setRates] = useState<Record<string, string>>({});
   const decide = async (id: string, decision: 'approved' | 'rejected') => {
     setBusy(true); setError('');
-    try { await assessmentFetch('action=attendance_request_decide', { method: 'POST', body: JSON.stringify({ id, decision, rate: Number(rates[id] || 1.5) }) }); loadRequests(); }
+    try { await assessmentFetch('action=attendance_request_decide', { method: 'POST', body: JSON.stringify({ id, decision }) }); loadRequests(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
   };
+
+  useEffect(() => {
+    if (mode !== 'ot' || !startDate || !state) return;
+    setForm({ date: startDate, inTime: '', outTime: '', otTime: '', reason: OT_REASONS[0], remarks: '' });
+    void autofill(startDate);
+  }, [startDate, !!state]);
 
   if (!state) return error ? <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p> : <p className="text-sm text-slate-500">Loading…</p>;
   const shift = state.shift; const hasShift = !!shift.startTime;
   const next = state.nextKind;
-  const dates = Array.from({ length: 15 }, (_, index) => addDay(state.today, -index));
+  const dates = Array.from({ length: Number(state.today.slice(8, 10)) }, (_, index) => addDay(state.today, -index));
+  // Days this month with a clock missing (no clock in, or a clock in without a clock out), and no active request yet.
+  const forgotList = monthDays ? missedClockDates(monthDays, mine, state.today).filter((day) => dates.includes(day.date)) : null;
+  const forgotKind = (day: Day) => forgotList?.find((item) => item.date === day.date)?.kind || '';
+  const otDays = monthDays ? unclaimedOtDays(monthDays, mine, state.today) : [];
+  const forgotDates = forgotList ? forgotList.map((day) => day.date).sort().reverse() : null;
   // The request screens: OT (overtime, rest day) and Missed clock (forgot to clock in or out). A request shows under the one its reason belongs to.
   const requestSections = (kind: 'ot' | 'missed') => {
     const missed = kind === 'missed';
@@ -147,22 +161,26 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
       <ul className="divide-y divide-slate-100">{waitingHere.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
         {request.stage === 'hr' && <p className="mt-1 inline-block rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700">Supervisor approved · waiting for HR</p>}
-        {request.stage === 'hr' && request.otMinutes > 0 && <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">OT rate<select value={rates[request.id] || '1.5'} onChange={(event) => setRates({ ...rates, [request.id]: event.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold"><option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option><option value="3">3.0x</option></select></label>}
+        {request.otPreview && <p className="mt-1 text-xs font-semibold text-[#0b587b]">Pay: {request.otPreview}</p>}
         <div className="mt-2 flex gap-2"><button onClick={() => void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Approve</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>
       </li>)}</ul>
     </section>;
     return <>
     {!missed && approveBox}
+    {!missed && otDays.length > 0 && <section className={`${card} space-y-2`}>
+      <h3 className="font-semibold">Forgot to apply OT? <span className="text-xs font-normal text-slate-400">· extra time worked, no request yet</span></h3>
+      <ul className="divide-y divide-slate-100">{otDays.map((day) => <li key={day.date} className="flex items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(day.date)} · worked {hours(day.worked)}</span><button onClick={() => { setForm({ date: day.date, inTime: '', outTime: '', otTime: '', reason: OT_REASONS[0], remarks: '' }); void autofill(day.date); setTimeout(() => document.getElementById('apply-ot-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#0b587b]">Apply OT</button></li>)}</ul>
+    </section>}
 
-    <section className={`${card} space-y-3`}>
-      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && <button onClick={() => { setForm({ date: addDay(state.today, -1), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' }); if (!missed) void autofill(addDay(state.today, -1)); }} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
+    <section id={missed ? 'missed-clock-box' : 'apply-ot-box'} className={`${card} space-y-3`}>
+      <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && missed && forgotDates && !forgotDates.length && <span className="text-xs text-slate-400">No missed clock this month</span>}{!form && !(missed && forgotDates && !forgotDates.length) && <button onClick={() => { setForm({ date: missed && forgotDates ? forgotDates[0] : (dates[1] || state.today), inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' }); if (!missed) void autofill((dates[1] || state.today)); }} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
       {form && <div className="space-y-3">
-        <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => { setForm({ ...form, date: event.target.value }); if (!missed && !form.id) void autofill(event.target.value); }} className={field}>{dates.map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
-        <div className={`grid gap-3 ${missed ? 'grid-cols-2' : 'grid-cols-3'}`}><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label>{!missed && <div className="block text-sm"><span className="mb-1 block text-slate-500">OT hours</span><div className="flex gap-1"><select aria-label="OT hours" value={form.otTime ? String(Number(form.otTime.slice(0, 2))) : ''} onChange={(event) => setForm({ ...form, otTime: event.target.value === '' ? '' : `${event.target.value.padStart(2, '0')}:${form.otTime ? form.otTime.slice(3, 5) : '00'}` })} className={field}><option value="">h</option>{Array.from({ length: 25 }, (_, hour) => <option key={hour} value={hour}>{hour} h</option>)}</select><select aria-label="OT minutes" value={form.otTime ? String(Number(form.otTime.slice(3, 5))) : ''} onChange={(event) => setForm({ ...form, otTime: `${form.otTime ? form.otTime.slice(0, 2) : '00'}:${event.target.value.padStart(2, '0')}` })} className={field}><option value="">m</option>{Array.from({ length: 60 }, (_, minute) => <option key={minute} value={minute}>{minute} m</option>)}</select></div></div>}</div>
+        <label className="block text-sm"><span className="mb-1 block text-slate-500">Date</span><select value={form.date} onChange={(event) => { setForm({ ...form, date: event.target.value }); if (!missed && !form.id) void autofill(event.target.value); }} className={field}>{(missed && forgotDates ? [...new Set([...(forgotDates.includes(form.date) ? [] : [form.date]), ...forgotDates])].sort().reverse() : dates).map((date) => <option key={date} value={date}>{dayName(date)}</option>)}</select></label>
+        <div className={`grid gap-3 ${missed ? 'grid-cols-2' : 'grid-cols-3'}`}><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label>{!missed && <div className="block text-sm"><span className="mb-1 block text-slate-500">OT hours</span><select aria-label="OT hours" value={form.otTime ? String(Math.floor((Number(form.otTime.slice(0, 2)) * 60 + Number(form.otTime.slice(3, 5))) / 60)) : ''} onChange={(event) => setForm({ ...form, otTime: event.target.value === '' || event.target.value === '0' ? '' : `${event.target.value.padStart(2, '0')}:00` })} className={field}><option value="">Select</option>{Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{hour} h</option>)}</select></div>}</div>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={reasons.includes(form.reason) ? form.reason : reasons[0]} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Remarks (optional)</span><input value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} maxLength={500} className={field} /></label>
         {!missed && noClock && <p className="text-xs text-amber-700">No clock record for this day, so type the times or the OT hours yourself.</p>}
-        <p className="text-xs text-slate-400">{missed ? 'Enter the clock time you missed.' : 'Fill only what you need: the OT hours you worked, or the times of the day.'} Your supervisor approves first, then HR confirms.</p>
+        <p className="text-xs text-slate-400">{missed ? 'Enter the clock time you missed.' : 'OT is counted in whole hours (rounded down), at least 1 hour. 1 hour of rest is taken off when you work more than 5 hours. Fill only what you need: the OT hours you worked, or the times of the day.'} Your supervisor approves first, then HR confirms.</p>
         <div className="flex flex-wrap gap-2"><button onClick={() => void send(false)} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => void send(true)} disabled={busy} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-[#0b587b] disabled:opacity-60">Save draft</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Close</button></div>
       </div>}
       {mineHere.length > 0 && <ul className="divide-y divide-slate-100">{mineHere.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
@@ -170,7 +188,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
     {missed && approveBox}
   </>;
   };
-  if (mode === 'ot') return <div className="space-y-4">{requestSections('ot')}</div>;
+  if (mode === 'ot') return <div className="space-y-4">{requestSections('ot')}<OtPolicy className={card} /></div>;
   return <div className="space-y-4">
     <section className="relative overflow-hidden rounded-[24px] bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-5 text-white shadow-[0_18px_40px_rgba(11,48,70,0.25)] sm:p-7">
       <i className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10" />
@@ -203,6 +221,12 @@ export default function MyAttendance({ mode = 'clock', isApprover = false }: { k
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-slate-600"><Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-300" />{day.inTime || '—'} → {day.outTime || '—'}{day.worked > 0 && <span className="text-slate-400"> · {hours(day.worked)}</span>}</span>
           {day.lateCounted > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Late {day.lateCounted} min</span>}
           {badge(day.status)}
+          {mode === 'clock' && onApplyOt && otDays.some((item) => item.date === day.date) && <button onClick={() => onApplyOt(day.date)} className="basis-full text-left text-xs font-semibold text-[#b57a00] underline">Worked {hours(day.worked)}. Forgot to apply OT? Tap to apply for {dayName(day.date)}</button>}
+          {(() => {
+            const kind = forgotKind(day);
+            if (!kind || !dates.includes(day.date)) return null;
+            return <button onClick={() => { setForm({ date: day.date, inTime: day.inTime || '', outTime: day.outTime || '', otTime: '', reason: MISSED_REASONS[1], remarks: '' }); setTimeout(() => document.getElementById('missed-clock-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }} className="basis-full text-left text-xs font-semibold text-[#0b587b] underline">Did you forget to clock {kind}? Tap to send a request for {dayName(day.date)}</button>;
+          })()}
         </li>)}
         {!days.some((day) => !['off', 'upcoming', 'no-record'].includes(day.status)) && <li className="py-3 text-sm text-slate-500">{days.length > 0 && days.every((day) => day.status === 'no-record') ? `No record for ${monthName(month)}.` : `Nothing recorded for ${monthName(month)} yet.`}</li>}
       </ul>}
