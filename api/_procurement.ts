@@ -199,7 +199,7 @@ export async function procurementHandler(req: any, res: any) {
       const kind = text(req.query?.kind, 12);
       const type = text(req.query?.type, 30);
       const page = Math.max(0, Number(req.query?.page) || 0);
-      let query = db.from('proc_items').select('plato_id,type,category,categories,ingredients,tags_auto,name,description,unit,supplier,selling_price,cost_price,track_stock,kind,proc_item_suppliers(supplier,preferred,auto)', { count: 'exact' }).order('name');
+      let query = db.from('proc_items').select('plato_id,type,category,categories,ingredients,tags_auto,name,name_edited,name_plato,description,unit,supplier,selling_price,cost_price,track_stock,kind,proc_item_suppliers(supplier,preferred,auto)', { count: 'exact' }).order('name');
       if (['purchased', 'stocked', 'service'].includes(kind)) query = query.eq('kind', kind);
       if (type) query = query.eq('type', type);
       const category = text(req.query?.category, 80), ingredient = text(req.query?.ingredient, 80);
@@ -240,12 +240,21 @@ export async function procurementHandler(req: any, res: any) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
       const id = text(body.id, 200);
       const clean = (value: unknown, limit: number) => [...new Set((Array.isArray(value) ? value : []).map((entry) => text(entry, 80)).filter(Boolean))].slice(0, limit);
-      const { data: exists } = await db.from('proc_items').select('plato_id').eq('plato_id', id).maybeSingle();
+      const { data: exists } = await db.from('proc_items').select('plato_id,name,name_edited,name_plato').eq('plato_id', id).maybeSingle();
       if (!exists) throw fail(404, 'Item not found.');
+      // The name shown in AraOffice can differ from Plato's. The Plato name is kept (name_plato) and the import leaves an edited name alone.
+      const nameChange: Record<string, unknown> = {};
+      const platoName = exists.name_edited ? exists.name_plato || exists.name : exists.name;
+      if (body.resetName === true) { if (exists.name_edited) Object.assign(nameChange, { name: platoName, name_edited: false, name_plato: platoName }); }
+      else if (typeof body.name === 'string' && body.name.trim() !== exists.name) {
+        const newName = text(body.name, 200);
+        if (!newName) throw fail(400, 'Enter a name for the item.');
+        Object.assign(nameChange, newName === platoName ? { name: platoName, name_edited: false, name_plato: platoName } : { name: newName, name_edited: true, name_plato: platoName });
+      }
       const supplierRows = (Array.isArray(body.suppliers) ? body.suppliers : []).map((entry: any) => ({ plato_id: id, supplier: text(entry?.supplier, 150), preferred: Boolean(entry?.preferred), note: text(entry?.note, 200) })).filter((entry: any) => entry.supplier);
       const unique = [...new Map(supplierRows.map((entry: any) => [entry.supplier, entry])).values()].slice(0, 12) as any[];
       if (unique.filter((entry) => entry.preferred).length > 1) throw fail(400, 'Only one supplier can be the preferred one.');
-      const { error } = await db.from('proc_items').update({ categories: clean(body.categories, 12), ingredients: clean(body.ingredients, 12), tags_auto: false }).eq('plato_id', id);
+      const { error } = await db.from('proc_items').update({ categories: clean(body.categories, 12), ingredients: clean(body.ingredients, 12), tags_auto: false, ...nameChange }).eq('plato_id', id);
       if (error) throw error;
       const removed = await db.from('proc_item_suppliers').delete().eq('plato_id', id);
       if (removed.error) throw removed.error;

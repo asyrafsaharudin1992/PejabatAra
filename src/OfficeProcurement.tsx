@@ -21,7 +21,7 @@ type Kind = 'purchased' | 'stocked' | 'service';
 type Order = { id: string; order_date: string; location: string; supplier: string; po_no: string; invoice_no: string; status: string; subtotal: number; tax: number; total: number; paid: boolean; pay_mode: string; ref: string; due_date: string | null; due_manual?: string | null; platoDue?: string | null; platoPaid?: boolean; paid_manual?: boolean | null; paid_on?: string | null; paid_note?: string; paid_by?: string };
 type Line = { line: number; plato_id: string | null; item_name: string; batch: string; expiry: string | null; qty_ordered: number; qty_bonus: number; qty_received: number; amount: number; unit_cost: number | null };
 type Supplier = { name: string; category: string; mobile: string; phone: string; email: string; address: string; person: string; orders: number; spend: number; unpaid: number; last: string };
-type Item = { plato_id: string; type: string; category: string; categories: string[]; ingredients: string[]; tags_auto?: boolean; name: string; description: string; unit: string; supplier: string; selling_price: number | null; cost_price: number | null; track_stock: boolean; kind: Kind; proc_item_suppliers?: { supplier: string; preferred: boolean; auto: boolean }[] };
+type Item = { plato_id: string; type: string; category: string; categories: string[]; ingredients: string[]; tags_auto?: boolean; name: string; name_edited?: boolean; name_plato?: string | null; description: string; unit: string; supplier: string; selling_price: number | null; cost_price: number | null; track_stock: boolean; kind: Kind; proc_item_suppliers?: { supplier: string; preferred: boolean; auto: boolean }[] };
 
 const KIND: Record<Kind, { label: string; tone: string }> = { purchased: { label: 'Bought', tone: 'bg-sky-50 text-sky-700' }, stocked: { label: 'Stock only', tone: 'bg-violet-50 text-violet-700' }, service: { label: 'Service / other', tone: 'bg-slate-100 text-slate-600' } };
 const PAD = '[&_th]:px-4 [&_td]:px-4 [&_th]:py-2.5 [&_td]:py-3 [&_td]:align-middle [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap';
@@ -283,6 +283,7 @@ function ChipInput({ label, values, onChange, options, listId, placeholder }: { 
 }
 
 function ItemEditor({ item, facets, canEdit, onClose, onSaved, onError }: { item: Item; facets: Facets | null; canEdit: boolean; onClose: () => void; onSaved: () => void; onError: (message: string) => void }) {
+  const [name, setName] = useState(item.name);
   const [categories, setCategories] = useState<string[]>(item.categories || []);
   const [ingredients, setIngredients] = useState<string[]>(item.ingredients || []);
   const [suppliers, setSuppliers] = useState<{ supplier: string; preferred: boolean; note: string; auto?: boolean }[] | null>(null);
@@ -293,10 +294,19 @@ function ItemEditor({ item, facets, canEdit, onClose, onSaved, onError }: { item
   const list = suppliers || [];
   const addSupplier = (name: string) => { const value = name.trim(); if (value && !list.some((entry) => entry.supplier === value)) setSuppliers([...list, { supplier: value, preferred: !list.length, note: '' }]); setPick(''); };
   const prefer = (name: string) => setSuppliers(list.map((entry) => ({ ...entry, preferred: entry.supplier === name ? !entry.preferred : false })));
+  const resetName = async () => {
+    setBusy(true);
+    try {
+      const response = await officeFetch('/api/status?resource=procurement&action=item_save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.plato_id, resetName: true, categories, ingredients, suppliers: list }) });
+      const result = await response.json();
+      if (!response.ok || result.error) throw new Error(result.error || 'Could not save.');
+      onSaved();
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Could not save.'); } finally { setBusy(false); }
+  };
   const save = async () => {
     setBusy(true);
     try {
-      const response = await officeFetch('/api/status?resource=procurement&action=item_save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.plato_id, categories, ingredients, suppliers: list }) });
+      const response = await officeFetch('/api/status?resource=procurement&action=item_save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.plato_id, name, categories, ingredients, suppliers: list }) });
       const result = await response.json();
       if (!response.ok || result.error) throw new Error(result.error || 'Could not save.');
       onSaved();
@@ -304,6 +314,7 @@ function ItemEditor({ item, facets, canEdit, onClose, onSaved, onError }: { item
   };
   return <div className="space-y-4 rounded-2xl border border-sky-200 bg-sky-50/40 p-4">
     <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-semibold text-[#14233b]">{item.name}</p><p className="text-[11px] text-slate-500">{item.plato_id} · {item.type}{item.description ? ` · ${item.description}` : ''}</p></div><button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-slate-500"><X className="h-4 w-4" /></button></div>
+    {canEdit && <div><label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Name shown in AraOffice<input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} className={`${field} mt-1 w-full normal-case tracking-normal text-sm font-semibold text-[#14233b]`} /></label>{item.name_edited && item.name_plato && <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">Plato name: <span className="font-semibold text-slate-700">{item.name_plato}</span><button type="button" disabled={busy} onClick={() => void resetName()} className="font-semibold text-[#0b587b] hover:underline disabled:opacity-40">Use Plato name</button></p>}</div>}
     {(item.proc_item_suppliers || []).some((entry) => entry.auto) && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Suppliers were added automatically from the orders. The most bought is marked preferred. Change it if needed, then Save.</p>}
     {item.tags_auto && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Filled in automatically from the item name and description. Please check it, then press Save to confirm.</p>}
     {canEdit ? <ChipInput label="Categories (as many as apply)" values={categories} onChange={setCategories} options={(facets?.categories || []).map((entry) => entry.name)} listId="proc-categories" placeholder="e.g. Antihistamine, Decongestant, Cough" /> : <p className="text-xs text-slate-600"><b>Categories:</b> {categories.join(', ') || '—'}</p>}

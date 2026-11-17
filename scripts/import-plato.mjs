@@ -48,6 +48,11 @@ console.log(`Items ${items.length}`, count(items, 'kind'), `\nStock rows ${stock
 if (!apply) { console.log('Dry run only. Add --apply to write.'); process.exit(0); }
 
 const chunk = async (table, rows, conflict) => { for (let i = 0; i < rows.length; i += 500) { const { error } = await db.from(table).upsert(rows.slice(i, i + 500), { onConflict: conflict }); if (error) { console.error(`${table} failed:`, error.message); process.exit(1); } } console.log(`${table}: ${rows.length}`); };
+// A name Procurement edited in AraOffice stays; Plato's current name is kept next to it as name_plato.
+const edited = new Map();
+for (let from = 0; ; from += 1000) { const { data, error } = await db.from('proc_items').select('plato_id,name').eq('name_edited', true).order('plato_id').range(from, from + 999); if (error) { console.error('Could not read edited names:', error.message); process.exit(1); } for (const row of data || []) edited.set(row.plato_id, row.name); if ((data || []).length < 1000) break; }
+for (const item of items) { item.name_plato = item.name; if (edited.has(item.plato_id)) item.name = edited.get(item.plato_id); }
+console.log(`Names edited in AraOffice kept: ${edited.size}`);
 await chunk('proc_items', items, 'plato_id');
 await db.from('proc_stock').delete().neq('location', '');
 await chunk('proc_stock', stock.filter((s) => known.has(s.plato_id)), 'plato_id,location');
