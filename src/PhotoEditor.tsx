@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
-import { DEFAULT_CROP, drawPhoto, forgetPhotoUrls, photoBase64, type Crop } from './lib/staffPhoto';
+import { DEFAULT_CROP, drawPhoto, forgetPhotoUrls, photoBase64, standardBackground, type Crop } from './lib/staffPhoto';
 
 // HR edits one place on the chart, as in the Staff of the Month poster: the words, and the photo (drag it in the circle, or use Zoom and the
 // sliders). The full picture is kept on the server (private, HR only), so the photo can be moved again later without choosing the file again.
@@ -17,6 +17,9 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
   const drag = useRef<{ x: number; y: number } | null>(null);
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
   const [fresh, setFresh] = useState(false); // a new file was chosen (the old picture is replaced)
+  const [original, setOriginal] = useState<ImageBitmap | null>(null); // the new file as it was taken
+  const [standard, setStandard] = useState(true); // use the standard background
+  const [bgNote, setBgNote] = useState('');
   const [moved, setMoved] = useState(false);
   const [crop, setCrop] = useState<Crop>(DEFAULT_CROP);
   const [text, setText] = useState((lines || []).join('\n'));
@@ -32,10 +35,22 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
     }).catch(() => undefined);
     return () => { live = false; };
   }, [employeeId, hasPhoto]);
+  // Shows the new photo with the standard background (or as it was taken, or when the background cannot be told apart from the person).
+  const show = async (image: ImageBitmap, useStandard: boolean) => {
+    setBgNote('');
+    if (!useStandard) { setBitmap(image); return; }
+    const canvas = standardBackground(image);
+    if (!canvas) { setBitmap(image); setBgNote('The background could not be separated from the person, so the photo is used as it is.'); return; }
+    setBitmap(await createImageBitmap(canvas));
+  };
   const pick = async (file?: File) => {
     if (!file) return;
     if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 12 * 1024 * 1024) { onError('Choose a JPEG, PNG or WebP photo of at most 12 MB.'); return; }
-    try { const image = await createImageBitmap(file, { imageOrientation: 'from-image' }); setBitmap(image); setFresh(true); setMoved(true); setCrop({ zoom: 1, x: 50, y: image.height > image.width * 1.3 ? 12 : 50 }); } catch { onError('That photo cannot be opened.'); }
+    try {
+      const image = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      setOriginal(image); setFresh(true); setMoved(true); setCrop({ zoom: 1, x: 50, y: image.height > image.width * 1.3 ? 12 : 50 });
+      await show(image, standard);
+    } catch { onError('That photo cannot be opened.'); }
   };
   const change = (next: Crop) => { setCrop(next); setMoved(true); };
   const onMove = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -68,6 +83,8 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
       <div className="space-y-3">
         <p className="text-xs font-semibold text-slate-600">Photo</p>
         <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void pick(event.target.files?.[0]); event.target.value = ''; }} className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#0b587b]" />
+        {fresh && original && <label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={standard} onChange={(event) => { setStandard(event.target.checked); void show(original, event.target.checked); }} />Use the standard background (like the other staff)</label>}
+        {bgNote && <p className="text-xs text-amber-700">{bgNote}</p>}
         {bitmap ? <>
           <canvas ref={canvas} onPointerDown={(event) => { drag.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={onMove} onPointerUp={() => { drag.current = null; }} className="mx-auto h-48 w-48 cursor-grab touch-none rounded-full border-4 border-[#0b4f8a] bg-slate-100 active:cursor-grabbing" />
           <p className="text-center text-[11px] text-slate-400">Drag the photo, or use the sliders.</p>

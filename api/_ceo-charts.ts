@@ -62,7 +62,7 @@ async function computeCharts(db: any, kept: Kept = {}) {
   const months = Array.from({ length: 12 }, (_, index) => shiftMonth(thisMonth, index - 11));
   const first = `${months[0]}-01`;
   const closed: Kept = { ...kept };
-  const lastSettled = `${shiftMonth(thisMonth, -1)}-01`; // a month ending before last month's first day is settled
+  const lastSettled = `${thisMonth}-01`; // a month that has finished is settled (kept); only this month is worked out again
   const slot = (month: string) => months.indexOf(month);
 
   const read = async (query: any) => { const { data, error } = await query; if (error) { if (['42P01', 'PGRST205', '42703'].includes(error.code)) return []; throw error; } return data || []; };

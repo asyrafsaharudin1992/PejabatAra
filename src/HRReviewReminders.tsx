@@ -42,8 +42,15 @@ export function HRReviewReminders({ reminders, notSetUp, settings, settingsVersi
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to update this reminder.'); }
     finally { setBusy(false); }
   };
-  const actions = (item: ReviewReminder) => <>{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
-          {item.source === 'custom' && open(item) && <><button type="button" disabled={busy} onClick={() => setDraft({ id: item.id, employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn, notes: item.notes })} className="px-2 py-1 text-xs font-semibold text-slate-500">Edit</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'complete')} className="px-2 py-1 text-xs font-semibold text-emerald-700">Mark complete</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'cancel')} className="px-2 py-1 text-xs font-semibold text-slate-400">Cancel reminder</button></>}
+  const doneManually = async (item: ReviewReminder) => {
+    if (!window.confirm(`Mark "${item.periodLabel}" for ${item.fullName} (due ${dmy(item.dueOn)}) as done manually? It will no longer show as overdue.`)) return;
+    setBusy(true); setNotice('');
+    try { await reviewApi('action=hr_reminder_manual', { employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn }); await onReload(); setNotice('Marked as done manually.'); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to mark this as done.'); }
+    finally { setBusy(false); }
+  };
+  const actions = (item: ReviewReminder) => <>{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.source === 'automatic' && open(item) && <button type="button" disabled={busy} onClick={() => void doneManually(item)} className="px-2 py-1 text-xs font-semibold text-emerald-700">Done manually</button>}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
+          {item.source === 'custom' && open(item) && <><button type="button" disabled={busy} onClick={() => setDraft({ id: item.id, employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn, notes: item.notes })} className="px-2 py-1 text-xs font-semibold text-slate-500">Edit</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'complete')} className="px-2 py-1 text-xs font-semibold text-emerald-700">Done manually</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'cancel')} className="px-2 py-1 text-xs font-semibold text-slate-400">Cancel reminder</button></>}
           {item.source === 'custom' && !item.reviewId && ['completed', 'cancelled'].includes(item.status) && <button type="button" disabled={busy} onClick={() => void change(item.id, 'reopen')} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">Reopen</button>}</>;
   const [openRow, setOpenRow] = useState('');
   return <div id="review-panel-reminders" role="tabpanel" aria-labelledby="review-tab-reminders" className="space-y-5">

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { NEW_CODE } from '../src/lib/shiftCodes.js';
+import { branchId } from './_office-db.js';
 import { isMissedClock } from '../src/lib/attendanceRequests.js';
 import { classifyDay, cleanPolicy, DEFAULT_OT_POLICY, netMinutes, otParts, otSummary, parseVersions, paySummary, pickPolicy, wholeHours, type DayKind, type OtPart, type OtPolicy, type OtPolicyVersion } from './_ot-rules.js';
 
@@ -101,17 +102,29 @@ type Data = { roster: any[]; clocks: any[]; leave: any[]; waiting?: any[]; holid
 export const CREDIT_HOURS_PER_DAY = 8;
 // Everything a range needs, fetched at the same time (the database is far from the server, so one round of
 // queries is much faster than several in turn). Pass ids to read only those people; leave it out for everyone.
+// The database sends at most 1,000 rows for one request, whatever limit is asked for, so a long period was cut short (the Late tab showed only June).
+// This reads in pages of 1,000 until everything is read. `build` makes a fresh query each time (it must have a stable order).
+async function readAll(build: () => any): Promise<{ data: any[]; error: any }> {
+  const rows: any[] = [];
+  for (let offset = 0; offset < 200000; offset += 1000) {
+    const { data, error } = await build().range(offset, offset + 999);
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: rows, error: null };
+}
 export async function fetchData(db: any, from: string, to: string, ids?: string[]): Promise<Data> {
   const wide = { from: `${addDay(from, -1)}T00:00:00+08:00`, to: `${addDay(to, 2)}T00:00:00+08:00` };
   const only = (query: any) => ids ? query.in('employee_id', ids) : query;
   const [{ data: roster }, { data: clocks }, { data: leave }, { data: waiting }, { data: holidays }, { data: ot }, { data: credit }] = await Promise.all([
-    only(db.from('hr_roster').select('employee_id,work_date,shift,works').gte('work_date', from).lte('work_date', to)).limit(20000),
-    only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').limit(30000),
-    only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).limit(5000),
+    readAll(() => only(db.from('hr_roster').select('employee_id,work_date,shift,works').gte('work_date', from).lte('work_date', to)).order('work_date').order('employee_id')),
+    readAll(() => only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').order('id')),
+    readAll(() => only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).order('start_date').order('id')),
     only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').in('status', ['pending', 'supervisor_approved']).lte('start_date', to).gte('end_date', from)).limit(2000),
     db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to).limit(1000),
-    (async () => { const read = (columns: string) => only(db.from('hr_attendance_ot').select(columns).gte('work_date', from).lte('work_date', to)).limit(10000); const first = await read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note,parts'); return first.error ? read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note') : first; })(),
-    only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).limit(5000),
+    (async () => { const read = (columns: string) => readAll(() => only(db.from('hr_attendance_ot').select(columns).gte('work_date', from).lte('work_date', to)).order('work_date').order('employee_id')); const first = await read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note,parts'); return first.error ? read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note') : first; })(),
+    readAll(() => only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).order('work_date').order('id')),
   ]);
   return { roster: roster || [], clocks: clocks || [], leave: leave || [], waiting: waiting || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
 }
@@ -378,6 +391,25 @@ async function hrDecide(db: any, id: string, decision: string, note: string, by:
   }
 }
 
+// The credit hours a staff member could use for the clock they are about to make: a late arrival (clocking in after the shift starts) or an early
+// leave (clocking out before it ends). `basis` is the time to measure from (the shift start or end), so the phone can work out the minutes as time
+// passes; `creditNeed` works them out now. The amount used is 30 minutes, then whole hours up to 12 (and no more than the balance). `days` are yesterday's and today's days of this person.
+const MAX_CREDIT_USE_HOURS = 12;
+const creditChoiceOk = (hours: number) => hours === 0.5 || (Number.isInteger(hours) && hours >= 1 && hours <= MAX_CREDIT_USE_HOURS);
+function creditBasis(days: Day[], nextKind: 'in' | 'out') {
+  if (nextKind === 'in') {
+    const day = days.find((item) => item.date === today());
+    return day?.start && day.status !== 'leave' && !day.inAt ? { kind: 'late' as const, date: day.date, at: day.start } : null;
+  }
+  const day = [...days].reverse().find((item) => item.inAt && !item.outAt && item.end);
+  return day ? { kind: 'early' as const, date: day.date, at: day.end } : null;
+}
+function creditNeed(days: Day[], nextKind: 'in' | 'out', nowMs: number) {
+  const basis = creditBasis(days, nextKind); if (!basis) return null;
+  const minutes = Math.round((basis.kind === 'late' ? nowMs - Date.parse(basis.at) : Date.parse(basis.at) - nowMs) / MIN);
+  return minutes > 0 ? { ...basis, minutes } : null;
+}
+
 // ---- Staff side (Individual Sign In) ----
 export async function attendanceStaffAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const [{ data: me, error }, rules] = await Promise.all([db.from('hr_employees').select(`${PERSON},status,clock_mode,clock_place_ids,leave_approver_id,final_approver_id`).eq('assessment_staff_id', staff.id).maybeSingle(), loadRules(db)]);
@@ -395,7 +427,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const last = (recent || [])[0];
     const nextKind = last && last.kind === 'in' && Date.now() - Date.parse(last.clock_at) < 20 * HOUR ? 'out' : 'in';
     const mine = days.get(me.id) || [];
-    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0 };
+    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0, creditBasis: creditBasis(mine, nextKind) };
   };
 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
@@ -437,13 +469,40 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const prev = last?.[0];
     if (prev && Date.now() - Date.parse(prev.clock_at) < 60000) throw fail(429, 'You just clocked. Wait a minute before clocking again.');
     const kind = prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in';
+    // The staff member chose to cover a late arrival or an early leave with their credit hours: checked before the clock is saved.
+    let credit: { kind: 'late' | 'early'; date: string; hours: number } | null = null;
+    const chosen = Number(body.creditHours); // 30 minutes (0.5), then 1, 2, 3 ... 12 hours
+    if (chosen > 0) {
+      const day = today();
+      const need = creditNeed((await buildDays(db, [me], addDay(day, -1), day, rules)).get(me.id) || [], kind, Date.now());
+      if (!need) throw fail(400, kind === 'in' ? 'You are not late, so there is nothing to cover with credit hours. Clock again without it.' : 'You are not leaving early, so there is nothing to cover with credit hours. Clock again without it.');
+      if (!creditChoiceOk(chosen)) throw fail(400, 'Choose 30 minutes, or 1 to 12 whole hours.');
+      const balance = await creditMinutes(db, [me.id]);
+      if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Ask HR.');
+      if ((balance.totals.get(me.id) || 0) < Math.round(chosen * 60)) throw fail(400, `You have ${hm(balance.totals.get(me.id) || 0)} of credit hours, and ${hm(Math.round(chosen * 60))} was chosen. Choose less, or clock without it.`);
+      const { data: already } = await db.from('hr_credit_hour_use').select('id').eq('employee_id', me.id).eq('work_date', need.date).eq('kind', need.kind).maybeSingle();
+      if (already) throw fail(409, 'Credit hours are already used for this. Clock again without it.');
+      credit = { kind: need.kind, date: need.date, hours: chosen };
+    }
     const base = { employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: hash.slice(0, 12) };
     const remarks = text(body.remarks, 200);
     const address = me.clock_mode === 'anywhere' && hasLocation ? await addressOf(db, lat, lng) : '';
     let { error: insertError } = await db.from('hr_attendance_clocks').insert({ ...base, remarks, address });
     if (insertError && insertError.code === '42703') ({ error: insertError } = await db.from('hr_attendance_clocks').insert(base)); // before the migration
     if (insertError) throw insertError;
-    return res.status(200).json({ success: true, kind, ...(await state()) });
+    let creditNote = '';
+    if (credit) {
+      // The same record HR makes (Attendance > Credit hrs), marked as made by the staff member, so HR can see it and remove it.
+      const minutes = Math.round(credit.hours * 60), label = `${me.full_name} (staff, at the clock)`;
+      const { data: inserted, error: useError } = await db.from('hr_credit_hour_use').insert({ employee_id: me.id, work_date: credit.date, kind: credit.kind, hours: credit.hours, days: Math.round((credit.hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01, note: 'Used by the staff member when clocking', created_by: label }).select('id').single();
+      if (useError) creditNote = 'Your clock was saved, but the credit hours could not be recorded. Tell HR.';
+      else {
+        await db.from('hr_credit_hours').insert({ employee_id: me.id, entry_date: credit.date, minutes: -minutes, kind: 'use', note: `${credit.kind === 'late' ? 'Came in late' : 'Left early'}: used when clocking`, use_id: inserted.id, created_by: label });
+        await db.from('hr_audit').insert({ employee_id: me.id, action: 'update', changes: { credit_hours_used: `${credit.hours} h for ${credit.kind === 'late' ? 'a late arrival' : 'an early leave'} on ${credit.date}`, note: 'Used by the staff member when clocking', by: label } });
+        creditNote = `${hm(minutes)} of credit hours used for ${credit.kind === 'late' ? 'coming in late' : 'leaving early'}.`;
+      }
+    }
+    return res.status(200).json({ success: true, kind, creditNote, ...(await state()) });
   }
 
   // Corrections: ask for a missed clock to be added; the supervisor (or HR) approves.
@@ -541,7 +600,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
 export const TEAM_COLUMNS = PERSON;
 
 // ---- Office HR side ----
-export async function attendanceHrAction(req: any, res: any, db: any, action: string, body: any, userLabel: string, only?: Set<string>) {
+export async function attendanceHrAction(req: any, res: any, db: any, action: string, body: any, userLabel: string, only?: Set<string>, userId?: string) {
   // `only` limits the people to a team (the COO's own team); HR sees everyone.
   const active = async () => { const { data, error } = await db.from('hr_employees').select(PERSON).eq('status', 'Active').order('full_name').limit(500); if (error) throw error; return ((data || []) as Employee[]).filter((p) => !only || only.has(p.id)); };
   const person = (p: Employee) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, doctor: isDoctor(p.designation), group: /CLINIC ASSISTANT/i.test(p.designation || '') ? 'CA' : 'Others' });
@@ -582,11 +641,50 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   if (req.method === 'GET' && action === 'attendance_late_pattern') {
     const thisMonth = today().slice(0, 7);
     const months = Array.from({ length: 6 }, (_, index) => new Date(Date.UTC(Number(thisMonth.slice(0, 4)), Number(thisMonth.slice(5)) - 1 - (5 - index), 1)).toISOString().slice(0, 7));
-    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, `${months[0]}-01`, today())]);
-    const days = buildDaysFrom(data, people, `${months[0]}-01`, today(), rules);
+    const [people, rules] = await Promise.all([active(), loadRules(db)]);
+    // The days counted late in each month, for each person, kept as a small summary (days and minutes, no clock times) so the clocks are read as little as possible:
+    //  - a month that has finished is worked out once and kept;
+    //  - this month is kept up to yesterday, and each time only the days since then are read (normally just today, which can still change);
+    //  - Refresh (refresh=1) works everything out again, for when an old day was corrected.
+    type Sum = Record<string, { days: number; minutes: number }>;
+    const KEY = 'late_pattern_cache', BRANCH = 'AraOffice Charts Cache';
+    const refresh = req.query.refresh === '1';
+    let kept: { grace?: number; months?: Record<string, Sum>; current?: { month: string; through: string; people: Sum } } = {};
+    let branch: any = null;
+    try {
+      branch = await branchId(db, BRANCH, false);
+      if (branch && !refresh) { const { data: row } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', KEY).maybeSingle(); if (row?.payload?.grace === rules.lateGrace) kept = row.payload; }
+    } catch { /* no saved summary: work it out */ }
+    const summarize = async (from: string, to: string): Promise<Sum> => {
+      const days = buildDaysFrom(await fetchData(db, from, to, people.map((p) => p.id)), people, from, to, rules);
+      const out: Sum = {};
+      for (const p of people) { const own = (days.get(p.id) || []).filter((day) => day.lateCounted > 0); if (own.length) out[p.id] = { days: own.length, minutes: own.reduce((total, day) => total + day.lateCounted, 0) }; }
+      return out;
+    };
+    const add = (a: Sum, b: Sum): Sum => { const out: Sum = { ...a }; for (const [id, v] of Object.entries(b)) out[id] = { days: (out[id]?.days || 0) + v.days, minutes: (out[id]?.minutes || 0) + v.minutes }; return out; };
+    const month: Record<string, Sum> = {}, closed: Record<string, Sum> = { ...(kept.months || {}) };
+    let learned = false;
+    for (const name of months) {
+      if (name < thisMonth) {
+        if (!closed[name]) { const last = new Date(Date.UTC(Number(name.slice(0, 4)), Number(name.slice(5)), 0)).toISOString().slice(0, 10); closed[name] = await summarize(`${name}-01`, last); learned = true; }
+        month[name] = closed[name];
+      }
+    }
+    const first = `${thisMonth}-01`, yesterday = addDay(today(), -1);
+    let current = kept.current && kept.current.month === thisMonth ? kept.current : { month: thisMonth, through: addDay(first, -1), people: {} as Sum };
+    if (current.through < yesterday) { current = { month: thisMonth, through: yesterday, people: add(current.people, await summarize(addDay(current.through, 1), yesterday)) }; learned = true; }
+    month[thisMonth] = add(current.people, await summarize(today(), today()));
+    if (learned && userId) {
+      try {
+        const id = branch || await branchId(db, BRANCH, true);
+        const keep = Object.fromEntries(Object.entries(closed).filter(([name]) => name < thisMonth).slice(-12));
+        const row: any = { branch_id: id, state_key: KEY, payload: { grace: rules.lateGrace, months: keep, current }, updated_at: new Date().toISOString(), updated_by: userId };
+        const { data: existing } = await db.from('portal_state').select('state_key').eq('branch_id', id).eq('state_key', KEY).maybeSingle();
+        if (existing) await db.from('portal_state').update(row).eq('branch_id', id).eq('state_key', KEY); else await db.from('portal_state').insert(row);
+      } catch { /* the figures are still returned; they are just not kept */ }
+    }
     const rows = people.map((p) => {
-      const list = days.get(p.id) || [];
-      const perMonth = months.map((month) => { const own = list.filter((day) => day.date.startsWith(month) && day.lateCounted > 0); return { month, days: own.length, minutes: own.reduce((total, day) => total + day.lateCounted, 0) }; });
+      const perMonth = months.map((name) => ({ month: name, days: month[name]?.[p.id]?.days || 0, minutes: month[name]?.[p.id]?.minutes || 0 }));
       return { ...person(p), perMonth, total: perMonth.reduce((total, item) => total + item.days, 0) };
     }).filter((row) => row.total > 0).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
     return res.status(200).json({ months, rows, grace: rules.lateGrace });

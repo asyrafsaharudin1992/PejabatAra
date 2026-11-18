@@ -81,18 +81,41 @@ function hashIc4(digits: string) { const salt = randomBytes(16).toString('hex');
 
 // Company leave policy (annual leave by category and years of service; sick leave 14/18/22; hospital leave 60).
 const LEAVE_GROUPS = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
-const POLICY_AL: Record<string, number[]> = { admin: [15, 20, 25], clinical: [8, 12, 16], parttime: [6, 8, 11] };
-const POLICY_ML = [14, 18, 22];
+// The figures HR can edit (Leave > Company policy). They are kept in portal_state and read at most once a minute; the defaults are the company policy.
+type LeavePolicy = { al: Record<string, number[]>; ml: number[]; hosp: number; marriage: number; haji: number; unpaid: number };
+const DEFAULT_LEAVE_POLICY: LeavePolicy = { al: { admin: [15, 20, 25], clinical: [8, 12, 16], parttime: [6, 8, 11] }, ml: [14, 18, 22], hosp: 60, marriage: 1, haji: 14, unpaid: 30 };
+let LEAVE_POLICY: LeavePolicy = DEFAULT_LEAVE_POLICY, leavePolicyAt = 0;
+const POLICY_KEY = 'leave_company_policy', POLICY_BRANCH = 'AraOffice HR Private';
+function cleanLeavePolicy(input: any): LeavePolicy {
+  const whole = (value: unknown, max: number, label: string) => { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > max) throw fail(400, `${label} must be a whole number from 0 to ${max}.`); return n; };
+  const tiers = (list: unknown, label: string) => { if (!Array.isArray(list) || list.length !== 3) throw fail(400, `${label} needs three figures.`); return list.map((value) => whole(value, 90, label)); };
+  const al: Record<string, number[]> = {};
+  for (const track of ['admin', 'clinical', 'parttime']) al[track] = tiers(input?.al?.[track], `Annual leave (${track})`);
+  return { al, ml: tiers(input?.ml, 'Sick leave'), hosp: whole(input?.hosp, 365, 'Hospital leave'), marriage: whole(input?.marriage, 365, 'Marriage leave'), haji: whole(input?.haji, 365, 'Haji/Umrah leave'), unpaid: whole(input?.unpaid, 365, 'Unpaid leave') };
+}
+async function loadLeavePolicy(db: any, force = false): Promise<{ policy: LeavePolicy; history: { at: string; by: string; note: string }[] }> {
+  let history: { at: string; by: string; note: string }[] = [];
+  if (force || Date.now() - leavePolicyAt > 60000) {
+    try {
+      const branch = await branchId(db, POLICY_BRANCH, false);
+      const { data } = branch ? await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', POLICY_KEY).maybeSingle() : { data: null };
+      LEAVE_POLICY = data?.payload?.policy ? cleanLeavePolicy(data.payload.policy) : DEFAULT_LEAVE_POLICY;
+      history = Array.isArray(data?.payload?.history) ? data.payload.history : [];
+    } catch { LEAVE_POLICY = LEAVE_POLICY || DEFAULT_LEAVE_POLICY; }
+    leavePolicyAt = Date.now();
+  }
+  return { policy: LEAVE_POLICY, history };
+}
 // Under 2 years, 2 up to 5 years, 5 years and more.
 const tierOf = (years: number) => years >= 5 ? 2 : years >= 2 ? 1 : 0;
 // The year's entitlement worked out the way Infotech does it (it matches every staff member who started before 2026): annual leave is the
 // average over the 12 months of the figure for the person's tier at each month end, rounded, so someone who passes 2 years part-way through
 // the year gets a share of both figures; sick leave uses the tier on 31 December.
 function policyFor(track: string, joinDate: string, year = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4))) {
-  const part = track === 'parttime', table = POLICY_AL[track] || POLICY_AL.clinical;
+  const part = track === 'parttime', table = LEAVE_POLICY.al[track] || LEAVE_POLICY.al.clinical;
   const yearsAt = (date: string) => (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${joinDate}T00:00:00Z`)) / (365.25 * 86400000);
   let sum = 0; for (let month = 0; month < 12; month++) sum += table[tierOf(yearsAt(new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10)))];
-  return { al: Math.round(sum / 12), ml: part ? null : POLICY_ML[tierOf(yearsAt(`${year}-12-31`))], hosp: part ? null : 60 };
+  return { al: Math.round(sum / 12), ml: part ? null : LEAVE_POLICY.ml[tierOf(yearsAt(`${year}-12-31`))], hosp: part ? null : LEAVE_POLICY.hosp };
 }
 // In the year someone joins, annual leave is shared by month, as Infotech does (the setting "Annual Leave Prorate based on leave calculation Date Joined"):
 // the entitlement x (months from the join month to December) / 12, rounded. People can take leave up to this for the year. Staff who joined in an
@@ -178,7 +201,7 @@ async function applyLeavePolicy(db: any, userId: string, now: string, employeeId
   const thisYear = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4));
   const part = item.track === 'parttime';
   // The policy figures, plus the fixed entitlements everyone has in Infotech (marriage 1, Haji/Umrah 14, unpaid 30) when missing.
-  const groups: [string, number | null, number][] = [['AL', policy.al, thisYear], ['ML', policy.ml, thisYear], ['HOSP', policy.hosp, 0], ['MARRG', part ? null : 1, 0], ['HAJUMR', part ? null : 14, 0], ['UL', part ? null : 30, 0]];
+  const groups: [string, number | null, number][] = [['AL', policy.al, thisYear], ['ML', policy.ml, thisYear], ['HOSP', policy.hosp, 0], ['MARRG', part ? null : LEAVE_POLICY.marriage, 0], ['HAJUMR', part ? null : LEAVE_POLICY.haji, 0], ['UL', part ? null : LEAVE_POLICY.unpaid, 0]];
   for (const [group, value, year] of groups) {
     if (value === null) continue;
     const { data: rows } = await db.from('hr_leave_balances').select('*').eq('employee_id', item.id).eq('leave_group', group).order('year', { ascending: false }).limit(1);
@@ -314,12 +337,13 @@ export async function hrHandler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
+    await loadLeavePolicy(db); // the leave policy figures HR can edit (read at most once a minute)
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
-    if (action.startsWith('attendance_')) return await attendanceHrAction(req, res, db, action, body, text((user as any)?.email, 120));
+    if (action.startsWith('attendance_')) return await attendanceHrAction(req, res, db, action, body, text((user as any)?.email, 120), undefined, user.id);
 
     // Staff photos (HR): the organisation chart with its photos; links for a list of staff; upload and remove (HR only, every change is audited).
     if (req.method === 'GET' && action === 'org_chart') return res.status(200).json(await orgChart(db));
@@ -1213,7 +1237,8 @@ export async function hrHandler(req: any, res: any) {
         return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, joinDate: p.join_date || '', requests: mine, al: bal('AL'), ml: bal('ML') };
       });
       // Everyone with leave in the period or a balance on record; the rest have nothing to show.
-      return res.status(200).json({ from, to, people: out.filter((p: any) => p.requests.length || p.al || p.ml) });
+      // One chosen person is always shown (even with no leave in the period).
+      return res.status(200).json({ from, to, people: one ? out : out.filter((p: any) => p.requests.length || p.al || p.ml) });
     }
     if (req.method === 'GET' && action === 'leave_person') {
       const id = text(req.query.id, 60);
@@ -1318,6 +1343,26 @@ export async function hrHandler(req: any, res: any) {
 
     // Company leave policy: what each active staff member should have by their category and years of service, next to
     // what they have now. Nothing changes until HR applies it.
+    // The company leave policy figures HR can edit, and the last changes.
+    if (req.method === 'GET' && action === 'leave_policy_config') return res.status(200).json(await loadLeavePolicy(db, true));
+    if (req.method === 'POST' && action === 'leave_policy_config_save') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const next = cleanLeavePolicy(body.policy);
+      const before = (await loadLeavePolicy(db, true)).policy;
+      const changes: string[] = [];
+      for (const track of ['admin', 'clinical', 'parttime']) next.al[track].forEach((value, index) => { if (value !== before.al[track][index]) changes.push(`Annual ${track} tier ${index + 1}: ${before.al[track][index]} to ${value}`); });
+      next.ml.forEach((value, index) => { if (value !== before.ml[index]) changes.push(`Sick tier ${index + 1}: ${before.ml[index]} to ${value}`); });
+      for (const [key, label] of [['hosp', 'Hospital'], ['marriage', 'Marriage'], ['haji', 'Haji/Umrah'], ['unpaid', 'Unpaid']] as const) if (next[key] !== before[key]) changes.push(`${label}: ${before[key]} to ${next[key]}`);
+      if (!changes.length) throw fail(400, 'Nothing was changed.');
+      const branch = await branchId(db, POLICY_BRANCH, true);
+      const { data: existing } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', POLICY_KEY).maybeSingle();
+      const history = [{ at: now, by: text((user as any)?.email, 120), note: changes.join('; ').slice(0, 600) }, ...(Array.isArray(existing?.payload?.history) ? existing.payload.history : [])].slice(0, 30);
+      const row: any = { branch_id: branch, state_key: POLICY_KEY, payload: { policy: next, history }, updated_at: now, updated_by: user.id };
+      const { error } = existing ? await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', POLICY_KEY) : await db.from('portal_state').insert(row);
+      if (error) throw error;
+      LEAVE_POLICY = next; leavePolicyAt = Date.now();
+      return res.status(200).json({ policy: next, history });
+    }
     if (req.method === 'GET' && action === 'leave_policy') {
       const [{ data: people, error }, { data: balances }] = await Promise.all([
         db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,employment_type,join_date,leave_policy').eq('status', 'Active').order('company').order('full_name').limit(500),

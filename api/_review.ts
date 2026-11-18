@@ -185,7 +185,7 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_review_settings_save', 'hr_templates', 'hr_template_save', 'hr_template_archive', 'hr_template_delete'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_reminder_manual', 'hr_review_settings_save', 'hr_templates', 'hr_template_save', 'hr_template_archive', 'hr_template_delete'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_reminders') {
@@ -260,6 +260,25 @@ export async function reviewHandler(req: any, res: any) {
         const { error } = await db.from('hr_review_reminders').insert({ ...next, created_by: user.id });
         if (error) throw error;
       }
+      return res.status(200).json({ success: true });
+    }
+    // An automatic reminder (from the join or confirmation date) that HR already did outside AraOffice: it is kept as a completed reminder with the same
+    // staff, date and name, so it stops showing as overdue (the automatic one is left out when a saved one matches).
+    if (req.method === 'POST' && action === 'hr_reminder_manual') {
+      if (!isId(body.employeeId)) throw fail(400, 'Choose a staff member.');
+      const label = text(body.periodLabel, 40);
+      if (!label) throw fail(400, 'Missing the assessment name.');
+      if (!validReminderDate(String(body.dueOn || ''))) throw fail(400, 'Choose a valid due date.');
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,status').eq('id', body.employeeId).maybeSingle();
+      if (personError) throw personError;
+      if (!person || person.status !== 'Active') throw fail(400, 'Choose an active staff member.');
+      const now = new Date().toISOString();
+      const note = `Done manually (marked by ${text((user as any)?.email, 120) || 'HR'} on ${now.slice(0, 10)})`;
+      const { data: same } = await db.from('hr_review_reminders').select('id').eq('employee_id', person.id).eq('due_on', body.dueOn).eq('period_label', label).maybeSingle();
+      const { error } = same
+        ? await db.from('hr_review_reminders').update({ completed_at: now, cancelled_at: null, notes: note, updated_by: user.id, updated_at: now }).eq('id', same.id)
+        : await db.from('hr_review_reminders').insert({ employee_id: person.id, period_label: label, due_on: body.dueOn, notes: note, completed_at: now, created_by: user.id, updated_by: user.id });
+      if (error) throw error;
       return res.status(200).json({ success: true });
     }
     if (req.method === 'POST' && action === 'hr_reminder_state') {

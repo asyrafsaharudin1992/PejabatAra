@@ -67,13 +67,15 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
   const [from, setFrom] = useState(`${year}-01-01`);
   const [to, setTo] = useState(`${year}-12-31`);
   const [company, setCompany] = useState('');
+  const [staffId, setStaffId] = useState(''); // '' is all staff
+  const [staff, setStaff] = useState<{ id: string; fullName: string; company: string; employeeCode: string }[]>([]);
   const [people, setPeople] = useState<Person[] | null>(null);
   const [shown, setShown] = useState<{ from: string; to: string; at: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const run = async () => {
     setLoading(true);
     try {
-      const response = await officeFetch(`/api/status?resource=hr&action=leave_history_report&from=${from}&to=${to}${company ? `&company=${company}` : ''}`);
+      const response = await officeFetch(`/api/status?resource=hr&action=leave_history_report&from=${from}&to=${to}${company ? `&company=${company}` : ''}${staffId ? `&id=${staffId}` : ''}`);
       const result = await response.json();
       if (!response.ok || result.error) throw new Error(result.error || 'Unable to build the report.');
       setPeople(result.people); setShown({ from, to, at: nowText() });
@@ -81,6 +83,12 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
     finally { setLoading(false); }
   };
   useEffect(() => { void run(); }, []);
+  // The staff to choose from (active, for the chosen company).
+  useEffect(() => {
+    let live = true;
+    officeFetch('/api/status?resource=hr&action=employees').then((response) => response.json()).then((result) => { if (live) setStaff((result.employees || []).filter((item: { status: string }) => item.status === 'Active').sort((a: { fullName: string }, b: { fullName: string }) => a.fullName.localeCompare(b.fullName))); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
 
   let serial = 0;
   const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm';
@@ -89,7 +97,8 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
       <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">Leave History Report</h2><p className="text-sm text-slate-500">Approved leave per person for a period, grouped by leave type, with the Annual and Medical Leave balance. Print it or save it as a PDF.</p></div>
       <label className="text-xs font-bold text-slate-600">From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className={`${field} mt-1 block`} /></label>
       <label className="text-xs font-bold text-slate-600">To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} className={`${field} mt-1 block`} /></label>
-      <label className="text-xs font-bold text-slate-600">Company<select value={company} onChange={(event) => setCompany(event.target.value)} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
+      <label className="text-xs font-bold text-slate-600">Company<select value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
+      <label className="text-xs font-bold text-slate-600">Staff<select aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[240px]`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.company}</option>)}</select></label>
       <button onClick={() => void run()} disabled={loading} className="h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white hover:bg-[#0a4c6a] disabled:opacity-60">{loading ? 'Building…' : 'Preview'}</button>
       <button onClick={() => window.print()} disabled={!people?.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
     </section>

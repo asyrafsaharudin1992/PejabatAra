@@ -10,7 +10,7 @@ import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 // today's shift, the month so far, and a request to correct a forgotten clock. A supervisor
 // sees the requests waiting for them here.
 type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; leave: string };
-type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
+type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; creditBasis?: { kind: 'late' | 'early'; date: string; at: string } | null; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
 type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; otPreview?: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr' };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
@@ -70,12 +70,28 @@ export function LocationHelp({ onClose, onRetry, kind = phoneKind(), app = homeS
   </div>;
 }
 
+// Credit hours that can be used for the clock about to be made: the minutes late (clocking in) or early (clocking out), worked out from the shift time
+// as time passes. The amount to use is 30 minutes, then whole hours up to 12, and no more than the balance.
+const CREDIT_CHOICES = [0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+function creditNeedNow(state: State, nowMs: number) {
+  const basis = state.creditBasis; if (!basis) return null;
+  const minutes = Math.round((basis.kind === 'late' ? nowMs - Date.parse(basis.at) : Date.parse(basis.at) - nowMs) / 60000);
+  return minutes > 0 ? { kind: basis.kind, minutes } : null;
+}
+function creditOptions(state: State, nowMs: number) {
+  if (!creditNeedNow(state, nowMs)) return [];
+  return CREDIT_CHOICES.filter((hours) => hours * 60 <= (state.creditMinutes || 0));
+}
+
 export default function MyAttendance({ mode = 'clock', isApprover = false, onApplyOt, startDate }: { key?: string; mode?: 'clock' | 'ot'; isApprover?: boolean; onApplyOt?: (date: string) => void; startDate?: string }) {
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [remark, setRemark] = useState('');
+  const [creditHours, setCreditHours] = useState(0);
+  const [tickAt, setTickAt] = useState(() => Date.now()); // so the late or early minutes follow the clock while the page stays open
+  useEffect(() => { const timer = setInterval(() => setTickAt(Date.now()), 60000); return () => clearInterval(timer); }, []);
   const [confirmId, setConfirmId] = useState('');
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [days, setDays] = useState<Day[] | null>(null);
@@ -107,10 +123,10 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       if (controller.signal.aborted) return;
       setLocating(false);
       setBlocked(false);
-      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim() }) });
-      setRemark('');
+      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim(), creditHours: creditOptions(state, Date.now()).includes(creditHours) ? creditHours : 0 }) });
+      setRemark(''); setCreditHours(0);
       setState(result);
-      setMessage(`Clocked ${result.kind === 'in' ? 'in' : 'out'} at ${timeOf(new Date().toISOString())}.`);
+      setMessage(`Clocked ${result.kind === 'in' ? 'in' : 'out'} at ${timeOf(new Date().toISOString())}.${result.creditNote ? ` ${result.creditNote}` : ''}`);
       // On an iPhone the phone asks each time unless the website setting is Allow: say so once.
       try { if (phoneKind() === 'ios' && !homeScreenApp() && !localStorage.getItem('ara_location_tip')) setTip(true); } catch { /* storage not available */ }
       loadDays();
@@ -234,7 +250,13 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       <p className="relative mt-2 text-xl font-semibold tracking-tight">{hasShift ? `${newCode(shift.code)} · ${shift.startTime} – ${shift.endTime}` : shift.leave ? `On leave (${LEAVE_CODE[shift.leave] || shift.leave})${shift.status === 'leave-pending' ? ' · pending approval' : ''}` : 'No shift today'}</p>
       {(state.creditMinutes || 0) > 0 && <p className="relative mt-1 text-sm text-white/75">Credit hours: {Math.floor((state.creditMinutes || 0) / 60)} h{(state.creditMinutes || 0) % 60 ? ` ${(state.creditMinutes || 0) % 60} min` : ''}</p>}
       {state.recent.length > 0 && <p className="relative mt-1 text-sm text-white/75">Last clock: {state.recent[0].kind === 'in' ? 'in' : 'out'} at {timeOf(state.recent[0].at)}</p>}
-      {state.required === 'none' && <p className="relative mt-4 rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/85">Clocking is optional for you. Your working days count even if you do not clock.</p>}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" /><button onClick={() => void clock()} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
+      {state.required === 'none' && <p className="relative mt-4 rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/85">Clocking is optional for you. Your working days count even if you do not clock.</p>}{(() => {
+        const need = creditNeedNow(state, tickAt), options = creditOptions(state, tickAt);
+        if (!need || !options.length) return null;
+        const text = (hours: number) => hours < 1 ? `${hours * 60} minutes` : hours === 1 ? '1 hour' : `${hours} hours`;
+        return <label className="relative mt-4 block rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/90"><span className="block"><strong>Use credit hours?</strong> You are {need.minutes} min {need.kind === 'late' ? 'late' : 'leaving early'}. You have {Math.floor((state.creditMinutes || 0) / 60)} h{(state.creditMinutes || 0) % 60 ? ` ${(state.creditMinutes || 0) % 60} min` : ''}. Please make sure your supervisor has been informed.</span>
+          <select aria-label="Credit hours to use" value={options.includes(creditHours) ? creditHours : 0} onChange={(event) => setCreditHours(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white"><option value={0} className="text-slate-800">Do not use credit hours</option>{options.map((hours) => <option key={hours} value={hours} className="text-slate-800">{`Use ${text(hours)}`}</option>)}</select></label>;
+      })()}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" /><button onClick={() => void clock()} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
       <p className="relative mt-3 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{state.mode === 'anywhere' ? 'You can clock from anywhere. Your location is still recorded.' : state.places.length ? `You can clock at: ${state.places.map((place) => place.name).join(', ')}.` : 'No clock place is set for you yet. Ask HR.'}</p>
     </section>
     {helpOpen && blocked && state.mode === 'places' && <LocationHelp onClose={() => setHelpOpen(false)} onRetry={() => { setHelpOpen(false); void clock(); }} />}

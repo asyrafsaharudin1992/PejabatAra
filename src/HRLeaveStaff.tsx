@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ScrollText, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 
@@ -42,7 +42,6 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
   const [company, setCompany] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [openId, setOpenId] = useState('');
-  const [policy, setPolicy] = useState(false);
   const [page, setPage] = useState(1);
   const load = () => api('action=leave_staff').then((result) => { if (result.error) throw new Error(result.error); setStaff(result.staff); }).catch((cause: Error) => { setStaff([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
@@ -59,7 +58,6 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
   const goTo = (next: number) => { setPage(next); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const numbers = Array.from({ length: pages }, (_, index) => index + 1).filter((number) => pages <= 7 || number === 1 || number === pages || Math.abs(number - current) <= 1);
 
-  if (policy) return <PolicyReview onBack={() => { setPolicy(false); void load(); }} onError={onError} />;
   if (openId) return <PersonLeave key={openId} id={openId} onBack={() => { setOpenId(''); void load(); }} onError={onError} />;
   return <div className="space-y-5">
     <section className={`${card} flex flex-wrap items-center gap-3`}>
@@ -67,7 +65,6 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
       <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
       <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Show resigned</label>
       <span className="text-sm text-slate-400">{staff ? `${shown.length} staff` : 'Loading…'}</span>
-      <button onClick={() => setPolicy(true)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-slate-50"><ScrollText className="h-4 w-4" />Company policy</button>
     </section>
     {staff && !shown.length && <p className={`${card} text-sm text-slate-500`}>No staff match these filters.</p>}
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visible.map((person) => <button key={person.id} onClick={() => setOpenId(person.id)} className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-md ${person.status === 'Active' ? '' : 'opacity-60'}`}>
@@ -149,83 +146,5 @@ function BalanceRow({ id, balance, onSaved, onError }: { key?: string; id: strin
     <div className="mt-3 flex flex-wrap items-end gap-3">{fields.map(([key, label]) => <label key={key} className="block"><span className="mb-1 block text-[11px] font-semibold text-slate-500">{label}</span><input inputMode="decimal" value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value.replace(/[^\d.]/g, '') })} className="h-10 w-28 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label>)}
       <button onClick={() => void save()} disabled={!changed || saving} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div>
     {annual && n(form.earn) > 0 && <p className="mt-2 text-xs text-slate-400">While "Earned so far" is above 0, the total uses what has been earned. Set it to 0 once the full entitlement applies.</p>}
-  </div>;
-}
-
-
-// Company leave policy: annual leave by staff category and years of service, sick leave 14/18/22, hospital leave 60. HR sees what each
-// person has next to what the policy gives, and applies it to the people chosen.
-type PolicyRow = { id: string; company: string; code: string; name: string; designation: string; joinDate: string | null; years: number | null; track: string; trackSet: boolean; al: number | null; ml: number | null; hosp: number | null };
-const TRACKS: [string, string][] = [['admin', 'Administrative officer'], ['clinical', 'Doctor / clinic assistant (permanent)'], ['parttime', 'Doctor / clinic assistant (part-time)']];
-const POLICY_AL: Record<string, number[]> = { admin: [15, 20, 25], clinical: [8, 12, 16], parttime: [6, 8, 11] };
-const POLICY_ML = [14, 18, 22];
-const tierOf = (years: number) => years >= 5 ? 2 : years >= 2 ? 1 : 0;
-const TIER = ['under 2 years', '2 to 5 years', '5 years or more'];
-// The same working-out as the server (and as Infotech): annual leave is the average of the tier's figure at each month end of this year,
-// rounded; sick leave uses the tier on 31 December.
-const wanted = (track: string, joinDate: string | null) => {
-  if (!joinDate) return null;
-  const year = new Date().getFullYear(), part = track === 'parttime';
-  const yearsAt = (date: string) => (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${joinDate}T00:00:00Z`)) / (365.25 * 86400000);
-  let sum = 0; for (let month = 0; month < 12; month++) sum += POLICY_AL[track][tierOf(yearsAt(new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10)))];
-  return { al: Math.round(sum / 12), ml: part ? null : POLICY_ML[tierOf(yearsAt(`${year}-12-31`))], hosp: part ? null : 60 };
-};
-
-function PolicyReview({ onBack, onError }: { onBack: () => void; onError: (message: string) => void }) {
-  const [rows, setRows] = useState<PolicyRow[] | null>(null);
-  const [tracks, setTracks] = useState<Record<string, string>>({});
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [onlyDiffer, setOnlyDiffer] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState('');
-  const load = () => api('action=leave_policy').then((result) => { if (result.error) throw new Error(result.error); setRows(result.staff); setTracks({}); setPicked(new Set()); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
-  useEffect(() => { void load(); }, []);
-
-  const view = useMemo(() => (rows || []).map((row) => { const track = tracks[row.id] || row.track; const want = wanted(track, row.joinDate); const differ = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp)) || (tracks[row.id] !== undefined && tracks[row.id] !== row.track) || !row.trackSet); const figures = !!want && (row.al === null || row.al !== want.al || (want.ml !== null && (row.ml === null || row.ml !== want.ml)) || (want.hosp !== null && (row.hosp === null || row.hosp !== want.hosp))); return { row, track, want, differ, figures }; }), [rows, tracks]);
-  const shown = view.filter((item) => !onlyDiffer || item.differ);
-  const differing = view.filter((item) => item.differ).length, figuresDiffer = view.filter((item) => item.figures).length;
-  const toggle = (id: string) => setPicked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  const apply = async () => {
-    const items = view.filter((item) => picked.has(item.row.id)).map((item) => ({ id: item.row.id, track: item.track }));
-    if (!items.length) return;
-    if (!window.confirm(`Apply the company policy to ${items.length} staff? Their annual, sick and hospital leave entitlement changes to the policy figure and each change is written to their HR history.`)) return;
-    setSaving(true); setDone('');
-    try { const result = await api('action=leave_policy_apply', { items }); if (result.error) throw new Error(result.error); setDone(`Applied: ${result.changed} entitlement${result.changed === 1 ? '' : 's'} changed${result.skipped ? `, ${result.skipped} skipped (no join date)` : ''}.`); await load(); }
-    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to apply.'); }
-    setSaving(false);
-  };
-  const cell = (now: number | null, want: number | null | undefined) => now === null ? <span className="text-slate-300">no balance</span> : want === null || want === undefined ? <span>{num(now)}</span> : now === want ? <span className="text-slate-500">{num(now)}</span> : <span className="font-semibold text-amber-700">{num(now)} → {num(want)}</span>;
-
-  return <div className="space-y-5">
-    <button onClick={onBack} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0b587b] shadow-sm hover:bg-[#edf9fe]"><ArrowLeft className="h-4 w-4" />All staff</button>
-    <section className={card}>
-      <h3 className="font-semibold">Company leave policy</h3>
-      <p className="mt-1 text-sm text-slate-500">Annual leave depends on the staff category and years of service. Sick leave is 14, 18 or 22 days and hospital leave 60 days for permanent staff. When someone passes 2 or 5 years during the year, annual leave is shared by month (the same way Infotech does it: the figure for their tier at the end of each month, averaged over 12 months) and sick leave uses their tier on 31 December. Choose a category for each person, pick who to update and press Apply. Nothing changes until you do.</p>
-      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
-        <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="py-2 pr-4 font-semibold">Years of service</th>{TRACKS.map(([key, label]) => <th key={key} className="py-2 pr-4 font-semibold">Annual · {label}</th>)}<th className="py-2 pr-4 font-semibold">Sick leave (permanent)</th><th className="py-2 font-semibold">Hospital (permanent)</th></tr></thead>
-        <tbody>{TIER.map((label, index) => <tr key={label} className="border-b border-slate-50"><td className="py-2 pr-4 text-slate-600">{label[0].toUpperCase() + label.slice(1)}</td>{TRACKS.map(([key]) => <td key={key} className="py-2 pr-4 font-semibold text-[#0b587b]">{POLICY_AL[key][index]} days</td>)}<td className="py-2 pr-4 font-semibold text-[#0b587b]">{POLICY_ML[index]} days</td><td className="py-2 font-semibold text-[#0b587b]">60 days</td></tr>)}</tbody>
-      </table></div>
-      <p className="mt-2 text-xs text-slate-400">Part-time staff have no sick or hospital leave under this policy.</p>
-    </section>
-    <section className={`${card} flex flex-wrap items-center gap-3`}>
-      <label className="inline-flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={onlyDiffer} onChange={(event) => setOnlyDiffer(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />Only staff who need attention <span className="text-slate-400">(leave differs from the policy, or category not saved yet)</span></label>
-      <span className="text-sm text-slate-400">{rows ? `${differing} of ${view.length} need attention · ${figuresDiffer} with different figures, ${differing - figuresDiffer} only need the category confirmed` : 'Loading…'}</span>
-      <button onClick={() => setPicked(new Set(shown.map((item) => item.row.id)))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-[#0b587b] hover:bg-slate-50">Select all shown</button>
-      <button onClick={() => void apply()} disabled={!picked.size || saving} className="ml-auto h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Applying…' : `Apply to ${picked.size} selected`}</button>
-    </section>
-    {done && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{done}</p>}
-    <section className={`${card} overflow-x-auto`}>
-      {rows && !shown.length ? <p className="text-sm text-slate-500">{view.length ? 'Everyone matches the company policy.' : 'No staff found.'}</p> :
-        <table className="w-full min-w-[900px] text-left text-sm">
-          <thead><tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400"><th className="w-8 py-2" /><th className="py-2 pr-4 font-semibold">Staff</th><th className="py-2 pr-4 font-semibold">Service</th><th className="py-2 pr-4 font-semibold">Category</th><th className="py-2 pr-4 font-semibold">Annual</th><th className="py-2 pr-4 font-semibold">Sick</th><th className="py-2 font-semibold">Hospital</th></tr></thead>
-          <tbody>{shown.map(({ row, track, want, differ, figures }) => <tr key={row.id} className="border-b border-slate-50 align-top">
-            <td className="py-3"><input type="checkbox" checked={picked.has(row.id)} onChange={() => toggle(row.id)} aria-label={`Select ${row.name}`} className="h-4 w-4 rounded border-slate-300" /></td>
-            <td className="py-3 pr-4"><p className="font-semibold">{row.name}</p><p className="text-xs text-slate-400">{row.company} · {row.code}{row.designation ? ` · ${row.designation}` : ''}</p>{differ && <p className="mt-1 text-[10px] font-semibold text-amber-700">{figures ? 'Leave figures differ from the policy' : 'Figures match; category not confirmed yet'}</p>}</td>
-            <td className="py-3 pr-4 whitespace-nowrap">{row.years === null ? <span className="text-slate-300">no join date</span> : <><strong>{(Math.round(row.years * 10) / 10).toFixed(1)}</strong> yrs<p className="text-xs text-slate-400">{TIER[tierOf(row.years)]}</p></>}</td>
-            <td className="py-3 pr-4"><select value={track} onChange={(event) => setTracks({ ...tracks, [row.id]: event.target.value })} aria-label={`Category for ${row.name}`} className="h-9 w-full min-w-[190px] rounded-lg border border-slate-200 bg-white px-2 text-xs">{TRACKS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{!row.trackSet && !tracks[row.id] && <p className="mt-1 text-[10px] text-slate-400">Guessed from the current entitlement: check it</p>}</td>
-            <td className="py-3 pr-4">{cell(row.al, want?.al)}</td><td className="py-3 pr-4">{cell(row.ml, want?.ml)}</td><td className="py-3">{cell(row.hosp, want?.hosp)}</td>
-          </tr>)}</tbody>
-        </table>}
-    </section>
   </div>;
 }
