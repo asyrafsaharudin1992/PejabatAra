@@ -1467,6 +1467,35 @@ export async function hrHandler(req: any, res: any) {
       // One chosen person is always shown (even with no leave in the period).
       return res.status(200).json({ from, to, people: one ? out : out.filter((p: any) => p.requests.length || p.al || p.ml) });
     }
+    // Leave Status Report (like Infotech's): every leave request with a leave date in the period, with its status, who it is waiting for or who approved it,
+    // the officer's comment, and when it was applied and decided. One block for each person.
+    if (req.method === 'GET' && action === 'leave_status_report') {
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      const from = iso.test(String(req.query.from)) ? String(req.query.from) : `${new Date().getFullYear()}-01-01`;
+      const to = iso.test(String(req.query.to)) ? String(req.query.to) : `${new Date().getFullYear()}-12-31`;
+      if (Date.parse(to) - Date.parse(from) > 400 * 86400000) throw fail(400, 'Choose a period of at most a year.');
+      const company = ['KJ', 'SK'].includes(String(req.query.company)) ? String(req.query.company) : '';
+      const status = ['pending', 'approved', 'rejected', 'cancelled'].includes(String(req.query.status)) ? String(req.query.status) : '';
+      const one = text(req.query.id, 60);
+      let query = db.from('hr_leave_requests').select('employee_id,approver_id,decided_by,leave_type,start_date,end_date,half_day,days,reason,status,decision_note,created_at,decided_at').lte('start_date', to).gte('end_date', from).order('start_date').limit(5000);
+      if (status) query = query.eq('status', status);
+      if (one) query = query.eq('employee_id', one);
+      const { data: requests, error } = await query;
+      if (error) throw error;
+      const ids = [...new Set((requests || []).map((r: any) => r.employee_id))];
+      const nameIds = [...new Set((requests || []).flatMap((r: any) => [r.approver_id, r.decided_by]).filter(Boolean))];
+      const [{ data: people }, { data: names }] = await Promise.all([
+        ids.length ? db.from('hr_employees').select('id,company,employee_code,full_name').in('id', ids) : { data: [] as any[] },
+        nameIds.length ? db.from('hr_employees').select('id,full_name').in('id', nameIds) : { data: [] as any[] },
+      ]);
+      const nameOf = new Map((names || []).map((p: any) => [p.id, p.full_name]));
+      const day = (value: string | null) => value ? new Date(Date.parse(value) + 8 * 3600000).toISOString().slice(0, 10) : '';
+      const out = (people || []).filter((p: any) => !company || p.company === company).map((p: any) => ({
+        id: p.id, company: p.company, code: p.employee_code, name: p.full_name,
+        requests: (requests || []).filter((r: any) => r.employee_id === p.id).map((r: any) => ({ type: r.leave_type, start: r.start_date, end: r.end_date, half: r.half_day, days: Math.round(Number(r.days || 0) * 100) / 100, reason: r.reason || '', status: r.status, pendingWith: r.status === 'pending' ? nameOf.get(r.approver_id) || '' : '', approvedBy: r.status === 'pending' ? '' : nameOf.get(r.decided_by) || '', comment: r.decision_note || '', applied: day(r.created_at), decided: day(r.decided_at) })),
+      })).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+      return res.status(200).json({ from, to, people: out });
+    }
     if (req.method === 'GET' && action === 'leave_person') {
       const id = text(req.query.id, 60);
       const { data: person, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,status').eq('id', id).maybeSingle();

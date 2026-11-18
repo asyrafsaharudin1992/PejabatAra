@@ -1,4 +1,5 @@
 import { isMissedClock } from './lib/attendanceRequests';
+import { HRAttendanceIndividual } from './HRAttendanceIndividual';
 import { OtPolicyBody } from './OtPolicy';
 import { OtClaims } from './HROtClaims';
 import { SubTabs } from './SubTabs';
@@ -22,7 +23,7 @@ async function hrApi(query: string, body?: unknown) {
 }
 const api = hrApi;
 type Source = (query: string) => Promise<any>;
-type Tab = 'today' | 'month' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
+type Tab = 'today' | 'month' | 'individual' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
 type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
 type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
 const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${minutes < 0 ? '-' : ''}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
@@ -599,11 +600,12 @@ function OtArea({ onError, badges }: { onError: (message: string) => void; badge
 
 export function HRAttendance({ onError, badges = {} }: { onError: (message: string) => void; badges?: { ot?: number; missed?: number } }) {
   const [tab, setTab] = useState<Tab>('today');
-  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['ot', 'OT'], ['missed', 'Missed clock'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
+  const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['individual', 'Individual'], ['ot', 'OT'], ['missed', 'Missed clock'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="text-compact mx-auto max-w-[1500px] space-y-3 sm:space-y-5">
     <SubTabs active={tab} onSelect={setTab} tabs={tabs.map(([key, label]) => ({ id: key, label, short: key === 'missed' ? 'Missed' : key === 'credit' ? 'Credit' : undefined, badge: key === 'ot' ? badges.ot : key === 'missed' ? badges.missed : 0 }))} />
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
+    {tab === 'individual' && <HRAttendanceIndividual onError={onError} />}
     {tab === 'ot' && <OtArea onError={onError} />}
     {tab === 'missed' && <Requests onError={onError} kind="missed" />}
     {tab === 'late' && <Late onError={onError} />}

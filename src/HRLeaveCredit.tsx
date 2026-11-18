@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Printer, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { PeriodPicker } from './PeriodPicker';
 
 // Office HR: Credit Annual Leave Report (who was given extra Annual Leave, for what, and when) and the form that
 // gives credit to one or many staff. Every credit is also added to the person's AL credit for that year.
@@ -34,7 +35,7 @@ export function HRLeaveCredit({ onError }: { onError: (message: string) => void 
     call(`action=leave_credit_report&from=${from}&to=${to}${company ? `&company=${company}` : ''}`).then((result) => { setPeople(result.people); setShown({ from, to, company }); })
       .catch((cause: Error) => { setPeople([]); onError(cause.message); });
   };
-  useEffect(load, []);
+  useEffect(load, [from, to, company]);
 
   const remove = async (credit: Credit, person: Person) => {
     if (!window.confirm(`Take back ${n2(credit.days)} day(s) of "${credit.remarks}" from ${person.name}? It comes off their AL credit for ${credit.date.slice(0, 4)}.`)) return;
@@ -46,10 +47,8 @@ export function HRLeaveCredit({ onError }: { onError: (message: string) => void 
   return <div className="space-y-5">
     <section className={`${card} flex flex-wrap items-end gap-3 print:hidden`}>
       <div className="min-w-[220px] flex-1"><h2 className="text-lg font-semibold">Credit Annual Leave Report</h2><p className="text-sm text-slate-500">Every Annual Leave credit given in a period (public holiday replacement, training days and so on), per person.</p></div>
-      <label className="text-xs font-bold text-slate-600">From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className={`${field} mt-1 block`} /></label>
-      <label className="text-xs font-bold text-slate-600">To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} className={`${field} mt-1 block`} /></label>
+      <PeriodPicker onChange={(period) => { setFrom(period.from); setTo(period.to); }} allowYear defaultMode="year" />
       <label className="text-xs font-bold text-slate-600">Company<select value={company} onChange={(event) => setCompany(event.target.value)} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
-      <button onClick={load} className="h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white hover:bg-[#0a4c6a]">Preview</button>
       <button onClick={() => window.print()} disabled={!people?.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
       <button onClick={() => setAdding(!adding)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"><Plus className="h-4 w-4" />Give credit</button>
     </section>

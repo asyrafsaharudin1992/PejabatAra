@@ -25,6 +25,9 @@ export function HRReviewReminders({ reminders, notSetUp, settings, settingsVersi
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<ReturnType<typeof blank> | null>(null);
   const [busy, setBusy] = useState(false);
+  // The question is asked on the page itself (not a browser pop-up, which a browser can silently block after a few of them, so nothing was saved).
+  const [asking, setAsking] = useState('');
+  const keyOf = (item: ReviewReminder) => `${item.employeeId}|${item.periodLabel}|${item.dueOn}`;
   const [notice, setNotice] = useState('');
   const relevant = (reminders || []).filter((item) => (!company || item.company === company) && `${item.fullName} ${item.employeeCode} ${item.periodLabel} ${item.notes}`.toLowerCase().includes(query.trim().toLowerCase()));
   const shown = relevant.filter((item) => filter === 'next' ? open(item) && item.daysUntil <= 90 : filter === 'overdue' ? item.status === 'overdue' : filter === 'assigned' ? item.status === 'assigned' : filter === 'closed' ? ['completed', 'cancelled'].includes(item.status) : open(item));
@@ -43,13 +46,15 @@ export function HRReviewReminders({ reminders, notSetUp, settings, settingsVersi
     finally { setBusy(false); }
   };
   const doneManually = async (item: ReviewReminder) => {
-    if (!window.confirm(`Mark "${item.periodLabel}" for ${item.fullName} (due ${dmy(item.dueOn)}) as done manually? It will no longer show as overdue.`)) return;
+    setAsking('');
     setBusy(true); setNotice('');
     try { await reviewApi('action=hr_reminder_manual', { employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn }); await onReload(); setNotice('Marked as done manually.'); }
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to mark this as done.'); }
     finally { setBusy(false); }
   };
-  const actions = (item: ReviewReminder) => <>{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.source === 'automatic' && open(item) && <button type="button" disabled={busy} onClick={() => void doneManually(item)} className="px-2 py-1 text-xs font-semibold text-emerald-700">Done manually</button>}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
+  const actions = (item: ReviewReminder) => <>{open(item) && <button type="button" onClick={() => onAssign(item)} className="rounded-lg bg-[#0b587b] px-3 py-2 text-xs font-semibold text-white">Assign review</button>}{item.source === 'automatic' && open(item) && (asking === keyOf(item)
+            ? <span className="inline-flex flex-wrap items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Mark as done manually? <button type="button" disabled={busy} onClick={() => void doneManually(item)} className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white">Yes</button><button type="button" onClick={() => setAsking('')} className="px-2 py-1 font-semibold">No</button></span>
+            : <button type="button" disabled={busy} onClick={() => setAsking(keyOf(item))} className="px-2 py-1 text-xs font-semibold text-emerald-700">Done manually</button>)}{item.reviewId && <button type="button" onClick={() => onView(item.reviewId!)} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">View review</button>}
           {item.source === 'custom' && open(item) && <><button type="button" disabled={busy} onClick={() => setDraft({ id: item.id, employeeId: item.employeeId, periodLabel: item.periodLabel, dueOn: item.dueOn, notes: item.notes })} className="px-2 py-1 text-xs font-semibold text-slate-500">Edit</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'complete')} className="px-2 py-1 text-xs font-semibold text-emerald-700">Done manually</button><button type="button" disabled={busy} onClick={() => void change(item.id, 'cancel')} className="px-2 py-1 text-xs font-semibold text-slate-400">Cancel reminder</button></>}
           {item.source === 'custom' && !item.reviewId && ['completed', 'cancelled'].includes(item.status) && <button type="button" disabled={busy} onClick={() => void change(item.id, 'reopen')} className="px-2 py-1 text-xs font-semibold text-[#0b587b]">Reopen</button>}</>;
   const [openRow, setOpenRow] = useState('');
