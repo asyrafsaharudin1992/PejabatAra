@@ -3,6 +3,7 @@ import { Search, Users } from 'lucide-react';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { locationGroup } from './lib/staffGroup';
 import { usePhotoUrls } from './lib/staffPhoto';
+import { PhotoEditor } from './PhotoEditor';
 import { StaffAvatar } from './StaffAvatar';
 
 type Person = { id?: string; fullName: string; employeeCode: string; company: string; designation: string; department: string; status: string; joinDate: string | null };
@@ -13,7 +14,10 @@ const position = (person: Person) => person.company === 'KJ' && person.employeeC
 // Without `onOpen` it is a list only (the COO's Staff page): the names are not clickable, so no profile opens.
 export default function HRStaffLocation({ people, onOpen }: { people: Person[] | null; onOpen?: (id: string) => void }) {
   const today = useMalaysiaToday();
-  const photos = usePhotoUrls(onOpen ? 'hr' : 'coo', (people || []).filter((p) => p.status === 'Active' && p.id).map((p) => p.id as string));
+  const [again, setAgain] = useState(0);
+  const [problem, setProblem] = useState('');
+  const [moving, setMoving] = useState<Person | null>(null);
+  const photos = usePhotoUrls(onOpen ? 'hr' : 'coo', (people || []).filter((p) => p.status === 'Active' && p.id).map((p) => p.id as string), again);
   const [query, setQuery] = useState(''), [company, setCompany] = useState('');
   const active = (people || []).filter((p) => p.status === 'Active');
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -28,9 +32,11 @@ export default function HRStaffLocation({ people, onOpen }: { people: Person[] |
       return <section id={`staff-location-${group.replace(/\s/g, '-')}`} key={group} className="scroll-mt-6 space-y-3"><h3 className="flex items-center gap-2 text-base font-semibold text-[#17364c] sm:text-lg"><Users size={19} />{group}<span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs text-sky-800">{members.length}</span></h3><div className="grid gap-3 sm:gap-4 lg:grid-cols-2">{['KJ', 'SK', ...new Set(members.map((p) => p.company).filter((c) => !['KJ', 'SK'].includes(c)))].map((branch) => {
         const staff = members.filter((p) => p.company === branch).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode, undefined, { numeric: true }) || a.fullName.localeCompare(b.fullName));
         if (!staff.length) return null;
-        return <div key={branch} className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4"><h4 className="mb-2 flex sm:mb-3 justify-between text-xs font-bold uppercase tracking-wide text-[#0b587b]"><span>{branch === 'KJ' ? 'KJ · Kajang' : branch === 'SK' ? 'SK · Seri Kembangan' : branch || 'Branch not set'}</span><span>{staff.length}</span></h4><div className="grid grid-cols-2 gap-1.5 sm:block sm:space-y-2">{staff.map((p) => <button key={p.id || p.employeeCode} type="button" onClick={() => p.id && onOpen?.(p.id)} disabled={!onOpen} className="flex w-full items-center gap-2 disabled:cursor-default rounded-xl bg-slate-50 p-2 text-left transition hover:bg-sky-50 sm:items-start sm:gap-3 sm:p-3"><StaffAvatar name={p.fullName} url={p.id ? photos[p.id] : undefined} size={36} className="!bg-sky-100 !text-sky-800" /><span className="min-w-0"><span className="block text-[11.5px] font-semibold leading-tight text-slate-800 sm:text-sm">{p.fullName}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500 sm:mt-1 sm:text-xs">{position(p)} · {p.employeeCode}</span>{p.joinDate && p.joinDate > today && <span className="mt-1 inline-block rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">Starts {p.joinDate.split('-').reverse().join('/')}</span>}</span></button>)}</div></div>;
+        return <div key={branch} className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4"><h4 className="mb-2 flex sm:mb-3 justify-between text-xs font-bold uppercase tracking-wide text-[#0b587b]"><span>{branch === 'KJ' ? 'KJ · Kajang' : branch === 'SK' ? 'SK · Seri Kembangan' : branch || 'Branch not set'}</span><span>{staff.length}</span></h4><div className="grid grid-cols-2 gap-1.5 sm:block sm:space-y-2">{staff.map((p) => <button key={p.id || p.employeeCode} type="button" onClick={() => p.id && onOpen?.(p.id)} disabled={!onOpen} className="flex w-full items-center gap-2 disabled:cursor-default rounded-xl bg-slate-50 p-2 text-left transition hover:bg-sky-50 sm:items-start sm:gap-3 sm:p-3"><span role={onOpen && p.id ? 'button' : undefined} title={onOpen && p.id ? 'Adjust the photo' : undefined} onClick={onOpen && p.id ? (event) => { event.stopPropagation(); setMoving(p); } : undefined} className={onOpen && p.id ? 'rounded-full ring-sky-400 hover:ring-2' : ''}><StaffAvatar name={p.fullName} url={p.id ? photos[p.id] : undefined} size={36} className="!bg-sky-100 !text-sky-800" /></span><span className="min-w-0"><span className="block text-[11.5px] font-semibold leading-tight text-slate-800 sm:text-sm">{p.fullName}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500 sm:mt-1 sm:text-xs">{position(p)} · {p.employeeCode}</span>{p.joinDate && p.joinDate > today && <span className="mt-1 inline-block rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">Starts {p.joinDate.split('-').reverse().join('/')}</span>}</span></button>)}</div></div>;
       })}</div></section>;
     })}
     {people && !shown.length && <p className="rounded-xl bg-white p-5 text-sm text-slate-500">No staff match this view.</p>}
+    {problem && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{problem}</p>}
+    {moving?.id && <PhotoEditor employeeId={moving.id} name={moving.fullName} hasPhoto={Boolean(photos[moving.id])} onClose={() => setMoving(null)} onSaved={() => { setMoving(null); setAgain((value) => value + 1); }} onError={setProblem} />}
   </section>;
 }

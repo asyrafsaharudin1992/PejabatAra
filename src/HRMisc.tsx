@@ -1,11 +1,12 @@
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Award, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Award, Cake, CalendarClock, Check, Copy, ExternalLink, FileDown, Image as ImageIcon, Link2, MessageCircle, NotebookPen, Pencil, Plus, Printer, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
 import { SHARE_NOTICE, shareToWhatsApp } from './lib/shareFile';
 import { shrinkPoster } from './ManagedServices';
 import { card } from './AssessmentStaff';
 import { HRSotm } from './HRSotm';
+import { HRBirthday } from './HRBirthday';
 
 // Office HR > Miscellaneous: four cards. Important links, posters HR shares on WhatsApp, notes (optionally with a due date that shows on the HR calendar) and
 // things HR prints often. Each card opens its own page; HR adds and removes everything here.
@@ -52,6 +53,7 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
   const [notSetUp, setNotSetUp] = useState(false);
   const [section, setSection] = useState<Kind | null>(null);
   const [sotm, setSotm] = useState(false);
+  const [birthday, setBirthday] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [edit, setEdit] = useState<{ id?: string; kind: 'link' | 'note' | 'print'; title: string; url: string; body: string; dueOn: string } | null>(null);
@@ -109,10 +111,16 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
       <HRSotm onError={onError} />
     </>}
 
-    {items && !current && !sotm && <>
+    {birthday && <>
+      <button onClick={() => setBirthday(false)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b] hover:underline"><ArrowLeft className="h-4 w-4" />Miscellaneous</button>
+      <HRBirthday onError={onError} />
+    </>}
+
+    {items && !current && !sotm && !birthday && <>
       {dueNotes.length > 0 && <button onClick={() => setSection('note')} className="flex w-full items-center gap-3 rounded-2xl bg-amber-50 p-4 text-left text-sm text-amber-900 hover:bg-amber-100"><CalendarClock className="h-5 w-5 shrink-0" /><span><strong>{dueNotes.length} {dueNotes.length === 1 ? 'note is' : 'notes are'} due</strong> in the next 7 days or overdue. Open Notes to see them.</span></button>}
       <div className="space-y-1.5 sm:hidden">{SECTIONS.map((entry) => { const Icon = entry.icon; return <button key={entry.kind} onClick={() => setSection(entry.kind)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 text-left"><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${entry.tone}`}><Icon className="h-[18px] w-[18px]" /></span><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold">{entry.title}</span><span className="block truncate text-[10.5px] text-slate-500">{entry.hint}</span></span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{of(entry.kind).length}</span><ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /></button>; })}
-        <button onClick={() => setSotm(true)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 text-left"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-600"><Award className="h-[18px] w-[18px]" /></span><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold">SOTM</span><span className="block truncate text-[10.5px] text-slate-500">Staff of the Month poster</span></span><ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /></button></div>
+        <button onClick={() => setSotm(true)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 text-left"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-600"><Award className="h-[18px] w-[18px]" /></span><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold">SOTM</span><span className="block truncate text-[10.5px] text-slate-500">Staff of the Month poster</span></span><ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /></button>
+        <button onClick={() => setBirthday(true)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 text-left"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-600"><Cake className="h-[18px] w-[18px]" /></span><span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold">Birthday</span><span className="block truncate text-[10.5px] text-slate-500">Birthday poster</span></span><ArrowRight className="h-4 w-4 shrink-0 text-slate-300" /></button></div>
       <div className="hidden gap-4 sm:grid sm:grid-cols-2">{SECTIONS.map((entry) => { const Icon = entry.icon; const count = of(entry.kind).length; return <button key={entry.kind} onClick={() => setSection(entry.kind)} className="group flex flex-col rounded-[26px] border border-black/[0.045] bg-white p-6 text-left shadow-[0_2px_8px_rgba(0,0,0,0.025)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
         <span className="flex items-start justify-between"><span className={`grid h-12 w-12 place-items-center rounded-2xl ${entry.tone}`}><Icon className="h-6 w-6" /></span><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">{count}</span></span>
         <span className="mt-5 text-lg font-semibold">{entry.title}</span><span className="mt-1 text-sm text-slate-500">{entry.hint}</span>
@@ -121,6 +129,11 @@ export function HRMisc({ onError }: { onError: (message: string) => void }) {
         <button onClick={() => setSotm(true)} className="group flex flex-col rounded-[26px] border border-black/[0.045] bg-white p-6 text-left shadow-[0_2px_8px_rgba(0,0,0,0.025)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
           <span className="flex items-start justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-600"><Award className="h-6 w-6" /></span></span>
           <span className="mt-5 text-lg font-semibold">SOTM</span><span className="mt-1 text-sm text-slate-500">Staff of the Month poster: choose the staff, add a face photo, download.</span>
+          <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+        </button>
+        <button onClick={() => setBirthday(true)} className="group flex flex-col rounded-[26px] border border-black/[0.045] bg-white p-6 text-left shadow-[0_2px_8px_rgba(0,0,0,0.025)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
+          <span className="flex items-start justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600"><Cake className="h-6 w-6" /></span></span>
+          <span className="mt-5 text-lg font-semibold">Birthday</span><span className="mt-1 text-sm text-slate-500">Birthday poster: choose the staff, their photo is added, share or download.</span>
           <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
         </button></div>
     </>}

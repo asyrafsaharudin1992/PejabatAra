@@ -12,14 +12,14 @@ async function sourceBase64(bitmap: ImageBitmap): Promise<string> {
   canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   return photoBase64(canvas);
 }
-export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClose, onSaved, onError }: { employeeId: string; name: string; lines: string[]; nodeKey: string; hasPhoto: boolean; onClose: () => void; onSaved: () => void; onError: (message: string) => void }) {
+export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClose, onSaved, onError }: { employeeId: string; name: string; lines?: string[]; nodeKey?: string; hasPhoto: boolean; onClose: () => void; onSaved: () => void; onError: (message: string) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
   const [fresh, setFresh] = useState(false); // a new file was chosen (the old picture is replaced)
   const [moved, setMoved] = useState(false);
   const [crop, setCrop] = useState<Crop>(DEFAULT_CROP);
-  const [text, setText] = useState(lines.join('\n'));
+  const [text, setText] = useState((lines || []).join('\n'));
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (bitmap && canvas.current) drawPhoto(canvas.current, bitmap, crop); }, [bitmap, crop]);
   // The saved picture, so the photo can be moved again.
@@ -54,7 +54,7 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
     setBusy(true);
     try {
       const clean = text.split('\n').map((line) => line.trim()).filter(Boolean);
-      if (clean.join('\n') !== lines.join('\n')) await post({ action: 'org_text', key: nodeKey, lines: clean });
+      if (nodeKey && clean.join('\n') !== (lines || []).join('\n')) await post({ action: 'org_text', key: nodeKey, lines: clean });
       if (bitmap && moved && canvas.current) await post({ action: 'photo_upload', employeeId, image: await photoBase64(canvas.current), source: fresh ? await sourceBase64(bitmap) : undefined });
       forgetPhotoUrls(); onSaved();
     } catch (cause) { onError((cause as Error).message); } finally { setBusy(false); }
@@ -63,8 +63,8 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
   const slider = (label: string, key: keyof Crop, min: number, max: number, step: number) => <label className="block text-xs font-semibold text-slate-600">{label}<input type="range" min={min} max={max} step={step} value={crop[key]} onChange={(event) => change({ ...crop, [key]: Number(event.target.value) })} className="mt-1 w-full" /></label>;
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/40 p-4" onClick={onClose}>
     <div role="dialog" aria-label={`Edit ${name}`} onClick={(event) => event.stopPropagation()} className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
-      <div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-slate-800">Edit chart</h3><button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X size={18} /></button></div>
-      <label className="block text-xs font-semibold text-slate-600">Words under the photo (one line each, up to 4)<textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} maxLength={260} className="mt-1 w-full rounded-xl border border-slate-200 p-2 text-sm font-normal text-slate-800" /></label>
+      <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-800">{nodeKey ? 'Edit chart' : 'Photo position'}</h3>{!nodeKey && <p className="text-sm text-slate-500">{name}</p>}</div><button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X size={18} /></button></div>
+      {nodeKey && <label className="block text-xs font-semibold text-slate-600">Words under the photo (one line each, up to 4)<textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} maxLength={260} className="mt-1 w-full rounded-xl border border-slate-200 p-2 text-sm font-normal text-slate-800" /></label>}
       <div className="space-y-3">
         <p className="text-xs font-semibold text-slate-600">Photo</p>
         <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void pick(event.target.files?.[0]); event.target.value = ''; }} className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#0b587b]" />

@@ -25,7 +25,7 @@ export async function photoBase64(canvas: HTMLCanvasElement): Promise<string> {
 // Links for a list of staff, asked once and kept while the page is open (a link works for an hour). Staff with no photo, and people who may not
 // see photos, simply get none: the page shows the initials then.
 const cache = new Map<string, { url: string; at: number }>();
-export function usePhotoUrls(resource: 'hr' | 'coo', ids: string[]): Record<string, string> {
+export function usePhotoUrls(resource: 'hr' | 'coo', ids: string[], stamp = 0): Record<string, string> {
   const key = [...new Set(ids)].sort().join(',');
   const [urls, setUrls] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -47,7 +47,7 @@ export function usePhotoUrls(resource: 'hr' | 'coo', ids: string[]): Record<stri
       done();
     })();
     return () => { live = false; };
-  }, [key, resource]);
+  }, [key, resource, stamp]);
   return urls;
 }
 export const forgetPhotoUrls = () => cache.clear();

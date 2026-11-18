@@ -335,6 +335,12 @@ export async function hrHandler(req: any, res: any) {
       await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { photo: 'uploaded', by: text((user as any)?.email, 120) }, changed_by: user.id });
       return res.status(200).json({ success: true });
     }
+    // Birthdays (Birthday poster): name, clinic and birthday of the active staff. Only the day and month are sent, not the year or age.
+    if (req.method === 'GET' && action === 'birthdays') {
+      const { data, error } = await db.from('hr_employees').select('id,full_name,company,date_of_birth').eq('status', 'Active').not('date_of_birth', 'is', null).order('full_name').limit(500);
+      if (error) throw error;
+      return res.status(200).json({ people: (data || []).filter((row: any) => isDate(row.date_of_birth)).map((row: any) => ({ id: row.id, name: row.full_name, branch: row.company, month: Number(String(row.date_of_birth).slice(5, 7)), day: Number(String(row.date_of_birth).slice(8, 10)) })) });
+    }
     if (req.method === 'GET' && action === 'photo_source') return res.status(200).json({ url: await sourceLink(db, text(req.query.employeeId, 60)) });
     if (req.method === 'POST' && action === 'org_text') {
       if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
