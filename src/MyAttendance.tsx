@@ -90,6 +90,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   const [busy, setBusy] = useState(false);
   const [remark, setRemark] = useState('');
   const [creditHours, setCreditHours] = useState(0);
+  // The question asked when clocking in late or out early with credit hours in hand: use them, or not.
+  const [ask, setAsk] = useState<null | { kind: 'late' | 'early'; minutes: number; options: number[]; pick: number; step: 'ask' | 'pick' }>(null);
   const [tickAt, setTickAt] = useState(() => Date.now()); // so the late or early minutes follow the clock while the page stays open
   useEffect(() => { const timer = setInterval(() => setTickAt(Date.now()), 60000); return () => clearInterval(timer); }, []);
   const [confirmId, setConfirmId] = useState('');
@@ -113,7 +115,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   const loadMonthDays = () => { assessmentFetch(`action=attendance_history&month=${monthOf(new Date())}`).then((result: { days: Day[] }) => setMonthDays(result.days)).catch(() => setMonthDays(null)); };
   useEffect(loadMonthDays, []);
 
-  const clock = async () => {
+  // `chosen`: the hours of credit decided in the question (0 = none); without it the dropdown's choice is used.
+  const clock = async (chosen?: number) => {
     if (!state || busy) return;
     setBusy(true); setError(''); setMessage(''); setHelpOpen(false);
     const controller = new AbortController();
@@ -123,7 +126,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       if (controller.signal.aborted) return;
       setLocating(false);
       setBlocked(false);
-      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim(), creditHours: creditOptions(state, Date.now()).includes(creditHours) ? creditHours : 0 }) });
+      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim(), creditHours: creditOptions(state, Date.now()).includes(chosen ?? creditHours) ? (chosen ?? creditHours) : 0 }) });
       setRemark(''); setCreditHours(0);
       setState(result);
       setMessage(`Clocked ${result.kind === 'in' ? 'in' : 'out'} at ${timeOf(new Date().toISOString())}.${result.creditNote ? ` ${result.creditNote}` : ''}`);
@@ -136,6 +139,18 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       if (cause instanceof ClockLocationError && cause.reason === 'denied') { setBlocked(true); setHelpOpen(true); }
       setError(text);
     } finally { if (locationCheck.current === controller) locationCheck.current = null; setLocating(false); setBusy(false); }
+  };
+  // Clocking in late or out early while having credit hours: ask first whether to use them (unless the dropdown already has an answer).
+  const startClock = () => {
+    if (!state || busy) return;
+    const need = creditNeedNow(state, Date.now()), options = creditOptions(state, Date.now());
+    if (need && options.length && !creditHours) {
+      // The smallest amount that covers the time late or early, or the most they have.
+      const cover = options.find((hours) => hours * 60 >= need.minutes) ?? options[options.length - 1];
+      setAsk({ kind: need.kind, minutes: need.minutes, options, pick: cover, step: 'ask' });
+      return;
+    }
+    void clock();
   };
   const send = async (draft = false) => {
     if (!form) return;
@@ -256,10 +271,26 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
         const text = (hours: number) => hours < 1 ? `${hours * 60} minutes` : hours === 1 ? '1 hour' : `${hours} hours`;
         return <label className="relative mt-4 block rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/90"><span className="block"><strong>Use credit hours?</strong> You are {need.minutes} min {need.kind === 'late' ? 'late' : 'leaving early'}. You have {Math.floor((state.creditMinutes || 0) / 60)} h{(state.creditMinutes || 0) % 60 ? ` ${(state.creditMinutes || 0) % 60} min` : ''}. Please make sure your supervisor has been informed.</span>
           <select aria-label="Credit hours to use" value={options.includes(creditHours) ? creditHours : 0} onChange={(event) => setCreditHours(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white"><option value={0} className="text-slate-800">Do not use credit hours</option>{options.map((hours) => <option key={hours} value={hours} className="text-slate-800">{`Use ${text(hours)}`}</option>)}</select></label>;
-      })()}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" />{/(use|guna|gunakan|kredit|credit|kreadit)\b.{0,20}(hour|hours|hr|hrs|jam)|\b(kredit|credit)\s*(hours?|jam)\b/i.test(remark) && creditHours === 0 && <p role="alert" className="relative mt-2 rounded-xl bg-amber-300/20 p-3 text-xs leading-5 text-amber-100"><strong>To use credit hours, choose "Use credit hours?" above, not the Remark.</strong> The Remark is only a note; your credit hours will not be deducted. If you do not see the choice, you are not late or leaving early, or you have no balance. <span className="mt-1 block"><strong>Untuk guna kredit jam, pilih "Use credit hours?" di atas, bukan dalam Remark.</strong> Remark hanya catatan; baki kredit jam tidak ditolak.</span></p>}<button onClick={() => void clock()} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
+      })()}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" />{/(use|guna|gunakan|kredit|credit|kreadit)\b.{0,20}(hour|hours|hr|hrs|jam)|\b(kredit|credit)\s*(hours?|jam)\b/i.test(remark) && creditHours === 0 && <p role="alert" className="relative mt-2 rounded-xl bg-amber-300/20 p-3 text-xs leading-5 text-amber-100"><strong>To use credit hours, choose "Use credit hours?" above, not the Remark.</strong> The Remark is only a note; your credit hours will not be deducted. If you do not see the choice, you are not late or leaving early, or you have no balance. <span className="mt-1 block"><strong>Untuk guna kredit jam, pilih "Use credit hours?" di atas, bukan dalam Remark.</strong> Remark hanya catatan; baki kredit jam tidak ditolak.</span></p>}<button onClick={startClock} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
       <p className="relative mt-3 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{state.mode === 'anywhere' ? 'You can clock from anywhere. Your location is still recorded.' : state.places.length ? `You can clock at: ${state.places.map((place) => place.name).join(', ')}.` : 'No clock place is set for you yet. Ask HR.'}</p>
     </section>
     {helpOpen && blocked && state.mode === 'places' && <LocationHelp onClose={() => setHelpOpen(false)} onRetry={() => { setHelpOpen(false); void clock(); }} />}
+    {ask && state && <div role="dialog" aria-modal="true" aria-labelledby="credit-ask-title" className="fixed inset-0 z-50 grid place-items-end bg-slate-950/55 p-0 backdrop-blur-sm sm:place-items-center sm:p-6">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[28px] bg-white p-6 shadow-2xl sm:rounded-[28px]">
+        <h2 id="credit-ask-title" className="text-xl font-semibold tracking-tight text-[#0b2a4a]">{ask.kind === 'early' ? 'You are clocking out early' : 'You are clocking in late'}</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">{ask.kind === 'early' ? `You are leaving ${ask.minutes} minutes before your shift ends.` : `You are ${ask.minutes} minutes late for your shift.`} You have {Math.floor((state.creditMinutes || 0) / 60)} h{(state.creditMinutes || 0) % 60 ? ` ${(state.creditMinutes || 0) % 60} min` : ''} of credit hours.</p>
+        <p className="mt-3 text-base font-semibold text-[#14233b]">Do you want to use your credit hours?</p>
+        {ask.step === 'pick' && <label className="mt-3 block text-sm font-semibold text-slate-700">How much credit to use<select value={ask.pick} onChange={(event) => setAsk({ ...ask, pick: Number(event.target.value) })} className="mt-1 h-12 w-full rounded-2xl border border-slate-200 px-3 text-base">{ask.options.map((hours) => <option key={hours} value={hours}>{hours < 1 ? `${hours * 60} minutes` : hours === 1 ? '1 hour' : `${hours} hours`}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-500">Please make sure your supervisor has been informed.</span></label>}
+        <div className="mt-5 grid gap-2">
+          {ask.step === 'ask'
+            ? <><button type="button" onClick={() => setAsk({ ...ask, step: 'pick' })} className="h-12 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Yes, use my credit hours</button>
+              <button type="button" onClick={() => { setAsk(null); setCreditHours(0); void clock(0); }} className="h-12 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-700">No, clock without credit hours</button></>
+            : <><button type="button" onClick={() => { const hours = ask.pick; setAsk(null); setCreditHours(hours); void clock(hours); }} className="h-12 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Use credit hours and clock {ask.kind === 'early' ? 'out' : 'in'}</button>
+              <button type="button" onClick={() => setAsk({ ...ask, step: 'ask' })} className="h-12 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-700">Back</button></>}
+          <button type="button" onClick={() => setAsk(null)} className="h-10 text-sm font-semibold text-slate-500">Cancel, do not clock yet</button>
+        </div>
+      </div>
+    </div>}
     {message && <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{message}</p>}
     {tip && <section className="rounded-2xl bg-[#eef5ff] p-4 text-sm leading-6 text-[#0b2a4a]"><p className="font-semibold">So your iPhone does not ask every time</p><p className="mt-1">Tap <strong>aA</strong> on the left of the web address, then <strong>Website Settings</strong>, <strong>Location</strong> and choose <strong>Allow</strong>. You only need to do this once.</p><button onClick={() => { try { localStorage.setItem('ara_location_tip', '1'); } catch { /* storage not available */ } setTip(false); }} className="mt-2 text-sm font-semibold text-[#1f6feb]">Got it</button></section>}
     {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
