@@ -6,11 +6,12 @@ import { card } from './AssessmentStaff';
 // Office HR, Leave > Staff leave: a card for every staff member with their annual and medical leave, and from a card the
 // person's balances (HR can correct them) and their whole leave history.
 type Pair = { year: number; eligible: number; total: number; taken: number; balance: number } | null;
-type Staff = { id: string; company: string; code: string; name: string; designation: string; status: string; al: Pair; ml: Pair; waiting: number };
+type Staff = { id: string; company: string; code: string; name: string; designation: string; status: string; al: Pair; ml: Pair; others?: { group: string; eligible: number; taken: number; balance: number }[]; waiting: number };
 type Balance = { group: string; year: number; eligible: number; broughtForward: number; credit: number; earn: number; forfeit: number; total: number; taken: number; balance: number; asOf: string; source: string };
 type Req = { id: string; type: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorNote: string; note: string };
 
 const GROUP_NAME: Record<string, string> = { AL: 'Annual leave', ML: 'Medical leave', HOSP: 'Hospitalization', MARRG: 'Marriage', HAJUMR: 'Haji / Umrah', UL: 'Unpaid leave' };
+const OTHER_SHORT: Record<string, string> = { UL: 'UPL', HOSP: 'Hospital', MARRG: 'Marriage', HAJUMR: 'Haji/Umrah' };
 const LABEL: Record<Req['status'], string> = { pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for final approver', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 const TONE: Record<Req['status'], string> = { pending: 'bg-amber-50 text-amber-700', supervisor_approved: 'bg-sky-50 text-sky-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-rose-50 text-rose-700', cancelled: 'bg-slate-100 text-slate-500' };
 const dmy = (date: string) => date.split('-').reverse().join('/');
@@ -73,6 +74,7 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
       <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold">{person.name}</p><p className="mt-0.5 truncate text-xs text-slate-400">{person.company} · {person.code}{person.designation ? ` · ${person.designation}` : ''}</p></div>
         {person.waiting > 0 && <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">{person.waiting} waiting</span>}{person.status !== 'Active' && <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">{person.status}</span>}</div>
       <div className="mt-4 grid grid-cols-2 gap-5"><Meter label="Annual" pair={person.al} /><Meter label="Medical" pair={person.ml} /></div>
+      {!!person.others?.length && <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">{person.others.map((item) => <span key={item.group} title={`${GROUP_NAME[item.group] || item.group}: ${num(item.taken)} taken, ${num(item.balance)} left of ${num(item.eligible)}`} className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${item.taken > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-50 text-slate-400'}`}>{OTHER_SHORT[item.group] || item.group} {num(item.taken)} <span className="font-normal">of {num(item.eligible)}</span></span>)}</div>}
     </button>)}</div>
     {pages > 1 && <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="Staff pages">
       <p className="text-sm text-slate-500">Showing {(current - 1) * PAGE_SIZE + 1}–{Math.min(current * PAGE_SIZE, shown.length)} of {shown.length}</p>

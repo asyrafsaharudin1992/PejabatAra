@@ -11,6 +11,7 @@ import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollR
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
+import { checkPhoto, checkSource, isStaffId, orgChart, photoLinks, removePhoto, saveOrgText, savePhoto, saveSource, sourceLink } from './_photos.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
 
 // Office HR. Served from /api/status?resource=hr because the Vercel Hobby plan
@@ -301,7 +302,7 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 }
 
 // What the COO may read in the HR office: the roster and the CA staffing forecast (read only). Nothing else in HR, and nothing that changes data.
-const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context']);
+const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
 const CLINICAL_CAN_READ = new Set(['roster']);
 
@@ -319,6 +320,34 @@ export async function hrHandler(req: any, res: any) {
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
     if (action.startsWith('attendance_')) return await attendanceHrAction(req, res, db, action, body, text((user as any)?.email, 120));
+
+    // Staff photos (HR): the organisation chart with its photos; links for a list of staff; upload and remove (HR only, every change is audited).
+    if (req.method === 'GET' && action === 'org_chart') return res.status(200).json(await orgChart(db));
+    if (req.method === 'GET' && action === 'photo_urls') return res.status(200).json({ urls: await photoLinks(db, text(req.query.ids, 14000).split(',')) });
+    if (req.method === 'POST' && action === 'photo_upload') {
+      const id = text(body.employeeId, 60);
+      if (!isStaffId(id)) throw fail(400, 'Choose a staff member.');
+      const { data: person } = await db.from('hr_employees').select('id,full_name').eq('id', id).maybeSingle();
+      if (!person) throw fail(404, 'That staff member was not found.');
+      const original = checkSource(body.source);
+      await savePhoto(db, id, checkPhoto(body.image));
+      if (original) await saveSource(db, id, original);
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { photo: 'uploaded', by: text((user as any)?.email, 120) }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'GET' && action === 'photo_source') return res.status(200).json({ url: await sourceLink(db, text(req.query.employeeId, 60)) });
+    if (req.method === 'POST' && action === 'org_text') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      await saveOrgText(db, user.id, body.key, body.lines);
+      return res.status(200).json({ success: true });
+    }
+    if (req.method === 'POST' && action === 'photo_delete') {
+      const id = text(body.employeeId, 60);
+      if (!isStaffId(id)) throw fail(400, 'Choose a staff member.');
+      await removePhoto(db, id);
+      await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { photo: 'removed', by: text((user as any)?.email, 120) }, changed_by: user.id });
+      return res.status(200).json({ success: true });
+    }
 
     if (req.method === 'GET' && action === 'staff') {
       // The Assessment Room staff list; preview and test accounts are not real staff.
@@ -886,7 +915,7 @@ export async function hrHandler(req: any, res: any) {
       let restored = 0;
       if (request.status === 'approved' && !fromInfotech) {
         // The balance was taken off the newest year of the leave group at approval: put the days back there.
-        const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', Number(String(request.start_date).slice(0, 4))).limit(1);
+        const { data: rows } = await db.from('hr_leave_balances').select('id,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', ['UL', 'HOSP', 'MARRG', 'HAJUMR'].includes(request.leave_group) ? 0 : Number(String(request.start_date).slice(0, 4))).limit(1);
         if (rows?.length) { restored = Number(request.days); const { error } = await db.from('hr_leave_balances').update({ taken: Math.max(0, Number(rows[0].taken) - restored), balance: Number(rows[0].balance) + restored, updated_at: now }).eq('id', rows[0].id); if (error) throw error; }
       }
       await removeLeaveFiles(db, request.id);
@@ -904,13 +933,13 @@ export async function hrHandler(req: any, res: any) {
       if (error) throw error;
       const ids = (people || []).map((p: any) => p.id);
       const [{ data: balances }, { data: open }] = await Promise.all([
-        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).limit(4000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML', 'UL', 'HOSP', 'MARRG', 'HAJUMR']).limit(8000),
         db.from('hr_leave_requests').select('employee_id').in('status', ['pending', 'supervisor_approved']).limit(2000),
       ]);
       const latest = (employee: string, group: string) => (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year)[0];
       const waiting = new Map<string, number>(); for (const row of open || []) waiting.set(row.employee_id, (waiting.get(row.employee_id) || 0) + 1);
       const pick = (b: any) => b ? { year: b.year, eligible: Number(b.eligible), total: Number(b.total), taken: Number(b.taken), balance: Number(b.balance) } : null;
-      return res.status(200).json({ staff: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation, status: p.status, al: pick(latest(p.id, 'AL')), ml: pick(latest(p.id, 'ML')), waiting: waiting.get(p.id) || 0 })) });
+      return res.status(200).json({ staff: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation, status: p.status, al: pick(latest(p.id, 'AL')), ml: pick(latest(p.id, 'ML')), others: ['UL', 'HOSP', 'MARRG', 'HAJUMR'].map((group) => { const b = latest(p.id, group); return b ? { group, eligible: Number(b.eligible), taken: Number(b.taken), balance: Number(b.balance) } : null; }).filter(Boolean), waiting: waiting.get(p.id) || 0 })) });
     }
     // GCR report (Gantian Cuti Rehat): per person, the credit that burns, the days to pay and what carries forward.
     if (req.method === 'GET' && action === 'leave_gcr') {
@@ -1103,7 +1132,7 @@ export async function hrHandler(req: any, res: any) {
           if (!days) throw fail(400, 'No working day in those dates (rest days and public holidays are not counted).');
           const { count: clash } = await db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('employee_id', id).in('status', ['pending', 'supervisor_approved', 'approved']).lte('start_date', end).gte('end_date', start);
           if (clash) throw fail(409, 'Already has leave on some of those dates.');
-          const { data: rows, error: balanceError } = await db.from('hr_leave_balances').select('id,eligible,brought_forward,credit,earn,forfeit,taken,balance').eq('employee_id', id).eq('leave_group', type.group).eq('year', year).limit(1);
+          const { data: rows, error: balanceError } = await db.from('hr_leave_balances').select('id,eligible,brought_forward,credit,earn,forfeit,taken,balance').eq('employee_id', id).eq('leave_group', type.group).eq('year', ['UL', 'HOSP', 'MARRG', 'HAJUMR'].includes(type.group) ? 0 : year).limit(1);
           if (balanceError) throw balanceError;
           const balance: any = rows?.[0];
           if (type.group === 'AL' || type.group === 'ML') {
@@ -1908,7 +1937,7 @@ export async function hrHandler(req: any, res: any) {
     }
 
     // The Charts tab (also the CEO's and the COO's): HR sees everything, pay and tax included.
-    if (req.method === 'GET' && action === 'charts') return res.status(200).json(await ceoCharts(db, String(req.query.refresh || '') === '1', true));
+    if (req.method === 'GET' && action === 'charts') return res.status(200).json(await ceoCharts(db, String(req.query.refresh || '') === '1', true, String((user as any)?.id || '')));
     if (req.method === 'GET' && action === 'headcount') return res.status(200).json(await headcount(db));
 
     // Everything the printed Borang EA and the CP8D list need, for the staff who have a yearly EA row for the year (HR only).

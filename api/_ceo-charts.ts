@@ -27,15 +27,15 @@ export async function headcount(db: any) {
 }
 
 // `money` false leaves out pay and tax (what the COO sees): the figures are worked out the same, but only sent to those who see pay.
-export async function ceoCharts(db: any, refresh = false, money = true) {
-  const data: any = await chartsData(db, refresh);
+export async function ceoCharts(db: any, refresh = false, money = true, userId = '') {
+  const data: any = await chartsData(db, refresh, userId);
   return money ? data : { ...data, pay: null, tax: null };
 }
 
 // The figures are worked out once a day (or when someone presses Refresh) and kept in the database, so opening the Charts tab reads one small record
 // instead of the clocks, rosters, payslips and claims again. The same record serves the CEO, the COO and HR.
 const CACHE_KEY = 'ceo_charts_cache', CACHE_BRANCH = 'AraOffice Charts Cache', DAY = 24 * 3600 * 1000;
-async function chartsData(db: any, refresh: boolean) {
+async function chartsData(db: any, refresh: boolean, userId: string) {
   if (!refresh && cache && Date.now() - cache.at < DAY) return cache.data;
   let stored: any = null;
   try {
@@ -46,7 +46,9 @@ async function chartsData(db: any, refresh: boolean) {
   const { data: fresh, closed } = await computeCharts(db, refresh ? {} : stored?.closed || {});
   try {
     const branch = await branchId(db, CACHE_BRANCH, true);
-    const row = { branch_id: branch, state_key: CACHE_KEY, payload: { data: fresh, closed }, updated_at: new Date().toISOString() };
+    // portal_state needs the person who saved it (updated_by); without it the save failed quietly and the figures were worked out again on every open.
+    const row: any = { branch_id: branch, state_key: CACHE_KEY, payload: { data: fresh, closed }, updated_at: new Date().toISOString() };
+    if (userId) row.updated_by = userId;
     if (stored) await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', CACHE_KEY); else await db.from('portal_state').insert(row);
   } catch { /* the figures are still returned; they are just not kept */ }
   return fresh;

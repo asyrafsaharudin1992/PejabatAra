@@ -7,6 +7,7 @@ import { attendanceHrAction, attendanceStaffAction } from './_attendance.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { ceoTasksAction } from './_ceo-tasks.js';
 import { ceoCharts, headcount } from './_ceo-charts.js';
+import { orgChart, photoLinks } from './_photos.js';
 import { waitingCounts } from './_waiting.js';
 
 // Office COO: the COO leads operations: Clinical Admin, the Clinical Assistants and the doctors. The team is every active staff member whose job title is
@@ -84,9 +85,18 @@ export async function cooHandler(req: any, res: any) {
     }
 
     // The numbers for the Charts tab (read only, cached for a few minutes). The CEO sees everything; the COO does not see pay or tax.
+    if (req.method === 'GET' && action === 'photo_urls') {
+      if (!isCoo && !isCeo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
+      return res.status(200).json({ urls: await photoLinks(db, String(req.query.ids || '').slice(0, 14000).split(',')) });
+    }
+    // The organisation chart with the staff photos (the same people who have the Charts tab).
+    if (req.method === 'GET' && action === 'org_chart') {
+      if (!isCoo && !isCeo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
+      return res.status(200).json(await orgChart(db));
+    }
     if (req.method === 'GET' && action === 'ceo_charts') {
       if (!isCoo && !isCeo) throw Object.assign(new Error('Access restricted.'), { status: 403 });
-      return res.status(200).json(await ceoCharts(db, String(req.query?.refresh || '') === '1', isCeo));
+      return res.status(200).json(await ceoCharts(db, String(req.query?.refresh || '') === '1', isCeo, String((user as any)?.id || '')));
     }
     // How many people there are, for the home and the Charts tab: all active staff, doctors (directors included), Clinical Assistants and admins, by clinic.
     if (req.method === 'GET' && action === 'headcount') {

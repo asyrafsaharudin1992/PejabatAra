@@ -5,6 +5,7 @@ import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
+import { photoLinks } from './_photos.js';
 import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewFull, reviewRow, submitReview } from './_review.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -602,8 +603,8 @@ export async function leaveAction(req: any, res: any, db: any, staff: { id: stri
     if (error) throw error;
     if (!decided?.length) throw fail(409, 'This request has already been decided.');
     if (status === 'approved') {
-      // Take the days off the balance (the newest year of that leave group) only once it is finally approved.
-      const { data: rows } = await db.from('hr_leave_balances').select('id,year,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', Number(String(request.start_date).slice(0, 4))).limit(1);
+      // Take the days off the balance only once it is finally approved. Annual and Medical Leave are kept by year; unpaid, hospital, marriage and Haji/Umrah leave have one balance (year 0).
+      const { data: rows } = await db.from('hr_leave_balances').select('id,year,taken,balance').eq('employee_id', request.employee_id).eq('leave_group', request.leave_group).eq('year', ['UL', 'HOSP', 'MARRG', 'HAJUMR'].includes(request.leave_group) ? 0 : Number(String(request.start_date).slice(0, 4))).limit(1);
       if (rows?.length) await db.from('hr_leave_balances').update({ taken: Number(rows[0].taken) + days, balance: Number(rows[0].balance) - days, updated_at: now }).eq('id', rows[0].id);
     }
     return res.status(200).json({ success: true, status, stage });
@@ -721,6 +722,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     // The PDF is locked with the same password, so a copy sent on WhatsApp or by e-mail cannot be opened without it.
     const pdf = payslipPdf(payslip as any, password);
     return res.status(200).json({ file: `Payslip_${me.employee_code}_${year}-${String(month).padStart(2, '0')}.pdf`, pdf: pdf.toString('base64') });
+  }
+
+  // The staff member's own photo (a link that works for an hour); nobody else's photo can be asked for here.
+  if (req.method === 'GET' && action === 'my_photo') {
+    const { data: me } = await db.from('hr_employees').select('id').eq('assessment_staff_id', staff.id).maybeSingle();
+    const links = me ? await photoLinks(db, [me.id]) : {};
+    return res.status(200).json({ url: me ? links[me.id] || '' : '' });
   }
 
   if (action.startsWith('my_document')) {

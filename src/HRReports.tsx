@@ -16,6 +16,8 @@ const REPORTS = [
   { id: 'attendance-daily', category: 'Attendance', title: 'Daily Attendance', description: 'Daily shifts, clock times, late minutes and attendance status.', format: 'Print / PDF', icon: Clock3 },
   { id: 'attendance-monthly', category: 'Attendance', title: 'Monthly Attendance', description: 'Monthly presence, absences, leave, working hours and overtime totals.', format: 'Print / PDF', icon: Clock3 },
   { id: 'attendance-late', category: 'Attendance', title: 'Late Attendance', description: 'Late arrivals over the last six months, with monthly counts and minutes.', format: 'Print / PDF', icon: Clock3 },
+  { id: 'ot-claims', category: 'Attendance', title: 'OT Claim Status', description: 'Every OT claim of a payroll period or month in the Infotech layout: a summary of everyone first, then one page for each staff member.', format: 'Print / PDF', icon: Clock3 },
+  { id: 'credit-hours', category: 'Attendance', title: 'Credit Hours', description: 'Credit hours balance of each staff member, what was earned and used in a period, and every entry.', format: 'Print / PDF', icon: Clock3 },
   { id: 'performance', category: 'Performance Reviews', title: 'Performance Review Reports', description: 'Supervisor reviews, scores, improvement plans and HR receipt details.', format: 'Print form', icon: ClipboardCheck },
   { id: 'incentives', category: 'Incentive', title: 'Incentive Claims', description: 'Claims sent to HR, approved amounts, monthly summaries and individual forms.', format: 'Print / PDF', icon: Wallet },
 ] as const;

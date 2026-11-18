@@ -207,6 +207,7 @@ const VIEW_AS: Record<string, Partial<Me['staff']>> = {
 export default function IndividualHub() {
   const [signedIn, setSignedIn] = useState(() => Boolean(localStorage.getItem(TOKEN_KEY)));
   const [realMe, setMe] = useState<Me | null>(() => readRememberedMe());
+  const [photo, setPhoto] = useState('');
   const [viewAs, setViewAs] = useState(readIndividualPreview);
   const canViewAs = realMe?.staff.canViewAs === true;
   const selectedPreview = canViewAs ? viewAs : '';
@@ -224,8 +225,9 @@ export default function IndividualHub() {
   useEffect(() => { if (view !== 'home') return; const clock = setInterval(() => setNow(new Date()), 20000); setNow(new Date()); return () => clearInterval(clock); }, [view]);
 
   useEffect(() => {
-    if (!signedIn) { setMe(null); return; }
+    if (!signedIn) { setMe(null); setPhoto(''); return; }
     let live = true;
+    assessmentFetch('action=my_photo').then((result: { url?: string }) => { if (live) setPhoto(result.url || ''); }).catch(() => undefined);
     assessmentFetch('action=me').then((result: Me) => { if (live) { setMe(result); rememberMe(result); } }).catch((cause: { status?: number }) => { if (live && cause?.status === 401) { forgetMe(); setSignedIn(false); } });
     return () => { live = false; };
   }, [signedIn]);
@@ -331,7 +333,7 @@ export default function IndividualHub() {
           <div><p className="text-[34px] font-extrabold leading-none tracking-tight"><span className="text-[#0b2a4a]">Ara</span><span className="text-[#1f6feb]">Office</span></p><p className="mt-1.5 text-[11px] font-medium tracking-[0.34em] text-[#0b2a4a]">KLINIK ARA 24 JAM</p></div>
           <button onClick={() => { if (me?.staff.announcementsUnread) setView('announcements'); else if (me?.staff.leaveWaiting) setView('leave'); else if (me?.staff.reviewWaiting) setView('review'); }} aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full bg-white/70 text-[#0b2a4a] backdrop-blur"><Bell className="h-6 w-6" strokeWidth={1.7} />{((me?.staff.leaveWaiting || 0) + (me?.staff.reviewWaiting || 0) + (me?.staff.announcementsUnread || 0)) > 0 && <i className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full border-2 border-white bg-rose-500" />}</button>
         </div>
-        <div className="relative mt-4 flex items-center gap-3.5 px-5"><span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full bg-[#cfe3f9] text-xl font-bold text-[#1f6feb]">{me ? initials(name) : '…'}</span><div className="min-w-0"><h1 className="truncate text-[23px] font-bold leading-tight tracking-tight text-[#0b2a4a]">Hi, {me ? (me.staff.isDoctor ? greetingName(name, true) : '') || name.split(' ')[0] : '…'}</h1><p className="text-[14px] text-slate-600">Have a good day ahead!</p><p className="mt-0.5 text-[12.5px] font-semibold text-[#1f6feb]">{now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' })} · {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p></div></div>
+        <div className="relative mt-4 flex items-center gap-3.5 px-5">{photo ? <img src={photo} alt="" referrerPolicy="no-referrer" className="h-[58px] w-[58px] shrink-0 rounded-full bg-slate-100 object-cover" /> : <span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-full bg-[#cfe3f9] text-xl font-bold text-[#1f6feb]">{me ? initials(name) : '…'}</span>}<div className="min-w-0"><h1 className="truncate text-[23px] font-bold leading-tight tracking-tight text-[#0b2a4a]">Hi, {me ? (me.staff.isDoctor ? greetingName(name, true) : '') || name.split(' ')[0] : '…'}</h1><p className="text-[14px] text-slate-600">Have a good day ahead!</p><p className="mt-0.5 text-[12.5px] font-semibold text-[#1f6feb]">{now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' })} · {now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}</p></div></div>
         <div className="absolute inset-x-0 bottom-9 px-5"><p className="max-w-[290px] text-[21px] font-semibold leading-snug tracking-tight text-white [text-shadow:0_1px_8px_rgba(8,44,66,0.55)]">{quote}</p><i className="mt-2 block h-1 w-12 rounded-full bg-[#7cc4ff]" /></div>
       </header>
       <main className="relative z-10 -mt-6 mx-3 rounded-[26px] bg-white px-1.5 pb-4 pt-4 shadow-[0_10px_34px_rgba(11,42,74,0.1)]">
@@ -364,7 +366,7 @@ export default function IndividualHub() {
         <div className="grid items-start gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
           <aside className="relative isolate overflow-hidden rounded-[28px] border border-white/10 bg-gradient-to-b from-[#0f5478] via-[#0b3d59] to-[#082c42] p-6 text-white shadow-[0_16px_40px_rgba(11,48,70,0.18)]">
             <i aria-hidden="true" className="pointer-events-none absolute -right-16 -top-16 -z-10 h-48 w-48 rounded-full bg-white/[0.06]" />
-            <span className="grid h-16 w-16 place-items-center rounded-full bg-[#d6eef7] text-xl font-semibold text-[#0b3d59] ring-4 ring-white/5">{me ? initials(name) : '…'}</span>
+            {photo ? <img src={photo} alt="" referrerPolicy="no-referrer" className="h-16 w-16 rounded-full bg-slate-100 object-cover ring-4 ring-white/5" /> : <span className="grid h-16 w-16 place-items-center rounded-full bg-[#d6eef7] text-xl font-semibold text-[#0b3d59] ring-4 ring-white/5">{me ? initials(name) : '…'}</span>}
             <h2 className="mt-4 text-lg font-semibold tracking-tight">{name || 'Loading…'}</h2>
             <p className="mt-1 text-xs text-[#b9cfdd]">{me?.staff.code}</p>
             <p className="mt-3 text-xs leading-5 text-[#b9cfdd]">{company}</p>

@@ -13,6 +13,7 @@ import { PrintPage, PrintPortal } from './PrintPortal';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
 import { downloadReportCsv, downloadReportExcel, reportExportSections, type PreparedReport as Prepared, type ReportSection } from './lib/hrReportExport';
 import HRProjectionDocument from './HRProjectionDocument';
+import { buildOtClaimPages, generatedAt, OtClaimPage, otClaimSections, type Staff as OtStaff } from './OtClaimBlock';
 import { projectionMonths, shiftProjectionMonth } from './lib/hrProjection';
 
 type Person = { id: string; company: string; fullName: string; employeeCode: string; status: string };
@@ -22,6 +23,10 @@ const day = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala
 const dateLabel = (date: string) => date ? date.slice(0, 10).split('-').reverse().join('/') : '—';
 const num = (value: number | undefined | null) => value == null ? '—' : Number(value).toFixed(2);
 const field = 'mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
+// A payroll month runs from the 20th of the month before to the 19th (Nov payroll: 20 Oct to 19 Nov).
+const payrollRangeOf = (value: string) => { const [year, number] = value.split('-').map(Number); const before = new Date(year, number - 2, 1); return { from: `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-20`, to: `${value}-19` }; };
+const monthRangeOf = (value: string) => ({ from: `${value}-01`, to: new Date(Date.UTC(Number(value.slice(0, 4)), Number(value.slice(5)), 0)).toISOString().slice(0, 10) });
+const hoursOf = (minutes: number) => (minutes / 60).toFixed(2);
 async function hr(action: string, params: Record<string, string> = {}) {
   const query = new URLSearchParams({ resource: 'hr', action, ...params });
   const response = await officeFetch(`/api/status?${query}`);
@@ -45,6 +50,8 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
   const [codes, setCodes] = useState('new');
   const [branch, setBranch] = useState('');
   const [reveal, setReveal] = useState(false);
+  const [otBasis, setOtBasis] = useState<'payroll' | 'month'>('payroll');
+  const [otStatus, setOtStatus] = useState('');
   const [reviewId, setReviewId] = useState('');
   const [people, setPeople] = useState<Person[]>([]);
   const [reviews, setReviews] = useState<{ id: string; staffName: string; periodLabel: string; status: string }[]>([]);
@@ -56,11 +63,11 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
   const [previewKey, setPreviewKey] = useState('');
-  const selectionKey = JSON.stringify([month, date, year, from, to, company, employeeId, group, codes, branch, reveal, reviewId, staffStatus, forecastFrom, forecastTo]);
+  const selectionKey = JSON.stringify([month, date, year, from, to, company, employeeId, group, codes, branch, reveal, reviewId, staffStatus, forecastFrom, forecastTo, otBasis, otStatus]);
   const ready = prepared !== null && previewKey === selectionKey;
   const dialog = useRef<HTMLDialogElement>(null);
   const printTitle = `${title} - ${id === 'forecast' ? `${forecastFrom} to ${forecastTo}` : month}`;
-  usePrintSheet(printing && (prepared?.kind === 'table' || prepared?.kind === 'incentives' || prepared?.kind === 'forecast'), printTitle, () => setPrinting(false));
+  usePrintSheet(printing && (prepared?.kind === 'table' || prepared?.kind === 'incentives' || prepared?.kind === 'forecast' || prepared?.kind === 'otclaims'), printTitle, () => setPrinting(false));
   useStaffProfilePrint(printing && prepared?.kind === 'profile', `Staff Profile - ${prepared?.kind === 'profile' ? prepared.employee.fullName : ''}`, () => setPrinting(false));
   useReviewPrint(printing && prepared?.kind === 'review', `Performance Review - ${prepared?.kind === 'review' ? prepared.review.staffName : ''}`, () => setPrinting(false));
 
@@ -88,8 +95,8 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
   const person = people.find((item) => item.id === employeeId);
   const companyParams = company ? { company } : {};
   const matches = (row: { id?: string; company?: string; code?: string }) => (!company || row.company === company) && (!employeeId || row.id === employeeId || row.code === person?.employeeCode && row.company === person?.company);
-  const needsMonth = ['roster', 'attendance-monthly', 'incentives'].includes(id);
-  const needsRange = ['leave-credit', 'leave-history'].includes(id);
+  const needsMonth = ['roster', 'attendance-monthly', 'incentives', 'ot-claims'].includes(id);
+  const needsRange = ['leave-credit', 'leave-history', 'credit-hours'].includes(id);
   const needsYear = ['leave-consolidate', 'leave-gcr'].includes(id);
   const peopleShown = people.filter((item) => !company || item.company === company);
 
@@ -112,6 +119,13 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
         const result = await reviewApi(`action=hr_get&id=${encodeURIComponent(reviewId)}`);
         if (!result.review || result.review.status === 'pending') throw new Error('Choose a submitted review to print.');
         next = { kind: 'review', review: result.review };
+      } else if (id === 'ot-claims') {
+        const range = otBasis === 'payroll' ? payrollRangeOf(month) : monthRangeOf(month);
+        const result = await hr('attendance_ot_claims', range);
+        const staff: OtStaff[] = (result.staff || []).filter((row: OtStaff) => (!company || row.company === company) && (!person || row.code === person.employeeCode)).map((row: OtStaff) => ({ ...row, claims: row.claims.filter((claim) => !otStatus || claim.status === otStatus) })).filter((row: OtStaff) => row.claims.length);
+        if (!staff.length) throw new Error('No OT claims match these options.');
+        const label = otBasis === 'payroll' ? `Payroll ${month} (${range.from.split('-').reverse().join('-')} to ${range.to.split('-').reverse().join('-')})` : month;
+        next = { kind: 'otclaims', staff, from: range.from, to: range.to, company, filterText: [company || 'All locations', otStatus || 'All statuses', person?.fullName].filter(Boolean).join(' · '), sections: otClaimSections(staff), subtitle: [label, company || 'KJ and SK', otStatus].filter(Boolean).join(' · ') };
       } else if (id === 'incentives') {
         const result = await hr('incentives', { month });
         const claims = (result.claims || []).filter((claim: Claim) => (!branch || claim.branch.toLowerCase().includes(branch.trim().toLowerCase())) && (!person || claim.staffCode === person.employeeCode));
@@ -150,6 +164,11 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
         } else if (id === 'leave-credit') {
           const result = await hr('leave_credit_report', { from, to, ...companyParams });
           sections.push({ headers: ['Staff', 'Company / code', 'Date', 'Remarks', 'Days'], rows: (result.people || []).filter(matches).flatMap((row: any) => row.credits.map((credit: any) => [row.name, `${row.company} · ${row.code}`, dateLabel(credit.date), credit.remarks, num(credit.days)])) });
+        } else if (id === 'credit-hours') {
+          const result = await hr('attendance_credit_hours_report', { from, to });
+          const list = (result.rows || []).filter(matches);
+          sections.push({ title: 'Balance', note: `Credit hours earned and used from ${dateLabel(from)} to ${dateLabel(to)}; the balance is as of today`, headers: ['No.', 'Code', 'Staff', 'Company', 'Position', 'Earned (h)', 'Used (h)', 'Balance (h)'], rows: list.map((row: any, index: number) => [index + 1, row.code, row.name, row.company, row.designation, hoursOf(row.earned), hoursOf(row.used), hoursOf(row.balance)]) });
+          sections.push({ title: 'Entries', headers: ['Staff', 'Company / code', 'Date', 'Type', 'Hours', 'Note', 'Entered by'], rows: list.flatMap((row: any) => row.entries.map((entry: any) => [row.name, `${row.company} · ${row.code}`, dateLabel(entry.date), entry.kind === 'earn' ? 'Earned' : entry.kind === 'adjust' ? 'Adjusted' : entry.kind, hoursOf(entry.minutes), entry.note, entry.by])) });
         } else if (id === 'leave-history') {
           const result = await hr('leave_history_report', { from, to, ...companyParams });
           for (const row of (result.people || []).filter(matches)) sections.push({ title: `${row.name} · ${row.company} · ${row.code}`, note: `Annual Leave balance: ${num(row.al?.balance)} · Medical Leave balance: ${num(row.ml?.balance)}`, headers: ['Leave type', 'From', 'To', 'Days', 'Remarks'], rows: row.requests.map((request: any) => [request.type, dateLabel(request.start), dateLabel(request.end), num(request.days), request.reason || '—']) });
@@ -168,7 +187,7 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
     if (!ready || !prepared) return;
     setExporting(true); setError(''); setNotice('');
     try {
-      const sections = reportExportSections(prepared, reveal).map((section) => ({ ...section, note: [title, prepared.kind === 'table' || prepared.kind === 'incentives' || prepared.kind === 'forecast' ? prepared.subtitle : '', section.note].filter(Boolean).join(' · ') }));
+      const sections = reportExportSections(prepared, reveal).map((section) => ({ ...section, note: [title, prepared.kind === 'table' || prepared.kind === 'incentives' || prepared.kind === 'forecast' || prepared.kind === 'otclaims' ? prepared.subtitle : '', section.note].filter(Boolean).join(' · ') }));
       const name = `${title} - ${id === 'forecast' ? `${forecastFrom} to ${forecastTo}` : needsMonth ? month : needsYear ? year : needsRange ? `${from} to ${to}` : date}`.replace(/[\\/:*?"<>|]/g, '-');
       if (format === 'csv') downloadReportCsv(sections, name);
       else await downloadReportExcel(sections, name);
@@ -188,7 +207,8 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wider text-[#0b9aca]">Report options</p><h2 id="report-options-title" className="mt-1 text-xl font-semibold">{title}</h2></div><button type="button" disabled={busy || printing || exporting} onClick={onClose} aria-label="Close report options" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
       <form onSubmit={(event) => void run(event)} className="mt-5 space-y-4">
         <fieldset disabled={busy || printing || exporting} className="grid gap-4 sm:grid-cols-2">
-        {needsMonth && <label className="block text-sm font-semibold">Month<input type="month" required value={month} onChange={(event) => setMonth(event.target.value)} className={field} /></label>}
+        {needsMonth && <label className="block text-sm font-semibold">{id === 'ot-claims' && otBasis === 'payroll' ? 'Payroll month' : 'Month'}<input type="month" required value={month} onChange={(event) => setMonth(event.target.value)} className={field} /></label>}
+        {id === 'ot-claims' && <div className="grid grid-cols-2 gap-3"><label className="block text-sm font-semibold">Period by<select value={otBasis} onChange={(event) => setOtBasis(event.target.value as 'payroll' | 'month')} className={field}><option value="payroll">Payroll month (20th to 19th)</option><option value="month">Calendar month</option></select></label><label className="block text-sm font-semibold">Status<select value={otStatus} onChange={(event) => setOtStatus(event.target.value)} className={field}><option value="">All statuses</option><option value="Approved">Approved</option><option value="Pending">Pending</option><option value="Rejected">Rejected</option><option value="Cancelled">Cancelled</option></select></label></div>}
         {id === 'attendance-daily' && <label className="block text-sm font-semibold">Date<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} className={field} /></label>}
         {needsYear && <label className="block text-sm font-semibold">Year<input type="number" required min="2000" max="2100" value={year} onChange={(event) => setYear(Number(event.target.value))} className={field} /></label>}
         {needsRange && <div className="grid grid-cols-2 gap-3"><label className="block text-sm font-semibold">From<input type="date" required value={from} onChange={(event) => setFrom(event.target.value)} className={field} /></label><label className="block text-sm font-semibold">To<input type="date" required min={from} value={to} onChange={(event) => setTo(event.target.value)} className={field} /></label></div>}
@@ -216,6 +236,7 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
       </form>
       {ready && prepared && <section aria-label="Report preview" className="report-preview mt-5 overflow-auto rounded-xl border border-slate-200 bg-slate-200 p-4">
         {prepared.kind === 'table' && pages.map((page, index) => <div key={index}><ReportPreviewFrame><div className="report-preview-landscape">{tableContent(page, index)}</div></ReportPreviewFrame></div>)}
+        {prepared.kind === 'otclaims' && (() => { const sheets = buildOtClaimPages(prepared.staff, prepared.company); const stamp = generatedAt(); return sheets.map((sheet, index) => <div key={index}><ReportPreviewFrame><div className="report-preview-landscape"><div className="cv-fit"><OtClaimPage sheet={sheet} index={index} count={sheets.length} from={prepared.from} to={prepared.to} filterText={prepared.filterText} generated={stamp} /></div></div></ReportPreviewFrame></div>); })()}
         {prepared.kind === 'profile' && <ReportPreviewFrame portrait><StaffProfileDocument employee={prepared.employee} career={prepared.career} reveal={reveal} /></ReportPreviewFrame>}
         {prepared.kind === 'review' && <ReportPreviewFrame portrait><ReviewDocument review={prepared.review} /></ReportPreviewFrame>}
         {prepared.kind === 'incentives' && <><ReportPreviewFrame>{Array.from({ length: Math.ceil(prepared.claims.length / 12) }, (_, index) => <div key={index} className="report-preview-landscape"><MonthSummary claims={prepared.claims.slice(index * 12, (index + 1) * 12)} title={prepared.subtitle} /></div>)}{prepared.claims.map((claim) => <ClaimPages key={claim.id} claim={claim} />)}</ReportPreviewFrame></>}
@@ -225,6 +246,7 @@ export function HRReportDialog({ id, title, onClose }: { id: string; title: stri
     {printing && prepared?.kind === 'profile' && <StaffProfilePrint employee={prepared.employee} career={prepared.career} reveal={reveal} />}
     {printing && prepared?.kind === 'review' && <ReviewSheet review={prepared.review} />}
     {printing && prepared?.kind === 'table' && <PrintPortal margin={10}>{pages.map((page, index) => <PrintPage key={index}>{tableContent(page, index)}</PrintPage>)}</PrintPortal>}
+    {printing && prepared?.kind === 'otclaims' && (() => { const sheets = buildOtClaimPages(prepared.staff, prepared.company); const stamp = generatedAt(); return <PrintPortal margin={6}>{sheets.map((sheet, index) => <PrintPage key={index}><div className="cv-fit"><OtClaimPage sheet={sheet} index={index} count={sheets.length} from={prepared.from} to={prepared.to} filterText={prepared.filterText} generated={stamp} /></div></PrintPage>)}</PrintPortal>; })()}
     {printing && prepared?.kind === 'incentives' && <PrintPortal>{Array.from({ length: Math.ceil(prepared.claims.length / 12) }, (_, index) => <PrintPage key={index}><MonthSummary claims={prepared.claims.slice(index * 12, (index + 1) * 12)} title={`${prepared.subtitle} · ${index + 1}`} /></PrintPage>)}{prepared.claims.map((claim) => <ClaimPages key={claim.id} claim={claim} />)}</PrintPortal>}
     {printing && prepared?.kind === 'forecast' && <PrintPortal margin={8}>{prepared.branches.map((branch) => <PrintPage key={branch}><div className="cv-fit"><HRProjectionDocument {...prepared} branches={[branch]} compact /></div></PrintPage>)}</PrintPortal>}
   </>;

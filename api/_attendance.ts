@@ -54,6 +54,25 @@ function metres(lat1: number, lng1: number, lat2: number, lng2: number) {
   return Math.round(2 * earth * Math.asin(Math.sqrt(a)));
 }
 
+// The address of a GPS point, for staff who may clock from anywhere (HR agreed; the staff were told). Only the point goes to OpenStreetMap (Nominatim),
+// rounded to about 100 m: no name, code or time. A point near an earlier clock with an address reuses it, so each place is looked up once.
+async function addressOf(db: any, lat: number, lng: number): Promise<string> {
+  const rlat = Math.round(lat * 1000) / 1000, rlng = Math.round(lng * 1000) / 1000;
+  try {
+    const { data: known } = await db.from('hr_attendance_clocks').select('address').neq('address', '').gte('latitude', rlat - 0.0006).lte('latitude', rlat + 0.0006).gte('longitude', rlng - 0.0006).lte('longitude', rlng + 0.0006).order('clock_at', { ascending: false }).limit(1);
+    if (known?.[0]?.address) return known[0].address;
+  } catch { /* the column may not exist yet */ }
+  try {
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${rlat}&lon=${rlng}`, { signal: controller.signal, headers: { 'User-Agent': 'attendance-location-lookup/1.0' } });
+    clearTimeout(timer);
+    if (!response.ok) return '';
+    const body: any = await response.json(), a = body.address || {};
+    const parts = [body.name && body.name !== a.road ? body.name : '', a.road, a.neighbourhood || a.suburb || a.hamlet, a.city || a.town || a.village || a.city_district || a.county].filter(Boolean);
+    return [...new Set(parts)].join(', ').slice(0, 200);
+  } catch { return ''; }
+}
+
 type Shift = { start: string; end: string };
 type Rules = { lateGrace: number; earlyGrace: number; countEarly: boolean; otMin: number; policy: OtPolicy; versions: OtPolicyVersion[]; policyFor: (date: string) => OtPolicy; times: Map<string, Shift> };
 export async function loadRules(db: any): Promise<Rules> {
@@ -77,7 +96,7 @@ export type Day = { date: string; code: string; start: string; end: string; stat
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
-type Data = { roster: any[]; clocks: any[]; leave: any[]; holidays: any[]; ot: any[]; credit: any[] };
+type Data = { roster: any[]; clocks: any[]; leave: any[]; waiting?: any[]; holidays: any[]; ot: any[]; credit: any[] };
 // Annual leave credit used in hours counts 8 hours as one day.
 export const CREDIT_HOURS_PER_DAY = 8;
 // Everything a range needs, fetched at the same time (the database is far from the server, so one round of
@@ -85,15 +104,16 @@ export const CREDIT_HOURS_PER_DAY = 8;
 export async function fetchData(db: any, from: string, to: string, ids?: string[]): Promise<Data> {
   const wide = { from: `${addDay(from, -1)}T00:00:00+08:00`, to: `${addDay(to, 2)}T00:00:00+08:00` };
   const only = (query: any) => ids ? query.in('employee_id', ids) : query;
-  const [{ data: roster }, { data: clocks }, { data: leave }, { data: holidays }, { data: ot }, { data: credit }] = await Promise.all([
+  const [{ data: roster }, { data: clocks }, { data: leave }, { data: waiting }, { data: holidays }, { data: ot }, { data: credit }] = await Promise.all([
     only(db.from('hr_roster').select('employee_id,work_date,shift,works').gte('work_date', from).lte('work_date', to)).limit(20000),
     only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').limit(30000),
     only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).limit(5000),
+    only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').in('status', ['pending', 'supervisor_approved']).lte('start_date', to).gte('end_date', from)).limit(2000),
     db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to).limit(1000),
     (async () => { const read = (columns: string) => only(db.from('hr_attendance_ot').select(columns).gte('work_date', from).lte('work_date', to)).limit(10000); const first = await read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note,parts'); return first.error ? read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note') : first; })(),
     only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).limit(5000),
   ]);
-  return { roster: roster || [], clocks: clocks || [], leave: leave || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
+  return { roster: roster || [], clocks: clocks || [], leave: leave || [], waiting: waiting || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
 }
 
 export async function buildDays(db: any, people: Employee[], from: string, to: string, rules: Rules) {
@@ -109,7 +129,7 @@ export const recordsFromFor = (_company?: string | null) => RECORDS_FROM;
 
 export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));
-  const { roster, clocks, leave, holidays, ot: otRows } = data;
+  const { roster, clocks, leave, waiting, holidays, ot: otRows } = data;
   const creditOf = new Map<string, number>((data.credit || []).map((row: any) => [`${row.employee_id}|${row.work_date}|${row.kind}`, Number(row.hours)]));
   const rosterOf = new Map<string, { shift: string; works: boolean }>((roster || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
   const holidayOn = new Set((holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
@@ -136,8 +156,10 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       else if (HOLIDAY_OFF_GROUPS.has(person.holiday_group || '') && holidayOn.has(`${person.holiday_group}|${date}`)) code = '';
       else if (workDays.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) code = person.default_shift || OFFICE_CODE;
       const leaveRow = (leave || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date);
+      // Leave applied for and not approved yet: shown as "leave, pending approval" and not as absent.
+      const waitingRow = !leaveRow ? (waiting || []).find((item: any) => item.employee_id === person.id && item.start_date <= date && item.end_date >= date) : undefined;
       const shift = code ? shiftTimes(rules, code, doctor) : null;
-      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', otParts: [], creditHours: 0, leave: leaveRow?.leave_type || '' };
+      const blank: Day = { date, code, start: '', end: '', status: '', inAt: null, outAt: null, late: 0, lateCounted: 0, early: 0, earlyCounted: 0, worked: 0, ot: 0, otCounted: 0, otStatus: '', otApproved: 0, otRate: 0, otNote: '', otParts: [], creditHours: 0, leave: leaveRow?.leave_type || waitingRow?.leave_type || '' };
       // Before the person joined and after the last working day nothing is expected: not absent. A clock or approved leave on such a day is still shown.
       if (((person.join_date && date < person.join_date) || (person.resign_date && date > person.resign_date)) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       // Before the records start there is nothing to judge: not absent, not expected. Approved leave is still shown.
@@ -182,7 +204,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
         else day.status = now > end + 8 * HOUR ? 'missing-out' : 'working';
-      } else day.status = now >= end ? 'absent' : now >= start + rules.lateGrace * MIN ? 'not-in' : 'upcoming';
+      } else day.status = waitingRow ? 'leave-pending' : now >= end ? 'absent' : now >= start + rules.lateGrace * MIN ? 'not-in' : 'upcoming';
       push(day);
     }
   }
@@ -235,8 +257,10 @@ const hoursMinutesText = (minutes: number) => `${Math.floor(minutes / 60)} h${mi
 // The details shown under every OT line HR reads: the real clock in and out of the day, and how the OT is paid.
 // Works from one read of the clocks, the roster and the holidays for all the lines at once.
 type OtLine = { key: string; employee_id: string; work_date: string; asked: number; state: 'open' | 'approved' | 'closed' };
+// Hours (as minutes) at each of the four rates, from the parts of a day's OT.
+const ratesOf = (parts: OtPart[]) => { const out: Record<string, number> = { '1': 0, '1.5': 0, '2': 0, '3': 0 }; for (const part of parts) { const key = String(Number(part.multiplier)); if (key in out) out[key] += Number(part.minutes || 0); } return out; };
 async function otDetails(db: any, lines: OtLine[]) {
-  const result = new Map<string, { clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; otMinutes?: number; pay: string }>();
+  const result = new Map<string, { clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; otMinutes?: number; kind?: DayKind; late?: number; early?: number; original?: Record<string, number>; requested?: Record<string, number>; pay: string }>();
   if (!lines.length) return result;
   const ids = [...new Set(lines.map((line) => line.employee_id))];
   const { data: people } = await db.from('hr_employees').select(PERSON).in('id', ids);
@@ -281,7 +305,7 @@ async function otDetails(db: any, lines: OtLine[]) {
       const counted = capped ? shown : line.asked;
       pay = capped ? (counted < policy.minMinutes ? `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show less than ${hoursMinutesText(policy.minMinutes)} of extra time: no OT can be confirmed` : `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show ${hoursMinutesText(shown)}. ${otSummary(kind, counted, policy)}`) : otSummary(kind, counted, policy);
     }
-    result.set(line.key, { ...(day && day.inAt ? { clockIn: hhmm(Date.parse(day.inAt)), clockOut: day.outAt ? hhmm(Date.parse(day.outAt)) : '' } : {}), ...(day ? { shiftCode: day.code || '', shiftStart: day.start ? hhmm(Date.parse(day.start)) : '', shiftEnd: day.end ? hhmm(Date.parse(day.end)) : '' } : {}), ...(otMinutes !== undefined ? { otMinutes } : {}), pay });
+    result.set(line.key, { ...(day && day.inAt ? { clockIn: hhmm(Date.parse(day.inAt)), clockOut: day.outAt ? hhmm(Date.parse(day.outAt)) : '' } : {}), ...(day ? { shiftCode: day.code || '', shiftStart: day.start ? hhmm(Date.parse(day.start)) : '', shiftEnd: day.end ? hhmm(Date.parse(day.end)) : '' } : {}), ...(otMinutes !== undefined ? { otMinutes } : {}), kind, ...(day ? { late: day.late, early: day.early, original: ratesOf(otParts(kind, kind === 'ph' ? Math.max(day.otCounted, wholeHours(day.worked, policy)) : day.otCounted, policy)) } : {}), requested: ratesOf(otParts(kind, line.asked, policy)), pay });
   }
   return result;
 }
@@ -413,7 +437,11 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const prev = last?.[0];
     if (prev && Date.now() - Date.parse(prev.clock_at) < 60000) throw fail(429, 'You just clocked. Wait a minute before clocking again.');
     const kind = prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in';
-    const { error: insertError } = await db.from('hr_attendance_clocks').insert({ employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: hash.slice(0, 12) });
+    const base = { employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: hash.slice(0, 12) };
+    const remarks = text(body.remarks, 200);
+    const address = me.clock_mode === 'anywhere' && hasLocation ? await addressOf(db, lat, lng) : '';
+    let { error: insertError } = await db.from('hr_attendance_clocks').insert({ ...base, remarks, address });
+    if (insertError && insertError.code === '42703') ({ error: insertError } = await db.from('hr_attendance_clocks').insert(base)); // before the migration
     if (insertError) throw insertError;
     return res.status(200).json({ success: true, kind, ...(await state()) });
   }
@@ -458,6 +486,21 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
       const { error: insertError } = await db.from('hr_attendance_requests').insert({ employee_id: me.id, ...fields });
       if (insertError) { if (insertError.code === '42703' || insertError.code === '23514') throw fail(400, 'OT requests are not set up yet. Ask HR (the database update has not been run).'); throw insertError; }
     }
+    return res.status(200).json({ success: true });
+  }
+  // "Not OT": the staff member says the extra time on a day was not overtime, so the reminder goes away. It is kept as a "rejected" OT line marked as the staff's own, and can be undone.
+  if (req.method === 'POST' && action === 'attendance_ot_dismiss') {
+    const date = isDate(body.date) ? String(body.date) : '';
+    if (!date || date >= today() || date.slice(0, 7) !== today().slice(0, 7)) throw fail(400, 'Choose a day earlier this month.');
+    const { data: line } = await db.from('hr_attendance_ot').select('status,decided_by').eq('employee_id', me.id).eq('work_date', date).maybeSingle();
+    if (body.undo === true) {
+      if (line && line.status === 'rejected' && String(line.decided_by).endsWith('(staff)')) await db.from('hr_attendance_ot').delete().eq('employee_id', me.id).eq('work_date', date).eq('status', 'rejected');
+      return res.status(200).json({ success: true });
+    }
+    if (line) throw fail(409, 'That day already has an OT decision.');
+    const clock = await clockOtFor(db, me, date, rules);
+    const { error: dismissError } = await db.from('hr_attendance_ot').insert({ employee_id: me.id, work_date: date, captured_minutes: clock.counted, status: 'rejected', approved_minutes: 0, multiplier: 1.5, note: 'The staff member said this was not OT.', decided_by: `${me.full_name} (staff)`, decided_at: new Date().toISOString() });
+    if (dismissError) throw dismissError;
     return res.status(200).json({ success: true });
   }
   if (req.method === 'POST' && action === 'attendance_request_cancel') {
@@ -528,7 +571,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       const list = days.get(p.id) || [];
       const sum = (pick: (day: Day) => number) => list.reduce((total, day) => total + pick(day), 0);
       const count = (status: string) => list.filter((day) => day.status === status).length;
-      return { ...person(p), expected: list.filter((day) => day.start || day.status === 'leave').length, present: list.filter((day) => ['present', 'working', 'missing-out', 'exempt'].includes(day.status)).length, absent: count('absent'), leave: count('leave'), missingOut: count('missing-out'), lateDays: list.filter((day) => day.lateCounted > 0).length, lateMinutes: sum((day) => day.lateCounted), workedMinutes: sum((day) => day.worked), otApprovedMinutes: sum((day) => day.otStatus === 'approved' ? day.otApproved : 0), otWaitingMinutes: sum((day) => day.otCounted > 0 && !day.otStatus ? day.otCounted : 0), exempt: count('exempt') };
+      return { ...person(p), expected: list.filter((day) => day.start || day.status === 'leave').length, present: list.filter((day) => ['present', 'working', 'missing-out', 'exempt'].includes(day.status)).length, absent: count('absent'), leave: count('leave') + count('leave-pending'), missingOut: count('missing-out'), lateDays: list.filter((day) => day.lateCounted > 0).length, lateMinutes: sum((day) => day.lateCounted), workedMinutes: sum((day) => day.worked), otApprovedMinutes: sum((day) => day.otStatus === 'approved' ? day.otApproved : 0), otWaitingMinutes: sum((day) => day.otCounted > 0 && !day.otStatus ? day.otCounted : 0), exempt: count('exempt') };
     }).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
     // Companies with nothing recorded for the whole month: the screen shows one "No record for this month" line instead of empty rows.
     const noRecord = ['KJ', 'SK'].filter((company) => monthEnd(month) < recordsFromFor(company));
@@ -619,9 +662,11 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
 
   if (req.method === 'GET' && action === 'attendance_clocks') {
     const id = text(req.query.id, 60), date = isDate(req.query.date) ? String(req.query.date) : today();
-    const { data, error } = await db.from('hr_attendance_clocks').select('id,kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)').eq('employee_id', id).gte('clock_at', `${addDay(date, -1)}T12:00:00+08:00`).lte('clock_at', `${addDay(date, 1)}T12:00:00+08:00`).order('clock_at');
+    const readClocks = (columns: string) => db.from('hr_attendance_clocks').select(columns).eq('employee_id', id).gte('clock_at', `${addDay(date, -1)}T12:00:00+08:00`).lte('clock_at', `${addDay(date, 1)}T12:00:00+08:00`).order('clock_at');
+    let { data, error } = await readClocks('id,kind,clock_at,distance_m,within_place,accuracy_m,device,remarks,address,latitude,longitude,hr_clock_places(name)');
+    if (error) ({ data, error } = await readClocks('id,kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)')); // before the migration
     if (error) throw error;
-    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: row.device === 'request' ? 'request' : row.device === 'hr' ? 'hr' : String(row.device).startsWith('infotech') ? 'infotech' : 'phone', kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && !['request', 'hr'].includes(row.device) && !String(row.device).startsWith('infotech'), fromRequest: row.device === 'request', device: row.device })) });
+    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: row.device === 'request' ? 'request' : row.device === 'hr' ? 'hr' : String(row.device).startsWith('infotech') ? 'infotech' : 'phone', kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', remarks: row.remarks || '', address: row.address || '', map: row.latitude != null ? `https://www.google.com/maps?q=${row.latitude},${row.longitude}` : '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && !['request', 'hr'].includes(row.device) && !String(row.device).startsWith('infotech'), fromRequest: row.device === 'request', device: row.device })) });
   }
 
   // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
@@ -633,11 +678,46 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
     return res.status(200).json({ rows: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', minutes: balance.totals.get(p.id) || 0 })) });
   }
+  // The credit hours report (Reports tab): each staff member's balance, what was earned and used in a period, and the entries.
+  if (req.method === 'GET' && action === 'attendance_credit_hours_report') {
+    const dateOk = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    const from = dateOk(req.query.from) ? String(req.query.from) : `${today().slice(0, 4)}-01-01`, to = dateOk(req.query.to) ? String(req.query.to) : today();
+    const { data: people, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation').eq('status', 'Active').order('company').order('employee_code').limit(300);
+    if (error) throw error;
+    const balance = await creditMinutes(db);
+    if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
+    const { data: entries } = await db.from('hr_credit_hours').select('employee_id,entry_date,minutes,kind,note,created_by').gte('entry_date', from).lte('entry_date', to).order('entry_date').limit(5000);
+    const scope = only ? new Set<string>(only) : null;
+    const rows = (people || []).filter((p: any) => !scope || scope.has(p.id)).map((p: any) => {
+      const mine = (entries || []).filter((entry: any) => entry.employee_id === p.id);
+      return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', balance: balance.totals.get(p.id) || 0, earned: mine.filter((entry: any) => Number(entry.minutes) > 0).reduce((total: number, entry: any) => total + Number(entry.minutes), 0), used: mine.filter((entry: any) => Number(entry.minutes) < 0).reduce((total: number, entry: any) => total + Math.abs(Number(entry.minutes)), 0), entries: mine.map((entry: any) => ({ date: entry.entry_date, minutes: Number(entry.minutes), kind: entry.kind, note: entry.note || '', by: entry.created_by || '' })) };
+    });
+    return res.status(200).json({ from, to, rows });
+  }
   if (req.method === 'GET' && action === 'attendance_credit_hours_entries') {
     const id = text(req.query.id, 60);
     const { data, error } = await db.from('hr_credit_hours').select('id,entry_date,minutes,kind,note,created_by').eq('employee_id', id).order('entry_date', { ascending: false }).order('created_at', { ascending: false }).limit(60);
     if (error) throw error;
     return res.status(200).json({ entries: data || [] });
+  }
+  // Bulk: the same credit hours for several staff at once (for example everyone who went to an outside programme).
+  if (req.method === 'POST' && action === 'attendance_credit_hours_add_bulk') {
+    const ids: string[] = [...new Set<string>((Array.isArray(body.ids) ? body.ids : []).map((item: unknown) => text(item, 60)).filter(Boolean))].slice(0, 300);
+    const date = isDate(body.date) ? String(body.date) : today(), minutes = Math.round(Number(body.minutes)), note = text(body.note, 200);
+    if (!ids.length) throw fail(400, 'Choose at least one staff member.');
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 6000) throw fail(400, 'Enter the hours earned as a number more than zero, for example 2 or 1.5.');
+    if (note.length < 2) throw fail(400, 'Write why (for example: outside programme 14/11).');
+    const balance = await creditMinutes(db);
+    if (!balance.ok) throw fail(409, 'Credit hours are not set up yet. Run the migration 202611040002_credit_hours_balance first.');
+    const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name').eq('status', 'Active').in('id', ids);
+    if (peopleError) throw peopleError;
+    const scope = only ? new Set<string>(only) : null;
+    const chosen = (people || []).filter((p: any) => !scope || scope.has(p.id));
+    if (!chosen.length) throw fail(400, 'None of the chosen staff can be given credit hours.');
+    const { error } = await db.from('hr_credit_hours').insert(chosen.map((p: any) => ({ employee_id: p.id, entry_date: date, minutes, kind: 'earn', note, created_by: userLabel })));
+    if (error) throw error;
+    await db.from('hr_audit').insert(chosen.map((p: any) => ({ employee_id: p.id, action: 'update', changes: { credit_hours: `+${hm(minutes)} (earn) on ${date}`, note, by: userLabel, bulk: chosen.length } })));
+    return res.status(200).json({ success: true, added: chosen.length, skipped: ids.length - chosen.length });
   }
   if (req.method === 'POST' && action === 'attendance_credit_hours_add') {
     const id = text(body.id, 60), date = isDate(body.date) ? String(body.date) : today(), kind = body.kind === 'adjust' ? 'adjust' : 'earn';
@@ -831,6 +911,46 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { ot_policy: versions ? { from: String(body.from), settings: versions[versions.length - 1].policy } : 'reset to the memo defaults' }, changed_by: null });
     const rules = await loadRules(db);
     return res.status(200).json({ success: true, policy: rules.policy, versions: rules.versions });
+  }
+  // The OT claim status report (like Infotech's Attendance Request Status Report): every OT claim in a date range, grouped by staff member.
+  if (req.method === 'GET' && action === 'attendance_ot_claims') {
+    const dateOk = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    const from = dateOk(req.query.from) ? String(req.query.from) : `${today().slice(0, 7)}-01`, to = dateOk(req.query.to) ? String(req.query.to) : today();
+    const { data: asked, error: askedError } = await db.from('hr_attendance_requests').select('*').neq('status', 'draft').gte('work_date', from).lte('work_date', to).order('work_date').limit(1500);
+    if (askedError) throw askedError;
+    const requests = (asked || []).filter((row: any) => !isMissedClock(row.reason) && (Number(row.ot_minutes) > 0 || /^(overtime|worked on rest day)/i.test(String(row.reason || ''))));
+    const { data: decidedRows } = await db.from('hr_attendance_ot').select('id,employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,parts,note,decided_by,decided_at').eq('status', 'approved').gte('work_date', from).lte('work_date', to).limit(3000);
+    // A day that HR approved without an approved request (brought over from Infotech) is listed too, even when a new request for the same day is still waiting.
+    const askedKey = new Set(requests.filter((row: any) => row.status === 'approved').map((row: any) => `${row.employee_id}|${row.work_date}`));
+    const broughtOver = (decidedRows || []).filter((row: any) => !askedKey.has(`${row.employee_id}|${row.work_date}`));
+    const ids = [...new Set([...requests, ...broughtOver].map((row: any) => row.employee_id))];
+    const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] };
+    const scope = only ? new Set<string>(only) : null;
+    const byId = new Map<string, any>((people || []).filter((p: any) => !scope || scope.has(p.id)).map((p: any) => [p.id, p]));
+    const approverIds = [...new Set(requests.map((row: any) => row.approver_id).filter(Boolean))];
+    const { data: approvers } = approverIds.length ? await db.from('hr_employees').select('id,full_name').in('id', approverIds) : { data: [] };
+    const approverName = new Map<string, string>((approvers || []).map((p: any) => [p.id, p.full_name]));
+    const lines: OtLine[] = [...requests.map((row: any) => ({ key: row.id, employee_id: row.employee_id, work_date: String(row.work_date), asked: Number(row.ot_minutes), state: (row.status === 'approved' ? 'approved' : ['pending', 'supervisor_approved'].includes(row.status) ? 'open' : 'closed') as OtLine['state'] })), ...broughtOver.map((row: any) => ({ key: `ot-${row.id}`, employee_id: row.employee_id, work_date: String(row.work_date), asked: Number(row.approved_minutes || 0), state: 'approved' as const }))].filter((line) => byId.has(line.employee_id));
+    const details = await otDetails(db, lines);
+    const savedOt = new Map<string, any>((decidedRows || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
+    const day = (iso: string) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(`${iso}T00:00:00Z`).getUTCDay()];
+    const atRates = (row: any) => { const out: Record<string, number> = { '1': 0, '1.5': 0, '2': 0, '3': 0 }; if (!row) return out; const parts: OtPart[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }]; for (const part of parts) { const key = String(Number(part.multiplier)); if (key in out) out[key] += Number(part.minutes || 0); } return out; };
+    type Claim = { kind: string; late: number; early: number; original: Record<string, number>; requested: Record<string, number>; typedIn: string; typedOut: string; date: string; day: string; shift: string; shiftStart: string; shiftEnd: string; clockIn: string; clockOut: string; askedMinutes: number; approved: Record<string, number>; approvedMinutes: number; status: string; pendingWith: string; approvedBy: string; remarks: string; comments: string; applied: string; decided: string; pay: string; source: 'request' | 'infotech' };
+    const claims = new Map<string, Claim[]>();
+    const add = (employeeId: string, claim: Claim) => { const list = claims.get(employeeId) || []; list.push(claim); claims.set(employeeId, list); };
+    for (const row of requests) {
+      if (!byId.has(row.employee_id)) continue;
+      const detail = details.get(row.id), saved = row.status === 'approved' ? savedOt.get(`${row.employee_id}|${row.work_date}`) : null;
+      const status = row.status === 'pending' || row.status === 'supervisor_approved' ? 'Pending' : row.status === 'approved' ? 'Approved' : row.status === 'rejected' ? 'Rejected' : 'Cancelled';
+      add(row.employee_id, { kind: detail?.kind || 'normal', late: detail?.late || 0, early: detail?.early || 0, original: detail?.original || atRates(null), requested: detail?.requested || atRates(null), typedIn: row.in_time ? String(row.in_time).slice(0, 5) : '', typedOut: row.out_time ? String(row.out_time).slice(0, 5) : '', date: row.work_date, day: day(row.work_date), shift: detail?.shiftCode || '', shiftStart: detail?.shiftStart || '', shiftEnd: detail?.shiftEnd || '', clockIn: detail?.clockIn || '', clockOut: detail?.clockOut || '', askedMinutes: detail?.otMinutes ?? Number(row.ot_minutes || 0), approved: atRates(saved), approvedMinutes: saved ? Number(saved.approved_minutes || 0) : 0, status, pendingWith: row.status === 'pending' ? approverName.get(row.approver_id) || 'Supervisor' : row.status === 'supervisor_approved' ? 'HR' : '', approvedBy: row.status === 'approved' ? row.decided_by || '' : '', remarks: row.remarks || '', comments: row.status === 'rejected' || row.status === 'approved' ? row.decision_note || row.supervisor_note || '' : '', applied: String(row.created_at || '').slice(0, 10), decided: row.decided_at ? String(row.decided_at).slice(0, 10) : '', pay: detail?.pay || '', source: 'request' });
+    }
+    for (const row of broughtOver) {
+      if (!byId.has(row.employee_id)) continue;
+      const detail = details.get(`ot-${row.id}`), there = /approved there: ([^)]*)\)/.exec(String(row.note || ''))?.[1];
+      add(row.employee_id, { kind: detail?.kind || 'normal', late: detail?.late || 0, early: detail?.early || 0, original: detail?.original || atRates(null), requested: detail?.requested || atRates(row), typedIn: '', typedOut: '', date: row.work_date, day: day(row.work_date), shift: detail?.shiftCode || '', shiftStart: detail?.shiftStart || '', shiftEnd: detail?.shiftEnd || '', clockIn: detail?.clockIn || '', clockOut: detail?.clockOut || '', askedMinutes: Number(row.captured_minutes || row.approved_minutes || 0), approved: atRates(row), approvedMinutes: Number(row.approved_minutes || 0), status: 'Approved', pendingWith: '', approvedBy: row.decided_by === 'Infotech migration' ? 'Infotech' : row.decided_by || '', remarks: row.decided_by === 'Infotech migration' ? `Brought over from Infotech${there ? ` (${there} there)` : ''}` : String(row.note || ''), comments: '', applied: '', decided: row.decided_by === 'Infotech migration' ? '' : row.decided_at ? String(row.decided_at).slice(0, 10) : '', pay: detail?.pay || '', source: 'infotech' });
+    }
+    const staff = [...byId.values()].filter((p: any) => claims.has(p.id)).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.employee_code.localeCompare(b.employee_code)).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', group: /CLINIC ASSISTANT/i.test(p.designation || '') ? 'CA' : 'Others', claims: (claims.get(p.id) || []).sort((a, b) => a.date.localeCompare(b.date)) }));
+    return res.status(200).json({ from, to, staff });
   }
   // OT approved in a date range (a month, or a payroll period), per staff member: hours at each rate, and what is still waiting.
   if (req.method === 'GET' && action === 'attendance_ot_summary') {

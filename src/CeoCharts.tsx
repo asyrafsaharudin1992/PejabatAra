@@ -3,6 +3,8 @@ import { Table2, BarChart3, RefreshCw } from 'lucide-react';
 import { BarsChart, LinesChart, COLOR, money, type Series } from './CeoChartKit';
 import { PayrollCharts } from './PayrollCharts';
 import { officeFetch } from './lib/officeApi';
+import { SubTabs } from './SubTabs';
+import { OrgChartPage } from './OrgChart';
 
 // The CEO's Charts tab: how many people there are in each role at each clinic. The head count, joiners and leavers and the payroll cost over the
 // last twelve months come from the shared payroll charts, shown below this one. Plain SVG, no chart library; the two clinics keep their colour
@@ -70,7 +72,7 @@ const heading = (text: string, note: string) => <div className="pt-2"><h3 classN
 
 // Everything on the CEO's Charts tab: the people, time and attendance, money, and reviews. The figures come in one read from the server.
 // `source` says who is looking: the CEO and HR see everything; the COO does not see pay or tax (the server leaves them out).
-export function CeoChartsPage({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
+function ChartsBody({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
   const [data, setData] = useState<Charts | null>(null);
   const [busy, setBusy] = useState(false);
   const load = (refresh: boolean) => { setBusy(true); officeFetch(source === 'hr' ? `/api/status?resource=hr&action=charts${refresh ? '&refresh=1' : ''}` : `/api/status?resource=coo&action=ceo_charts${refresh ? '&refresh=1' : ''}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => onError(cause.message)).finally(() => setBusy(false)); };
@@ -114,5 +116,14 @@ export function CeoChartsPage({ onError, source = 'ceo' }: { onError: (message: 
     </div>
 
     {data.pay && <>{heading('Payroll over 12 months', 'Head count, joiners and leavers, and the cost of pay, as in HR.')}<PayrollCharts /></>}
+  </div>;
+}
+
+// The Charts tab: the figures, and the organisation chart under its own sub-tab.
+export function CeoChartsPage({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
+  const [tab, setTab] = useState<'figures' | 'org'>('figures');
+  return <div className="space-y-5">
+    <SubTabs label="Charts" active={tab} onSelect={setTab} tabs={[{ id: 'figures', label: 'Charts' }, { id: 'org', label: 'See organization chart', short: 'Organization chart' }]} />
+    {tab === 'org' ? <OrgChartPage onError={onError} source={source} /> : <ChartsBody onError={onError} source={source} />}
   </div>;
 }

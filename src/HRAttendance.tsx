@@ -1,5 +1,6 @@
 import { isMissedClock } from './lib/attendanceRequests';
 import { OtPolicyBody } from './OtPolicy';
+import { OtClaims } from './HROtClaims';
 import { SubTabs } from './SubTabs';
 import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Download, Plus, Trash2 } from 'lucide-react';
@@ -28,7 +29,7 @@ const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
 type Place = { id: string; name: string; company: string; latitude: number; longitude: number; radius: number; active: boolean };
 type Person = { id: string; company: string; code: string; name: string; doctor: boolean; mode: 'places' | 'anywhere'; placeIds: string[]; clockRequired: 'full' | 'in_only' | 'none'; defaultShift: string };
-type Clock = { id: string; source: 'phone' | 'infotech' | 'hr' | 'request'; kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string };
+type Clock = { id: string; source: 'phone' | 'infotech' | 'hr' | 'request'; kind: 'in' | 'out'; at: string; time: string; date: string; place: string; distance: number | null; accuracy: number | null; anywhere: boolean; fromRequest: boolean; device: string; remarks?: string; address?: string; map?: string };
 type TimeRow = { kind: 'staff' | 'doctor'; code: string; start: string; end: string };
 type OtRow = { group?: string; id: string; company: string; code: string; name: string; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; dayOff: boolean; captured: number; status: '' | 'approved' | 'rejected'; approved: number; rate: number; note: string };
 type Req = { id: string; employeeId: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; readOnly?: boolean; company?: string; otPreview?: string; otShown?: number; clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; reason: string; remarks: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorDecidedBy: string; supervisorNote: string; decidedBy: string; note: string; rate: number | null };
@@ -43,8 +44,11 @@ const monthName = (month: string) => new Date(`${month}-01T00:00:00`).toLocaleDa
 const shortMonth = (month: string) => new Date(`${month}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short' });
 const dayName = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
-const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emerald-50 text-emerald-700'], working: ['Working', 'bg-sky-50 text-sky-700'], absent: ['Absent', 'bg-rose-50 text-rose-700'], 'not-in': ['Not in yet', 'bg-amber-50 text-amber-700'], leave: ['Leave', 'bg-violet-50 text-violet-700'], 'missing-out': ['No clock out', 'bg-amber-50 text-amber-700'], extra: ['Clocked on a day off', 'bg-slate-100 text-slate-500'], off: ['Off', 'bg-slate-100 text-slate-400'], upcoming: ['Upcoming', 'bg-slate-100 text-slate-500'], 'no-times': ['Shift not set', 'bg-slate-100 text-slate-500'], 'post-call': ['Post night', 'bg-indigo-50 text-indigo-700'], exempt: ['No clock needed', 'bg-slate-100 text-slate-500'], 'no-record': ['No record', 'bg-slate-50 text-slate-400'] };
-const badge = (status: string) => { const [label, tone] = STATUS[status] || [status, 'bg-slate-100 text-slate-500']; return <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{label}</span>; };
+const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emerald-50 text-emerald-700'], working: ['Working', 'bg-sky-50 text-sky-700'], absent: ['Absent', 'bg-rose-50 text-rose-700'], 'not-in': ['Not in yet', 'bg-amber-50 text-amber-700'], leave: ['Leave', 'bg-violet-50 text-violet-700'], 'leave-pending': ['Leave · pending approval', 'bg-amber-50 text-amber-700'], 'missing-out': ['No clock out', 'bg-amber-50 text-amber-700'], extra: ['Clocked on a day off', 'bg-slate-100 text-slate-500'], off: ['Off', 'bg-slate-100 text-slate-400'], upcoming: ['Upcoming', 'bg-slate-100 text-slate-500'], 'no-times': ['Shift not set', 'bg-slate-100 text-slate-500'], 'post-call': ['Post night', 'bg-indigo-50 text-indigo-700'], exempt: ['No clock needed', 'bg-slate-100 text-slate-500'], 'no-record': ['No record', 'bg-slate-50 text-slate-400'] };
+// The leave codes as HR knows them (unpaid leave is UPL); the badge says which leave it is, not just "Leave".
+const LEAVE_CODE: Record<string, string> = { AL: 'AL', ML: 'ML', EL: 'EL', UL: 'UPL', ULEL: 'UPL', HOSP: 'HOSP', MATN: 'MATN', MARRG: 'MARRG' };
+const LEAVE_NAME: Record<string, string> = { AL: 'Annual leave', ML: 'Medical leave', EL: 'Emergency leave', UL: 'Unpaid leave', ULEL: 'Unpaid emergency leave', HOSP: 'Hospitalisation leave', MATN: 'Maternity leave', MARRG: 'Marriage leave' };
+const badge = (status: string, leave = '') => { const [label, tone] = STATUS[status] || [status, 'bg-slate-100 text-slate-500']; const shownLabel = status === 'leave' && leave ? `Leave · ${LEAVE_CODE[leave] || leave}` : status === 'leave-pending' && leave ? `Leave · ${LEAVE_CODE[leave] || leave} · pending approval` : label; return <span title={(status === 'leave' || status === 'leave-pending') && leave ? LEAVE_NAME[leave] || leave : undefined} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{shownLabel}</span>; };
 const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
 const addDay = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:00Z`) + by * 86400000).toISOString().slice(0, 10);
 // The Infotech code each roster name replaced, so HR who knew the old names can follow.
@@ -96,7 +100,7 @@ function Today({ onError, source }: { onError: (message: string) => void; source
     <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 sm:gap-3">{chips.map(([label, value, tone]) => <div key={label} className={`${card} !p-2.5 text-center sm:!p-4`}><p className={`text-xl font-semibold sm:text-2xl ${tone}`}>{value}</p><p className="mt-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-xs">{label}</p></div>)}</div>
     {noRecordFor.length > 0 && <p className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-600">No record for this date ({noRecordFor.join(' and ')}).</p>}
     {source && rows && <ul className="space-y-2 sm:hidden">{shown.filter((row) => row.status !== 'off').map((row) => <li key={row.id} className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[13px] font-semibold leading-tight text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></div>{badge(row.status)}</div>
+      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[13px] font-semibold leading-tight text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></div>{badge(row.status, row.leave)}</div>
       <div className="mt-2 grid grid-cols-3 gap-1.5 text-center"><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Shift</p><p className="text-[12px] font-bold text-[#0b587b]">{newCode(row.shift) || '—'}</p>{row.startTime && <p className="text-[10px] text-slate-500">{row.startTime}–{row.endTime}</p>}</div><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">In</p><p className="text-[12px] font-semibold">{row.inTime || '—'}</p></div><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Out</p><p className="text-[12px] font-semibold">{row.outTime || '—'}</p></div></div>
       {(row.lateCounted > 0 || row.late > 0) && <p className={`mt-1.5 text-[11px] ${row.lateCounted > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Late {row.lateCounted > 0 ? `${row.lateCounted} min` : `${row.late} min (grace)`}</p>}
     </li>)}{!shown.length && <li className="text-sm text-slate-500">Nobody on this date.</li>}</ul>}
@@ -109,12 +113,12 @@ function Today({ onError, source }: { onError: (message: string) => void; source
             <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{newCode(row.shift)}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
             <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
-            <td className="pr-3">{badge(row.status)}</td>
+            <td className="pr-3">{badge(row.status, row.leave)}</td>
             <td className="text-right">{!source && <button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button>}</td>
           </tr>
           {open === row.id && <tr key={`${row.id}-details`}><td colSpan={7} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">
             {!clocks ? 'Loading…' : <>
-              {!clocks.length ? <p>No clocks around this date.</p> : <ul className="space-y-1">{clocks.map((clock) => <li key={clock.id} className="flex flex-wrap items-center gap-x-2">{clock.date} {clock.time} · {clock.kind === 'in' ? 'In' : 'Out'} · {clock.source === 'phone' ? (clock.anywhere ? 'phone, anywhere (not checked)' : `${clock.place}, ${clock.distance} m away${clock.accuracy !== null ? ` · GPS ±${clock.accuracy} m` : ''}`) : SOURCE[clock.source]}<button onClick={() => { if (window.confirm('Delete this clock? It is written to the audit trail.')) void change(() => api('action=attendance_clock_delete', { clockId: clock.id }), row.id); }} className="font-semibold text-rose-600 hover:underline">Delete</button></li>)}</ul>}
+              {!clocks.length ? <p>No clocks around this date.</p> : <ul className="space-y-1">{clocks.map((clock) => <li key={clock.id} className="flex flex-wrap items-center gap-x-2">{clock.date} {clock.time} · {clock.kind === 'in' ? 'In' : 'Out'} · {clock.source === 'phone' ? (clock.anywhere ? <span>phone, anywhere{clock.address ? <b className="font-semibold text-slate-700"> · {clock.address}</b> : ' (not checked)'}{clock.accuracy !== null ? ` · GPS ±${clock.accuracy} m` : ''}{clock.map && <> · <a href={clock.map} target="_blank" rel="noreferrer" className="font-semibold text-[#0b587b] hover:underline">Map</a></>}</span> : `${clock.place}, ${clock.distance} m away${clock.accuracy !== null ? ` · GPS ±${clock.accuracy} m` : ''}`) : SOURCE[clock.source]}{clock.remarks && <span className="basis-full pl-1 italic text-slate-500">“{clock.remarks}”</span>}<button onClick={() => { if (window.confirm('Delete this clock? It is written to the audit trail.')) void change(() => api('action=attendance_clock_delete', { clockId: clock.id }), row.id); }} className="font-semibold text-rose-600 hover:underline">Delete</button></li>)}</ul>}
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3"><span className="font-semibold">Add a clock for {dayName(date)}</span>
                 <select value={add.kind} onChange={(event) => setAdd({ ...add, kind: event.target.value as 'in' | 'out' })} aria-label="Clock in or out" className={field}><option value="in">In</option><option value="out">Out</option></select>
                 <input type="time" value={add.time} onChange={(event) => setAdd({ ...add, time: event.target.value })} aria-label="Time" className={field} />
@@ -390,6 +394,12 @@ function CreditHours({ onError }: { onError: (message: string) => void }) {
   const [entries, setEntries] = useState<CreditEntry[] | null>(null);
   const [form, setForm] = useState({ kind: 'earn' as 'earn' | 'plus' | 'minus', hours: '', date: todayKey(), note: '' });
   const [busy, setBusy] = useState(false);
+  // Several staff at once: tick them, then give each the same hours (an outside programme, a training day).
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bulk, setBulk] = useState({ hours: '', date: todayKey(), note: '' });
+  const [bulkAsk, setBulkAsk] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
   const load = () => api('action=attendance_credit_hours_list').then((result) => { if (result.error) throw new Error(result.error); setRows(result.rows); }).catch((cause: Error) => { setRows([]); onError(cause.message); });
   useEffect(() => { void load(); }, []);
   const loadEntries = async (id: string) => { setEntries(null); try { const result = await api(`action=attendance_credit_hours_entries&id=${id}`); if (result.error) throw new Error(result.error); setEntries(result.entries); } catch (cause) { setEntries([]); onError(cause instanceof Error ? cause.message : 'Unable to load the entries.'); } };
@@ -398,10 +408,25 @@ function CreditHours({ onError }: { onError: (message: string) => void }) {
   const add = (id: string) => void run(async () => { const result = await api('action=attendance_credit_hours_add', { id, kind: form.kind === 'earn' ? 'earn' : 'adjust', minutes: Math.round(Number(form.hours) * 60) * (form.kind === 'minus' ? -1 : 1), date: form.date, note: form.note }); if (!result.error) setForm({ kind: 'earn', hours: '', date: todayKey(), note: '' }); return result; }, id);
   const shown = (rows || []).filter((row) => (!company || row.company === company) && `${row.name} ${row.code}`.toLowerCase().includes(query.trim().toLowerCase()));
   const total = shown.reduce((sum, row) => sum + row.minutes, 0);
+  const bulkMinutes = Math.round(Number(bulk.hours) * 60);
+  const bulkReady = picked.length > 0 && bulkMinutes > 0 && bulk.note.trim().length >= 2;
+  const saveBulk = async () => { setBusy(true); setBulkMessage(''); try { const result = await api('action=attendance_credit_hours_add_bulk', { ids: picked, minutes: bulkMinutes, date: bulk.date, note: bulk.note }); if (result.error) throw new Error(result.error); setBulkMessage(`Added ${hoursText(bulkMinutes)} credit hours to ${result.added} staff.`); setPicked([]); setBulk({ hours: '', date: todayKey(), note: '' }); setBulkAsk(false); await load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); } };
   return <section className={`${card} space-y-4`}>
     <div className="flex flex-wrap items-center gap-3"><div><h3 className="text-lg font-semibold">Credit hours</h3><p className="text-sm text-slate-500">Hours earned outside the shift (reset hours, a meeting, a talk) and not used yet. They are kept apart from Annual Leave. Use them from the Today tab for a late arrival or an early leave.</p></div>
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" className={`${field} ml-auto w-52`} aria-label="Search" />
       <select value={company} onChange={(event) => setCompany(event.target.value)} aria-label="Company" className={field}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></div>
+    <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => { setBulkOpen(!bulkOpen); setBulkMessage(''); }} className={ghost}>{bulkOpen ? 'Close' : 'Add credit hours to several staff'}</button>{bulkMessage && <span className="text-sm font-semibold text-emerald-700">{bulkMessage}</span>}</div>
+    {bulkOpen && <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+      <p className="text-sm text-slate-600">Tick the staff who earned the same hours (for example everyone who went to an outside programme), then say how many hours and why. Each person gets the hours as one entry.</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs"><button type="button" onClick={() => setPicked([...new Set([...picked, ...shown.map((row) => row.id)])])} className="font-semibold text-[#0b587b] hover:underline">Tick all shown ({shown.length})</button><button type="button" onClick={() => setPicked([])} className="font-semibold text-slate-500 hover:underline">Clear</button><span className="text-slate-400">The list follows the search and company above.</span></div>
+      <ul className="grid max-h-64 gap-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 sm:grid-cols-2">{shown.map((row) => <li key={row.id}><label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50"><input type="checkbox" checked={picked.includes(row.id)} onChange={() => setPicked(picked.includes(row.id) ? picked.filter((id) => id !== row.id) : [...picked, row.id])} /><span className="min-w-0 flex-1 truncate">{row.name}</span><span className="text-[11px] text-slate-400">{row.company} · {row.code}</span></label></li>)}</ul>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="block text-xs font-semibold text-slate-600">Hours earned each<input type="number" min="0" step="0.25" inputMode="decimal" value={bulk.hours} onChange={(event) => setBulk({ ...bulk, hours: event.target.value })} placeholder="e.g. 2.5" className={`${field} mt-1 block w-28`} /></label>
+        <label className="block text-xs font-semibold text-slate-600">Date<input type="date" value={bulk.date} onChange={(event) => setBulk({ ...bulk, date: event.target.value })} className={`${field} mt-1 block`} /></label>
+        <label className="block min-w-[220px] flex-1 text-xs font-semibold text-slate-600">Why<input value={bulk.note} maxLength={200} onChange={(event) => setBulk({ ...bulk, note: event.target.value })} placeholder="e.g. outside programme at …, 14/11" className={`${field} mt-1 block w-full`} /></label>
+      </div>
+      {bulkAsk ? <div className="rounded-xl border border-[#0b587b]/20 bg-sky-50/70 p-3 text-sm"><p className="font-semibold text-slate-800">Do you want to add {hoursText(bulkMinutes)} credit hours to {picked.length} staff?</p><p className="mt-0.5 text-xs text-slate-600">{bulk.note} · {bulk.date.split('-').reverse().join('/')}. Each person gets one entry, which can be removed from their own list.</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void saveBulk()} disabled={busy} className={button}>Yes, add</button><button type="button" onClick={() => setBulkAsk(false)} className={ghost}>Cancel</button></div></div> : <button type="button" onClick={() => setBulkAsk(true)} disabled={!bulkReady || busy} className={button}>Add to {picked.length} staff</button>}
+    </div>}
     {!rows ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[640px] text-sm">
       <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Balance</th><th /></tr></thead>
       <tbody>{shown.map((row) => <>
@@ -561,11 +586,12 @@ function OtSettings({ onError }: { onError: (message: string) => void }) {
 }
 
 function OtArea({ onError, badges }: { onError: (message: string) => void; badges?: number }) {
-  const [sub, setSub] = useState<'requests' | 'summary' | 'settings'>('requests');
+  const [sub, setSub] = useState<'requests' | 'summary' | 'claims' | 'settings'>('requests');
   return <div className="space-y-5">
-    <SubTabs active={sub} onSelect={setSub} tabs={[{ id: 'requests' as const, label: 'Requests', badge: badges || 0 }, { id: 'summary' as const, label: 'Summary' }, { id: 'settings' as const, label: 'Settings' }]} />
+    <SubTabs active={sub} onSelect={setSub} tabs={[{ id: 'requests' as const, label: 'Requests', badge: badges || 0 }, { id: 'summary' as const, label: 'Summary' }, { id: 'claims' as const, label: 'Claim report' }, { id: 'settings' as const, label: 'Settings' }]} />
     {sub === 'requests' && <><Requests onError={onError} kind="ot" /><OtAlerts onError={onError} /></>}
     {sub === 'summary' && <OtSummary onError={onError} />}
+    {sub === 'claims' && <OtClaims onError={onError} />}
     {sub === 'settings' && <OtSettings onError={onError} />}
   </div>;
 }
