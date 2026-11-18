@@ -21,15 +21,15 @@ assert.deepEqual(otParts('normal', 30), []);
 // Off day: all hours at 1.5x, rest taken off.
 assert.deepEqual(otParts('off', 9 * H), [{ minutes: 8 * H, multiplier: 1.5 }]);
 // Rest day: up to 4 h = half day (4 h at 1.0), up to 8 h = a day (8 h at 1.0), then 2.0 beyond 8 h.
-assert.deepEqual(otParts('rest', 3 * H), [{ minutes: 4 * H, multiplier: 1 }]);
-assert.deepEqual(otParts('rest', 4 * H), [{ minutes: 4 * H, multiplier: 1 }]);
-assert.deepEqual(otParts('rest', 5 * H), [{ minutes: 8 * H, multiplier: 1 }]);
-assert.deepEqual(otParts('rest', 9 * H), [{ minutes: 8 * H, multiplier: 1 }]);      // 9 h worked, 8 h after rest, a day pay
-assert.deepEqual(otParts('rest', 11 * H), [{ minutes: 8 * H, multiplier: 1 }, { minutes: 2 * H, multiplier: 2 }]);
+assert.deepEqual(otParts('rest', 3 * H), [{ minutes: 4 * H, multiplier: 1, flat: 'rest' }]);
+assert.deepEqual(otParts('rest', 4 * H), [{ minutes: 4 * H, multiplier: 1, flat: 'rest' }]);
+assert.deepEqual(otParts('rest', 5 * H), [{ minutes: 8 * H, multiplier: 1, flat: 'rest' }]);
+assert.deepEqual(otParts('rest', 9 * H), [{ minutes: 8 * H, multiplier: 1, flat: 'rest' }]);      // 9 h worked, 8 h after rest, a day pay
+assert.deepEqual(otParts('rest', 11 * H), [{ minutes: 8 * H, multiplier: 1, flat: 'rest' }, { minutes: 2 * H, multiplier: 2 }]);
 // Public holiday: any time up to 8 h is 2 x ORP, a whole day; beyond 8 h at 3.0x.
-assert.deepEqual(otParts('ph', 4 * H), [{ minutes: 8 * H, multiplier: 2 }]);
-assert.deepEqual(otParts('ph', 8 * H), [{ minutes: 8 * H, multiplier: 2 }]);
-assert.deepEqual(otParts('ph', 13 * H), [{ minutes: 8 * H, multiplier: 2 }, { minutes: 4 * H, multiplier: 3 }]);
+assert.deepEqual(otParts('ph', 4 * H), [{ minutes: 8 * H, multiplier: 2, flat: 'ph' }]);
+assert.deepEqual(otParts('ph', 8 * H), [{ minutes: 8 * H, multiplier: 2, flat: 'ph' }]);
+assert.deepEqual(otParts('ph', 13 * H), [{ minutes: 8 * H, multiplier: 2, flat: 'ph' }, { minutes: 4 * H, multiplier: 3 }]);
 assert.deepEqual(otParts('ph', 30), []);
 // Pay in hours x rate for a public holiday of 4 hours equals 2 x ORP (16 HRP): 8 h x 2.0.
 assert.equal(otParts('ph', 4 * H).reduce((sum, part) => sum + (part.minutes / H) * part.multiplier, 0), 16);
@@ -68,7 +68,7 @@ assert.throws(() => cleanPolicy({ roundMinutes: 0 }), /OT block/);
 const custom = cleanPolicy({ roundMinutes: 30, restMinutes: 30, restAfterMinutes: 360, normalRate: 2, phHours: 6 });
 assert.equal(netMinutes('normal', 7 * H + 40, custom), 7 * H);                 // 7 h 40 -> blocks of 30 = 7 h 30, more than 6 h so 30 min rest off -> 7 h
 assert.deepEqual(otParts('normal', 3 * H + 40, custom), [{ minutes: 3 * H + 30, multiplier: 2 }]);
-assert.deepEqual(otParts('ph', 5 * H, custom), [{ minutes: 6 * H, multiplier: 2 }]);
+assert.deepEqual(otParts('ph', 5 * H, custom), [{ minutes: 6 * H, multiplier: 2, flat: 'ph' }]);
 assert.equal(otParts('ph', 5 * H, custom).reduce((sum, part) => sum + (part.minutes / H) * part.multiplier, 0), 12);
 assert.match(otSummary('ph', 5 * H, custom), /Public holiday.*1\.5 x ORP/);          // 6 h at 2.0 = 12 HRP = 1.5 x ORP
 assert.match(paySummary('rest', 8 * H, [{ minutes: 8 * H, multiplier: 1 }], true), /1 h rest not counted.*a day pay \(1 x ORP\)/);

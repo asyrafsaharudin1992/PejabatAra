@@ -10,6 +10,9 @@ import { Claim, MonthSummary } from './ClinicalIncentives';
 import { HRIncentiveRates } from './HRIncentiveRates';
 import { HRIncentiveForms } from './HRIncentiveForms';
 import { HRCare } from './HRCare';
+import { HRIncentiveSummary } from './HRIncentiveSummary';
+import { HRSotmIncentive } from './HRSotmIncentive';
+import { HRIncentiveFinance } from './HRIncentiveFinance';
 
 // Office HR: the staff incentive claims that Clinical Admin has approved and sent to HR, by month. Read only:
 // Clinical Admin checks and approves each claim, and returning one there takes it back from this list.
@@ -33,7 +36,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
   const [problem, setProblem] = useState('');
   const [flowOpen, setFlowOpen] = useState(false);
   const [ratesOpen, setRatesOpen] = useState(false);
-  const [tab, setTab] = useState<'claims' | 'staff' | 'doctor' | 'care'>('claims');
+  const [tab, setTab] = useState<'claims' | 'summary' | 'staff' | 'doctor' | 'care' | 'sotm' | 'finance'>('claims');
   const [printing, setPrinting] = useState<'' | 'print' | 'pdf'>('');
   const load = () => {
     setClaims(null);
@@ -50,6 +53,9 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
   const sentOnly = shown.filter((claim) => claim.hrSubmittedAt);
   const entries = sentOnly.flatMap((claim) => claim.entries);
   const waiting = shown.filter((claim) => !claim.hrReceivedAt && claim.hrSubmittedAt);
+  // Claims not sent to HR yet (still filling in, waiting for approval, or returned): their rows that are not rejected, for an estimate of what may still come.
+  const pendingClaims = shown.filter((claim) => !claim.hrSubmittedAt), pendingEntries = pendingClaims.flatMap((claim) => claim.entries.filter((entry) => entry.review !== 'rejected'));
+  const pendingTotal = claimTotal(pendingEntries);
   // Marks claims received (or undoes it) and shows the result straight away.
   const mark = async (ids: string[], receive: boolean) => {
     if (receive && ids.length > 1 && !window.confirm(`Mark ${ids.length} claims as received by HR?`)) return;
@@ -83,9 +89,12 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
 
   return <div className="text-compact mx-auto max-w-[1500px] space-y-3 sm:space-y-5">
     {!embedded && <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:p-9"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.22em]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-0.5 text-lg font-semibold tracking-tight sm:mt-3 sm:text-3xl">Staff incentives</h2><p className="mt-3 hidden max-w-2xl leading-7 text-[#b9cfdd] sm:block">Incentive claims that Clinical Admin has checked, approved and sent to HR. Claims still being filled in or waiting for approval are listed too (use the progress filter) and are not counted until they are sent. Only the rows Clinical Admin ticked ✓ are counted in the approved amount.</p></section>}
-    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'claims', label: 'Claims' }, { id: 'staff', label: 'Staff form', short: 'Staff' }, { id: 'doctor', label: 'Doctor form', short: 'Doctor' }, { id: 'care', label: 'AraCare' }]} />
+    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'claims', label: 'Claims' }, { id: 'summary', label: 'Summary (allowance sheet)', short: 'Summary' }, { id: 'staff', label: 'Staff form', short: 'Staff' }, { id: 'doctor', label: 'Doctor form', short: 'Doctor' }, { id: 'care', label: 'AraCare' }, { id: 'sotm', label: 'SOTM' }, { id: 'finance', label: 'Finance use', short: 'Finance' }]} />
     {(tab === 'staff' || tab === 'doctor') && <HRIncentiveForms key={tab} form={tab} onError={onError} />}
     {tab === 'care' && <HRCare onError={onError} />}
+    {tab === 'summary' && <HRIncentiveSummary onError={onError} />}
+    {tab === 'sotm' && <HRSotmIncentive onError={onError} />}
+    {tab === 'finance' && <HRIncentiveFinance onError={onError} />}
     <div className={tab === 'claims' ? 'space-y-3 sm:space-y-5' : 'hidden'}>
     <section className={`${card} grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3`}>
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} col-span-4 min-w-0 sm:min-w-[200px] sm:flex-1`} />
@@ -116,7 +125,7 @@ export function HRIncentives({ onError, embedded = false }: { onError: (message:
     {claims && waiting.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-[#f4fafd] p-4"><p className="min-w-[200px] flex-1 text-sm text-slate-700"><strong>{waiting.length} {waiting.length === 1 ? 'claim' : 'claims'}</strong> {waiting.length === 1 ? 'has' : 'have'} not been marked received.</p>
       <input value={receiver} onChange={(event) => setReceiver(event.target.value)} placeholder="Your name (optional)" aria-label="Your name" className={`${field} w-52`} />
       <button onClick={() => void mark(waiting.map((claim) => claim.id), true)} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><CheckCheck className="h-4 w-4" />Mark {waiting.length} received</button></div>}
-    <div className="grid grid-cols-3 gap-1.5 sm:gap-3">{[['Claims sent to HR', 'Sent', claims ? String(sentOnly.length) : '…'], ['Total claimed', 'Claimed', claims ? rm(claimTotal(entries)) : '…'], ['Total approved', 'Approved', claims ? rm(approvedTotal(entries)) : '…']].map(([label, short, value]) => <div key={label} className={`${card} max-sm:!rounded-lg max-sm:!p-2`}><p className="truncate text-[10px] font-semibold text-slate-500 sm:text-xs"><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span></p><p className="mt-0.5 truncate text-sm font-semibold text-[#0b587b] sm:mt-1 sm:text-3xl">{value}</p></div>)}</div>
+    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5 sm:gap-3">{[['Claims sent to HR', 'Sent', claims ? String(sentOnly.length) : '…'], ['Total claimed', 'Claimed', claims ? rm(claimTotal(entries)) : '…'], ['Total approved', 'Approved', claims ? rm(approvedTotal(entries)) : '…'], ['Pending (filling in / waiting approval)', 'Pending', claims ? `${rm(pendingTotal)} · ${pendingClaims.length}` : '…'], ['Estimate if all pending are approved', 'Estimate', claims ? rm(approvedTotal(entries) + pendingTotal) : '…']].map(([label, short, value]) => <div key={label} className={`${card} max-sm:!rounded-lg max-sm:!p-2`}><p className="text-[10px] font-semibold leading-tight text-slate-500 sm:text-xs"><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span></p><p className="mt-0.5 break-words text-sm font-semibold text-[#0b587b] sm:mt-1 sm:text-2xl">{value}</p></div>)}</div>
     <section className={`${card} overflow-x-auto`}>
       {!claims ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{claims.length ? 'No claim matches these filters.' : `Nothing has been submitted or sent to HR for ${month === 'all' ? 'any month' : monthLabel(month)} yet. Clinical Admin sends approved claims from Staff incentives.`}</p> :
         <>

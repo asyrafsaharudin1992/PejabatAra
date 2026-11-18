@@ -190,7 +190,7 @@ function CarryCell({ row, year, onChanged, onError }: { row: YearEndRow; year: n
   </div>;
 }
 
-// The GCR (Gantian Cuti Rehat) rules Year End applies, read from the settings HR keeps under Leave → Reports → GCR.
+// The GCR (Gantian Cuti Rehat) rules Year End applies, read from the settings HR keeps under Leave → Company policy → GCR.
 function GcrPolicy({ settings }: { settings?: { minUsedPercent: number; maxDays: number; carry: { admin: number; clinical: number; parttime: number } } }) {
   const [open, setOpen] = useState(false);
   if (!settings) return null;
@@ -206,7 +206,7 @@ function GcrPolicy({ settings }: { settings?: { minUsedPercent: number; maxDays:
       <li>Brought-forward days that are not used by the BF expiry date you set when processing are forfeited.</li>
     </ul>
     <div className="mt-3 grid max-w-xl gap-3 text-sm sm:grid-cols-3">{([['Administrative officer', settings.carry.admin], ['Doctor / clinic assistant (permanent)', settings.carry.clinical], ['Doctor / clinic assistant (part-time)', settings.carry.parttime]] as const).map(([label, days]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Carry-forward limit</p><p className="mt-1 text-xs text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-[#0b587b]">{days} days</p></div>)}</div>
-    <p className="mt-3 text-xs text-slate-400">HR can change these numbers under Leave → Reports → GCR. HR can also set a carry-forward figure by hand for one person, with the reason.</p>
+    <p className="mt-3 text-xs text-slate-400">HR can change these numbers under Leave → Company policy → GCR. HR can also set a carry-forward figure by hand for one person, with the reason.</p>
   </section>;
 }
 

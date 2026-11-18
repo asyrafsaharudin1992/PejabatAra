@@ -65,18 +65,7 @@ export function HRLeaveGcr({ onError }: { onError: (message: string) => void }) 
   const td = 'whitespace-nowrap border-t border-slate-100 px-2 py-2 text-right tabular-nums';
   const s = data?.settings;
   return <div className="space-y-5">
-    <section className={`${card} space-y-4 print:hidden`}>
-      <div><h2 className="text-lg font-semibold">GCR rules</h2><p className="text-sm text-slate-500">Gantian Cuti Rehat, as in the HR memo. Change a number and press Save; the report below and Year End follow it straight away.</p></div>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="text-xs font-bold text-slate-600">Eligible leave to be used (%)<input type="number" min="0" max="100" value={form.minUsedPercent} onChange={(event) => setForm({ ...form, minUsedPercent: event.target.value })} className={`${field} mt-1 block w-40`} /></label>
-        <label className="text-xs font-bold text-slate-600">Most days that can be paid<input type="number" min="0" max="60" step="0.5" value={form.maxDays} onChange={(event) => setForm({ ...form, maxDays: event.target.value })} className={`${field} mt-1 block w-40`} /></label>
-        <label className="text-xs font-bold text-slate-600">Carry limit: Admin (days)<input type="number" min="0" max="366" value={form.carryAdmin} onChange={(event) => setForm({ ...form, carryAdmin: event.target.value })} className={`${field} mt-1 block w-36`} /></label>
-        <label className="text-xs font-bold text-slate-600">Carry limit: Operation (days)<input type="number" min="0" max="366" value={form.carryClinical} onChange={(event) => setForm({ ...form, carryClinical: event.target.value })} className={`${field} mt-1 block w-36`} /></label>
-        <label className="text-xs font-bold text-slate-600">Carry limit: Part-time (days)<input type="number" min="0" max="366" value={form.carryParttime} onChange={(event) => setForm({ ...form, carryParttime: event.target.value })} className={`${field} mt-1 block w-36`} /></label>
-        <button onClick={() => void saveSettings()} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Save className="h-4 w-4" />Save rules</button>
-      </div>
-      <p className="text-xs leading-5 text-slate-500">Credit leave (public holiday replacement, training and so on) is used first and burns on 31 December if unused; it is never paid or carried. Staff who used at least {s?.minUsedPercent ?? 50}% of their eligible days may choose to be paid for up to {s?.maxDays ?? 4} of the days left. What is left after that carries forward, up to the limit.</p>
-    </section>
+    <p className="text-xs text-slate-500 print:hidden">The GCR rules ({data?.settings.minUsedPercent ?? 50}% to be used, up to {data?.settings.maxDays ?? 4} days paid) are edited under Leave &gt; Company policy &gt; GCR.</p>
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 print:hidden">{notice}</p>}
     <section className={`${card} flex flex-wrap items-end gap-3 print:hidden`}>
       <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">GCR report</h2><p className="text-sm text-slate-500">Who qualifies, how many days can be paid, what burns and what carries forward. Record each person's choice in the last columns.</p></div>

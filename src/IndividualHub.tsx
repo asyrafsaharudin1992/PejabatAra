@@ -23,7 +23,7 @@ type Profile = { fullName: string; code: string; company: string; branch: string
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
   address?: { line1: string; line2: string; postcode: string; city: string; state: string };
   emergency?: { name: string; relation: string; phone: string };
-  spouse?: { name: string; occupation: string; phone: string };
+  spouse?: { name: string; occupation: string; phone: string; working?: boolean | null };
   children?: { name: string; dateOfBirth: string | null }[];
   education?: { level: string; institution: string; course: string; year: string }[] };
 
@@ -92,12 +92,12 @@ function Screen({ title, onBack, children, nav }: { title: string; onBack: () =>
 // children, education). They only see their own record, and never IC, bank or pay details. A staff member can ask HR to change
 // the personal sections; nothing changes until HR approves.
 type Req = { id: string; status: 'pending' | 'approved' | 'rejected'; fields: string[]; requestedAt: string; decidedAt: string | null; note: string };
-const FIELD_NAME: Record<string, string> = { date_of_birth: 'date of birth', religion: 'religion', race: 'race', nationality: 'nationality', marital_status: 'marital status', address_line1: 'address', address_line2: 'address', postcode: 'address', city: 'address', state: 'address', phone: 'mobile', email: 'email', emergency_name: 'emergency contact', emergency_relation: 'emergency contact', emergency_phone: 'emergency contact', spouse_name: 'spouse', spouse_employer: 'spouse', spouse_phone: 'spouse', children: 'children', education: 'education' };
+const FIELD_NAME: Record<string, string> = { date_of_birth: 'date of birth', religion: 'religion', race: 'race', nationality: 'nationality', marital_status: 'marital status', spouse_working: 'whether your spouse works', address_line1: 'address', address_line2: 'address', postcode: 'address', city: 'address', state: 'address', phone: 'mobile', email: 'email', emergency_name: 'emergency contact', emergency_relation: 'emergency contact', emergency_phone: 'emergency contact', spouse_name: 'spouse', spouse_employer: 'spouse', spouse_phone: 'spouse', children: 'children', education: 'education' };
 const SECTION_FIELDS: Record<string, { column: string; label: string; type?: string; options?: string[] }[]> = {
   personal: [{ column: 'date_of_birth', label: 'Date of birth', type: 'date' }, { column: 'nationality', label: 'Nationality' }, { column: 'religion', label: 'Religion' }, { column: 'race', label: 'Race' }, { column: 'marital_status', label: 'Marital status', options: ['', 'Single', 'Married', 'Divorced', 'Widowed'] }],
   address: [{ column: 'address_line1', label: 'Address line 1' }, { column: 'address_line2', label: 'Address line 2' }, { column: 'postcode', label: 'Postcode' }, { column: 'city', label: 'City' }, { column: 'state', label: 'State' }],
   contact: [{ column: 'phone', label: 'Mobile', type: 'tel' }, { column: 'email', label: 'Email', type: 'email' }, { column: 'emergency_name', label: 'Emergency contact' }, { column: 'emergency_relation', label: 'Relationship' }, { column: 'emergency_phone', label: 'Emergency phone', type: 'tel' }],
-  spouse: [{ column: 'spouse_name', label: 'Name' }, { column: 'spouse_employer', label: 'Occupation' }, { column: 'spouse_phone', label: 'Phone', type: 'tel' }],
+  spouse: [{ column: 'spouse_name', label: 'Name' }, { column: 'spouse_employer', label: 'Occupation' }, { column: 'spouse_working', label: 'Does your spouse work?', options: ['', 'Yes', 'No'] }, { column: 'spouse_phone', label: 'Phone', type: 'tel' }],
 };
 const fieldBox = 'mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-[#14233b]';
 const shortDate = (value: string | null) => value ? new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' }) : '';
@@ -130,13 +130,13 @@ function MyProfile() {
   const current: Record<string, any> = { date_of_birth: p.personal?.dateOfBirth || '', nationality: p.personal?.nationality || '', religion: p.personal?.religion || '', race: p.personal?.race || '', marital_status: p.personal?.maritalStatus || '',
     address_line1: p.address?.line1 || '', address_line2: p.address?.line2 || '', postcode: p.address?.postcode || '', city: p.address?.city || '', state: p.address?.state || '',
     phone: p.phone || '', email: p.email || '', emergency_name: p.emergency?.name || '', emergency_relation: p.emergency?.relation || '', emergency_phone: p.emergency?.phone || '',
-    spouse_name: p.spouse?.name || '', spouse_employer: p.spouse?.occupation || '', spouse_phone: p.spouse?.phone || '', children: p.children || [], education: p.education || [] };
+    spouse_name: p.spouse?.name || '', spouse_employer: p.spouse?.occupation || '', spouse_working: p.spouse?.working === true ? 'Yes' : p.spouse?.working === false ? 'No' : '', spouse_phone: p.spouse?.phone || '', children: p.children || [], education: p.education || [] };
   const sections: { key: string; label: string; icon: typeof Settings; rows?: [string, string][]; list?: { title: string; sub: string }[]; empty?: string }[] = [
     { key: 'work', label: 'Work', icon: UserRound, rows: [['Name', p.fullName], ['Employee code', p.code], ['Company', COMPANY[p.company] || p.company], ['Branch', p.branch], ['Department', p.department], ['Position', p.position], ['Employment type', p.employmentType], ['Joined', dmy(p.joinDate)], ['Confirmed', dmy(p.confirmDate)]] },
     { key: 'personal', label: 'Personal', icon: ScanFace, rows: [['Gender', dash(p.personal?.gender)], ['Date of birth', dmy(p.personal?.dateOfBirth)], ['Nationality', dash(p.personal?.nationality)], ['Religion', dash(p.personal?.religion)], ['Race', dash(p.personal?.race)], ['Marital status', dash(p.personal?.maritalStatus)]] },
     { key: 'address', label: 'Address', icon: House, rows: [['Address', dash(address)]] },
     { key: 'contact', label: 'Contact', icon: Phone, rows: [['Mobile', dash(p.phone)], ['Email', dash(p.email)], ['Emergency contact', dash(p.emergency?.name)], ['Relationship', dash(p.emergency?.relation)], ['Emergency phone', dash(p.emergency?.phone)]] },
-    { key: 'spouse', label: 'Spouse', icon: Users, rows: [['Name', dash(p.spouse?.name)], ['Occupation', dash(p.spouse?.occupation)], ['Phone', dash(p.spouse?.phone)]] },
+    { key: 'spouse', label: 'Spouse', icon: Users, rows: [['Name', dash(p.spouse?.name)], ['Occupation', dash(p.spouse?.occupation)], ['Spouse working', p.spouse?.working === true ? 'Yes' : p.spouse?.working === false ? 'No' : '—'], ['Phone', dash(p.spouse?.phone)]] },
     { key: 'children', label: 'Children', icon: Baby, list: (p.children || []).map((child) => ({ title: child.name, sub: child.dateOfBirth ? `Born ${dmy(child.dateOfBirth)}` : '' })), empty: 'No children recorded.' },
     { key: 'education', label: 'Studies', icon: GraduationCap, list: (p.education || []).map((item) => ({ title: [item.level, item.course].filter(Boolean).join(' · ') || item.institution, sub: [item.institution, item.year].filter(Boolean).join(' · ') })), empty: 'No education recorded.' },
   ];

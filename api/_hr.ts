@@ -4,7 +4,7 @@ import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { attendanceHrAction } from './_attendance.js';
-import { codesOf } from '../src/lib/incentiveCodes.js';
+import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
@@ -78,6 +78,34 @@ function encode(body: any) {
 
 // Last 4 IC digits: only a salted scrypt hash is stored, never the digits (the same as the sign-in in _assessment.ts).
 function hashIc4(digits: string) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(digits, salt, 32).toString('hex')}`; }
+
+// Staff of the Month: the amount paid (code C, memo HSO/MEMO/SM/2026/0012). Who won comes from the SOTM posters HR saved (Miscellaneous > SOTM): each poster is kept
+// as hr-misc/sotm/<month>__<name>__<branch>.jpg and saving it writes the person to the audit log, which links the poster to the staff member.
+const SOTM_AMOUNT = 100;
+// Winners HR ticked by hand in Incentive > SOTM (for a person who has no poster), kept by month in portal_state.
+async function readSotmManual(db: any, month: string): Promise<{ KJ: string[]; SK: string[] }> {
+  try {
+    const branch = await branchId(db, 'AraOffice HR Private', false);
+    if (!branch) return { KJ: [], SK: [] };
+    const { data } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'sotm_winners').maybeSingle();
+    const found = data?.payload?.months?.[month];
+    return { KJ: Array.isArray(found?.KJ) ? found.KJ : [], SK: Array.isArray(found?.SK) ? found.SK : [] };
+  } catch { return { KJ: [], SK: [] }; }
+}
+async function sotmWinnersFromPosters(db: any, month: string): Promise<{ ids: Set<string>; unmatched: string[] }> {
+  const ids = new Set<string>(), unmatched: string[] = [];
+  try {
+    const { data: files } = await db.storage.from('hr-misc').list('sotm', { limit: 200, search: `${month}__` });
+    const names = (files || []).map((file: any) => String(file.name)).filter((name: string) => name.startsWith(`${month}__`) && name.endsWith('.jpg')).map((name: string) => name.slice(9, -4).split('__')[0]);
+    if (!names.length) return { ids, unmatched };
+    const { data: audit } = await db.from('hr_audit').select('employee_id,changes').eq('action', 'update').not('changes->>sotm_saved', 'is', null).order('changed_at', { ascending: false }).limit(1000);
+    for (const name of names) {
+      const hit = (audit || []).find((row: any) => String(Array.isArray(row.changes?.sotm_saved) ? row.changes.sotm_saved[1] : '') === `${month} ${name}`);
+      if (hit?.employee_id) ids.add(hit.employee_id); else unmatched.push(name);
+    }
+  } catch { /* no SOTM poster for the month */ }
+  return { ids, unmatched };
+}
 
 // Company leave policy (annual leave by category and years of service; sick leave 14/18/22; hospital leave 60).
 const LEAVE_GROUPS = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
@@ -252,15 +280,34 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   let otRead = await readOt('employee_id,approved_minutes,multiplier,parts');
   if (otRead.error) otRead = await readOt('employee_id,approved_minutes,multiplier'); // before the parts column exists
   const attendanceOt = new Map<string, { ot10: number; ot15: number; ot20: number; ot30: number }>();
+  // The fixed amount for a rest day or a public holiday worked (Infotech's Rest/PH Amount), in days: a rest day is paid 1 x ORP a day (half a day for up to 4 hours), a public holiday 2 x ORP.
+  const attendanceRestPh = new Map<string, { restDays: number; phDays: number }>();
   for (const row of otRead.error ? [] : otRead.data || []) {
     const sums = attendanceOt.get(row.employee_id) || { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
     // A day can be paid in parts at different rates (a rest day, a public holiday); older rows have one rate for the whole approved time.
-    const parts: { minutes: number; multiplier: number }[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }];
+    const parts: { minutes: number; multiplier: number; flat?: string }[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }];
     for (const part of parts) {
+      if (part.flat === 'rest' || part.flat === 'ph') {
+        const orp = (Number(part.minutes || 0) / 60) * Number(part.multiplier) / 8; // the day's pay in days of ORP
+        const days = attendanceRestPh.get(row.employee_id) || { restDays: 0, phDays: 0 };
+        if (part.flat === 'rest') days.restDays += orp; else days.phDays += orp / 2;
+        attendanceRestPh.set(row.employee_id, days);
+        continue;
+      }
       const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, 'ot10' | 'ot15' | 'ot20' | 'ot30'>)[Number(part.multiplier)];
       if (key) sums[key] += Number(part.minutes || 0) / 60;
     }
     attendanceOt.set(row.employee_id, sums);
+  }
+  // Unpaid leave (UL, ULEL) approved for this pay period, as days: a request that runs over the start or end of the period counts only for the days inside it.
+  const attendanceUnpaid = new Map<string, number>();
+  {
+    const { data: unpaid, error: unpaidError } = await db.from('hr_leave_requests').select('employee_id,start_date,end_date,days').in('leave_type', ['UL', 'ULEL']).eq('status', 'approved').lte('start_date', periodTo).gte('end_date', periodFrom).limit(2000);
+    const day = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86400000;
+    for (const row of unpaidError ? [] : unpaid || []) {
+      const whole = day(row.end_date) - day(row.start_date) + 1, inside = Math.min(day(row.end_date), day(periodTo)) - Math.max(day(row.start_date), day(periodFrom)) + 1;
+      if (whole > 0 && inside > 0) attendanceUnpaid.set(row.employee_id, (attendanceUnpaid.get(row.employee_id) || 0) + Number(row.days || 0) * Math.min(1, inside / whole));
+    }
   }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
     db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
@@ -303,7 +350,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     return {
       id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [], salaryChanges: raises.get(row.id) || [],
       maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
-      attendanceOt: Object.fromEntries(Object.entries(attendanceOt.get(row.id) || {}).map(([key, value]) => [key, Math.round(Number(value) * 100) / 100])), settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
+      attendanceRestPh: { restDays: Math.round((attendanceRestPh.get(row.id)?.restDays || 0) * 100) / 100, phDays: Math.round((attendanceRestPh.get(row.id)?.phDays || 0) * 100) / 100 }, attendanceUnpaid: Math.round((attendanceUnpaid.get(row.id) || 0) * 100) / 100, attendanceOt: Object.fromEntries(Object.entries(attendanceOt.get(row.id) || {}).map(([key, value]) => [key, Math.round(Number(value) * 100) / 100])), settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
   });
   return { asOf: `${MONTHS[baseMonth - 1].toUpperCase()} ${year}`, baseMonth, comparison, staff };
@@ -328,6 +375,85 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
 const CLINICAL_CAN_READ = new Set(['roster']);
+
+// The Maybank2U bulk payment file (the layout Infotech writes) for one company: `entries` are the people and the amounts to pay. Used for the salary, for the incentive pay
+// in Payroll, and for the Incentive > Finance use tab.
+async function buildMaybank(db: any, entries: { employee_id: string; net: number }[], company: string, valueDate: string) {
+  const slips = entries.map((entry) => ({ employee_id: entry.employee_id, result: { net: entry.net } }));
+  const ids = (slips || []).map((row: any) => row.employee_id);
+  const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,company,full_name,ic_no,passport_no,bank_name,bank_account').in('id', ids).eq('company', company) : { data: [], error: null };
+  if (peopleError) throw peopleError;
+  const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row]));
+  // Maybank2U's bank names; only MAYBANK, RHB and HONG LEONG are checked against a real file so far.
+  const KNOWN = ['MAYBANK', 'RHB', 'HONG LEONG', 'CIMB', 'AMBANK', 'BANK ISLAM'];
+  const bankName = (name: string) => { const n = String(name || '').toUpperCase(); if (/MAYBANK|MALAYAN BANKING/.test(n)) return 'MAYBANK'; if (/RHB/.test(n)) return 'RHB'; if (/HONG LEONG/.test(n)) return 'HONG LEONG'; if (/CIMB/.test(n)) return 'CIMB'; if (/AM ?BANK|ARAB.?MALAYSIAN/.test(n)) return 'AMBANK'; if (/BANK ISLAM/.test(n)) return 'BANK ISLAM'; return n.replace(/\(.*?\)/g, '').replace(/\b(BERHAD|BHD)\b/g, '').replace(/\s+/g, ' ').trim(); };
+  const csv = (value: unknown) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+  const [vy, vm, vd] = valueDate.split('-');
+  const dd = `${vd}${vm}${vy.slice(2)}`;
+  // As in Infotech's file: a six-digit batch number in the header; each row's reference is the date, the time and the first three digits of it.
+  const batch = String(Math.floor(100000 + Math.random() * 900000));
+  const clock = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 19).replace(/:/g, '');
+  const lines = [['Employer Info :'], ['Crediting Date (eg. dd/MM/yyyy)', `${vd}/${vm}/${vy}`], ['Payment Reference', `MBPREF${batch}`], ['Payment Description', `MBPDEC${batch}`], ['Bulk Payment Type', 'Salary'], [''],
+    ['Beneficiary Name', 'Beneficiary Bank', 'Beneficiary Account No', 'ID Type', 'ID Number', 'Payment Amount', 'Payment Reference', 'Payment Description']];
+  const problems: string[] = []; let total = 0, count = 0;
+  for (const person of (people || []).sort((a: any, b: any) => String(a.full_name).localeCompare(String(b.full_name)))) {
+    const net = Math.round(Number((slipOf.get(person.id) as any)?.result?.net || 0) * 100) / 100;
+    if (net <= 0) continue;
+    const account = String(person.bank_account || '').replace(/\D/g, ''), ic = String(person.ic_no || '').replace(/\D/g, '');
+    const bank = bankName(person.bank_name);
+    if (!account || !bank) { problems.push(`${person.full_name}: bank account missing`); continue; }
+    if (!KNOWN.includes(bank)) problems.push(`${person.full_name}: bank "${bank}" is not checked against a Maybank2U file yet`);
+    const idType = ic.length === 12 ? 'NRIC' : 'PASSPORT', idNumber = ic.length === 12 ? ic : String(person.passport_no || '').trim();
+    if (!idNumber) problems.push(`${person.full_name}: no IC or passport number`);
+    lines.push([String(person.full_name).slice(0, 40).trim(), bank, account, idType, idNumber, net.toFixed(2), `PRE${dd}${clock}${batch.slice(0, 3)}`, `PDC${dd}${clock}${batch.slice(0, 3)}`]);
+    total += net; count++;
+  }
+  const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
+  return { csv: body, count, total: Math.round(total * 100) / 100, problems };
+}
+
+// The Incentive Allowance summary of a month for every staff member of both branches (rows), shared by the summary sheet and by Finance's bank file.
+async function incentiveSummaryData(db: any, month: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+  const first = `${month}-01`, last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+  const [peopleRead, claimRead, careRead] = await Promise.all([
+    db.from('hr_employees').select('id,assessment_staff_id,employee_code,full_name,company,ic_no,passport_no,join_date,resign_date,status').in('company', ['KJ', 'SK']).lte('join_date', last).order('company').order('employee_code').limit(1000),
+    db.from('incentive_claims').select('staff_id,entries').eq('month', month).not('hr_submitted_at', 'is', null).limit(1000),
+    db.from('care_claims').select('staff_id,amount,status').eq('month', month).eq('status', 'approved').limit(500),
+  ]);
+  if (peopleRead.error) throw peopleRead.error;
+  if (claimRead.error) { if (['42703', '42P01'].includes(claimRead.error.code)) throw fail(400, 'Incentive claims are not set up yet.'); throw claimRead.error; }
+  const careRows = careRead.error ? [] : careRead.data || [];
+  const claimBy = new Map<string, any[]>(); for (const row of claimRead.data || []) claimBy.set(row.staff_id, [...(claimBy.get(row.staff_id) || []), ...(Array.isArray(row.entries) ? row.entries : [])]);
+  const careBy = new Map<string, number>(); for (const row of careRows) careBy.set(row.staff_id, (careBy.get(row.staff_id) || 0) + Number(row.amount || 0));
+  let extras: Record<string, any> = {};
+  try { const branch = await branchId(db, 'AraOffice HR Private', false); if (branch) { const { data } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'incentive_summary_extras').maybeSingle(); extras = data?.payload?.months?.[month] || {}; } } catch { /* nothing typed yet */ }
+  const r2 = (value: number) => Math.round(value * 100) / 100;
+  // The Staff of the Month (from the posters saved in Miscellaneous > SOTM) get the SOTM amount without a claim; a claim for code C is then not counted twice.
+  const sotm = await sotmWinnersFromPosters(db, month);
+  const manualSotm = await readSotmManual(db, month), manualCodes = new Set<string>([...manualSotm.KJ, ...manualSotm.SK]);
+  const CA = new Set(INCENTIVE_CODES.filter((item) => item.group === INCENTIVE_GROUPS[0] || item.group === INCENTIVE_GROUPS[1]).map((item) => item.code));
+  const SPECIAL = new Set(['D', 'E', 'F', 'G', 'H', 'I']);
+  const people = (peopleRead.data || []).filter((p: any) => (p.status === 'Active' || (p.resign_date && p.resign_date >= first)) && (!p.resign_date || p.resign_date >= first));
+  const rows = people.map((p: any) => {
+    const entries = (claimBy.get(p.assessment_staff_id) || []).filter((entry: any) => entry?.review === 'approved');
+    const sum = (list: any[]) => r2(list.reduce((total, entry) => total + Number(entry.rm || 0), 0));
+    const doctor = entries.filter((entry: any) => entry.form === 'doctor'), staffEntries = entries.filter((entry: any) => entry.form !== 'doctor');
+    const typed = extras[p.employee_code] || {};
+    const money = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n > 0 ? r2(n) : 0; };
+    const row = {
+      id: p.id, code: p.employee_code, name: p.full_name, company: p.company, ic: p.ic_no || p.passport_no || '', joinDate: p.join_date || '',
+      salesCommission: r2(doctor.reduce((total: number, entry: any) => total + Number(entry.commission || 0), 0)), bonus: money(typed.bonus),
+      sotm: sotm.ids.has(p.id) || manualCodes.has(p.employee_code) ? SOTM_AMOUNT : sum(staffEntries.filter((entry: any) => entry.code === 'C')), special: sum(staffEntries.filter((entry: any) => SPECIAL.has(entry.code))), trainer: sum(staffEntries.filter((entry: any) => entry.code === 'A')),
+      night: sum(staffEntries.filter((entry: any) => entry.code === 'B')), care: r2(careBy.get(p.assessment_staff_id) || 0), outstanding: money(typed.outstanding),
+      doctor: sum(doctor), ca: sum(staffEntries.filter((entry: any) => CA.has(entry.code))), other: sum(staffEntries.filter((entry: any) => !CA.has(entry.code) && !SPECIAL.has(entry.code) && !['A', 'B', 'C'].includes(entry.code))),
+      deduction: money(typed.deduction),
+    };
+    const total = r2(row.salesCommission + row.bonus + row.sotm + row.special + row.trainer + row.night + row.care + row.outstanding + row.doctor + row.ca + row.other);
+    return { ...row, total, nett: r2(total - row.deduction) };
+  });
+  return { month, rows, sotmUnmatched: sotm.unmatched };
+}
 
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -688,6 +814,74 @@ export async function hrHandler(req: any, res: any) {
       if (waitingStaff.length) { const { data: people } = await db.from('hr_employees').select('employee_code,assessment_staff_id').in('assessment_staff_id', waitingStaff); (people || []).forEach((person: any) => owners.set(person.assessment_staff_id, person.employee_code)); }
       return res.status(200).json({ extraCodes: await extraIncentiveCodes(db), claims: (data || []).map((row: any) => ({ approver: row.status === 'submitted' && !row.hr_submitted_at ? (row.form === 'doctor' ? (owners.get(row.staff_id) === 'ARA0002' ? 'Dr Asyraf' : 'Dr Syafiq') : 'Clinical Admin') : '', id: row.id, form: row.form === 'doctor' ? 'doctor' : 'staff', month: row.month, branch: row.branch, staffName: row.assessment_staff?.name || '', staffCode: row.assessment_staff?.staff_code || '', entries: row.entries || [], status: row.status, adminNote: row.admin_note, approvedBy: row.approved_by, submittedAt: row.submitted_at, decidedAt: row.decided_at, hrSubmittedAt: row.hr_submitted_at, hrSubmittedBy: row.hr_submitted_by, hrReceivedAt: row.hr_received_at, hrReceivedBy: row.hr_received_by || '' })) });
     }
+    // The Incentive Allowance summary of a month, one sheet for each branch (the layout HR uses): what each person was paid, by column. The amounts come from the
+    // approved incentive claims (staff and doctor forms) sent to HR and from the approved AraCare claims; Bonus, Outstanding payment and Other deduction are typed by
+    // HR and kept for the month.
+    if (req.method === 'GET' && action === 'incentive_summary') return res.status(200).json(await incentiveSummaryData(db, text(req.query.month, 7)));
+    // Incentive > Finance use: what each person is paid for the month (the Nett Payment of the summary), with the bank details, and the Maybank2U bulk file made from it.
+    if (req.method === 'GET' && action === 'incentive_finance') {
+      const month = text(req.query.month, 7);
+      const data = await incentiveSummaryData(db, month);
+      const ids = data.rows.filter((row: any) => row.nett > 0).map((row: any) => row.id);
+      const { data: banks } = ids.length ? await db.from('hr_employees').select('id,bank_name,bank_account,ic_no,passport_no').in('id', ids) : { data: [] as any[] };
+      const bankOf = new Map((banks || []).map((row: any) => [row.id, row]));
+      const [year, number] = month.split('-').map(Number);
+      const paidOn = `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, '0')}-16`;
+      return res.status(200).json({ month, paidOn, sotmUnmatched: data.sotmUnmatched, items: data.rows.filter((row: any) => row.nett > 0).map((row: any) => { const bank: any = bankOf.get(row.id) || {}; return { id: row.id, code: row.code, name: row.name, company: row.company, nett: row.nett, bankName: bank.bank_name || '', bankAccount: bank.bank_account || '', hasId: Boolean(String(bank.ic_no || bank.passport_no || '').trim()) }; }) });
+    }
+    if (req.method === 'GET' && action === 'incentive_bank') {
+      const month = text(req.query.month, 7), company = text(req.query.company, 2).toUpperCase(), valueDate = text(req.query.valueDate, 10);
+      if (!['KJ', 'SK'].includes(company) || !isDate(valueDate)) throw fail(400, 'Choose the month, the company and the value date.');
+      const data = await incentiveSummaryData(db, month);
+      const made = await buildMaybank(db, data.rows.filter((row: any) => row.company === company && row.nett > 0).map((row: any) => ({ employee_id: row.id, net: row.nett })), company, valueDate);
+      return res.status(200).json({ file: `MaybankIncentive_${company}_${month}.csv`, csv: made.csv, count: made.count, total: made.total, problems: made.problems });
+    }
+    // Incentive > SOTM: who is Staff of the Month. Those with a poster (Miscellaneous > SOTM) are ticked already; HR can tick others by hand.
+    if (req.method === 'GET' && action === 'incentive_sotm_winners') {
+      const month = text(req.query.month, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      const posters = await sotmWinnersFromPosters(db, month);
+      const { data: people } = posters.ids.size ? await db.from('hr_employees').select('employee_code,company').in('id', [...posters.ids]) : { data: [] as any[] };
+      const poster = { KJ: (people || []).filter((p: any) => p.company === 'KJ').map((p: any) => p.employee_code), SK: (people || []).filter((p: any) => p.company === 'SK').map((p: any) => p.employee_code) };
+      return res.status(200).json({ month, amount: SOTM_AMOUNT, manual: await readSotmManual(db, month), poster, unmatched: posters.unmatched });
+    }
+    if (req.method === 'POST' && action === 'incentive_sotm_winners_save') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const month = text(body.month, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      const pick = (value: unknown) => (Array.isArray(value) ? value : []).map((item) => text(item, 20)).filter((code) => /^[A-Za-z0-9-]{3,20}$/.test(code)).slice(0, 5);
+      const next = { KJ: pick(body.winners?.KJ), SK: pick(body.winners?.SK) };
+      const { data: valid } = await db.from('hr_employees').select('employee_code,company').in('employee_code', [...next.KJ, ...next.SK]).eq('status', 'Active');
+      const ok = new Set((valid || []).map((row: any) => `${row.company}:${row.employee_code}`));
+      const clean = { KJ: next.KJ.filter((code) => ok.has(`KJ:${code}`)), SK: next.SK.filter((code) => ok.has(`SK:${code}`)) };
+      const branch = await branchId(db, 'AraOffice HR Private', true);
+      const { data: existing } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'sotm_winners').maybeSingle();
+      const months = { ...(existing?.payload?.months || {}), [month]: clean };
+      const row: any = { branch_id: branch, state_key: 'sotm_winners', payload: { months }, updated_at: now, updated_by: user.id };
+      const { error } = existing ? await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', 'sotm_winners') : await db.from('portal_state').insert(row);
+      if (error) throw error;
+      return res.status(200).json({ success: true, manual: clean });
+    }
+    // The amounts HR types for the month (Bonus, Outstanding payment, Other deduction), kept by staff code.
+    if (req.method === 'POST' && action === 'incentive_summary_save') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const month = text(body.month, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw fail(400, 'Choose a month.');
+      const clean: Record<string, { bonus: number; outstanding: number; deduction: number }> = {};
+      const n = (value: unknown) => { const v = Math.round(Number(value) * 100) / 100; if (value === '' || value === null || value === undefined) return 0; if (!Number.isFinite(v) || v < 0 || v > 1000000) throw fail(400, 'Each amount must be a number from 0 to 1,000,000.'); return v; };
+      for (const [code, value] of Object.entries(body.extras && typeof body.extras === 'object' ? body.extras : {}).slice(0, 500) as [string, any][]) {
+        if (!/^[A-Za-z0-9-]{3,20}$/.test(code)) continue;
+        const next = { bonus: n(value?.bonus), outstanding: n(value?.outstanding), deduction: n(value?.deduction) };
+        if (next.bonus || next.outstanding || next.deduction) clean[code] = next;
+      }
+      const branch = await branchId(db, 'AraOffice HR Private', true);
+      const { data: existing } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'incentive_summary_extras').maybeSingle();
+      const months = { ...(existing?.payload?.months || {}), [month]: clean };
+      const row: any = { branch_id: branch, state_key: 'incentive_summary_extras', payload: { months }, updated_at: now, updated_by: user.id };
+      const { error } = existing ? await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', 'incentive_summary_extras') : await db.from('portal_state').insert(row);
+      if (error) throw error;
+      return res.status(200).json({ success: true });
+    }
     // Incentives HR adds to the staff form or the doctor form (they apply at once). A code is hidden, never deleted, so old claims keep their name.
     if (req.method === 'GET' && action === 'incentive_codes') return res.status(200).json({ extraCodes: await extraIncentiveCodes(db) });
     if (req.method === 'POST' && action === 'incentive_code_save') {
@@ -992,6 +1186,7 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ year, settings, rows });
     }
     // HR edits the GCR rules in the system.
+    if (req.method === 'GET' && action === 'leave_gcr_settings') return res.status(200).json({ settings: await loadGcrSettings(db) });
     if (req.method === 'POST' && action === 'leave_gcr_settings_save') {
       const pick = (value: unknown, label: string, max: number) => { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > max || Math.round(n * 100) !== n * 100) throw fail(400, `${label} must be a number from 0 to ${max}.`); return n; };
       const next = { min_used_percent: pick(body.minUsedPercent, 'The share of eligible leave to be used', 100), max_days: pick(body.maxDays, 'The most days that can be paid', 60), carry_admin: pick(body.carryAdmin, 'The Admin carry-forward limit', 366), carry_clinical: pick(body.carryClinical, 'The Operation carry-forward limit', 366), carry_parttime: pick(body.carryParttime, 'The Part-time carry-forward limit', 366) };
@@ -1825,36 +2020,8 @@ export async function hrHandler(req: any, res: any) {
         ? await db.from('hr_incentive_pay').select('employee_id,amount').eq('claim_month', claimMonth).then((read: any) => ({ data: (read.data || []).map((row: any) => ({ employee_id: row.employee_id, result: { net: Number(row.amount) } })), error: read.error }))
         : await db.from('hr_payslips').select('employee_id,status,result').eq('year', year).eq('month', month);
       if (error) throw fail(400, incentiveRun ? 'Incentive pay is not set up yet.' : 'Payslips are not set up yet.');
-      const ids = (slips || []).map((row: any) => row.employee_id);
-      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,company,full_name,ic_no,passport_no,bank_name,bank_account').in('id', ids).eq('company', company) : { data: [], error: null };
-      if (peopleError) throw peopleError;
-      const slipOf = new Map((slips || []).map((row: any) => [row.employee_id, row]));
-      // Maybank2U's bank names; only MAYBANK, RHB and HONG LEONG are checked against a real file so far.
-      const KNOWN = ['MAYBANK', 'RHB', 'HONG LEONG', 'CIMB', 'AMBANK', 'BANK ISLAM'];
-      const bankName = (name: string) => { const n = String(name || '').toUpperCase(); if (/MAYBANK|MALAYAN BANKING/.test(n)) return 'MAYBANK'; if (/RHB/.test(n)) return 'RHB'; if (/HONG LEONG/.test(n)) return 'HONG LEONG'; if (/CIMB/.test(n)) return 'CIMB'; if (/AM ?BANK|ARAB.?MALAYSIAN/.test(n)) return 'AMBANK'; if (/BANK ISLAM/.test(n)) return 'BANK ISLAM'; return n.replace(/\(.*?\)/g, '').replace(/\b(BERHAD|BHD)\b/g, '').replace(/\s+/g, ' ').trim(); };
-      const csv = (value: unknown) => /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
-      const [vy, vm, vd] = valueDate.split('-');
-      const dd = `${vd}${vm}${vy.slice(2)}`;
-      // As in Infotech's file: a six-digit batch number in the header; each row's reference is the date, the time and the first three digits of it.
-      const batch = String(Math.floor(100000 + Math.random() * 900000));
-      const clock = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 19).replace(/:/g, '');
-      const lines = [['Employer Info :'], ['Crediting Date (eg. dd/MM/yyyy)', `${vd}/${vm}/${vy}`], ['Payment Reference', `MBPREF${batch}`], ['Payment Description', `MBPDEC${batch}`], ['Bulk Payment Type', 'Salary'], [''],
-        ['Beneficiary Name', 'Beneficiary Bank', 'Beneficiary Account No', 'ID Type', 'ID Number', 'Payment Amount', 'Payment Reference', 'Payment Description']];
-      const problems: string[] = []; let total = 0, count = 0;
-      for (const person of (people || []).sort((a: any, b: any) => String(a.full_name).localeCompare(String(b.full_name)))) {
-        const net = Math.round(Number((slipOf.get(person.id) as any)?.result?.net || 0) * 100) / 100;
-        if (net <= 0) continue;
-        const account = String(person.bank_account || '').replace(/\D/g, ''), ic = String(person.ic_no || '').replace(/\D/g, '');
-        const bank = bankName(person.bank_name);
-        if (!account || !bank) { problems.push(`${person.full_name}: bank account missing`); continue; }
-        if (!KNOWN.includes(bank)) problems.push(`${person.full_name}: bank "${bank}" is not checked against a Maybank2U file yet`);
-        const idType = ic.length === 12 ? 'NRIC' : 'PASSPORT', idNumber = ic.length === 12 ? ic : String(person.passport_no || '').trim();
-        if (!idNumber) problems.push(`${person.full_name}: no IC or passport number`);
-        lines.push([String(person.full_name).slice(0, 40).trim(), bank, account, idType, idNumber, net.toFixed(2), `PRE${dd}${clock}${batch.slice(0, 3)}`, `PDC${dd}${clock}${batch.slice(0, 3)}`]);
-        total += net; count++;
-      }
-      const body = lines.map((row) => { const cells = [...row, ...Array(Math.max(0, 8 - row.length)).fill('')]; return cells.map(csv).join(','); }).join('\r\n');
-      return res.status(200).json({ file: `${incentiveRun ? 'MaybankInc' : 'MaybankSal'}_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: body, count, total: Math.round(total * 100) / 100, problems });
+      const made = await buildMaybank(db, (slips || []).map((row: any) => ({ employee_id: row.employee_id, net: Number(row.result?.net || 0) })), company, valueDate);
+      return res.status(200).json({ file: `${incentiveRun ? 'MaybankInc' : 'MaybankSal'}_${company}_${year}-${String(month).padStart(2, '0')}.csv`, csv: made.csv, count: made.count, total: made.total, problems: made.problems });
     }
 
     // Files for the portals: KWSP Form A, PERKESO / EIS / SKBBK and ePCB, one company at a time, from the month's payslips.
@@ -2079,14 +2246,21 @@ export async function hrHandler(req: any, res: any) {
 
     // A pay raise: records it in the employment history (the pay run pays the days before the date at the old salary) and sets the new basic salary.
     if (req.method === 'POST' && action === 'increment_save') {
-      const employeeId = text(body.employeeId, 60), date = text(body.date, 10), next = Math.round(Number(body.newSalary) * 100) / 100;
+      const employeeId = text(body.employeeId, 60), date = text(body.date, 10);
+      let next = Math.round(Number(body.newSalary) * 100) / 100;
       if (!employeeId) throw fail(400, 'Choose a staff member.');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw fail(400, 'Choose the date the new salary starts.');
-      if (!(next > 0) || next > 1000000) throw fail(400, 'Type the new basic salary.');
       const { data: person, error: personError } = await db.from('hr_employees').select('id,basic_salary').eq('id', employeeId).maybeSingle();
       if (personError) throw personError;
       if (!person) throw fail(404, 'Staff member not found.');
       const before = Math.round(Number(person.basic_salary || 0) * 100) / 100;
+      // HR types the increase; the new basic salary is the salary now plus the increase (worked out here, from the salary on record).
+      if (body.increase !== undefined && body.increase !== null && body.increase !== '') {
+        const increase = Math.round(Number(body.increase) * 100) / 100;
+        if (!(increase > 0) || increase > 1000000) throw fail(400, 'Type the increase in RM.');
+        next = Math.round((before + increase) * 100) / 100;
+      }
+      if (!(next > 0) || next > 1000000) throw fail(400, 'Type the increase in RM.');
       if (before === next) throw fail(400, 'The new salary is the same as the current one.');
       const { error: historyError } = await db.from('hr_career_history').insert({ employee_id: employeeId, event_date: date, kind: 'Increment', detail: 'BASIC SALARY', from_value: before.toFixed(2), to_value: next.toFixed(2), amount: Math.round((next - before) * 100) / 100, source: 'AraOffice' });
       if (historyError) throw historyError;

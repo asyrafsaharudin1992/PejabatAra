@@ -10,13 +10,14 @@ const API = '/api/status?resource=hr';
 type Change = { from: unknown; to: unknown };
 type Request = { id: string; name: string; company: string; code: string; status: 'pending' | 'approved' | 'rejected'; changes: Record<string, Change>; requestedAt: string; decidedAt: string | null; note: string };
 
-const LABEL: Record<string, string> = { date_of_birth: 'Date of birth', religion: 'Religion', race: 'Race', nationality: 'Nationality', marital_status: 'Marital status', address_line1: 'Address line 1', address_line2: 'Address line 2', postcode: 'Postcode', city: 'City', state: 'State', phone: 'Mobile', email: 'Email', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', spouse_name: 'Spouse name', spouse_employer: 'Spouse occupation', spouse_phone: 'Spouse phone', children: 'Children', education: 'Education' };
+const LABEL: Record<string, string> = { date_of_birth: 'Date of birth', religion: 'Religion', race: 'Race', nationality: 'Nationality', marital_status: 'Marital status', address_line1: 'Address line 1', address_line2: 'Address line 2', postcode: 'Postcode', city: 'City', state: 'State', phone: 'Mobile', email: 'Email', emergency_name: 'Emergency contact', emergency_relation: 'Emergency relationship', emergency_phone: 'Emergency phone', spouse_name: 'Spouse name', spouse_employer: 'Spouse occupation', spouse_working: 'Spouse working (used for PCB)', spouse_phone: 'Spouse phone', children: 'Children', education: 'Education' };
 const dmy = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.split('-').reverse().join('/') : value;
 function show(column: string, value: unknown): string {
   if (Array.isArray(value)) {
     if (!value.length) return '—';
     return value.map((item: any) => column === 'children' ? `${item.name}${item.dateOfBirth ? ` (${dmy(item.dateOfBirth)})` : ''}` : [[item.level, item.course].filter(Boolean).join(' · '), [item.institution, item.year].filter(Boolean).join(' ')].filter(Boolean).join(', ')).join('\n');
   }
+  if (column === 'spouse_working') return value === true ? 'Yes' : value === false ? 'No' : '—';
   const text = String(value ?? '').trim();
   return text ? dmy(text) : '—';
 }

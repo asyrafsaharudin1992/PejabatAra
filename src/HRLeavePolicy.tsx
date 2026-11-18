@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
+import { SubTabs } from './SubTabs';
+import { HRLeaveGcrRules } from './HRLeaveGcrRules';
 
 // Office HR, Leave > Company policy: the leave HR gives by staff category and years of service (annual leave, sick leave, hospital leave and the fixed ones).
 // HR can edit the figures here (every change is kept in a short history), and below them see what each person has next to the policy and apply it.
@@ -88,7 +90,7 @@ function PolicyEditor({ policy, history, onSaved, onError }: { policy: Policy; h
   useEffect(() => { if (!editing) setDraft(policy); }, [policy, editing]);
   const input = (value: number, change: (value: number) => void, label: string) => editing
     ? <input type="number" min={0} max={365} step={1} aria-label={label} value={value} onChange={(event) => change(Math.max(0, Math.round(Number(event.target.value) || 0)))} className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-[#0b587b]" />
-    : <span className="font-semibold text-[#0b587b]">{value} days</span>;
+    : <span className="font-semibold text-[#0b587b]">{value} {value === 1 ? 'day' : 'days'}</span>;
   const setAl = (track: string, index: number, value: number) => setDraft({ ...draft, al: { ...draft.al, [track]: draft.al[track].map((item, at) => at === index ? value : item) } });
   const save = async () => {
     if (!window.confirm('Save the company leave policy? It does not change anyone\'s balance by itself: you apply it to the staff you choose below.')) return;
@@ -120,7 +122,11 @@ export function HRLeavePolicy({ onError }: { onError: (message: string) => void 
   const [policy, setPolicy] = useState<Policy>(DEFAULT);
   const [history, setHistory] = useState<History>([]);
   const [ready, setReady] = useState(false);
+  const [which, setWhich] = useState<'leave' | 'gcr'>('leave');
   useEffect(() => { api('action=leave_policy_config').then((result) => { if (result.error) throw new Error(result.error); setPolicy(result.policy); setHistory(result.history || []); }).catch((cause: Error) => onError(cause.message)).finally(() => setReady(true)); }, []);
   if (!ready) return <p className="text-sm text-slate-500">Loading…</p>;
-  return <div className="space-y-5"><PolicyEditor policy={policy} history={history} onSaved={(next, log) => { setPolicy(next); setHistory(log); }} onError={onError} /><PolicyReview policy={policy} onError={onError} /></div>;
+  return <div className="space-y-5">
+    <SubTabs active={which} onSelect={setWhich} label="Company policy" tabs={[{ id: 'leave', label: 'Leave' }, { id: 'gcr', label: 'GCR' }]} />
+    {which === 'gcr' ? <HRLeaveGcrRules onError={onError} /> : <><PolicyEditor policy={policy} history={history} onSaved={(next, log) => { setPolicy(next); setHistory(log); }} onError={onError} /><PolicyReview policy={policy} onError={onError} /></>}
+  </div>;
 }

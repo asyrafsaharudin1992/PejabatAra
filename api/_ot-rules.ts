@@ -2,7 +2,8 @@
 // Pure functions, no database: the Attendance API works out the day type and calls these. The numbers come from a policy that HR can edit (OT > Settings);
 // the defaults below are what the memos say.
 export type DayKind = 'normal' | 'off' | 'rest' | 'ph';
-export type OtPart = { minutes: number; multiplier: number };
+// `flat` marks the fixed amount for a rest day or a public holiday (Payroll shows it as Rest/PH, apart from OT, as Infotech does); the hours beyond it are OT.
+export type OtPart = { minutes: number; multiplier: number; flat?: 'rest' | 'ph' };
 
 // Every rate must be one Payroll has a bucket for.
 export const OT_RATES = [1, 1.5, 2, 3];
@@ -87,13 +88,13 @@ export function otParts(kind: DayKind, grossMinutes: number, policy: OtPolicy = 
   if (kind === 'off') return [{ minutes: net, multiplier: policy.offRate }];
   if (kind === 'rest') {
     const full = policy.restFullHours * HOUR;
-    if (hours <= policy.restHalfHours) return [{ minutes: policy.restHalfHours * HOUR, multiplier: policy.restHalfRate }];
-    if (hours <= policy.restFullHours) return [{ minutes: full, multiplier: policy.restFullRate }];
-    return [{ minutes: full, multiplier: policy.restFullRate }, { minutes: net - full, multiplier: policy.restExtraRate }];
+    if (hours <= policy.restHalfHours) return [{ minutes: policy.restHalfHours * HOUR, multiplier: policy.restHalfRate, flat: 'rest' }];
+    if (hours <= policy.restFullHours) return [{ minutes: full, multiplier: policy.restFullRate, flat: 'rest' }];
+    return [{ minutes: full, multiplier: policy.restFullRate, flat: 'rest' }, { minutes: net - full, multiplier: policy.restExtraRate }];
   }
   const flat = policy.phHours * HOUR;
-  if (hours <= policy.phHours) return [{ minutes: flat, multiplier: policy.phRate }];
-  return [{ minutes: flat, multiplier: policy.phRate }, { minutes: net - flat, multiplier: policy.phExtraRate }];
+  if (hours <= policy.phHours) return [{ minutes: flat, multiplier: policy.phRate, flat: 'ph' }];
+  return [{ minutes: flat, multiplier: policy.phRate, flat: 'ph' }, { minutes: net - flat, multiplier: policy.phExtraRate }];
 }
 
 const KIND_NAME: Record<DayKind, string> = { normal: 'Normal day', off: 'Off day', rest: 'Rest day', ph: 'Public holiday' };
