@@ -3,6 +3,7 @@ import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
+import { fluFormFor, fluFormSave, fluFormVaccine, fluFormWaiting } from './_staff-forms.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { photoLinks } from './_photos.js';
@@ -794,6 +795,10 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
   }
   // Everyone can read the announcements; the clinic assistants and Clinical Admin on the reading list record their own read.
+  // HR's influenza vaccine form: every staff member answers it from Announcements (agree or refuse).
+  if (req.method === 'GET' && action === 'flu_form') return res.status(200).json(await fluFormFor(db, staff.id));
+  if (req.method === 'POST' && action === 'flu_form_vaccine') return res.status(200).json(await fluFormVaccine(db, staff.id, body));
+  if (req.method === 'POST' && action === 'flu_form_save') return res.status(200).json(await fluFormSave(db, staff.id, body));
   if (req.method === 'GET' && action === 'announcements') return res.status(200).json(await announcementsFor(db, staff.id));
   if (req.method === 'POST' && action === 'announcement_read') {
     const { listed } = await announcementsFor(db, staff.id);
@@ -848,6 +853,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const cpoOffice = /\bCPO\b/i.test(String(designation || ''));
     // The red number on the Announcements icon (only for the staff who must read them).
     try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
+    try { if (await fluFormWaiting(db, staff.id)) announcementsUnread += 1; } catch { /* the form is not set up yet */ }
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);

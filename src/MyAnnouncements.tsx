@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, ExternalLink, FileText } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
+import FluForm from './FluForm';
 
 // Announcements inside Individual Sign In: each clinic assistant and Clinical Admin sees the announcements here, opens
 // the memo each one refers to, then records that they have read it. The Clinical Assistants office only shows who has.
@@ -20,10 +21,13 @@ export default function MyAnnouncements({ onChange }: { onChange: (unread: numbe
     setSaving('');
   };
   if (!data) return error ? <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p> : <p className="text-sm text-slate-500">Loading…</p>;
-  if (!data.items.length) return <p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No announcements yet.</p>;
+  // HR's influenza form sits above the announcements; answering it takes one off the red number.
+  const flu = <FluForm onAnswered={() => onChange(data.items.filter((item) => !item.readAt).length)} />;
+  if (!data.items.length) return <div className="space-y-4">{flu}<p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No announcements yet.</p></div>;
   const unread = data.listed ? data.items.filter((item) => !item.readAt).length : 0;
   const audienceOf = (value: string) => /^semua staf$/i.test(value.trim()) ? 'All staff' : value;
   return <div className="space-y-4">
+    {flu}
     {data.listed && <p className={`text-sm font-semibold ${unread ? 'text-rose-600' : 'text-emerald-600'}`}>{unread ? `${unread} announcement${unread > 1 ? 's' : ''} waiting for you` : '✓ You have recorded all announcements'}</p>}
     {error && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
     {data.items.map((item) => <article key={item.id} className={`rounded-2xl border bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)] ${item.readAt || !data.listed ? 'border-transparent' : 'border-rose-300'}`}>

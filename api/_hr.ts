@@ -9,6 +9,7 @@ import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
+import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { checkPhoto, checkSource, isStaffId, orgChart, photoLinks, removePhoto, saveOrgText, savePhoto, saveSource, sourceLink } from './_photos.js';
@@ -492,6 +493,9 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ people: (data || []).filter((row: any) => isDate(row.date_of_birth)).map((row: any) => ({ id: row.id, name: row.full_name, branch: row.company, month: Number(String(row.date_of_birth).slice(5, 7)), day: Number(String(row.date_of_birth).slice(8, 10)) })) });
     }
     if (req.method === 'GET' && action === 'photo_source') return res.status(200).json({ url: await sourceLink(db, text(req.query.employeeId, 60)) });
+    if ((action === 'flu_form_hr' || action === 'flu_form_open') && profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+    if (req.method === 'GET' && action === 'flu_form_hr') return res.status(200).json(await fluFormHr(db));
+    if (req.method === 'POST' && action === 'flu_form_open') { await fluFormOpen(db, user.id, body.open === true); return res.status(200).json(await fluFormHr(db)); }
     if (req.method === 'POST' && action === 'org_text') {
       if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
       await saveOrgText(db, user.id, body.key, body.lines);
