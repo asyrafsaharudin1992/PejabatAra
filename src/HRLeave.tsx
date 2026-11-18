@@ -5,6 +5,7 @@ import { officeFetch } from './lib/officeApi';
 import { shrinkAttachment } from './lib/shrinkImage';
 import { card } from './AssessmentStaff';
 import { HRLeaveStaff } from './HRLeaveStaff';
+import { HRLeavePolicy } from './HRLeavePolicy';
 import { HRLeaveReport } from './HRLeaveReport';
 import { HRLeaveApply } from './HRLeaveApply';
 import { HRLeaveHolidays } from './HRLeaveHolidays';
@@ -69,7 +70,7 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
 
   const [removing, setRemoving] = useState('');
   const [openRow, setOpenRow] = useState('');
-  const [tab, setTab] = useState<'requests' | 'enter' | 'staff' | 'year_end' | 'holidays' | 'reports'>('requests');
+  const [tab, setTab] = useState<'requests' | 'enter' | 'staff' | 'policy' | 'year_end' | 'holidays' | 'reports'>('requests');
   // Deleting is final: approved leave that AraOffice took off the balance goes back on it; the person's HR history records it.
   const remove = async (row: Request) => {
     const note = row.status === 'approved' && !imported(row) ? ` The ${days(row.days)} day(s) go back on ${row.applicant}'s balance.` : imported(row) ? ' This was imported from Infotech, so no balance changes.' : '';
@@ -108,8 +109,8 @@ export function HRLeave({ onError, onTypes }: { onError: (message: string) => vo
         <button onClick={onTypes} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-white/12 px-3 text-xs font-semibold text-white ring-1 ring-white/25 hover:bg-white/20 sm:h-12 sm:gap-2 sm:rounded-xl sm:px-5 sm:text-sm"><Tags className="h-3.5 w-3.5 sm:h-4 sm:w-4" />Leave types</button>
       </div>
     </section>
-    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'requests', label: 'Leave requests', short: 'Requests' }, { id: 'enter', label: 'Enter leave', short: 'Enter' }, { id: 'staff', label: 'Staff leave', short: 'Staff' }, { id: 'year_end', label: 'Leave year end', short: 'Year end' }, { id: 'holidays', label: 'Public holidays', short: 'Holidays' }, { id: 'reports', label: 'Reports' }]} />
-    {tab === 'enter' ? <HRLeaveApply onError={onError} onSaved={() => setRefresh((count) => count + 1)} /> : tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'reports' ? <HRLeaveReport onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : tab === 'holidays' ? <HRLeaveHolidays onError={onError} /> : <>
+    <SubTabs active={tab} onSelect={setTab} tabs={[{ id: 'requests', label: 'Leave requests', short: 'Requests' }, { id: 'enter', label: 'Enter leave', short: 'Enter' }, { id: 'staff', label: 'Staff leave', short: 'Staff' }, { id: 'policy', label: 'Company policy', short: 'Policy' }, { id: 'year_end', label: 'Leave year end', short: 'Year end' }, { id: 'holidays', label: 'Public holidays', short: 'Holidays' }, { id: 'reports', label: 'Reports' }]} />
+    {tab === 'enter' ? <HRLeaveApply onError={onError} onSaved={() => setRefresh((count) => count + 1)} /> : tab === 'staff' ? <HRLeaveStaff onError={onError} /> : tab === 'policy' ? <HRLeavePolicy onError={onError} /> : tab === 'reports' ? <HRLeaveReport onError={onError} /> : tab === 'year_end' ? <YearEndPanel onError={onError} /> : tab === 'holidays' ? <HRLeaveHolidays onError={onError} /> : <>
     <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">{tiles.map(([label, value, tone]) => <div key={label} className={`${card} max-sm:!rounded-lg max-sm:!p-2`}><p className="truncate text-[10px] font-semibold text-slate-500 sm:text-xs"><span className="sm:hidden">{label === 'Waiting for supervisor' ? 'Supervisor' : label === 'Waiting for final approver' ? 'Final' : label === 'On leave today' ? 'Today' : label}</span><span className="hidden sm:inline">{label}</span></p><p className={`mt-0.5 text-lg font-semibold sm:mt-1 sm:text-3xl ${tone}`}>{rows ? value : '…'}</p></div>)}</div>
     {onLeaveToday.length > 0 && <p className="rounded-xl bg-[#f4fafd] p-3 text-sm text-slate-700"><strong className="text-[#0b587b]">On leave today:</strong> {onLeaveToday.map((row) => `${row.applicant} (${row.type})`).join(', ')}</p>}
     <section className={`${card} grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3`}>
