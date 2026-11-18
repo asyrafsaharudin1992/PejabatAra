@@ -120,10 +120,10 @@ function ChartsBody({ onError, source = 'ceo' }: { onError: (message: string) =>
 }
 
 // The Charts tab: the figures, and the organisation chart under its own sub-tab.
-export function CeoChartsPage({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
+export function CeoChartsPage({ onError, source = 'ceo', readOnly = false }: { onError: (message: string) => void; source?: ChartsSource; readOnly?: boolean }) {
   const [tab, setTab] = useState<'figures' | 'org'>('figures');
   return <div className="space-y-5">
     <SubTabs label="Charts" active={tab} onSelect={setTab} tabs={[{ id: 'figures', label: 'Charts' }, { id: 'org', label: 'See organization chart', short: 'Organization chart' }]} />
-    {tab === 'org' ? <OrgChartPage onError={onError} source={source} /> : <ChartsBody onError={onError} source={source} />}
+    {tab === 'org' ? <OrgChartPage onError={onError} source={source} readOnly={readOnly} /> : <ChartsBody onError={onError} source={source} />}
   </div>;
 }

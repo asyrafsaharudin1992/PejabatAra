@@ -266,7 +266,7 @@ export function HRPayroll({ onError = () => {} }: { onError?: (message: string) 
   const [tab, setTab] = useState<'run' | 'finance' | 'chart' | 'guide'>('run');
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
-      <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p>
+      <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{window.location.hash.includes('finance') ? 'Office Finance' : 'Office HR'} · Klinik ARA 24 Jam</p>
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>

@@ -44,6 +44,8 @@ const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: type
   { id: 'misc', label: 'Miscellaneous', note: 'Links, posters and notes', icon: Link2, tone: 'text-[#70d8fa]' },
   { id: 'reports', label: 'Reports', note: 'All HR reports in one place', icon: FileBarChart, tone: 'text-[#4ade80]' },
 ];
+// Office Finance shows only these pages of the HR office (read and download; see FINANCE_CAN_READ in api/_hr.ts).
+const FINANCE_VIEWS: View[] = ['charts', 'incentives', 'payroll', 'tax'];
 const TITLES: Record<View, string> = { misc: 'Miscellaneous', home: 'Home', profiles: 'Staff Profiles', reviews: 'Performance Reviews', leaveTypes: 'Leave Types', leave: 'Leave', attendance: 'Attendance', roster: 'Roster', incentives: 'Incentive', payroll: 'Payroll', tax: 'Tax', charts: 'Charts', reports: 'Reports', memos: 'Memo/Guide' };
 // What each upcoming tab will do, shown until it is built.
 const PLANNED: Partial<Record<View, string[]>> = {
@@ -61,8 +63,8 @@ function Hero({ title, text, action }: { title: string; text: string; action?: R
   </section>;
 }
 
-function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { badges?: Partial<Record<View, number>>; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
-  const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]', soon: false }, ...TABS];
+function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {}, finance = false }: { finance?: boolean; badges?: Partial<Record<View, number>>; view: View; open: boolean; onClose: () => void; onNavigate: (view: View) => void; onLogout: () => void }) {
+  const items = [{ id: 'home' as View, label: 'Home', icon: Home, tone: 'text-[#818cf8]', soon: false }, ...TABS.filter((tab) => !finance || FINANCE_VIEWS.includes(tab.id))];
   return <>
     {open && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" onClick={onClose} />}
     <aside className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col overflow-y-auto overscroll-contain border-r border-white/5 bg-[#1b3150] p-6 text-white transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -79,7 +81,7 @@ function Sidebar({ view, open, onClose, onNavigate, onLogout, badges = {} }: { b
         </span>
       </button>)}</nav>
       <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-        <div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">HR</div><div className="min-w-0"><p className="truncate text-sm font-semibold">Human Resources</p><p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p></div></div>
+        <div className="flex items-center gap-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 text-sm font-semibold">{finance ? 'FN' : 'HR'}</div><div className="min-w-0"><p className="truncate text-sm font-semibold">{finance ? 'Finance' : 'Human Resources'}</p><p className="truncate text-xs text-[#9bb5c7]">AraOffice portal</p></div></div>
         <button onClick={onLogout} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#b5cad8] transition hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Sign out</button>
       </div>
     </aside>
@@ -98,6 +100,28 @@ function HomeView({ onNavigate, onForecast }: { onNavigate: (view: View) => void
       </div>
     </section>
     <Suspense fallback={<p className="p-4 text-sm text-slate-500">Loading HR overview…</p>}><HRHomeCalendar onReviews={() => onNavigate('reviews')} onPayroll={() => onNavigate('payroll')} onProfiles={() => onNavigate('profiles')} onForecast={onForecast} /></Suspense>
+  </div>;
+}
+
+// Office Finance home: a welcome and a way into the four pages Finance uses.
+function FinanceHome({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const today = useMalaysiaToday();
+  const greeting = readGreeting('finance');
+  const date = new Date(`${today}T12:00:00+08:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
+  const cards: { id: View; text: string }[] = [
+    { id: 'incentives', text: 'The monthly allowance sheet, SOTM, and the Maybank bulk file. Mark the month as paid once it is paid.' },
+    { id: 'payroll', text: 'The pay run and the payroll summary, with the Maybank, KWSP, PERKESO / EIS and ePCB files to download.' },
+    { id: 'tax', text: 'Yearly tax figures (EA form) for each staff member.' },
+    { id: 'charts', text: 'People, attendance, pay and review charts.' },
+  ];
+  return <div className="mx-auto max-w-[1500px] space-y-5 sm:space-y-8">
+    <section className="ara-hero rounded-[16px] px-3.5 py-3 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#70d8fa] sm:text-xs sm:tracking-[0.24em]">Klinik ARA 24 Jam · Finance</p><h2 className="mt-0.5 text-lg font-semibold tracking-[-0.03em] sm:mt-3 sm:text-[2.45rem]">{greeting ? `Welcome, ${greeting}` : 'Welcome to Office Finance'}</h2><p className="mt-1 max-w-2xl text-[11px] leading-4 text-[#b9cddb] sm:mt-4 sm:text-base sm:leading-7">Payroll, incentive and tax for HSO Healthcare. You can read everything here and download the bank and statutory files. Payroll is prepared and locked by HR.</p></div>
+        <span className="inline-flex self-start rounded-full bg-white/12 px-3 py-1.5 text-[11px] font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span>
+      </div>
+    </section>
+    <div className="grid gap-4 sm:grid-cols-2">{cards.map((item) => { const tab = TABS.find((entry) => entry.id === item.id)!; return <button key={item.id} onClick={() => onNavigate(item.id)} className={`${card} group flex flex-col text-left transition hover:-translate-y-0.5`}><span className="flex items-center gap-3 text-lg font-semibold"><tab.icon className={`h-5 w-5 ${tab.tone}`} />{tab.label}</span><span className="mt-2 text-sm leading-6 text-slate-500">{item.text}</span><span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span></button>; })}</div>
   </div>;
 }
 
@@ -124,7 +148,7 @@ function ComingSoon({ view }: { view: View }) {
 }
 
 // `embedded`: shown inside the CEO office. The office keeps its own menu, as a row of tabs above the page instead of a sidebar.
-export default function OfficeHR({ embedded = false }: { embedded?: boolean } = {}) {
+export default function OfficeHR({ embedded = false, finance = false }: { embedded?: boolean; finance?: boolean } = {}) {
   const [view, setView] = useState<View>('home');
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState('');
@@ -132,7 +156,7 @@ export default function OfficeHR({ embedded = false }: { embedded?: boolean } = 
   const [pendingRequests, setPendingRequests] = useState(0);
   // Everything waiting for HR (red numbers on the menu), refreshed when the menu changes and when the tab comes back into view (no timer).
   const [waiting, setWaiting] = useState<{ leave: number; reviews: number; incentive: number; attendanceOt: number; attendanceMissed: number }>({ leave: 0, reviews: 0, incentive: 0, attendanceOt: 0, attendanceMissed: 0 });
-  const loadWaiting = () => officeFetch('/api/status?resource=hr&action=hr_badges').then((response) => response.json()).then((result) => { if (!result.error) setWaiting(result); }).catch(() => undefined);
+  const loadWaiting = () => finance ? Promise.resolve() : officeFetch('/api/status?resource=hr&action=hr_badges').then((response) => response.json()).then((result) => { if (!result.error) setWaiting(result); }).catch(() => undefined);
   useEffect(() => {
     void loadWaiting();
     const onVisible = () => { if (document.visibilityState === 'visible') void loadWaiting(); };
@@ -140,7 +164,7 @@ export default function OfficeHR({ embedded = false }: { embedded?: boolean } = 
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [view]);
   // The number on Staff Profiles: staff change requests waiting for HR.
-  useEffect(() => { officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
+  useEffect(() => { if (finance) return; officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => setPendingRequests(result.pending || 0)).catch(() => undefined); }, []);
 
   const navigate = (next: View) => { setProfileTab('list'); setView(next); setMenuOpen(false); window.scrollTo({ top: 0 }); };
   const logout = async () => {
@@ -154,32 +178,33 @@ export default function OfficeHR({ embedded = false }: { embedded?: boolean } = 
 
   const badges = { profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed };
   return <div className={embedded ? 'coo-compact text-[#14233b]' : 'coo-compact min-h-screen bg-[#f7f8fb] text-[#14233b]'}>
-    {!embedded && <Sidebar badges={{ profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />}
+    {!embedded && <Sidebar finance={finance} badges={{ profiles: pendingRequests, leave: waiting.leave, reviews: waiting.reviews, incentives: waiting.incentive, attendance: waiting.attendanceOt + waiting.attendanceMissed }} view={view} open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={navigate} onLogout={() => void logout()} />}
     <div className={embedded ? '' : 'min-h-screen lg:pl-[300px]'}>
       <header className={`sticky top-0 z-30 border-b border-[#dce4ed] bg-[#f7f8fb]/90 backdrop-blur-2xl lg:hidden${embedded ? ' !hidden' : ''}`}>
         <div className="flex h-[76px] items-center gap-4 px-4 sm:px-6">
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce4ed] bg-white" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
-          <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">Office HR</p><h1 className="truncate text-xl font-semibold tracking-tight">{TITLES[view]}</h1></div>
+          <div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#18bff2]">{finance ? 'Office Finance' : 'Office HR'}</p><h1 className="truncate text-xl font-semibold tracking-tight">{TITLES[view]}</h1></div>
         </div>
       </header>
       <main className={embedded ? 'pt-1' : 'p-4 sm:p-6 lg:p-[38px]'}>
 <StackTables>
-        {embedded && <EmbeddedTabs tabs={[{ id: 'home' as View, label: 'Home', icon: Home }, ...TABS.map((item) => ({ id: item.id as View, label: item.label, icon: item.icon, badge: badges[item.id as keyof typeof badges] }))]} active={view === 'leaveTypes' ? 'leave' : view} onSelect={navigate} />}
+        {embedded && <EmbeddedTabs tabs={[{ id: 'home' as View, label: 'Home', icon: Home }, ...TABS.filter((item) => !finance || FINANCE_VIEWS.includes(item.id)).map((item) => ({ id: item.id as View, label: item.label, icon: item.icon, badge: badges[item.id as keyof typeof badges] }))]} active={view === 'leaveTypes' ? 'leave' : view} onSelect={navigate} />}
         {error && <p className="mx-auto mb-4 max-w-[1500px] rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-        {view === 'home' && <HomeView onNavigate={navigate} onForecast={() => { navigate('profiles'); setProfileTab('projection'); }} />}
-        {view === 'profiles' && <HRProfiles initialTab={profileTab} onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
-        {view === 'reviews' && <HRReviews onError={setError} />}
-        {view === 'roster' && <div className="text-compact"><HRRoster onError={setError} defaultView={window.matchMedia('(max-width: 639px)').matches ? 'calendar' : 'table'} /></div>}
+        {view === 'home' && finance && <FinanceHome onNavigate={navigate} />}
+        {view === 'home' && !finance && <HomeView onNavigate={navigate} onForecast={() => { navigate('profiles'); setProfileTab('projection'); }} />}
+        {view === 'profiles' && !finance && <HRProfiles initialTab={profileTab} onError={setError} pendingRequests={pendingRequests} onPendingChange={setPendingRequests} />}
+        {view === 'reviews' && !finance && <HRReviews onError={setError} />}
+        {view === 'roster' && !finance && <div className="text-compact"><HRRoster onError={setError} defaultView={window.matchMedia('(max-width: 639px)').matches ? 'calendar' : 'table'} /></div>}
         {view === 'incentives' && <HRIncentives onError={setError} />}
-        {view === 'leave' && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
-        {view === 'leaveTypes' && <LeaveTypes onBack={() => navigate('leave')} />}
-        {view === 'attendance' && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
+        {view === 'leave' && !finance && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
+        {view === 'leaveTypes' && !finance && <LeaveTypes onBack={() => navigate('leave')} />}
+        {view === 'attendance' && !finance && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
         {view === 'tax' && <HRTax onError={setError} />}
-        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><CeoChartsPage source="hr" onError={setError} /></div>}
-        {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
-        {view === 'misc' && <HRMisc onError={setError} />}
-        {view === 'reports' && <HRReports onError={setError} />}
+        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><CeoChartsPage source="hr" readOnly={finance} onError={setError} /></div>}
+        {view === 'memos' && !finance && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
+        {view === 'misc' && !finance && <HRMisc onError={setError} />}
+        {view === 'reports' && !finance && <HRReports onError={setError} />}
 </StackTables>
       </main>
     </div>

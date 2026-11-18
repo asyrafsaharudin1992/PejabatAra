@@ -7,7 +7,7 @@ import { amount, monthShort } from './lib/incentiveSummaryPdf';
 
 // Office HR > Incentive > Finance use: for the month, what each person is paid (the Nett Payment of the Incentive summary), with their bank details, and the
 // Maybank2U bulk payment file for each company, made from it, so Finance can upload it and pay everyone at once.
-type Item = { id: string; code: string; name: string; company: string; nett: number; bankName: string; bankAccount: string; hasId: boolean };
+type Item = { id: string; code: string; name: string; company: string; nett: number; bankName: string; bankAccount: string; hasId: boolean; paid: { amount: number; on: string } | null };
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 7);
 const shiftMonth = (month: string, by: number) => { const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 + by; return `${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`; };
 const months = () => { const list: string[] = []; for (let month = thisMonth(); month >= '2026-10'; month = shiftMonth(month, -1)) list.push(month); return list.length ? list : ['2026-10']; };
@@ -35,6 +35,18 @@ export function HRIncentiveFinance({ onError }: { onError: (message: string) => 
     return { company, ...result } as { company: string; file: string; csv: string; count: number; total: number; problems: string[] };
   };
   const openPreview = async (company: 'KJ' | 'SK') => { setBusy(true); setNotice(''); try { setPreview(await makeFile(company)); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the preview.'); } finally { setBusy(false); } };
+  const reload = () => officeFetch(`/api/status?resource=hr&action=incentive_finance&month=${month}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setItems(result.items); });
+  // Mark as paid (after Finance has paid): staff then see the amount under My payslips. Undo is for a mistake.
+  const mark = async (paid: boolean) => {
+    const waiting = (items || []).filter((item) => !item.paid).length;
+    const message = paid ? `Mark ${waiting} staff as paid for Allowance ${monthShort(month)}, paid on ${dmy(paidOn)}? Staff will see it under their payslips.` : `Undo "paid" for Allowance ${monthShort(month)}? Staff will no longer see it under their payslips.`;
+    if (!window.confirm(message)) return;
+    setBusy(true); setNotice('');
+    try {
+      const response = await officeFetch('/api/status?resource=hr&action=' + (paid ? 'incentive_mark_paid' : 'incentive_unmark_paid'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month, paidOn }) }); const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || 'Unable to save.');
+      await reload(); setNotice(paid ? `${result.marked} staff marked as paid.` : 'Marked as not paid.');
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(false); }
+  };
   const maybank = async (company: 'KJ' | 'SK') => {
     setBusy(true); setNotice('');
     try {
@@ -57,11 +69,13 @@ export function HRIncentiveFinance({ onError }: { onError: (message: string) => 
         {(['KJ', 'SK'] as const).map((company) => <button key={company} type="button" disabled={busy || !items.some((item) => item.company === company)} onClick={() => void maybank(company)} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40"><Download className="h-4 w-4" />Maybank file {company}</button>)}
         {(['KJ', 'SK'] as const).map((company) => <button key={`p${company}`} type="button" disabled={busy || !items.some((item) => item.company === company)} onClick={() => void openPreview(company)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-[#0b587b] disabled:opacity-40"><Eye className="h-4 w-4" />Preview {company}</button>)}
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide account numbers' : 'Show account numbers'}</button>
+        {items.some((item) => !item.paid) && <button type="button" disabled={busy || !paidOn} onClick={() => void mark(true)} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-40">Mark as paid</button>}
+        {items.some((item) => item.paid) && <button type="button" disabled={busy} onClick={() => void mark(false)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Undo paid</button>}
         <span className="ml-auto text-sm font-semibold text-slate-600">KJ RM {amount(total('KJ'))} · SK RM {amount(total('SK'))} · Total RM {amount(total())}</span>
       </div>
       <div className="overflow-x-auto"><table className="no-stack w-full min-w-[640px] text-left text-sm">
-        <thead><tr className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Company</th><th className="pr-3">Bank</th><th className="pr-3">Account no.</th><th className="text-right">Nett payment (RM)</th></tr></thead>
-        <tbody>{items.map((item) => <tr key={item.id} className="border-t border-slate-100"><td className="py-2 pr-3"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-[10px] text-slate-400">{item.code}</p></td><td className="pr-3">{item.company}</td><td className="pr-3">{item.bankName || '—'}</td><td className="pr-3 tabular-nums">{item.bankAccount ? (show ? item.bankAccount : mask(item.bankAccount)) : <span className="text-amber-700">missing</span>}</td><td className="text-right font-semibold tabular-nums text-[#0b587b]">{amount(item.nett)}</td></tr>)}</tbody>
+        <thead><tr className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Company</th><th className="pr-3">Bank</th><th className="pr-3">Account no.</th><th className="text-right">Nett payment (RM)</th><th className="pr-3">Status</th></tr></thead>
+        <tbody>{items.map((item) => <tr key={item.id} className="border-t border-slate-100"><td className="py-2 pr-3"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-[10px] text-slate-400">{item.code}</p></td><td className="pr-3">{item.company}</td><td className="pr-3">{item.bankName || '—'}</td><td className="pr-3 tabular-nums">{item.bankAccount ? (show ? item.bankAccount : mask(item.bankAccount)) : <span className="text-amber-700">missing</span>}</td><td className="text-right font-semibold tabular-nums text-[#0b587b]">{amount(item.nett)}</td><td className="pr-3 text-xs">{item.paid ? <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">Paid {dmy(item.paid.on)}</span> : <span className="rounded-full bg-amber-50 px-2.5 py-0.5 font-semibold text-amber-700">Not paid</span>}</td></tr>)}</tbody>
       </table></div>
     </>}
     {preview && <MaybankPreview preview={preview} title={`Maybank file ${preview.company} · Allowance ${monthShort(month)}`} onClose={() => setPreview(null)} />}

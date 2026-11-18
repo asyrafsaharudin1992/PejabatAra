@@ -2,7 +2,7 @@ import { useOnDemandSummary } from './lib/useOnDemandSummary';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { AraLogo } from './AraLogo';
 import { SubTabs } from './SubTabs';
-import { ClipboardList, Crown, ExternalLink, GraduationCap, HeartPulse, Home, IdCard, BarChart3, CalendarCheck, ClipboardCheck, LogOut, Menu, Pencil, Plus, Stethoscope, Trash2, Users, UserRound, UsersRound as TeamIcon, UsersRound, HandCoins, ShieldCheck, Truck, X } from 'lucide-react';
+import { Banknote, ClipboardList, Crown, ExternalLink, GraduationCap, HeartPulse, Home, IdCard, BarChart3, CalendarCheck, ClipboardCheck, LogOut, Menu, Pencil, Plus, Stethoscope, Trash2, Users, UserRound, UsersRound as TeamIcon, UsersRound, HandCoins, ShieldCheck, Truck, X } from 'lucide-react';
 import COOCalendar from './COOCalendar';
 import { officeFetch } from './lib/officeApi';
 import { Approvals } from './LeaveScreens';
@@ -21,7 +21,7 @@ const OfficeHR = lazy(() => import('./OfficeHR'));
 const OfficeQuality = lazy(() => import('./App'));
 const OfficeProcurement = lazy(() => import('./OfficeProcurement'));
 
-type View = 'home' | 'charts' | 'leave' | 'review' | 'coo' | 'hr' | 'procurement' | 'quality' | 'clinical' | 'ca';
+type View = 'home' | 'charts' | 'leave' | 'review' | 'coo' | 'hr' | 'finance' | 'procurement' | 'quality' | 'clinical' | 'ca';
 type Waiting = { leave: number | null; reviews: number | null };
 // What waits for the CEO, read from the same lists as the CEO's Individual Sign In.
 async function ceoCall(query: string, body?: unknown) {
@@ -39,6 +39,7 @@ const CARE_URL = 'https://aracare.hsohealthcare.com/';
 const INSIDE: { id: Exclude<View, 'home'>; label: string; icon: typeof Home; tone: string }[] = [
   { id: 'coo', label: 'COO office', icon: UsersRound, tone: 'text-sky-400' },
   { id: 'hr', label: 'HR office', icon: ShieldCheck, tone: 'text-emerald-400' },
+  { id: 'finance', label: 'Finance office', icon: Banknote, tone: 'text-lime-300' },
   { id: 'procurement', label: 'Procurement (CPO)', icon: Truck, tone: 'text-orange-300' },
   { id: 'quality', label: 'Quality & Corporate', icon: HandCoins, tone: 'text-amber-400' },
   { id: 'clinical', label: 'Clinical Admin', icon: ClipboardList, tone: 'text-cyan-300' },
@@ -198,7 +199,7 @@ export default function OfficeCEO() {
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
           {view === 'leave' && <Approvals fetcher={(query, options) => ceoCall(query.replace('action=', 'action=ceo_'), options?.body ? JSON.parse(String(options.body)) : undefined)} />}
           {view === 'review' && <ReviewRoom embedded onSignedOut={() => undefined} api={(query, body) => ceoCall(query.replace('action=', 'action=ceo_review_'), body)} />}
-        </div> : view !== 'home' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}><div className="max-sm:[zoom:0.84]">{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : view === 'ca' ? <OfficePortal key="ca" embedded /> : view === 'coo' ? <OfficeCOO key="coo" embedded /> : view === 'hr' ? <OfficeHR key="hr" embedded /> : view === 'procurement' ? <OfficeProcurement key="procurement" embedded /> : <OfficeQuality key="quality" embedded />}</div></Suspense> :
+        </div> : view !== 'home' ? <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the office…</p>}><div className="max-sm:[zoom:0.84]">{view === 'clinical' ? <OfficeClinical key="clinical" embedded /> : view === 'ca' ? <OfficePortal key="ca" embedded /> : view === 'coo' ? <OfficeCOO key="coo" embedded /> : view === 'hr' ? <OfficeHR key="hr" embedded /> : view === 'finance' ? <OfficeHR key="finance" embedded finance /> : view === 'procurement' ? <OfficeProcurement key="procurement" embedded /> : <OfficeQuality key="quality" embedded />}</div></Suspense> :
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section className="ara-hero rounded-[18px] px-4 py-3.5 text-white sm:rounded-[30px] sm:px-10 sm:py-9 lg:px-12">
             <div className="flex flex-col gap-4 sm:gap-7 md:flex-row md:items-start md:justify-between">

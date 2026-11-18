@@ -134,7 +134,8 @@ function Scaled({ children }: { children: ReactElement }) {
   return <div ref={box} className="w-full"><div className="mx-auto overflow-hidden rounded-2xl border border-slate-200 bg-white" style={{ width: W * scale, height: H * scale }}><div style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: 'top left' }}>{children}</div></div></div>;
 }
 
-export function OrgChartPage({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
+// Only HR edits the chart (words, photos, positions). Finance, COO, CPO and the CEO's other views only look (`readOnly`, and the server refuses the changes anyway).
+export function OrgChartPage({ onError, source = 'ceo', readOnly = false }: { onError: (message: string) => void; source?: ChartsSource; readOnly?: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [edit, setEdit] = useState<Node | null>(null);
   const [again, setAgain] = useState(0);
@@ -168,7 +169,7 @@ export function OrgChartPage({ onError, source = 'ceo' }: { onError: (message: s
     downloadBlob([pdf.output('blob')], `${NAME}.pdf`, 'application/pdf'); setNotice('Downloaded.');
   });
   return <div className="space-y-2">
-    {source === 'hr' && <div className="flex flex-wrap items-center gap-2">
+    {source === 'hr' && !readOnly && <div className="flex flex-wrap items-center gap-2">
       <p className="mr-auto text-xs text-slate-500">HR: click a photo to edit the words, or move, change or remove the photo.</p>
       <button type="button" disabled={busy} onClick={() => void share()} className="h-9 rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white disabled:opacity-50">Share to WhatsApp</button>
       <button type="button" disabled={busy} onClick={() => void downloadPdf()} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] disabled:opacity-50">Download PDF</button>
@@ -176,7 +177,7 @@ export function OrgChartPage({ onError, source = 'ceo' }: { onError: (message: s
     </div>}
     {busy && <p className="text-xs text-slate-500">Making the picture…</p>}
     {notice && <p className="text-xs font-semibold text-emerald-700">{notice}</p>}
-    <Scaled><Chart data={data} edition={edition} onEdit={source === 'hr' ? setEdit : undefined} /></Scaled>
+    <Scaled><Chart data={data} edition={edition} onEdit={source === 'hr' && !readOnly ? setEdit : undefined} /></Scaled>
     {edit && id && <PhotoEditor employeeId={id} name={edit.lines[edit.lines.length - 1]} lines={data.texts?.[keyOf(edit)] || edit.lines} nodeKey={keyOf(edit)} hasPhoto={Boolean(data.photos[id])} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); setAgain((value) => value + 1); }} onError={onError} />}
   </div>;
 }

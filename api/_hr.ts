@@ -373,6 +373,10 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 }
 
 // What the COO may read in the HR office: the roster and the CA staffing forecast (read only). Nothing else in HR, and nothing that changes data.
+// Office Finance: the Incentive, Payroll and Tax pages and the charts, for reading and downloading (Maybank, KWSP, PERKESO, ePCB files, summaries). The only
+// things Finance may change are marking an incentive as paid or not. Payroll itself (saving, locking), staff profiles, leave and the rest stay with HR.
+const FINANCE_CAN_READ = /^(payroll|tax_|incentive|incentives$|care_claims|care_staff|charts$|headcount$|employees$|org_chart$|photo_urls$)/;
+const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid']);
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
 const CLINICAL_CAN_READ = new Set(['roster']);
@@ -460,13 +464,15 @@ export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     // The COO may look at the roster and the forecast (read only).
-    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo', 'clinical']);
+    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo', 'clinical', 'finance']);
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
     await loadLeavePolicy(db); // the leave policy figures HR can edit (read at most once a minute)
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
-    if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action))) throw fail(403, 'Access restricted.');
+    const financeOnly = profile.role !== 'super_admin' && !access.includes('hr') && access.includes('finance');
+    if (financeOnly) { if (!(req.method === 'GET' ? FINANCE_CAN_READ.test(action) : FINANCE_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.'); }
+    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
@@ -831,7 +837,29 @@ export async function hrHandler(req: any, res: any) {
       const bankOf = new Map((banks || []).map((row: any) => [row.id, row]));
       const [year, number] = month.split('-').map(Number);
       const paidOn = `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, '0')}-16`;
-      return res.status(200).json({ month, paidOn, sotmUnmatched: data.sotmUnmatched, items: data.rows.filter((row: any) => row.nett > 0).map((row: any) => { const bank: any = bankOf.get(row.id) || {}; return { id: row.id, code: row.code, name: row.name, company: row.company, nett: row.nett, bankName: bank.bank_name || '', bankAccount: bank.bank_account || '', hasId: Boolean(String(bank.ic_no || bank.passport_no || '').trim()) }; }) });
+      // Who is already marked as paid (the rows staff see under their payslips).
+      const { data: paidRows } = ids.length ? await db.from('hr_incentive_pay').select('employee_id,amount,paid_on').eq('claim_month', month).in('employee_id', ids) : { data: [] as any[] };
+      const paidOf = new Map((paidRows || []).map((row: any) => [row.employee_id, row]));
+      return res.status(200).json({ month, paidOn, sotmUnmatched: data.sotmUnmatched, items: data.rows.filter((row: any) => row.nett > 0).map((row: any) => { const bank: any = bankOf.get(row.id) || {}; return { id: row.id, code: row.code, name: row.name, company: row.company, nett: row.nett, paid: paidOf.has(row.id) ? { amount: Number((paidOf.get(row.id) as any).amount), on: (paidOf.get(row.id) as any).paid_on } : null, bankName: bank.bank_name || '', bankAccount: bank.bank_account || '', hasId: Boolean(String(bank.ic_no || bank.passport_no || '').trim()) }; }) });
+    }
+    // Mark the month's incentive as paid: staff then see it under My payslips. The amount is the Nett Payment of the summary at this moment; a person already marked is left alone.
+    if (req.method === 'POST' && (action === 'incentive_mark_paid' || action === 'incentive_unmark_paid')) {
+      if (profile.role !== 'super_admin' && !access.includes('hr') && !access.includes('finance')) throw fail(403, 'Access restricted.');
+      const month = text(body.month, 7), paidOn = text(body.paidOn, 10);
+      if (!/^\d{4}-\d{2}$/.test(month) || !isDate(paidOn)) throw fail(400, 'Choose the month and the date paid.');
+      const data = await incentiveSummaryData(db, month);
+      const due = data.rows.filter((row: any) => row.nett > 0);
+      if (action === 'incentive_unmark_paid') {
+        const { error } = await db.from('hr_incentive_pay').delete().eq('claim_month', month).in('employee_id', due.map((row: any) => row.id));
+        if (error) throw error;
+        await db.from('hr_audit').insert({ employee_id: null, action: 'update', changes: { incentive_paid: `${month} unmarked`, by: text((user as any)?.email, 120) }, changed_by: user.id }).then(() => null, () => null);
+        return res.status(200).json({ unmarked: due.length });
+      }
+      const { data: already } = await db.from('hr_incentive_pay').select('employee_id').eq('claim_month', month);
+      const done = new Set((already || []).map((row: any) => row.employee_id));
+      const rows = due.filter((row: any) => !done.has(row.id)).map((row: any) => ({ employee_id: row.id, claim_month: month, amount: row.nett, procedures: 0, paid_on: paidOn, confirmed_by: text((user as any)?.email || '', 120) }));
+      if (rows.length) { const { error } = await db.from('hr_incentive_pay').insert(rows); if (error) throw error; }
+      return res.status(200).json({ marked: rows.length, paidOn });
     }
     if (req.method === 'GET' && action === 'incentive_bank') {
       const month = text(req.query.month, 7), company = text(req.query.company, 2).toUpperCase(), valueDate = text(req.query.valueDate, 10);
