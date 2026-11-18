@@ -11,7 +11,15 @@ const clean = (value: unknown, max: number) => String(value ?? '').replace(/[\u0
 
 export type FluAnswer = { choice: 'agree' | 'refuse'; health: string; allergy: boolean; allergyDetail: string; immunDate: string; immunName: string; reason: string; answeredAt: string };
 
-async function config(db: any) {
+// The form's on or off setting is read at most once every 30 seconds (it is looked at each time someone opens Home), and again at once when HR changes it.
+let cached: { at: number; value: any } | null = null;
+async function config(db: any, fresh = false) {
+  if (!fresh && cached && Date.now() - cached.at < 30000) return cached.value;
+  const value = await readConfig(db);
+  cached = { at: Date.now(), value };
+  return value;
+}
+async function readConfig(db: any) {
   const branch = await branchId(db, BRANCH, false);
   if (!branch) return { branch: null as string | null, open: false, title: '', openedAt: '', by: '' };
   const { data } = await db.from('portal_state').select('payload,updated_by').eq('branch_id', branch).eq('state_key', CONFIG).maybeSingle();
@@ -87,10 +95,12 @@ export async function fluFormOpen(db: any, userId: string, open: boolean) {
   const payload = { open, title: 'Influenza vaccine', openedAt: open && !cfg.open ? new Date().toISOString() : cfg.openedAt };
   const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: CONFIG, payload, updated_by: userId, updated_at: new Date().toISOString() }, { onConflict: 'branch_id,state_key' });
   if (error) throw error;
+  cached = null;
 }
 
 // For the red number on Announcements: the form is open and this person has not answered yet.
 export async function fluFormWaiting(db: any, assessmentStaffId: string) {
+  if (!(await config(db)).open) return false;   // closed: no further look-ups
   const state = await fluFormFor(db, assessmentStaffId);
   return Boolean(state.open && !(state as any).answer);
 }

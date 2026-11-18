@@ -852,8 +852,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const hrOffice = /\bCHRO\b/i.test(String(designation || ''));
     const cpoOffice = /\bCPO\b/i.test(String(designation || ''));
     // The red number on the Announcements icon (only for the staff who must read them).
-    try { const { listed, items } = await announcementsFor(db, staff.id, false); announcementsListed = listed; announcementsUnread = items.filter((item) => !item.readAt).length; } catch { /* announcements not set up yet */ }
-    try { if (await fluFormWaiting(db, staff.id)) announcementsUnread += 1; } catch { /* the form is not set up yet */ }
+    // Both are looked up together, so the form adds no waiting.
+    const [announced, fluWaiting] = await Promise.all([
+      announcementsFor(db, staff.id, false).catch(() => null),   // announcements not set up yet
+      fluFormWaiting(db, staff.id).catch(() => false),          // the form is not set up yet
+    ]);
+    if (announced) { announcementsListed = announced.listed; announcementsUnread = announced.items.filter((item) => !item.readAt).length; }
+    if (fluWaiting) announcementsUnread += 1;
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
