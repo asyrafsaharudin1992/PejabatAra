@@ -21,7 +21,7 @@ const OfficePortal = lazy(() => import('./PortalApp'));
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { EmbeddedTabs } from './EmbeddedTabs';
-import { CeoChartsPage } from './CeoCharts';
+import { DirectorCharts } from './DirectorCharts';
 import { WaitingForYou } from './WaitingForYou';
 import { card } from './AssessmentStaff';
 
@@ -256,7 +256,7 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
           {view === 'assessment' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the Assessment Room…</p>}><AssessmentAdmin embedded /></Suspense>}
           {view === 'attendance' && <AttendanceHub onError={setError} />}
           {view === 'review' && <ReviewRoom embedded onSignedOut={() => undefined} api={(query, body) => call(query.replace('action=', 'action=review_'), body)} />}
-          {view === 'charts' && <CeoChartsPage source="coo" onError={setError} />}
+          {view === 'charts' && <DirectorCharts onError={setError} start="operation" />}
           {view === 'care' && <CareReviewPage load={() => call('action=care')} review={(payload) => call('action=care_review', payload)} onError={setError} />}
         </div>}
 </StackTables>

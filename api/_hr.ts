@@ -4,13 +4,14 @@ import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
 import { assertPayrollOpen, attendanceHrAction } from './_attendance.js';
+import { loadReviewReminders } from './_review.js';
 import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
-import { patchFrom, REQUEST_SELECT } from './_profile-requests.js';
+import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { checkPhoto, checkSource, isStaffId, orgChart, photoLinks, removePhoto, saveOrgText, savePhoto, saveSource, sourceLink } from './_photos.js';
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, removeLeaveFiles, storeLeaveFile } from './_leave-files.js';
@@ -22,6 +23,9 @@ import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, l
 // is written to hr_audit.
 // The payroll settings kept per person (see 202611020003_payroll_settings.sql).
 const PAYROLL_KEYS = ['epfRate', 'socsoCategory', 'socsoEmployed', 'eis', 'hrdf', 'skbbk', 'taxResident', 'taxType', 'pcbApplied', 'payGroup', 'otType', 'probationMonths', 'flexi', 'restDay', 'defaultShift', 'epfName', 'lhdnEmployeeCode'];
+// What a new Malaysian staff member starts with (what nearly every staff member has): KWSP 11%, PERKESO, EIS, SKBBK and HRDF on, PCB, tax resident. Without these the pay
+// is worked out with the defaults (HRDF and SKBBK off), so a new staff member was missing HRDF. A foreign worker starts with none: HR sets theirs. These can be changed in the payroll settings.
+const STANDARD_PAYROLL = { epfRate: 11, socsoEmployed: true, socsoCategory: 'Employment Injury Scheme and Invalidity Scheme', eis: true, skbbk: true, hrdf: true, taxResident: true, taxType: 'Normal Remuneration', pcbApplied: true, payGroup: 'OPERATION PAYROLL 20-19HB', otType: 'NORMAL RATE (1.5, 2.0)', flexi: false, restDay: 'None' };
 const text = (value: unknown, max = 200) => String(value ?? '').trim().slice(0, max);
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const isDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -377,6 +381,9 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 // things Finance may change are marking an incentive as paid or not. Payroll itself (saving, locking), staff profiles, leave and the rest stay with HR.
 const FINANCE_CAN_READ = /^(payroll|payslip_|tax_|incentive|incentives$|care_claims|care_staff|charts$|headcount$|employees$|org_chart$|photo_urls$)/;
 const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid']);
+// The directors (CEO, COO, CPO, CHRO, CFO) all read the Charts: the figures, the head count, the 12-month payroll cost and the organisation chart (totals, never one person's pay).
+const DIRECTOR_CAN_READ = /^(charts$|headcount$|org_chart$|photo_urls$|payroll_trend$)/;
+const DIRECTOR_OFFICES = ['ceo', 'coo', 'procurement', 'finance'];
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
 const CLINICAL_CAN_READ = new Set(['roster']);
@@ -474,7 +481,7 @@ export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     // The COO may look at the roster and the forecast (read only).
-    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo', 'clinical', 'finance']);
+    const { db, user, profile } = await officeAccess(req, false, ['hr', 'coo', 'clinical', 'finance', 'procurement', 'ceo']);
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
     const now = new Date().toISOString();
@@ -482,7 +489,7 @@ export async function hrHandler(req: any, res: any) {
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     const financeOnly = profile.role !== 'super_admin' && !access.includes('hr') && access.includes('finance');
     if (financeOnly) { if (!(req.method === 'GET' ? FINANCE_CAN_READ.test(action) : FINANCE_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.'); }
-    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action)) && !(req.method === 'POST' && access.includes('clinical') && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
+    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && DIRECTOR_OFFICES.some((office) => access.includes(office)) && DIRECTOR_CAN_READ.test(action)) && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action)) && !(req.method === 'POST' && access.includes('clinical') && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
@@ -1055,6 +1062,8 @@ export async function hrHandler(req: any, res: any) {
     // The red numbers on the HR menu: what is waiting for HR to decide or receive. A part whose table or column is not set up yet counts as zero.
     if (req.method === 'GET' && action === 'hr_badges') {
       const count = async (work: () => PromiseLike<{ count: number | null; error: any }>) => { try { const { count: total, error } = await work(); return error ? 0 : total || 0; } catch { return 0; } };
+      // Performance Reviews: everything waiting on HR = submitted reviews not received yet + reminders that are due soon (the 'Due soon' status only, not upcoming or overdue).
+      const reminderDue = await loadReviewReminders(db).then((result: any) => (result.reminders || []).filter((item: any) => item.status === 'due').length, () => 0);
       const [leave, reviews, doctorClaims, claimsToReceive, careToReceive, requestsWaiting] = await Promise.all([
         count(() => db.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'supervisor_approved')),
         count(() => db.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('status', 'submitted').is('hr_received_on', null)),
@@ -1064,7 +1073,7 @@ export async function hrHandler(req: any, res: any) {
         db.from('hr_attendance_requests').select('reason').eq('status', 'supervisor_approved').limit(500).then((result: any) => result.error ? [] : result.data || [], () => []),
       ]);
       const missed = (requestsWaiting as any[]).filter((row) => /^forgot to clock/i.test(String(row.reason || '').trim())).length;
-      return res.status(200).json({ leave, reviews, incentive: doctorClaims + claimsToReceive + careToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
+      return res.status(200).json({ leave, reviews: reviews + reminderDue, incentive: doctorClaims + claimsToReceive + careToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
     }
     // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
     if (req.method === 'GET' && action === 'misc_list') {
@@ -2029,7 +2038,7 @@ export async function hrHandler(req: any, res: any) {
       const years = [...new Set(months.map((m) => Number(m.slice(0, 4))))];
       const { data: slips, error: slipError } = await db.from('hr_payslips').select('employee_id,year,month,result').in('year', years).limit(10000);
       if (slipError) { if (slipError.code === '42P01') return res.status(200).json({ months, cost: {}, headcount: [], joined: [], left: [] }); throw slipError; }
-      const keys = ['basic', 'ot', 'allowance', 'gross', 'net', 'kwspEmployee', 'kwspEmployer', 'eisEmployee', 'eisEmployer', 'socsoEmployee', 'socsoEmployer', 'pcb'];
+      const keys = ['basic', 'ot', 'allowance', 'gross', 'net', 'kwspEmployee', 'kwspEmployer', 'eisEmployee', 'eisEmployer', 'socsoEmployee', 'socsoEmployer', 'pcb', 'hrdf'];
       const cost: Record<string, number[]> = Object.fromEntries(keys.map((key) => [key, months.map(() => 0)]));
       const paidStaff = months.map(() => 0);
       for (const slip of slips || []) {
@@ -2114,8 +2123,8 @@ export async function hrHandler(req: any, res: any) {
     if (req.method === 'GET' && action === 'payslip_view') {
       const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
       const [{ data: slip, error }, { data: me }] = await Promise.all([
-        db.from('hr_payslips').select('year,month,status,result').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
-        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account').eq('id', id).maybeSingle(),
+        db.from('hr_payslips').select('year,month,status,result,inputs').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
+        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account,ic_no,tax_no,socso_no,epf_no,join_date').eq('id', id).maybeSingle(),
       ]);
       if (error) throw error;
       if (!slip || !me) throw fail(404, 'That payslip is not available.');
@@ -2123,7 +2132,10 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ status: slip.status, payslip: { year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
         basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
         eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
-        bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) } });
+        bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),
+        // For HR's A4 payslip (the Infotech layout): the identity and bank numbers (shown only when HR chooses), the join date and what HR typed that month.
+        ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', bankAccount: me.bank_account || '',
+        annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0 } });
     }
 
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).
@@ -2441,6 +2453,34 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true });
     }
 
+    // Undo an approval: the details HR approved go back to what they were when the staff member asked (only the ones that were not changed again since), the audit log
+    // says so, and the request waits again so HR can decide it once more.
+    if (req.method === 'POST' && action === 'profile_request_undo') {
+      const id = text(body.id, 60);
+      const { data: request, error } = await db.from('hr_profile_requests').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!request) throw fail(404, 'Request not found.');
+      if (request.status !== 'approved') throw fail(409, 'Only an approved request can be undone.');
+      const { data: person, error: personError }: { data: any; error: any } = await (db as any).from('hr_employees').select(REQUEST_SELECT).eq('id', request.employee_id).maybeSingle();
+      if (personError) throw personError;
+      if (!person) throw fail(404, 'The staff profile no longer exists.');
+      const back: Record<string, { from: unknown; to: unknown }> = {}, skipped: string[] = [];
+      for (const [column, change] of Object.entries(request.changes || {}) as [string, any][]) {
+        let saved: unknown; try { saved = cleanValue(column, change.to, person); } catch { saved = change.to; }
+        if (profileSame(person[column], saved)) back[column] = { from: person[column], to: change.from }; else skipped.push(column);
+      }
+      if (!Object.keys(back).length) throw fail(409, 'These details were changed again after the approval, so nothing was undone. Change them in the profile if needed.');
+      let patch: Record<string, unknown>;
+      try { patch = patchFrom(person, back); } catch (cause) { throw fail(409, `The earlier details could not be put back: ${(cause as Error).message}`); }
+      const { error: updateError } = await db.from('hr_employees').update({ ...patch, updated_at: now }).eq('id', request.employee_id);
+      if (updateError) throw updateError;
+      const changes: Record<string, unknown> = {}; for (const [column, change] of Object.entries(back)) changes[column] = [change.from, change.to];
+      await db.from('hr_audit').insert({ employee_id: request.employee_id, action: 'update', changes: { ...changes, source: ['', 'Staff request approval undone'] }, changed_by: user.id });
+      const { error: reopenError } = await db.from('hr_profile_requests').update({ status: 'pending', decided_by: null, decided_at: null, decision_note: '' }).eq('id', id);
+      if (reopenError) throw reopenError;
+      return res.status(200).json({ success: true, restored: Object.keys(back), skipped });
+    }
+
     // One day changed on screen by HR. It is saved and written to the audit log (who, when, before, after, and an optional
     // reason). An empty code clears the day, so the person's usual working weekdays apply again.
     if (req.method === 'POST' && action === 'roster_set') {
@@ -2548,7 +2588,8 @@ export async function hrHandler(req: any, res: any) {
         if (Object.keys(changes).length) await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes, changed_by: user.id });
         return res.status(200).json({ employee: decode(data) });
       }
-      const { data, error } = await db.from('hr_employees').insert({ ...row, updated_by: user.id }).select('*').single();
+      const malaysian = !String(row.nationality || '').trim() || /malaysia/i.test(String(row.nationality));
+      const { data, error } = await db.from('hr_employees').insert({ ...row, ...(malaysian ? { payroll_settings: STANDARD_PAYROLL } : {}), updated_by: user.id }).select('*').single();
       if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
       if (error) throw error;
       await db.from('hr_audit').insert({ employee_id: data.id, action: 'create', changes: {}, changed_by: user.id });

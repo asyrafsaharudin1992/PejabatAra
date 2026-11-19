@@ -1,8 +1,18 @@
-import { branchId, officeAccess, errorReply } from './_office-db.js';
+import { branchId, officeAccess, errorReply, serviceDb } from './_office-db.js';
 import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
 import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, isValidTerm, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
 import { customScore, gradeFor, resolveAnswers, templateMax, validateTemplate, type ReviewTemplate } from '../src/lib/reviewTemplate.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
+import { cleanFormText } from '../src/lib/reviewFormTextCore.js';
+
+// The wording HR changed on the two fixed review forms (names, area points, item words), kept as one record in HR's private area.
+const FORM_TEXT_KEY = 'review_form_text', FORM_TEXT_BRANCH = 'AraOffice HR Private';
+async function readFormText(db: any) {
+  const branch = await branchId(db, FORM_TEXT_BRANCH, false);
+  if (!branch) return {};
+  const { data } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', FORM_TEXT_KEY).maybeSingle();
+  return cleanFormText(data?.payload || {});
+}
 
 // Performance Review, served from /api/status?resource=review (the Vercel Hobby plan allows
 // only 12 functions).
@@ -141,11 +151,59 @@ export async function submitReview(db: any, body: any, allow: (assigned: any) =>
 }
 
 
+// The reminders (automatic and saved) with their status, read from the staff, the settings and the reviews. Used by the Reminder tab and by the number on the menu.
+export async function loadReviewReminders(db: any) {
+    // Read the small settings/staff lists first, then only the reminder dates we need.
+    // One extra row detects overflow rather than silently reporting incomplete statuses.
+    const readLimit = 500;
+    const today = malaysiaToday();
+    const [peopleResult, settingsResult, probation] = await Promise.all([
+      db.from('hr_employees').select('id,company,employee_code,full_name,join_date,confirm_date,designation,status').eq('status', 'Active').limit(readLimit + 1),
+      db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle(),
+      (async () => {
+        const branch = await branchId(db, 'AraOffice HR Private', false);
+        if (!branch) return {};
+        const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'hr_calendar_config').maybeSingle();
+        if (error) throw error;
+        return data?.payload?.probation || {};
+      })(),
+    ]);
+    if (peopleResult.error) throw peopleResult.error;
+    if ((peopleResult.data || []).length > readLimit) throw fail(422, 'Too many active staff to load reminders safely. Please contact the system administrator.');
+    const settingsNotSetUp = !settingsResult.data && (!settingsResult.error || ['PGRST205', '42P01'].includes(settingsResult.error.code));
+    if (settingsResult.error && !settingsNotSetUp) throw settingsResult.error;
+    const settings = normalizeReviewSettings(settingsResult.data?.settings || defaultReviewSettings(), settingsResult.data?.settings || defaultReviewSettings());
+    const people = (peopleResult.data || []).map((r: any) => ({ id: r.id, company: r.company, employeeCode: r.employee_code, fullName: r.full_name, joinDate: r.join_date, confirmDate: r.confirm_date, designation: r.designation, probationStatus: probation[r.id], status: r.status }));
+    const customResult = people.length
+      ? await db.from('hr_review_reminders').select('id,employee_id,period_label,due_on,notes,completed_at,cancelled_at').in('employee_id', people.map((person) => person.id)).order('due_on').limit(readLimit + 1)
+      : { data: [], error: null };
+    const notSetUp = customResult.error && ['PGRST205', '42P01'].includes(customResult.error.code);
+    if (customResult.error && !notSetUp) throw customResult.error;
+    if ((customResult.data || []).length > readLimit) throw fail(422, 'More than 500 staff reminders match. Please contact the system administrator to paginate reminders.');
+    const custom = (customResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, periodLabel: r.period_label, dueOn: r.due_on, notes: r.notes, completedAt: r.completed_at, cancelledAt: r.cancelled_at }));
+    const candidates = buildReviewReminders(people, [], custom, today, settings);
+    const dates = [...new Set(candidates.map((item) => item.dueOn))];
+    // Undated legacy reviews still participate in matching, as before.
+    const reviewsResult = dates.length
+      ? await db.from('hr_reviews').select('id,employee_id,employee_code,staff_name,period_label,period_end,status,submitted_at,form_type').or(`period_end.in.(${dates.join(',')}),period_end.is.null`).order('created_at', { ascending: false }).limit(readLimit + 1)
+      : { data: [], error: null };
+    if (reviewsResult.error) throw reviewsResult.error;
+    if ((reviewsResult.data || []).length > readLimit) throw fail(422, 'More than 500 reviews match the reminders. Reduce the review date window or contact the system administrator.');
+    const reviews = (reviewsResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, employeeCode: r.employee_code, staffName: r.staff_name, periodLabel: r.period_label, periodEnd: r.period_end, status: r.status, submittedAt: r.submitted_at, formType: r.form_type }));
+    return { reminders: buildReviewReminders(people, reviews, custom, today, settings), settings, settingsVersion: settingsResult.data?.updated_at || null, settingsNotSetUp: Boolean(settingsNotSetUp), notSetUp: Boolean(notSetUp)  };
+  }
+
 export async function reviewHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const action = text(req.query.action || body.action, 40);
+
+    // The words of the two fixed forms are not private (the questions are in the app itself): anyone who draws a review form reads them.
+    if (req.method === 'GET' && action === 'form_text') {
+      res.setHeader('Cache-Control', 'public, max-age=30');
+      return res.status(200).json({ text: await readFormText(serviceDb()) });
+    }
 
     // ---- Supervisors: what is waiting for them, their submitted reviews, and the form.
     if (['todo', 'mine', 'submit', 'edit', 'get'].includes(action)) {
@@ -185,48 +243,11 @@ export async function reviewHandler(req: any, res: any) {
     }
 
     // ---- Office HR: assign reviews, read every review, and the "For HR use" box.
-    if (!['hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_reminder_manual', 'hr_review_settings_save', 'hr_templates', 'hr_template_save', 'hr_template_archive', 'hr_template_delete'].includes(action)) throw fail(400, 'Unknown action.');
+    if (!['hr_form_text_save', 'hr_list', 'hr_get', 'hr_skipped', 'hr_assign', 'hr_delete', 'hr_supervisors', 'hr_receive', 'hr_reminders', 'hr_reminder_save', 'hr_reminder_state', 'hr_reminder_manual', 'hr_review_settings_save', 'hr_templates', 'hr_template_save', 'hr_template_archive', 'hr_template_delete'].includes(action)) throw fail(400, 'Unknown action.');
     const { db, user } = await officeAccess(req, false, 'hr');
 
     if (req.method === 'GET' && action === 'hr_reminders') {
-      // Read the small settings/staff lists first, then only the reminder dates we need.
-      // One extra row detects overflow rather than silently reporting incomplete statuses.
-      const readLimit = 500;
-      const today = malaysiaToday();
-      const [peopleResult, settingsResult, probation] = await Promise.all([
-        db.from('hr_employees').select('id,company,employee_code,full_name,join_date,confirm_date,designation,status').eq('status', 'Active').limit(readLimit + 1),
-        db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle(),
-        (async () => {
-          const branch = await branchId(db, 'AraOffice HR Private', false);
-          if (!branch) return {};
-          const { data, error } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'hr_calendar_config').maybeSingle();
-          if (error) throw error;
-          return data?.payload?.probation || {};
-        })(),
-      ]);
-      if (peopleResult.error) throw peopleResult.error;
-      if ((peopleResult.data || []).length > readLimit) throw fail(422, 'Too many active staff to load reminders safely. Please contact the system administrator.');
-      const settingsNotSetUp = !settingsResult.data && (!settingsResult.error || ['PGRST205', '42P01'].includes(settingsResult.error.code));
-      if (settingsResult.error && !settingsNotSetUp) throw settingsResult.error;
-      const settings = normalizeReviewSettings(settingsResult.data?.settings || defaultReviewSettings(), settingsResult.data?.settings || defaultReviewSettings());
-      const people = (peopleResult.data || []).map((r: any) => ({ id: r.id, company: r.company, employeeCode: r.employee_code, fullName: r.full_name, joinDate: r.join_date, confirmDate: r.confirm_date, designation: r.designation, probationStatus: probation[r.id], status: r.status }));
-      const customResult = people.length
-        ? await db.from('hr_review_reminders').select('id,employee_id,period_label,due_on,notes,completed_at,cancelled_at').in('employee_id', people.map((person) => person.id)).order('due_on').limit(readLimit + 1)
-        : { data: [], error: null };
-      const notSetUp = customResult.error && ['PGRST205', '42P01'].includes(customResult.error.code);
-      if (customResult.error && !notSetUp) throw customResult.error;
-      if ((customResult.data || []).length > readLimit) throw fail(422, 'More than 500 staff reminders match. Please contact the system administrator to paginate reminders.');
-      const custom = (customResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, periodLabel: r.period_label, dueOn: r.due_on, notes: r.notes, completedAt: r.completed_at, cancelledAt: r.cancelled_at }));
-      const candidates = buildReviewReminders(people, [], custom, today, settings);
-      const dates = [...new Set(candidates.map((item) => item.dueOn))];
-      // Undated legacy reviews still participate in matching, as before.
-      const reviewsResult = dates.length
-        ? await db.from('hr_reviews').select('id,employee_id,employee_code,staff_name,period_label,period_end,status,submitted_at').or(`period_end.in.(${dates.join(',')}),period_end.is.null`).order('created_at', { ascending: false }).limit(readLimit + 1)
-        : { data: [], error: null };
-      if (reviewsResult.error) throw reviewsResult.error;
-      if ((reviewsResult.data || []).length > readLimit) throw fail(422, 'More than 500 reviews match the reminders. Reduce the review date window or contact the system administrator.');
-      const reviews = (reviewsResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, employeeCode: r.employee_code, staffName: r.staff_name, periodLabel: r.period_label, periodEnd: r.period_end, status: r.status, submittedAt: r.submitted_at }));
-      return res.status(200).json({ reminders: buildReviewReminders(people, reviews, custom, today, settings), settings, settingsVersion: settingsResult.data?.updated_at || null, settingsNotSetUp: Boolean(settingsNotSetUp), notSetUp: Boolean(notSetUp) });
+      return res.status(200).json(await loadReviewReminders(db));
     }
     if (req.method === 'POST' && action === 'hr_review_settings_save') {
       const { data: current, error: readError } = await db.from('hr_review_settings').select('settings,updated_at').eq('id', 1).maybeSingle();
@@ -294,6 +315,14 @@ export async function reviewHandler(req: any, res: any) {
       const { data, error } = await db.from('hr_review_skips').select('stage,reason,skipped_by,skipped_at,staff:hr_employees!hr_review_skips_employee_id_fkey(full_name,employee_code,company)').order('skipped_at', { ascending: false }).limit(200);
       if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ skipped: [] }); throw error; }
       return res.status(200).json({ skipped: (data || []).map((row: any) => ({ name: row.staff?.full_name || '', code: row.staff?.employee_code || '', company: row.staff?.company || '', stage: row.stage, reason: row.reason, by: row.skipped_by, at: row.skipped_at })) });
+    }
+    // HR changes the words of the two fixed forms (names, points, item words). Marks, weights and the number of items never change here.
+    if (req.method === 'POST' && action === 'hr_form_text_save') {
+      const clean = cleanFormText(body.text || {});
+      const branch = await branchId(db, FORM_TEXT_BRANCH, true);
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: FORM_TEXT_KEY, payload: clean, updated_at: new Date().toISOString(), updated_by: user.id }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ text: clean });
     }
     // Templates HR makes: the list (archived ones too, marked), one saved (new or changed), one archived or brought back.
     if (req.method === 'GET' && action === 'hr_templates') {

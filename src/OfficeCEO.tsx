@@ -7,7 +7,7 @@ import COOCalendar from './COOCalendar';
 import { officeFetch } from './lib/officeApi';
 import { Approvals } from './LeaveScreens';
 import { ReviewRoom } from './OfficeReview';
-import { CeoChartsPage } from './CeoCharts';
+import { DirectorCharts } from './DirectorCharts';
 import { useMalaysiaToday } from './lib/useMalaysiaToday';
 import { CEO_TASKS, FREQUENCIES, FREQUENCY_TITLE, periodKey, type CeoFrequency, type CeoTask } from './lib/ceoTasks';
 import { signOutSupabase } from './lib/supabase';
@@ -193,7 +193,7 @@ export default function OfficeCEO() {
         {view === 'charts' ? <div className="mx-auto max-w-[1500px] space-y-5">
           <section className="ara-hero rounded-[18px] px-4 py-3 text-white sm:rounded-[30px] sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office CEO · Klinik ARA 24 Jam</p><h2 className="mt-1 text-xl font-semibold tracking-tight sm:mt-3 sm:text-3xl">Charts</h2><p className="mt-2 hidden max-w-2xl text-sm leading-6 text-[#b9cfdd] sm:mt-3 sm:block sm:text-base sm:leading-7">The people of the company, leave and attendance, incentives and pay, tax by year, and performance reviews.</p></section>
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
-          <CeoChartsPage source="ceo" onError={setError} />
+          <DirectorCharts onError={setError} start="operation" />
         </div> : view === 'leave' || view === 'review' ? <div className="mx-auto max-w-[1500px] space-y-5">
           {view !== 'review' && <section className="ara-hero rounded-[18px] px-4 py-3 text-white sm:rounded-[30px] sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office CEO · Klinik ARA 24 Jam</p><h2 className="mt-1 text-xl font-semibold tracking-tight sm:mt-3 sm:text-3xl">{title}</h2><p className="mt-2 hidden max-w-2xl text-sm leading-6 text-[#b9cfdd] sm:mt-3 sm:block sm:text-base sm:leading-7">{DESK.find((item) => item.id === view)?.note}. The same as in your Individual Sign In.</p></section>}
           {error && <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}

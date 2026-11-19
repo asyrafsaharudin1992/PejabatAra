@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { formName, useFormText } from './lib/reviewFormText';
 import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, FileText, LogOut, Plus } from 'lucide-react';
 import { AuthError, AuthShell, authButton, authInput, authLabel } from './AssessmentRoom';
 import { isSupabaseConfigured, signInWithSupabase, signOutSupabase, supabase } from './lib/supabase';
@@ -69,6 +70,7 @@ function ReviewSignIn({ onSignedIn }: { onSignedIn: () => void }) {
 
 // Used inside Individual Sign In too (embedded): the same form, with that sign-in's own way of calling the API.
 export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: { onSignedOut: () => void; api?: (query: string, body?: unknown) => Promise<any>; embedded?: boolean }) {
+  useFormText();
   const [view, setView] = useState<'todo' | 'done'>('todo');
   const [todo, setTodo] = useState<ReviewSummary[] | null>(null);
   const [done, setDone] = useState<ReviewSummary[] | null>(null);
@@ -174,7 +176,7 @@ export function ReviewRoom({ onSignedOut, api = reviewApi, embedded = false }: {
       </section>}
 
       {!thanks && !open && view === 'todo' && (due.due.length > 0 || due.skipped.length > 0) && <section className={card}>
-        <h2 className="text-lg font-semibold">Due now · Penilaian Bulanan Pembantu Klinik</h2>
+        <h2 className="text-lg font-semibold">Due now · {formName('assistant')}</h2>
         <p className="mt-1 text-sm text-slate-500">Clinic assistants on probation, 2 weeks after they start and in their 1st, 2nd and 3rd month. You can start these yourself; HR does not need to assign them.</p>
         {due.due.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">Nothing is due.</p> : <ul className="mt-3 divide-y divide-slate-100">{due.due.map((item) => <li key={`${item.employeeId}|${item.stage}`} className="flex flex-wrap items-center gap-3 py-3">
           <div className="min-w-0 flex-1"><p className="truncate font-semibold">{item.name}</p><p className="truncate text-xs text-slate-500"><span className="font-mono">{item.code}</span> · {item.stage} assessment · due {dmy(item.dueOn)} · started {dmy(item.joinDate)}</p></div>

@@ -83,7 +83,7 @@ function Screen({ title, onBack, children, nav }: { title: string; onBack: () =>
         <h1 className="mt-6 text-[30px] font-semibold tracking-tight sm:mt-8 sm:text-4xl">{title}</h1>
       </div>
     </header>
-    <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-10 sm:pt-9 md:pb-10">{children}</main>
+    <main className="mx-auto max-w-6xl px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-6 sm:px-10 sm:pt-9 md:pb-10">{children}</main>
     {nav}
   </div>;
 }

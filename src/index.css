@@ -619,3 +619,14 @@
   .clinical-checklist [data-checklist-controls] button { padding: 0.375rem; border-radius: 0.375rem; }
   .clinical-checklist [data-checklist-controls] .rounded-xl { border-radius: 0.5rem; }
 }
+
+/* HR's payslip in the Infotech layout: printed from its own A4 document; the app around it is hidden. */
+.hrslip-print { display: none; }
+@page hrslip { size: A4 portrait; margin: 0; }
+@media print {
+  html:has(body.hrslip-printing) { zoom: 1 !important; }
+  body.hrslip-printing { background: white !important; margin: 0 !important; }
+  body.hrslip-printing > *:not(.hrslip-print):not(style) { display: none !important; }
+  body.hrslip-printing .hrslip-print { display: block; page: hrslip; }
+  .hrslip-sheet * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

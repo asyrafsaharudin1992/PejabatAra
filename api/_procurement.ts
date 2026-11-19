@@ -45,9 +45,11 @@ async function stockRows(db: any, location: string) {
 
 export async function procurementHandler(req: any, res: any) {
   try {
-    const { db, user, profile } = await officeAccess(req, false, ['procurement', 'ceo']);
+    const { db, user, profile } = await officeAccess(req, false, ['procurement', 'ceo', 'coo', 'hr', 'finance']);
     const offices: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     const canEdit = profile.role === 'super_admin' || offices.includes('procurement');
+    // The other directors (COO, CHRO, CFO) only read the Charts; everything else in Procurement stays with Procurement and the CEO.
+    if (profile.role !== 'super_admin' && !offices.includes('procurement') && !offices.includes('ceo') && String(req.query?.action || '') !== 'charts') return res.status(403).json({ error: 'Access restricted.' });
     const action = String(req.query?.action || '');
     const text = (value: unknown, max = 100) => String(value ?? '').trim().slice(0, max);
     const day = today();

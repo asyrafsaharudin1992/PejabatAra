@@ -29,7 +29,7 @@ export function cleanValue(column: string, value: unknown, existing: any) {
   }
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? (typeof b === 'string' ? '' : null)) === JSON.stringify(b ?? (typeof a === 'string' ? '' : null));
+export const same = (a: unknown, b: unknown) => JSON.stringify(a ?? (typeof b === 'string' ? '' : null)) === JSON.stringify(b ?? (typeof a === 'string' ? '' : null));
 
 // What actually changes: each asked-for column that is allowed and differs from the record, as { column: { from, to } }.
 export function changesFrom(person: any, input: Record<string, unknown>) {

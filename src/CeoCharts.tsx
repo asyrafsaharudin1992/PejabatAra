@@ -72,10 +72,20 @@ const heading = (text: string, note: string) => <div className="pt-2"><h3 classN
 
 // Everything on the CEO's Charts tab: the people, time and attendance, money, and reviews. The figures come in one read from the server.
 // `source` says who is looking: the CEO and HR see everything; the COO does not see pay or tax (the server leaves them out).
-function ChartsBody({ onError, source = 'ceo' }: { onError: (message: string) => void; source?: ChartsSource }) {
+export type ChartsPart = 'all' | 'operation' | 'hr' | 'finance';
+// `part` picks what the Charts page shows: Operation (time, attendance and incentives), HR (people and reviews) or Finance (pay, tax and the payroll cost); `all` is everything.
+// The figures are read once and kept for a minute, so moving between the parts does not read them again.
+let chartsCache: { at: number; url: string; data: Charts } | null = null;
+export function ChartsBody({ onError, source = 'ceo', part = 'all' }: { onError: (message: string) => void; source?: ChartsSource; part?: ChartsPart }) {
+  const show = (name: 'operation' | 'hr' | 'finance') => part === 'all' || part === name;
   const [data, setData] = useState<Charts | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = (refresh: boolean) => { setBusy(true); officeFetch(source === 'hr' ? `/api/status?resource=hr&action=charts${refresh ? '&refresh=1' : ''}` : `/api/status?resource=coo&action=ceo_charts${refresh ? '&refresh=1' : ''}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => onError(cause.message)).finally(() => setBusy(false)); };
+  const load = (refresh: boolean) => {
+    const url = source === 'hr' ? '/api/status?resource=hr&action=charts' : '/api/status?resource=coo&action=ceo_charts';
+    if (!refresh && chartsCache && chartsCache.url === url && Date.now() - chartsCache.at < 60000) { setData(chartsCache.data); return; }
+    setBusy(true);
+    officeFetch(`${url}${refresh ? '&refresh=1' : ''}`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); chartsCache = { at: Date.now(), url, data: result }; setData(result); }).catch((cause: Error) => onError(cause.message)).finally(() => setBusy(false));
+  };
   useEffect(() => { load(false); }, []);
   if (!data) return <div className="space-y-5"><PeopleByRoleChart onError={onError} source={source} /><p className="text-sm text-slate-500">{busy ? 'Reading the figures…' : ''}</p></div>;
   const months = data.months.map(monthLabel);
@@ -86,6 +96,7 @@ function ChartsBody({ onError, source = 'ceo' }: { onError: (message: string) =>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>Updated {new Date(data.generatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' })}. The figures are worked out once a day; press Refresh for the latest.</span>
       <button type="button" onClick={() => load(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />Refresh</button></div>
 
+    {show('hr') && <>
     {heading('People', 'Who works in the company today, and how many leave.')}
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <PeopleByRoleChart onError={onError} source={source} given={data.headcount} />
@@ -93,29 +104,36 @@ function ChartsBody({ onError, source = 'ceo' }: { onError: (message: string) =>
       <LinesChart title="Staff turnover" note="People who left in the 12 months up to each month, as a percentage of the average head count. Lower is steadier." categories={months} series={clinics(data.turnover)} format={(value) => `${value}%`} />
       {kindsInUse.length > 1 && <BarsChart title="Kind of job" note="Active staff by employment type." categories={data.employment.types} series={[{ name: 'KJ', color: COLOR.KJ, values: data.employment.KJ }, { name: 'SK', color: COLOR.SK, values: data.employment.SK }]} firstColumn="Employment type" />}
     </div>
+    </>}
 
+    {show('operation') && <>
     {heading('Time and attendance', `Leave from the approved requests. Late days and OT come from the clocks: KJ from ${monthLabel(data.recordsFrom.KJ + '-01')}, SK from ${monthLabel(data.recordsFrom.SK + '-01')}. This month is not finished.`)}
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <BarsChart title="Leave days" note="Approved leave days in each month, spread over the days each leave covers." stacked categories={months} series={clinics(data.leave)} />
       <BarsChart title="Late days" note="Days a person clocked in past the grace time. For reference only; no pay is taken off." categories={months} series={clinics(data.late)} />
       <BarsChart title="OT recorded" note="Overtime hours the clocks recorded, before HR approves them." categories={months} series={clinics(data.ot)} />
     </div>
+    </>}
 
-    {heading(data.pay ? 'Money' : 'Incentives', data.pay ? 'Pay comes from the payslips HR has locked; tax from the Borang EA and the payslips.' : 'Incentive claims and the AraCare allowance, by claim month.')}
+    {(show('operation') || show('finance')) && <>
+    {heading(data.pay && part !== 'operation' ? 'Money' : 'Incentives', data.pay && part !== 'operation' ? 'Pay comes from the payslips HR has locked; tax from the Borang EA and the payslips.' : 'Incentive claims and the AraCare allowance, by claim month.')}
     <div className="grid items-start gap-4 lg:grid-cols-2">
-      <BarsChart title="Incentives" note="What staff claimed and what Clinical Admin approved, and the AraCare allowance, by claim month (from October 2026)." categories={months} series={[{ name: 'Claimed', color: COLOR.aqua, values: data.incentives.claimed }, { name: 'Approved', color: COLOR.violet, values: data.incentives.approved }, { name: 'AraCare', color: COLOR.magenta, values: data.incentives.care }]} format={money} />
-      {data.pay && <LinesChart title="Gross pay for each person" note="Total gross pay divided by the people paid that month." categories={months} series={clinics(data.pay.perHead)} format={money} />}
-      {data.pay && <LinesChart title="OT as a share of gross pay" note="How much of the pay is overtime." categories={months} series={clinics(data.pay.otShare)} format={(value) => `${value}%`} />}
-      {data.tax && <BarsChart title="Gross pay by year" note="Everyone, both clinics. The current year is only the months paid so far." categories={yearLabels} series={[{ name: 'Gross pay', color: COLOR.violet, values: data.tax.gross }]} format={money} firstColumn="Year" />}
-      {data.tax && <BarsChart title="PCB and KWSP by year" note="Tax taken from salary (PCB) and the employees' KWSP." categories={yearLabels} series={[{ name: 'PCB', color: COLOR.aqua, values: data.tax.pcb }, { name: 'KWSP', color: COLOR.yellow, values: data.tax.kwsp }]} format={money} firstColumn="Year" />}
+      {show('operation') && <BarsChart title="Incentives" note="What staff claimed and what Clinical Admin approved, and the AraCare allowance, by claim month (from October 2026)." categories={months} series={[{ name: 'Claimed', color: COLOR.aqua, values: data.incentives.claimed }, { name: 'Approved', color: COLOR.violet, values: data.incentives.approved }, { name: 'AraCare', color: COLOR.magenta, values: data.incentives.care }]} format={money} />}
+      {show('finance') && data.pay && <LinesChart title="Gross pay for each person" note="Total gross pay divided by the people paid that month." categories={months} series={clinics(data.pay.perHead)} format={money} />}
+      {show('finance') && data.pay && <LinesChart title="OT as a share of gross pay" note="How much of the pay is overtime." categories={months} series={clinics(data.pay.otShare)} format={(value) => `${value}%`} />}
+      {show('finance') && data.tax && <BarsChart title="Gross pay by year" note="Everyone, both clinics. The current year is only the months paid so far." categories={yearLabels} series={[{ name: 'Gross pay', color: COLOR.violet, values: data.tax.gross }]} format={money} firstColumn="Year" />}
+      {show('finance') && data.tax && <BarsChart title="PCB and KWSP by year" note="Tax taken from salary (PCB) and the employees' KWSP." categories={yearLabels} series={[{ name: 'PCB', color: COLOR.aqua, values: data.tax.pcb }, { name: 'KWSP', color: COLOR.yellow, values: data.tax.kwsp }]} format={money} firstColumn="Year" />}
     </div>
+    </>}
 
+    {show('hr') && <>
     {heading('Performance reviews', 'Reviews HR gave to supervisors, by the month they were given.')}
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <BarsChart title="Reviews done and waiting" categories={months} stacked series={[{ name: 'Done', color: COLOR.aqua, values: data.reviews.submitted }, { name: 'Still waiting', color: COLOR.yellow, values: data.reviews.pending }]} />
     </div>
+    </>}
 
-    {data.pay && <>{heading('Payroll over 12 months', 'Head count, joiners and leavers, and the cost of pay, as in HR.')}<PayrollCharts /></>}
+    {show('finance') && data.pay && <>{heading('Payroll over 12 months', 'Head count, joiners and leavers, and the cost of pay, as in HR.')}<PayrollCharts /></>}
   </div>;
 }
 

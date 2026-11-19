@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react';
+import { formName } from './lib/reviewFormText';
 import { CheckCircle2 } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { ASSISTANT_COMPANY, ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, ASSISTANT_PANEL_ITEM, ASSISTANT_STAGE_PRINT, AssistantKind, assistantDueOn, assistantTotal, outcomeLabel, termText } from './lib/assistantReview';
@@ -41,7 +42,7 @@ export function AssistantReviewForm({ review, assessorName, initial, api, onDone
 
   return <form onSubmit={submit} className="space-y-6">
     <section className={card}>
-      <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">Penilaian Bulanan Pembantu Klinik</h2><button type="button" onClick={onCancel} className="text-sm font-semibold text-slate-500 hover:text-slate-800">Back</button></div>
+      <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">{formName('assistant')}</h2><button type="button" onClick={onCancel} className="text-sm font-semibold text-slate-500 hover:text-slate-800">Back</button></div>
       <div className="mt-4 rounded-2xl bg-[#f4fafd] p-4"><p className="text-lg font-semibold">{review.staffName}</p><p className="mt-1 text-sm text-slate-600"><span className="font-mono">{review.employeeCode}</span>{review.position ? ` · ${review.position}` : ''}{review.periodLabel ? ` · ${review.periodLabel}` : ''}</p></div>
     </section>
 

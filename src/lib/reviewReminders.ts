@@ -1,7 +1,7 @@
 import { defaultReviewSettings, type ReviewSettings } from './reviewSettings.js';
 
 export type ReminderPerson = { id: string; company: string; employeeCode: string; fullName: string; joinDate: string | null; status: string; confirmDate?: string | null; designation?: string; probationStatus?: string };
-export type ReminderReview = { id: string; employeeId?: string | null; employeeCode: string; staffName: string; periodLabel: string; periodEnd: string | null; status: string; submittedAt: string | null };
+export type ReminderReview = { id: string; employeeId?: string | null; employeeCode: string; staffName: string; periodLabel: string; periodEnd: string | null; status: string; submittedAt: string | null; formType?: string };
 export type CustomReminder = { id: string; employeeId: string; periodLabel: string; dueOn: string; notes: string; completedAt: string | null; cancelledAt: string | null };
 export type ReviewReminder = CustomReminder & { source: 'automatic' | 'custom'; fullName: string; employeeCode: string; company: string; periodStart: string | null; status: 'upcoming' | 'due' | 'overdue' | 'assigned' | 'completed' | 'cancelled'; reviewId: string | null; daysUntil: number };
 
@@ -34,7 +34,9 @@ export function buildReviewReminders(people: ReminderPerson[], reviews: Reminder
   const result: ReviewReminder[] = [];
   const active = new Map(people.filter((person) => person.status === 'Active').map((person) => [person.id, person]));
   const append = (person: ReminderPerson, item: CustomReminder, source: ReviewReminder['source'], periodStart: string | null, previousLabels: string[] = [], recurringInterval = 0) => {
-    const match = reviews.filter((review) => (review.employeeId ? review.employeeId === person.id : review.employeeCode === person.employeeCode && review.staffName === person.fullName) && [item.periodLabel, ...previousLabels].some((label) => labelKey(review.periodLabel) === labelKey(label)) && (review.periodEnd === item.dueOn || source === 'automatic' && !review.periodEnd && (recurringInterval >= 12 && review.submittedAt?.slice(0, 4) === item.dueOn.slice(0, 4))))
+    // A probation stage of a clinic assistant is done by Review 2 (Penilaian Bulanan Pembantu Klinik), whatever its own stage name: one with the same end date settles it.
+    const probationStage = item.id.includes(':ca-evaluation:');
+    const match = reviews.filter((review) => (review.employeeId ? review.employeeId === person.id : review.employeeCode === person.employeeCode && review.staffName === person.fullName) && (([item.periodLabel, ...previousLabels].some((label) => labelKey(review.periodLabel) === labelKey(label)) || probationStage && review.formType === 'assistant' && review.periodEnd === item.dueOn)) && (review.periodEnd === item.dueOn || source === 'automatic' && !review.periodEnd && (recurringInterval >= 12 && review.submittedAt?.slice(0, 4) === item.dueOn.slice(0, 4))))
       .sort((a, b) => Number(b.status === 'submitted') - Number(a.status === 'submitted'))[0];
     const daysUntil = daysBetween(today, item.dueOn);
     const status = item.cancelledAt ? 'cancelled' : item.completedAt || match?.status === 'submitted' ? 'completed' : match?.status === 'pending' ? 'assigned' : daysUntil < 0 ? 'overdue' : daysUntil <= settings.leadDays ? 'due' : 'upcoming';

@@ -4,7 +4,9 @@ import { Eye, EyeOff, Printer, X } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
 import { payPeriod } from './lib/payrollRun';
-import { COMPANY, Field, fmt, longDate, MONTHS, Pair, PayslipDocument, Row, usePayslipPrint, type Slip } from './MyPayslips';
+import { fmt, longDate, MONTHS } from './MyPayslips';
+import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
+import { ReportPreviewFrame } from './ReportPreviewFrame';
 
 // Payroll > Payslips: the payslips of any past payroll month for everyone paid in it (HR and Finance), with a Preview of each as the staff member sees it.
 // October 2026 and before are what Infotech paid; November 2026 on is what was run in AraOffice. Amounts in the list stay hidden until Show amounts is pressed.
@@ -14,40 +16,33 @@ const monthKey = (year: number, month: number) => `${year}-${String(month).padSt
 // Payroll months from January 2026 to a few months ahead.
 const OPTIONS = (() => { const out: { year: number; month: number }[] = []; for (let y = 2026; y <= 2027; y++) for (let m = 1; m <= 12; m++) out.push({ year: y, month: m }); return out.filter((item) => monthKey(item.year, item.month) <= '2027-06'); })();
 
-function Preview({ slip, status, onClose }: { slip: Slip; status: string; onClose: () => void }) {
+// Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
+function useSlipPrint(active: boolean, title: string, onDone: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    document.body.classList.add('hrslip-printing');
+    const previous = document.title; document.title = title;
+    const done = () => { document.body.classList.remove('hrslip-printing'); document.title = previous; onDone(); };
+    window.addEventListener('afterprint', done, { once: true });
+    let cancelled = false;
+    const timer = window.setTimeout(() => { void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.hrslip-print img'), (image) => image.decode().catch(() => undefined))]).then(() => { if (!cancelled) window.print(); }); }, 80);
+    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('hrslip-printing'); document.title = previous; };
+  }, [active]);
+}
+
+// The payslip in the Infotech layout (A4), with a Print button. The IC, tax, SOCSO, EPF and bank numbers stay hidden until HR chooses to show them (and print as shown).
+function Preview({ slip, status, onClose }: { slip: HRSlip; status: string; onClose: () => void }) {
   const [printing, setPrinting] = useState(false);
-  usePayslipPrint(printing, `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code}`, () => setPrinting(false));
-  const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-  const period = payPeriod(slip.year, slip.month);
+  const [reveal, setReveal] = useState(false);
+  useSlipPrint(printing, `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code}`, () => setPrinting(false));
   return <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/70 p-2 sm:p-6 print:hidden" onClick={onClose}>
-    {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
-    <div role="dialog" aria-label="Payslip" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[560px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
-      <div className="flex items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">{slip.name} <span className="text-xs font-normal text-slate-400">· {MONTHS[slip.month - 1]} {slip.year}{status === 'draft' ? ' · draft, not locked' : ''}</span></h3>
+    {printing && createPortal(<div className="hrslip-print"><HRPayslipSheet slip={slip} reveal={reveal} /></div>, document.body)}
+    <div role="dialog" aria-label="Payslip" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">{slip.name} <span className="text-xs font-normal text-slate-400">· {MONTHS[slip.month - 1]} {slip.year}{status === 'draft' ? ' · draft, not locked' : ''}</span></h3>
+        <button type="button" onClick={() => setReveal(!reveal)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC, tax and bank numbers' : 'Show IC, tax and bank numbers'}</button>
         <button type="button" onClick={() => setPrinting(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 text-sm font-bold text-white"><Printer className="h-4 w-4" />Print</button>
         <button type="button" onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200"><X className="h-4 w-4" /></button></div>
-      <div className="flex-1 overflow-y-auto p-4">
-        <article className="rounded-2xl border border-slate-100 bg-white p-4">
-          <div className="mb-4 flex items-start gap-3 border-b border-slate-100 pb-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-12 w-12 shrink-0 object-contain" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#14233b]">{company.name}</p><p className="text-xs text-slate-500">{company.address}</p></div></div>
-          <h2 className="text-base font-semibold text-[#3b5da8]">{slip.name} ({slip.code})</h2>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3"><Field label="Department" value={slip.department} /><Field label="Designation" value={slip.designation} /><Field label="Company Name" value={company.name} /><Field label="Pay Period" value={`${longDate(period.from)} to ${longDate(period.to)}`} /></div>
-          <div className="mt-4 rounded-xl border border-slate-200 px-4 py-2">
-            <Row label="BASIC PAY" value={slip.basic} />
-            {slip.allowances.map((item) => <Row key={item.name} label={item.name.toUpperCase()} value={item.amount} />)}
-            {slip.ot > 0 && <Row label="OVERTIME" value={slip.ot} />}{slip.restPh > 0 && <Row label="REST DAY / PUBLIC HOLIDAY" value={slip.restPh} />}
-            <Row label="EMPLOYEE EPF" value={slip.kwspEmployee} minus /><Row label="EMPLOYEE EIS" value={slip.eisEmployee} minus /><Row label="EMPLOYEE SOCSO" value={slip.socsoEmployee} minus />
-            {slip.skbbk > 0 && <Row label="SKBBK" value={slip.skbbk} minus />}{slip.pcb > 0 && <Row label="MTD/PCB" value={slip.pcb} minus />}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-slate-200 p-4">
-            <Pair label="Gross Wages" value={slip.gross} /><Pair label="Nett Wages" value={slip.net} />
-            <Pair label="Employer EPF" value={slip.kwspEmployer} /><Pair label="EMPLOYEE EPF" value={slip.kwspEmployee} />
-            <Pair label="Employer EIS" value={slip.eisEmployer} /><Pair label="EMPLOYEE EIS" value={slip.eisEmployee} />
-            <Pair label="Employer SOCSO" value={slip.socsoEmployer} /><Pair label="EMPLOYEE SOCSO" value={slip.socsoEmployee} />
-            <Pair label="Zakat" value={0} /><Pair label="MTD/PCB" value={slip.pcb} />
-            <Pair label="Pay so far this year" value={slip.ytdWages} /><Pair label="PCB so far this year" value={slip.ytdPcb} />
-          </div>
-          <p className="mt-3 text-sm text-slate-600">Bank: {slip.bankName || '—'}{slip.bankAccountEnd ? ` · •••• ${slip.bankAccountEnd}` : ''}</p>
-        </article>
-      </div>
+      <div className="flex-1 overflow-auto bg-slate-100 p-3 sm:p-5"><ReportPreviewFrame portrait><HRPayslipSheet slip={slip} reveal={reveal} /></ReportPreviewFrame></div>
     </div>
   </div>;
 }
@@ -58,7 +53,7 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
   const [place, setPlace] = useState('');
   const [query, setQuery] = useState('');
   const [show, setShow] = useState(false);
-  const [view, setView] = useState<{ slip: Slip; status: string } | null>(null);
+  const [view, setView] = useState<{ slip: HRSlip; status: string } | null>(null);
   const [opening, setOpening] = useState('');
   const [year, month] = pick.split('-').map(Number);
   useEffect(() => {

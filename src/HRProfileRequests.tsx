@@ -27,6 +27,8 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
   const [data, setData] = useState<{ requests: Request[]; notSetUp?: boolean } | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState('');
+  const [undoing, setUndoing] = useState('');   // the request whose undo is being asked (asked on the page, not in a pop-up)
+  const [notice, setNotice] = useState('');
   const load = () => officeFetch(`${API}&action=profile_requests`).then((response) => response.json()).then((result) => { if (result.error) throw new Error(result.error); setData(result); onChanged(result.pending || 0); }).catch((cause: Error) => { setData({ requests: [] }); onError(cause.message); });
   useEffect(() => { void load(); }, []);
   const decide = async (request: Request, approve: boolean) => {
@@ -38,12 +40,25 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the decision.'); }
     setBusy('');
   };
+  // Undo an approval: the profile goes back to what it was when the staff member asked, and the request waits again.
+  const undo = async (request: Request) => {
+    setBusy(request.id); setNotice('');
+    try {
+      const response = await officeFetch(`${API}&action=profile_request_undo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: request.id }) });
+      const result = await response.json(); if (!response.ok || result.error) throw new Error(result.error || 'Unable to undo.');
+      setUndoing('');
+      setNotice(`${request.name}: the approval was undone.${result.skipped?.length ? ` Not put back (changed again since): ${result.skipped.map((column: string) => LABEL[column] || column).join(', ')}.` : ''} The request is waiting again.`);
+      await load();
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to undo.'); }
+    setBusy('');
+  };
   const decided = (data?.requests || []).filter((request) => request.status !== 'pending');
   const decidedPage = usePaged<Request>(decided, 10);
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
   const pending = data.requests.filter((request) => request.status === 'pending');
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <p className="px-1 text-sm text-slate-500">Staff ask to change their own details from Individual Sign In. Nothing changes in their profile until you approve it. IC, bank and pay details cannot be requested.</p>
+    {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{notice}</p>}
     {data.notSetUp && <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">Update requests are not set up yet: the database migration 202611010002 has not been run.</p>}
     {!data.notSetUp && !pending.length && <p className="rounded-2xl border border-dashed border-[#dce4ed] bg-white p-8 text-center text-sm text-slate-500">No requests waiting.</p>}
     {pending.map((request) => <section key={request.id} className={`${card} space-y-4`}>
@@ -55,6 +70,6 @@ export function HRProfileRequests({ onError, onChanged }: { onError: (message: s
         <button type="button" disabled={busy === request.id} onClick={() => void decide(request, false)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-rose-200 px-4 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"><X className="h-4 w-4" />Reject</button></div>
     </section>)}
     {decided.length > 0 && <section className={card}><h3 className="font-semibold">Decided</h3>
-      <ul className="mt-3 divide-y divide-slate-100 text-sm">{decidedPage.rows.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"><span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{request.status === 'approved' ? 'Approved' : 'Rejected'}</span><span className="font-semibold">{request.name}</span><span className="text-slate-500">{Object.keys(request.changes).map((column) => LABEL[column] || column).join(', ')}</span><span className="ml-auto text-xs text-slate-400">{when(request.decidedAt)}</span>{request.note && <span className="w-full text-xs text-slate-500">Note: {request.note}</span>}</li>)}</ul><Pager page={decidedPage.page} pages={decidedPage.pages} total={decidedPage.total} onPage={decidedPage.setPage} /></section>}
+      <ul className="mt-3 divide-y divide-slate-100 text-sm">{decidedPage.rows.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"><span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${request.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{request.status === 'approved' ? 'Approved' : 'Rejected'}</span><span className="font-semibold">{request.name}</span><span className="text-slate-500">{Object.keys(request.changes).map((column) => LABEL[column] || column).join(', ')}</span><span className="ml-auto text-xs text-slate-400">{when(request.decidedAt)}</span>{request.status === 'approved' && (undoing === request.id ? <span className="inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800">Undo this approval? The profile goes back to what it was before. <button type="button" disabled={busy === request.id} onClick={() => void undo(request)} className="rounded bg-amber-600 px-2 py-1 font-semibold text-white disabled:opacity-50">Yes, undo</button><button type="button" onClick={() => setUndoing('')} className="px-2 py-1 font-semibold">No</button></span> : <button type="button" onClick={() => setUndoing(request.id)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-[#0b587b] hover:bg-slate-50">Undo approval</button>)}{request.note && <span className="w-full text-xs text-slate-500">Note: {request.note}</span>}</li>)}</ul><Pager page={decidedPage.page} pages={decidedPage.pages} total={decidedPage.total} onPage={decidedPage.setPage} /></section>}
   </div>;
 }

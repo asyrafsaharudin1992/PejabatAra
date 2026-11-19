@@ -28,8 +28,10 @@ const toPayload = (draft: Draft) => ({
 });
 const draftTotal = (draft: Draft) => draft.items.reduce((sum, item) => sum + (item.kind === 'choice' ? Math.max(0, ...item.options.map((option) => Number(option.score) || 0)) : Number(item.max) || 0), 0);
 
-export function HRReviewTemplates({ templates, onReload, onError }: { templates: ReviewTemplate[] | null; onReload: () => Promise<void>; onError: (message: string) => void }) {
+export function HRReviewTemplates({ templates, onReload, onError, openId = '', onOpened }: { templates: ReviewTemplate[] | null; onReload: () => Promise<void>; onError: (message: string) => void; openId?: string; onOpened?: () => void }) {
   const [draft, setDraft] = useState<Draft | null>(null);
+  // Asked to open one template (Edit this form in Review samples): its editor opens as soon as the list is read.
+  useEffect(() => { if (!openId || !templates) return; const found = templates.find((item) => item.id === openId); if (found) setDraft(toDraft(found)); onOpened?.(); }, [openId, templates]);
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');

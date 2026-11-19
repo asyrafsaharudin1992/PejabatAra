@@ -271,8 +271,11 @@ const stageFor = (r: any, personId: string) => r.status === 'pending' && (r.appr
 // Review 2 for the clinic assistants of an Admin Klinikal's branch: what is due now (2 weeks after the start date in the HR profile, then the 1st, 2nd and 3rd month),
 // not yet done and not marked "Not needed". Staff only, still on probation, and started within the last four months.
 const isAdminKlinikal = (designation: string) => /ADMIN CLINICAL|CLINIC ASSISTANT OFFICER/i.test(designation || '');
+// HR decides which assessments an Admin Klinikal does: a review shows in their account only when HR assigns it (Assign Review). The list of assessments that come
+// due by themselves (2 weeks, then each month) is switched off. Set this to true to bring that automatic list back.
+const AUTOMATIC_ASSISTANT_DUE = false;
 export async function assistantDue(db: any, me: { id: string; company: string; designation: string }) {
-  if (!isAdminKlinikal(me.designation)) return { due: [] as DueAssessment[], skipped: [] as SkippedAssessment[] };
+  if (!AUTOMATIC_ASSISTANT_DUE || !isAdminKlinikal(me.designation)) return { due: [] as DueAssessment[], skipped: [] as SkippedAssessment[] };
   const today = malaysiaToday();
   const earliest = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 - 4, Number(today.slice(8)))).toISOString().slice(0, 10);
   const { data: people, error } = await db.from('hr_employees').select('id,full_name,employee_code,designation,join_date,confirm_date,resign_date').eq('company', me.company).eq('status', 'Active').gte('join_date', earliest).limit(300);

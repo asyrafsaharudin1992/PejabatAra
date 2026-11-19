@@ -18,7 +18,7 @@ import { HRIncentives } from './HRIncentives';
 import { HRReports } from './HRReports';
 import { HRPayroll } from './HRPayroll';
 import { HRTax } from './HRTax';
-import { CeoChartsPage } from './CeoCharts';
+import { DirectorCharts } from './DirectorCharts';
 import { EmbeddedTabs } from './EmbeddedTabs';
 const HRMemoGuide = lazy(() => import('./HRMemoGuide'));
 const HRHomeCalendar = lazy(() => import('./HRHomeCalendar'));
@@ -201,7 +201,7 @@ export default function OfficeHR({ embedded = false, finance = false }: { embedd
         {view === 'attendance' && !finance && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
         {view === 'payroll' && <HRPayroll onError={setError} />}
         {view === 'tax' && <HRTax onError={setError} />}
-        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><CeoChartsPage source="hr" readOnly={finance} onError={setError} /></div>}
+        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><DirectorCharts onError={setError} start={finance ? 'finance' : 'hr'} canEditOrg={!finance} /></div>}
         {view === 'memos' && !finance && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
         {view === 'misc' && !finance && <HRMisc onError={setError} />}
         {view === 'reports' && !finance && <HRReports onError={setError} />}
