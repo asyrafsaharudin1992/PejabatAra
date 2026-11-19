@@ -6,7 +6,10 @@ const settings = { ...defaultReviewSettings(), lookBackDays: 365, lookAheadDays:
 const najwa: ReminderPerson = { id: 'najwa', company: 'KJ', employeeCode: 'ARA0062', fullName: 'Najwa', designation: 'CLINIC ASSISTANT', status: 'Active', joinDate: '2026-08-04', confirmDate: null, probationStatus: 'probation' };
 assert.deepEqual(probationEvaluationDates(najwa.joinDate!), ['2026-08-18', '2026-09-04', '2026-10-04', '2026-11-04']);
 let reminders = buildReviewReminders([najwa], [], [], '2026-11-02', settings);
-assert.deepEqual(reminders.map((r) => r.dueOn), ['2026-08-18', '2026-09-04', '2026-10-04', '2026-11-04']);
+// One stage at a time: only the first one not finished is shown; the later stages wait.
+assert.deepEqual(reminders.map((r) => r.dueOn), ['2026-08-18']);
+const twoWeeksDone = [{ id: 'done-2w', employeeId: 'najwa', periodLabel: 'First CA evaluation · 2 weeks', dueOn: '2026-08-18', notes: '', completedAt: '2026-08-19', cancelledAt: null }];
+assert.deepEqual(buildReviewReminders([najwa], [], twoWeeksDone, '2026-11-02', settings).map((r) => `${r.dueOn}:${r.status}`), ['2026-08-18:completed', '2026-09-04:overdue']);
 assert.ok(!reminders.some((r) => r.dueOn === '2026-11-18' || /3rd|6th/.test(r.periodLabel)));
 const nuri = { ...najwa, id: 'nuri', fullName: 'Nurihusna', joinDate: '2026-08-26' };
 assert.deepEqual(probationEvaluationDates(nuri.joinDate), ['2026-09-09', '2026-09-26', '2026-10-26', '2026-11-26']);
@@ -23,7 +26,7 @@ assert.equal(reminders.length, 1);
 assert.equal(reminders[0].periodLabel, 'Annual appraisal');
 assert.equal(reminders[0].dueOn, '2027-10-07');
 const earlyConfirmation = { ...nuri, confirmDate: '2026-10-01' };
-assert.deepEqual(buildReviewReminders([earlyConfirmation], [], [], '2026-09-01', settings).map((r) => r.dueOn), ['2026-09-09', '2026-09-26']);
+assert.deepEqual(buildReviewReminders([earlyConfirmation], [], [], '2026-09-01', settings).map((r) => r.dueOn), ['2026-09-09']);
 const custom = [{ id: 'old-probation', employeeId: 'nuri', periodLabel: 'Monthly CA evaluation', dueOn: '2026-11-09', notes: '', completedAt: null, cancelledAt: null }];
 assert.ok(!buildReviewReminders([confirmed], [], custom, '2026-11-02', settings).some((r) => r.id === 'old-probation'));
 assert.ok(buildReviewReminders([confirmed], [], [{ ...custom[0], completedAt: '2026-11-01' }], '2026-11-02', settings).some((r) => r.id === 'old-probation' && r.status === 'completed'));

@@ -66,5 +66,15 @@ export function buildReviewReminders(people: ReminderPerson[], reviews: Reminder
       append(person, { id: `auto:${person.id}:${key}:${dueOn}`, employeeId: person.id, periodLabel, dueOn, notes, completedAt: null, cancelledAt: null }, 'automatic', periodStart, previousLabels, interval);
     }
   }
-  return result.sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.fullName.localeCompare(b.fullName));
+  // One stage at a time: a person with several automatic stages open (for example 2 weeks, 1st month, 2nd month) shows only the first one that is not finished.
+  // The later stages come out when that one is done; finished stages stay as history. Annual appraisals are one series, probation evaluations another.
+  const closed = (item: ReviewReminder) => item.status === 'completed' || item.status === 'cancelled';
+  const firstOpen = new Map<string, string>();
+  for (const item of [...result].sort((x, y) => x.dueOn.localeCompare(y.dueOn))) {
+    if (item.source !== 'automatic' || closed(item)) continue;
+    const series = `${item.employeeId}:${item.id.split(':')[2] || ''}`;
+    if (!firstOpen.has(series)) firstOpen.set(series, item.id);
+  }
+  const shown = result.filter((item) => item.source !== 'automatic' || closed(item) || firstOpen.get(`${item.employeeId}:${item.id.split(':')[2] || ''}`) === item.id);
+  return shown.sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.fullName.localeCompare(b.fullName));
 }
