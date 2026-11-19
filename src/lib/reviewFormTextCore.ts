@@ -1,4 +1,4 @@
-import { ASSISTANT_ITEMS } from './assistantReview';
+import { ASSISTANT_ITEMS } from './assistantReview.js';
 
 // The part of the review form wording that the server also uses: the record's shape and a clean-up of what is typed or saved. No browser code in here (the API
 // imports it). See reviewFormText.ts for how the wording is put over the forms.
