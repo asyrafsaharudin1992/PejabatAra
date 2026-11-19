@@ -14,9 +14,20 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const r2 = (value: number) => Math.round(value * 100) / 100;
 const f = (value: number) => (Math.abs(value) < 0.005 ? 0 : value).toFixed(2);
 
+// The ARA logo, at the top left of every page.
+async function logo(): Promise<{ data: string; w: number; h: number } | null> {
+  try {
+    const blob = await (await fetch('/ara-logo.png')).blob();
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
+    const bitmap = await createImageBitmap(blob); const size = { w: bitmap.width, h: bitmap.height }; bitmap.close();
+    return { data, ...size };
+  } catch { return null; }
+}
+
 export async function payrollSummaryPdf(rows: SummaryRow[], year: number, month: number): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const mark = await logo();
   // Column widths in mm (the sum fits the page): No, Code, Name, then the money columns in Infotech's order.
   const cols: { key: string; w: number }[] = [
     { key: 'no', w: 6 }, { key: 'code', w: 13 }, { key: 'name', w: 32 }, { key: 'totSal', w: 13 }, { key: 'ot', w: 10 }, { key: 'shift', w: 8 }, { key: 'restPh', w: 10 }, { key: 'allow', w: 12 }, { key: 'noPay', w: 11 }, { key: 'bonus', w: 8 }, { key: 'gross', w: 13 }, { key: 'ded', w: 10 },
@@ -52,6 +63,7 @@ export async function payrollSummaryPdf(rows: SummaryRow[], year: number, month:
     for (const row of staff) { const l = lines(row); for (const key of MONEY) sums[key] = r2(sums[key] + l[key]); }
     for (let page = 0; page < pages; page++) {
       if (!first) pdf.addPage(); first = false;
+      if (mark) { const height = 14, width = height * mark.w / mark.h; pdf.addImage(mark.data, 'PNG', left + 2, 4.5, width, height); }
       pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(...blue); pdf.text(COMPANY_NAME, pageW / 2, 13, { align: 'center' });
       pdf.setFontSize(10.5); pdf.text(`Monthly PayRoll Summary Detailed Report (By Individual) End Pay - MONTH [${label}]`, pageW / 2, 19.5, { align: 'center' });
       pdf.setFont('times', 'normal'); pdf.setFontSize(7); pdf.setTextColor(0, 0, 0); pdf.text(`Page ${page + 1} of ${pages}`, pageW - 8, 10, { align: 'right' });

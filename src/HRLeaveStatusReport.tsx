@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { bulk } from './lib/bulkReports';
 import { Download, Printer } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
@@ -7,6 +8,7 @@ import { card } from './AssessmentStaff';
 import { PeriodPicker, type Period } from './PeriodPicker';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { usePrintSheet } from './IncentiveSheet';
+import { PrintMenu } from './PrintMenu';
 import { perDay, TYPE_NAME } from './HRLeaveReport';
 
 // Office HR > Leave > Reports > Leave Status: every leave request of the period with its status, who it waits for or who approved it, the officer's comment and the
@@ -35,7 +37,7 @@ function Block({ person }: { key?: string; person: Person }) {
 
 function Page({ company, people, period, at, grand }: { key?: string; company: string; people: Person[]; period: Period; at: string; grand: number }) {
   return <article className="bg-white p-4 text-[11px] text-slate-800 print:p-0">
-    <header className="text-center"><p className="font-bold text-[#1f3a6b]">{COMPANY[company] || company}</p><p className="font-bold text-[#1f3a6b]">Leave Status Report (Individual)</p></header>
+    <header className="relative text-center"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="absolute left-0 top-0 h-12 w-auto" /><p className="font-bold text-[#1f3a6b]">{COMPANY[company] || company}</p><p className="font-bold text-[#1f3a6b]">Leave Status Report (Individual)</p></header>
     <div className="mt-2 flex justify-between border-y border-[#1f3a6b] py-1"><span>Date : {at}</span><span>Period From: {dmy(period.from)} To: {dmy(period.to)}</span></div>
     <div className={`${GRID} mt-1 border-b border-[#1f3a6b] pb-1 font-bold`}><span>Leave Date</span><span>Leave Type</span><span>Leave Status</span><span>Pending With</span><span>Approved Up To</span><span>Day / Hour</span><span>Remarks</span><span>Officer Comment</span><span>Applied Date</span><span>Approved Date</span></div>
     {people.map((person) => <Block key={person.id} person={person} />)}
@@ -45,7 +47,7 @@ function Page({ company, people, period, at, grand }: { key?: string; company: s
 
 export function HRLeaveStatusReport({ onError }: { onError: (message: string) => void }) {
   const [period, setPeriod] = useState<Period | null>(null);
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState<string>(bulk.active ? bulk.company : '');
   const [staffId, setStaffId] = useState('');
   const [status, setStatus] = useState('');
   const [staff, setStaff] = useState<{ id: string; fullName: string; company: string }[]>([]);
@@ -78,11 +80,10 @@ export function HRLeaveStatusReport({ onError }: { onError: (message: string) =>
       <label className="text-xs font-bold text-slate-600">Company<select aria-label="Company" value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
       <label className="text-xs font-bold text-slate-600">Staff<select aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[220px]`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
       <label className="text-xs font-bold text-slate-600">Status<select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value)} className={`${field} mt-1 block`}><option value="">All statuses</option><option value="approved">Approved</option><option value="pending">Pending</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select></label>
-      <button onClick={() => setPrinting(true)} disabled={!people?.length} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
-      <button onClick={csv} disabled={!people?.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] disabled:opacity-50"><Download className="h-4 w-4" />CSV</button>
+      <PrintMenu onPrint={() => setPrinting(true)} onCsv={csv} pdf={{ scope: '.leave-status-pages', landscape: true, filename: `Leave status ${period?.from}-to-${period?.to}` }} disabled={!people?.length} onError={onError} label="Print" />
     </section>
     {!people ? <p className="text-sm text-slate-500">Building the report…</p> : !people.length ? <p className={`${card} text-sm text-slate-500`}>No leave in this period.</p> :
-      <div className="space-y-6 print:hidden">{byCompany.map((group) => <div key={group.code} className={`${card} overflow-x-auto`}><div className="min-w-[1000px]"><Page company={group.code} people={group.people} period={period!} at={at} grand={grandOf(group.people)} /></div></div>)}</div>}
+      <div className="leave-status-pages space-y-6 print:hidden">{byCompany.map((group) => <div key={group.code} className={`${card} overflow-x-auto`}><div data-pdf-page className="min-w-[1000px]"><Page company={group.code} people={group.people} period={period!} at={at} grand={grandOf(group.people)} /></div></div>)}</div>}
     {printing && <PrintPortal margin={8}>{byCompany.map((group) => <PrintPage key={group.code}><div className="cv-fit"><Page company={group.code} people={group.people} period={period!} at={at} grand={grandOf(group.people)} /></div></PrintPage>)}</PrintPortal>}
   </div>;
 }

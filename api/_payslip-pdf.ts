@@ -1,9 +1,9 @@
 import { jsPDF } from 'jspdf';
-import { payPeriod } from '../src/lib/payrollRun.js';
+import { slipPeriod } from '../src/lib/payrollRun.js';
 import { ARA_LOGO_PNG } from './_ara-logo.js';
 
 // A password-protected PDF of one payslip, laid out like the Infotech payslip. The staff member opens it with their AraOffice password.
-export type PayslipData = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
+export type PayslipData = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } } };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const COMPANY: Record<string, { name: string; address: string }> = {
   KJ: { name: 'KJ- HSO Healthcare Sdn Bhd', address: 'D-13-GA Jalan Prima Saujana 2/F, Taman Prima Saujana, 43000 Kajang, Selangor' },
@@ -15,10 +15,10 @@ const longDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString
 export function payslipPdf(slip: PayslipData, password: string): Buffer {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', encryption: { userPassword: password, ownerPassword: `${password}-owner-${slip.code}`, userPermissions: ['print'] } });
   const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-  const period = payPeriod(slip.year, slip.month);
+  const period = slipPeriod(slip.year, slip.month, slip.resignDate);
   const left = 18, right = 192;
   // Always one page: the line spacing shrinks a little when a payslip has many allowances.
-  const lines = 15 + slip.allowances.length + (slip.ot > 0 ? 1 : 0) + (slip.restPh > 0 ? 1 : 0) + (slip.skbbk > 0 ? 1 : 0) + (slip.pcb > 0 ? 1 : 0);
+  const lines = 17 + slip.allowances.length + (slip.ot > 0 ? 1 : 0) + (slip.restPh > 0 ? 1 : 0) + (slip.skbbk > 0 ? 1 : 0) + (slip.pcb > 0 ? 1 : 0);
   const step = Math.min(6.5, 205 / lines);
   let y = 18;
   // Letterhead: logo and company.
@@ -44,7 +44,9 @@ export function payslipPdf(slip: PayslipData, password: string): Buffer {
   line('GROSS WAGES', fmt(slip.gross), true); line('NETT WAGES', fmt(slip.net), true); y += 2;
   doc.setTextColor(80);
   line('Employer EPF', fmt(slip.kwspEmployer)); line('Employer EIS', fmt(slip.eisEmployer)); line('Employer SOCSO', fmt(slip.socsoEmployer));
-  line('Pay so far this year', fmt(slip.ytdWages)); line('PCB so far this year', fmt(slip.ytdPcb)); doc.setTextColor(0); y += 2;
+  line('Pay so far this year', fmt(slip.ytdWages)); line('PCB so far this year', fmt(slip.ytdPcb));
+  if (slip.leave) { const text = (item: { period: number; balance: number | null; ytd: number }) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`; line('AL taken / balance / this year', text(slip.leave.al)); line('ML taken / balance / this year', text(slip.leave.ml)); }
+  doc.setTextColor(0); y += 2;
   line('Salary credited to', 'BANK GIRO'); line('Bank account', `${slip.bankName || '-'}${slip.bankAccountEnd ? ` (**** ${slip.bankAccountEnd})` : ''}`); line('Paid on', `26 ${MONTHS[slip.month - 1]} ${slip.year}`);
   y += 6; doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(120); doc.text('This is a system generated payslip and does not require signature. Keep this file private: it is locked with your AraOffice password.', 105, y, { align: 'center', maxWidth: 170 });
   return Buffer.from(doc.output('arraybuffer'));

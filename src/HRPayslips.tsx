@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Eye, EyeOff, Printer, X } from 'lucide-react';
 import { card } from './AssessmentStaff';
+import { PeriodPicker } from './PeriodPicker';
 import { officeFetch } from './lib/officeApi';
 import { payPeriod } from './lib/payrollRun';
 import { fmt, longDate, MONTHS } from './MyPayslips';
+import { PrintMenu } from './PrintMenu';
 import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
 
@@ -17,7 +19,7 @@ const monthKey = (year: number, month: number) => `${year}-${String(month).padSt
 const OPTIONS = (() => { const out: { year: number; month: number }[] = []; for (let y = 2026; y <= 2027; y++) for (let m = 1; m <= 12; m++) out.push({ year: y, month: m }); return out.filter((item) => monthKey(item.year, item.month) <= '2027-06'); })();
 
 // Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
-function useSlipPrint(active: boolean, title: string, onDone: () => void) {
+export function useSlipPrint(active: boolean, title: string, onDone: () => void) {
   useEffect(() => {
     if (!active) return;
     document.body.classList.add('hrslip-printing');
@@ -40,7 +42,7 @@ function Preview({ slip, status, onClose }: { slip: HRSlip; status: string; onCl
     <div role="dialog" aria-label="Payslip" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">{slip.name} <span className="text-xs font-normal text-slate-400">· {MONTHS[slip.month - 1]} {slip.year}{status === 'draft' ? ' · draft, not locked' : ''}</span></h3>
         <button type="button" onClick={() => setReveal(!reveal)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC, tax and bank numbers' : 'Show IC, tax and bank numbers'}</button>
-        <button type="button" onClick={() => setPrinting(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 text-sm font-bold text-white"><Printer className="h-4 w-4" />Print</button>
+        <PrintMenu onPrint={() => setPrinting(true)} pdf={{ scope: '[aria-label="Payslip"]', filename: `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code}` }} className="h-9 px-3" />
         <button type="button" onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200"><X className="h-4 w-4" /></button></div>
       <div className="flex-1 overflow-auto bg-slate-100 p-3 sm:p-5"><ReportPreviewFrame portrait><HRPayslipSheet slip={slip} reveal={reveal} /></ReportPreviewFrame></div>
     </div>
@@ -74,7 +76,7 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
   return <section className={`${card} space-y-4`}>
     <div className="flex flex-wrap items-center gap-3">
       <div className="mr-auto"><h3 className="text-lg font-semibold">Payslips</h3><p className="text-sm text-slate-500">Everyone paid in a payroll month. Choose the payroll month, then Preview a payslip as the staff member sees it. January to October 2026 are what Infotech paid.</p></div>
-      <select aria-label="Payroll month" value={pick} onChange={(event) => setPick(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{OPTIONS.map((item) => { const p = payPeriod(item.year, item.month); return <option key={monthKey(item.year, item.month)} value={monthKey(item.year, item.month)}>{`Payroll ${MONTHS[item.month - 1]} ${item.year} (${longDate(p.from).replace(/ \d{4}$/, '')} to ${longDate(p.to).replace(/ \d{4}$/, '')})`}</option>; })}</select>
+      <PeriodPicker onChange={(period) => setPick(period.to.slice(0, 7))} />
       <select aria-label="Company" value={place} onChange={(event) => setPlace(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
       <input aria-label="Search staff" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" className="h-10 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm" />
       <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>

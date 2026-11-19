@@ -1,26 +1,29 @@
-import { COMPANY, fmt, MONTHS, type Slip } from './MyPayslips';
-import { payPeriod } from './lib/payrollRun';
+import { COMPANY, fmt, leaveText, MONTHS, type Slip, type SlipLeave } from './MyPayslips';
+import { slipPeriod } from './lib/payrollRun';
 
 // HR's payslip, laid out like the Infotech Employee Payslip Report (A4): the clinic and address, the staff member's details, Earnings and Deductions side by side
 // with the totals, then the employer's share, the nett wages and the bank. The identity and bank numbers show only when HR has chosen to (`reveal`).
-export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number };
+export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave };
 const two = (value: number) => fmt(Number(value) || 0);
 const dmy = (iso: string) => iso ? iso.split('-').reverse().join('-') : '';
 const mask = (value: string, reveal: boolean) => !value ? '' : reveal || value.length <= 4 ? value : `${'•'.repeat(value.length - 4)}${value.slice(-4)}`;
 
 export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean }) {
   const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-  const period = payPeriod(slip.year, slip.month);
+  const period = slipPeriod(slip.year, slip.month, slip.resignDate);
   const sum = (items: number[]) => Math.round(items.reduce((total, value) => total + (Number(value) || 0), 0) * 100) / 100;
   // Earnings: basic pay, each allowance, OT, rest day / public holiday pay, and whatever else made up the gross (shift or other allowance typed in Pay run).
   const earnings: [string, number][] = [['BASIC PAY', slip.basic], ...slip.allowances.map((item): [string, number] => [item.name.toUpperCase(), item.amount])];
   if (slip.ot > 0) earnings.push(['OVERTIME', slip.ot]);
   if (slip.restPh > 0) earnings.push(['REST DAY / PUBLIC HOLIDAY', slip.restPh]);
+  for (const item of (slip.adjustments || []).filter((line) => line.amount > 0)) earnings.push([`${item.type}${item.note ? ` - ${item.note}` : ''}`.toUpperCase(), item.amount]);
   const known = sum(earnings.map(([, value]) => value));
   if (slip.gross - known > 0.005) earnings.push(['SHIFT / OTHER ALLOWANCE', Math.round((slip.gross - known) * 100) / 100]);
   // Deductions: the leave and other deductions HR typed, then the statutory ones; anything left over (a slip brought over from Infotech) is shown as one line.
   const deductions: [string, number][] = [];
   if (slip.annualLeaveDeduction > 0) deductions.push(['ANNUAL LEAVE DEDUCTION', slip.annualLeaveDeduction]);
+  const lessLines = (slip.adjustments || []).filter((line) => line.amount < 0);
+  for (const item of lessLines) deductions.push([`${item.type}${item.note ? ` - ${item.note}` : ''}`.toUpperCase(), -item.amount]);
   if (slip.otherDeduction > 0) deductions.push(['OTHER DEDUCTION', slip.otherDeduction]);
   deductions.push(['EMPLOYEE EPF', slip.kwspEmployee], ['EMPLOYEE EIS', slip.eisEmployee], ['EMPLOYEE SOCSO', slip.socsoEmployee]);
   if (slip.skbbk > 0) deductions.push(['SKBBK', slip.skbbk]);
@@ -60,7 +63,7 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
           <div className="space-y-1 border-b border-black px-3 py-2">{pair('Gross Wages', slip.gross)}{pair('Employer EPF', slip.kwspEmployer)}{pair('Employer EIS', slip.eisEmployer)}{pair('Employer SOCSO', slip.socsoEmployer)}</div>
           <div className="space-y-0.5 px-1.5 py-2"><p>Pay Mode <span className="ml-2">: BANK GIRO</span></p><p>Bank Name1 <span className="ml-1">: {slip.bankName}</span></p><p>Ac.No1 <span className="ml-7">: {mask(slip.bankAccount, reveal)}</span></p></div>
         </div>
-        <div className="space-y-1 border-l border-black px-3 py-2">{pair('Nett Wages', slip.net)}{pair('Employee EPF', slip.kwspEmployee)}{pair('Employee EIS', slip.eisEmployee)}{pair('Employee SOCSO', slip.socsoEmployee)}{pair('SKBBK', slip.skbbk || 0)}{pair('Zakat', 0)}{pair('MTD/PCB', slip.pcb)}</div>
+        <div className="space-y-1 border-l border-black px-3 py-2">{pair('Nett Wages', slip.net)}{pair('Employee EPF', slip.kwspEmployee)}{pair('Employee EIS', slip.eisEmployee)}{pair('Employee SOCSO', slip.socsoEmployee)}{pair('SKBBK', slip.skbbk || 0)}{pair('Zakat', 0)}{pair('MTD/PCB', slip.pcb)}{slip.leave && <><div className="mt-2 flex"><span className="w-[30mm]">AL/Bal/YTD</span><span className="w-[4mm]">:</span><span className="tabular-nums">{leaveText(slip.leave.al)}</span></div><div className="flex"><span className="w-[30mm]">ML/Bal/YTD</span><span className="w-[4mm]">:</span><span className="tabular-nums">{leaveText(slip.leave.ml)}</span></div></>}</div>
       </div>
       <div className="grid grid-cols-2 border-t border-black text-[8pt]"><p className="px-1.5 py-1">This commission/allowance is not part of the regular salary.</p><p className="border-l border-black px-1.5 py-1">It is subject to change and may not be recurring.</p></div>
     </div>

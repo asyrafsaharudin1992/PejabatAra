@@ -11,6 +11,7 @@ import { REVIEWER_TITLES, REVIEW_SUMMARY, reviewFull, reviewRow, submitReview } 
 import { ATTACHMENT_REQUIRED_FOR, MAX_FILES, attachLeaveFiles, attachmentsFor, leaveFileLink, storeLeaveFile } from './_leave-files.js';
 import { randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { activeAccount, currentDevice, deviceLockEnabled, hashSecret, serviceDb, errorReply } from './_office-db.js';
+import { payslipLeave } from './_leave-summary.js';
 import { payslipPdf } from './_payslip-pdf.js';
 import { ASSISTANT_STAGES, assistantDueOn, type DueAssessment, type SkippedAssessment } from '../src/lib/assistantReview.js';
 import { claimTotal, INCENTIVE_BRANCHES, INCENTIVE_CODES, IncentiveEntry, IncentiveForm, RateChange, codesOf, rateOn, setExtraCodes, ExtraIncentive } from '../src/lib/incentiveCodes.js';
@@ -700,7 +701,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   // The signed-in person's own payslips. Only a month HR has locked is shown, and only to the person it belongs to.
   // Opening one, and printing or sharing it, needs the person's own password again (as in Infotech): checked here, never trusted from the page.
   if (action === 'my_payslips' || action === 'my_payslip' || action === 'my_payslip_pdf' || action === 'verify_password') {
-    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account').eq('assessment_staff_id', staff.id).maybeSingle();
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account,resign_date').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
     if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
     if (action === 'my_payslips') {
@@ -721,7 +722,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const payslip = { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
       basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
       eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
-      bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) };
+      bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4), resignDate: me.resign_date || '', leave: r.leave || await payslipLeave(db, me.id, data.year, data.month) };
     if (action === 'my_payslip') return res.status(200).json({ payslip });
     // The PDF is locked with the same password, so a copy sent on WhatsApp or by e-mail cannot be opened without it.
     const pdf = payslipPdf(payslip as any, password);

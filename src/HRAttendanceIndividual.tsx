@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { bulk } from './lib/bulkReports';
 import { Download, Printer } from 'lucide-react';
+import { PrintMenu } from './PrintMenu';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
 import { csvCell } from './lib/hrReportExport';
@@ -46,7 +48,7 @@ function Totals({ labels, allowance, values, caption }: { labels: string[]; allo
       {labels.map((label) => <span key={label} className={dark}>{label}</span>)}
       <span className="col-span-7 border-x border-t border-slate-700 text-center" style={{ gridColumn: 'span 7' }}><span className={dark}>Allowance</span></span><span />
     </div>
-    <div style={GRID}><span /><span /><span /><span /><span />{labels.map((label) => <span key={label} />)}<span className="col-span-7" style={{ gridColumn: 'span 7' }}><span className="grid grid-cols-7 border-x border-slate-700">{allowance.map((label) => <span key={label} className={`${dark} text-[9px] leading-3`}>{label}</span>)}</span></span><span /></div>
+    <div style={GRID}><span /><span /><span /><span /><span />{labels.map((label) => <span key={label} />)}<span className="col-span-7" style={{ gridColumn: 'span 7' }}><span className="grid grid-cols-7 border-x border-slate-700">{allowance.map((label) => <span key={label} className={`${dark} min-w-0 overflow-hidden px-px text-center text-[8px] leading-[10px] [overflow-wrap:anywhere]`}>{label.replace('AllowanceOther', 'Allowance\u200bOther')}</span>)}</span></span><span /></div>
     <div className="mt-0.5 border-y border-slate-700 py-1 font-bold tabular-nums" style={GRID}><span className="col-span-5 text-center" style={{ gridColumn: 'span 5' }}>{caption}</span>{values.map((value, index) => <span key={index}>{value}</span>)}{Array.from({ length: 7 }, (_, index) => money(index))}<span /></div>
   </div>;
 }
@@ -80,7 +82,7 @@ function Sheet({ block, period, at, page, pages, grand }: { key?: string; block:
     <Totals labels={['Normal', 'Late', 'EarlyOut', 'Actual', 'OT 1.0', 'OT 1.5', 'OT 2.0', 'OT 3.0', 'Flat']} allowance={['Attd', 'Shift', 'Meal', 'Tran', 'AllowanceOther', 'AllowanceOther2', 'Health']} values={figures} caption="Total :" />
     <div className="mt-0 w-[48%] border border-slate-700 text-center">
       <p className="border-b border-slate-700 py-1 font-bold text-emerald-700">Monthly Allowance</p>
-      <div className="grid grid-cols-[0.8fr_1fr_1fr_0.9fr_1.6fr_1.6fr] border-b border-slate-700 font-bold text-[#8b1a1a]">{['Attd', 'Health', 'Trans', 'Meal', 'AllowanceOther1', 'AllowanceOther2'].map((label, index) => <span key={label} className={`py-1.5 ${index ? 'border-l border-slate-700' : ''}`}>{label}</span>)}</div>
+      <div className="grid grid-cols-[0.8fr_1fr_1fr_0.9fr_1.6fr_1.6fr] border-b border-slate-700 font-bold text-[#8b1a1a]">{['Attd', 'Health', 'Trans', 'Meal', 'AllowanceOther1', 'AllowanceOther2'].map((label, index) => <span key={label} className={`min-w-0 px-1 py-1.5 [overflow-wrap:anywhere] ${index ? 'border-l border-slate-700' : ''}`}>{label}</span>)}</div>
       <div className="grid grid-cols-[0.8fr_1fr_1fr_0.9fr_1.6fr_1.6fr] tabular-nums">{[0, 1, 2, 3, 4, 5].map((index) => <span key={index} className={`py-2 ${index ? 'border-l border-slate-700' : ''}`}>0.00</span>)}</div>
     </div>
     {grand && <div className="mt-3"><Totals labels={['Nrm', 'Actual', 'Late', 'Under', 'OT 1.0', 'OT 1.5', 'OT 2.0', 'OT 3.0', 'Flat']} allowance={['Attd', 'Shift', 'Meal', 'Tran', 'AllowanceOther1', 'AllowanceOther2', 'Health']} values={grandFigures} caption="Grand Total:" /></div>}
@@ -176,7 +178,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
 
 export function HRAttendanceIndividual({ onError }: { onError: (message: string) => void }) {
   const [period, setPeriod] = useState<Period | null>(null);
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState<string>(bulk.active ? bulk.company : '');
   const [staffId, setStaffId] = useState('');
   const [staff, setStaff] = useState<{ id: string; fullName: string; company: string }[]>([]);
   const [blocks, setBlocks] = useState<Block[] | null>(null);
@@ -224,15 +226,14 @@ export function HRAttendanceIndividual({ onError }: { onError: (message: string)
       <label className="text-xs font-bold text-slate-600">Company<select aria-label="Company" value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
       <label className="text-xs font-bold text-slate-600">Staff<select ref={staffBox} aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[240px] ${view === 'edit' && !staffId ? 'border-[#0b587b] ring-2 ring-[#0b587b]/40' : ''}`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
       <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">{([['edit', 'Edit'], ['report', 'Preview report'], ['odd', 'Odd days']] as const).map(([id, label]) => <button key={id} type="button" onClick={() => setView(id)} className={`h-8 rounded-lg px-3 text-sm font-semibold ${shownView === id ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{label}</button>)}</div>
-      <button onClick={() => setPrinting(true)} disabled={!shown.length || shownView !== 'report'} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
-      <button onClick={csv} disabled={!shown.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] disabled:opacity-50"><Download className="h-4 w-4" />CSV</button>
+      <PrintMenu onPrint={() => setPrinting(true)} onCsv={csv} pdf={{ scope: '.att-individual-pages', landscape: true, filename: `Individual attendance ${period?.from || ''}-to-${period?.to || ''}` }} disabled={!shown.length || shownView !== 'report'} onError={onError} />
     </section>
     {!blocks ? <p className="text-sm text-slate-500">Reading the records…</p> : !shown.length ? <p className={`${card} text-sm text-slate-500`}>No staff to show.</p>
       : shownView === 'edit' && !staffId ? <section className={`${card} print:hidden`}><p className="text-base font-semibold text-[#0b587b]">↑ Click the Staff box above and choose a staff member to edit.</p><p className="mt-1 text-sm text-slate-500">Their days then open here as a grid you can edit in place.</p></section>
       : shownView === 'edit' && shown[0] ? <EditGrid block={shown[0]} staffId={staffId} filters={filters} setFilters={setFilters} notice={notice} setNotice={setNotice} onChanged={() => setReload((n) => n + 1)} onError={onError} onPreview={() => setView('report')} staffList={staff.filter((item) => !company || item.company === company)} onStaff={setStaffId} />
       : shownView === 'odd' ? <section className={`${card} print:hidden`}><div className="overflow-x-auto"><table className="no-stack w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Odd days</th><th className="pr-3 text-right">Absent</th><th className="pr-3 text-right">No clock out</th><th className="pr-3 text-right">Day off, clocked</th><th className="pr-3 text-right">Over 14 h</th><th className="pr-3 text-right">Under 4 h</th><th className="pr-3 text-right">Late</th><th className="text-right">Early out</th></tr></thead>
         <tbody>{oddRows.map((row) => <tr key={row.person.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setStaffId(row.person.id); setView('edit'); }}><td className="py-2 pr-3"><span className="font-semibold text-[#0b587b]">{row.person.name}</span><span className="block text-xs text-slate-400">{row.person.code} · {row.person.company}</span></td><td className="pr-3 text-right tabular-nums">{num(row.odd)}</td><td className="pr-3 text-right tabular-nums">{num(row.absent)}</td><td className="pr-3 text-right tabular-nums">{num(row.noOut)}</td><td className="pr-3 text-right tabular-nums">{num(row.extra)}</td><td className="pr-3 text-right tabular-nums">{num(row.long)}</td><td className="pr-3 text-right tabular-nums">{num(row.short)}</td><td className="pr-3 text-right tabular-nums">{row.late || <span className="text-slate-300">0</span>}</td><td className="text-right tabular-nums">{row.early || <span className="text-slate-300">0</span>}</td></tr>)}</tbody></table></div></section>
-      : <div className="space-y-6 print:hidden">{shown.map((block, index) => <div key={block.person.id} className={`${card} overflow-x-auto`}><div className="min-w-[1180px]"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></div>)}</div>}
+      : <div className="att-individual-pages space-y-6 print:hidden">{shown.map((block, index) => <div key={block.person.id} className={`${card} overflow-x-auto`}><div data-pdf-page className="min-w-[1180px]"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></div>)}</div>}
     {printing && <PrintPortal margin={6}>{shown.map((block, index) => <PrintPage key={block.person.id}><div className="cv-fit"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></PrintPage>)}</PrintPortal>}
   </div>;
 }

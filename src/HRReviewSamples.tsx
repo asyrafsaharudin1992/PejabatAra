@@ -6,6 +6,7 @@ import { AREAS, LEVELS, ReviewFull, reviewApi } from './lib/performanceReview';
 import { applyFormText, changesOnly, cleanFormText, currentFormText, formName, useFormText, type FormText } from './lib/reviewFormText';
 import { ReviewDocument, ReviewSheet, useReviewPrint } from './ReviewSheet';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
+import { PrintMenu } from './PrintMenu';
 import { templateMax, type ReviewTemplate } from './lib/reviewTemplate';
 
 // Office HR: the two review forms as blank samples, to see what the supervisor fills in and to print an empty copy.
@@ -88,7 +89,7 @@ export function HRReviewSamples({ templates = [], onEditTemplate }: { templates?
     {previewing && <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/70 p-2 sm:p-6 print:hidden" onClick={() => setPreviewing(false)}>
       <div role="dialog" aria-label="Form preview" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[1000px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">Preview <span className="text-xs font-normal text-slate-400">· the blank form as printed (with the wording as it is now)</span></h3>
-          <button type="button" onClick={() => { setPreviewing(false); setPrinting(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 text-sm font-bold text-white"><Printer className="h-4 w-4" />Print</button>
+          <PrintMenu onPrint={() => { setPreviewing(false); setPrinting(true); }} pdf={{ scope: '[aria-label="Form preview"]', filename: `Review form ${template ? 'custom' : which}` }} className="h-9 px-3" />
           <button type="button" onClick={() => setPreviewing(false)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200"><X className="h-4 w-4" /></button></div>
         <div className="report-preview flex-1 overflow-auto bg-slate-100 p-3 sm:p-5"><ReportPreviewFrame portrait><ReviewDocument review={template ? blank('custom', template) : blank(which === 'assistant' ? 'assistant' : 'standard')} /></ReportPreviewFrame></div>
       </div>

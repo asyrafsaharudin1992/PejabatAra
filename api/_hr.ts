@@ -8,7 +8,8 @@ import { loadReviewReminders } from './_review.js';
 import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
-import { calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
+import { payslipLeave } from './_leave-summary.js';
+import { ADJUSTMENT_TYPES, calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
@@ -276,6 +277,39 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 // The active staff for one pay month with what the pay needs: salary, allowances, family, payroll settings and the year-to-date totals
 // (the totals read off Infotech, plus every month locked since). A month can only be run once the months before it are locked.
 // `viewOnly` lets a month already in the year-to-date totals (brought over from Infotech) be looked at; saving it is still refused.
+// ---- The roster has two versions from December 2026: the version made at the start of the month (kept as it was) and the current one with its changes (the change log) ----
+const ROSTER_ORIGINAL_FROM = '2026-12';
+const rosterOriginalKey = (month: string) => `roster_original:${month}`;
+async function readRosterOriginal(db: any, month: string): Promise<{ savedAt: string; source: string; days: [string, string, string][] } | null> {
+  try {
+    const branch = await branchId(db, 'AraOffice HR Private', false);
+    if (!branch) return null;
+    const { data } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', rosterOriginalKey(month)).maybeSingle();
+    return data?.payload?.days ? data.payload : null;
+  } catch { return null; }
+}
+// Keeps the roster of a month as it is now. `force` replaces an earlier copy (HR pressed Save as original). Otherwise it is kept once, just before the first change made on or after the 1st of the month,
+// so what was agreed before the month started is the original and what happens in the month is a change.
+async function keepRosterOriginal(db: any, userId: string, month: string, force = false) {
+  if (month < ROSTER_ORIGINAL_FROM) return;
+  if (!force && (await readRosterOriginal(db, month))) return;
+  const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+  const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift').gte('work_date', start).lte('work_date', end).limit(8000);
+  if (error) throw error;
+  const branch = await branchId(db, 'AraOffice HR Private', true);
+  const row: any = { branch_id: branch, state_key: rosterOriginalKey(month), payload: { savedAt: new Date().toISOString(), source: force ? 'manual' : 'automatic', days: (data || []).map((item: any) => [item.employee_id, item.work_date, String(item.shift)]) }, updated_at: new Date().toISOString(), updated_by: userId };
+  const { data: existing } = await db.from('portal_state').select('state_key').eq('branch_id', branch).eq('state_key', row.state_key).maybeSingle();
+  const { error: saveError } = existing ? await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', row.state_key) : await db.from('portal_state').insert(row);
+  if (saveError) throw saveError;
+}
+const bulkTries = new Map<string, { count: number; since: number }>();
+const todayMY = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+
+// The lines HR adds for one person in a month: at most 12, a type from the list, an amount (+ added, - taken off) and a short note.
+function cleanAdjustments(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 12).map((item: any) => ({ type: ADJUSTMENT_TYPES.includes(String(item?.type)) ? String(item.type) : 'Other', amount: Math.round((Number(item?.amount) || 0) * 100) / 100, note: String(item?.note ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60), ...(item?.source === 'incentive' ? { source: 'incentive' as const } : {}) })).filter((item) => item.amount !== 0 && Math.abs(item.amount) <= 1000000);
+}
 async function payrollContext(db: any, year: number, month: number, viewOnly = false) {
   // Staff who left during or after this pay period are still paid their last month.
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
@@ -1739,12 +1773,18 @@ export async function hrHandler(req: any, res: any) {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';
       if (!month) throw fail(400, 'Choose a month.');
       const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
-      const { data, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
+      const { data: liveData, error } = await db.from('hr_roster').select('employee_id,work_date,shift,works,note').gte('work_date', start).lte('work_date', end).limit(5000);
       if (error) throw error;
+      // From December 2026 the roster has the version made at the start of the month (original) and the current one with its changes.
+      const original = month >= ROSTER_ORIGINAL_FROM ? await readRosterOriginal(db, month) : null;
+      const wantOriginal = String(req.query.version) === 'original';
+      if (wantOriginal && month < ROSTER_ORIGINAL_FROM) throw fail(404, 'The start-of-month version is kept from December 2026. Choose Current for this month.');
+      if (wantOriginal && !original) throw fail(404, 'The start-of-month version of this roster has not been saved yet. It is saved by itself when the first change is made in the month, or press Save as original in Roster.');
+      const data = wantOriginal && original ? original.days.map(([employee_id, work_date, shift]) => ({ employee_id, work_date, shift, works: !['OFF', 'REST', 'PH', 'NA', 'RESIGN', 'AL', 'UPL', 'MC', 'EL'].includes(shift), note: '' })) : liveData;
       // Staff with a fixed weekly schedule (admin office: Monday to Friday, a default shift on the profile) have no stored roster rows
       // except for leave and the like. Their days without a row are shown from the profile, so the grid is not empty. Leave and public holidays stay as they are.
       const { data: fixedPeople } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id,work_days,default_shift,holiday_group').eq('status', 'Active').not('default_shift', 'is', null).neq('default_shift', '').limit(500);
-      const fixed = (fixedPeople || []).filter((p: any) => Array.isArray(p.work_days) && p.work_days.length && !p.work_days.includes(-1));
+      const fixed = wantOriginal ? [] : (fixedPeople || []).filter((p: any) => Array.isArray(p.work_days) && p.work_days.length && !p.work_days.includes(-1));
       const ids = [...new Set([...(data || []).map((row: any) => row.employee_id), ...fixed.map((p: any) => p.id)])];
       const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').in('id', ids) : { data: [] };
       const stored = new Set((data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
@@ -1773,7 +1813,7 @@ export async function hrHandler(req: any, res: any) {
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
       // Who may change what: HR changes everything; a Clinical Admin account only its own branch (`edit.company`).
       const editCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
-      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
+      return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
@@ -1813,6 +1853,7 @@ export async function hrHandler(req: any, res: any) {
         else { toSave.push(row); changed.push({ employee_id: row.employee_id, date: row.work_date, from: before, to: row.shift }); }
       }
       if (toSave.length) {
+        for (const month of new Set(toSave.map((row: any) => String(row.work_date).slice(0, 7)))) if (todayMY() >= `${month}-01`) await keepRosterOriginal(db, user.id, month);
         const { error } = await db.from('hr_roster').upsert(toSave, { onConflict: 'employee_id,work_date' });
         if (error) throw error;
       }
@@ -2077,9 +2118,11 @@ export async function hrHandler(req: any, res: any) {
         if (!member) continue;
         if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
         const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
-        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays), annualLeaveDeduction: num(item.inputs?.annualLeaveDeduction) };
+        const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays), annualLeaveDeduction: num(item.inputs?.annualLeaveDeduction), adjustments: cleanAdjustments(item.inputs?.adjustments) };
         const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate }, inputs, member.ytd, year, month);
-        rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result, locked_at: lock ? now : null, updated_at: now });
+        // Locking keeps the leave summary of that moment on the payslip, so the balance shown later is the one at the end of the pay period.
+        const saved: any = lock ? { ...result, leave: await payslipLeave(db, member.id, year, month) } : result;
+        rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result: saved, locked_at: lock ? now : null, updated_at: now });
       }
       if (lock) {
         const missing = context.staff.filter((member: any) => member.payslip?.status !== 'locked' && !rows.some((row) => row.employee_id === member.id));
@@ -2124,7 +2167,7 @@ export async function hrHandler(req: any, res: any) {
       const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
       const [{ data: slip, error }, { data: me }] = await Promise.all([
         db.from('hr_payslips').select('year,month,status,result,inputs').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
-        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account,ic_no,tax_no,socso_no,epf_no,join_date').eq('id', id).maybeSingle(),
+        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account,ic_no,tax_no,socso_no,epf_no,join_date,resign_date').eq('id', id).maybeSingle(),
       ]);
       if (error) throw error;
       if (!slip || !me) throw fail(404, 'That payslip is not available.');
@@ -2134,8 +2177,8 @@ export async function hrHandler(req: any, res: any) {
         eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
         bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),
         // For HR's A4 payslip (the Infotech layout): the identity and bank numbers (shown only when HR chooses), the join date and what HR typed that month.
-        ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', bankAccount: me.bank_account || '',
-        annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0 } });
+        ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', resignDate: me.resign_date || '', bankAccount: me.bank_account || '',
+        annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) } });
     }
 
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).
@@ -2235,6 +2278,19 @@ export async function hrHandler(req: any, res: any) {
       const rows = items.filter((item: any) => item.linked && item.received && !item.confirmed && item.amount > 0).map((item: any) => ({ employee_id: item.employeeId, claim_month: month, amount: item.amount, procedures: item.procedures, paid_on: paidOn, confirmed_by: text(user?.email || '', 120) }));
       if (rows.length) { const { error } = await db.from('hr_incentive_pay').insert(rows); if (error) throw error; }
       return res.status(200).json({ confirmed: rows.length, paidOn });
+    }
+
+    // Incentives paid in the months brought over from Infotech: the "Incentives" allowance line on those payslips (read only).
+    if (req.method === 'GET' && action === 'payroll_incentive_past') {
+      const { data: slips, error: slipError } = await db.from('hr_payslips').select('employee_id,year,month,result').eq('year', 2026).limit(5000);
+      if (slipError) throw slipError;
+      const found = (slips || []).map((slip: any) => ({ slip, amount: (Array.isArray(slip.result?.allowances) ? slip.result.allowances : []).filter((line: any) => /incentive/i.test(String(line?.name || ''))).reduce((sum: number, line: any) => sum + (Number(line.amount) || 0), 0) })).filter((row: any) => row.amount > 0 && row.slip.result?.source === 'Infotech');
+      const ids = [...new Set(found.map((row: any) => row.slip.employee_id))];
+      const { data: people, error: peopleError } = ids.length ? await db.from('hr_employees').select('id,employee_code,full_name,company').in('id', ids) : { data: [], error: null };
+      if (peopleError) throw peopleError;
+      const personOf = new Map((people || []).map((row: any) => [row.id, row]));
+      const items = found.map((row: any) => { const person: any = personOf.get(row.slip.employee_id); return { employeeId: row.slip.employee_id, code: person?.employee_code || '', name: person?.full_name || '', company: person?.company || '', year: row.slip.year, month: row.slip.month, amount: Math.round(row.amount * 100) / 100 }; }).sort((a: any, b: any) => a.month - b.month || a.code.localeCompare(b.code));
+      return res.status(200).json({ items });
     }
 
     // The months already paid for one person (HR only): what Infotech paid before AraOffice, and what AraOffice has locked since.
@@ -2495,6 +2551,7 @@ export async function hrHandler(req: any, res: any) {
       // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin of its own branch, never doctors or other branches.
       if (profile.role !== 'super_admin' && !access.includes('hr') && (!CLINICAL_ROSTER_STAFF.test(String(person.designation || '')) || person.company !== await clinicalCompany(db, user.id))) throw fail(403, NOT_AUTHORIZED);
       await assertPayrollOpen(db, employeeId, date);
+      if (todayMY() >= `${date.slice(0, 7)}-01`) await keepRosterOriginal(db, user.id, date.slice(0, 7));
       const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
       if (beforeError) throw beforeError;
       if ((before?.shift || '') === shift) throw fail(400, 'That is already the code for this day.');
@@ -2508,6 +2565,51 @@ export async function hrHandler(req: any, res: any) {
       }
       const { error: auditError } = await db.from('hr_audit').insert({ employee_id: employeeId, action: 'roster', changes: { [`roster_${date}`]: [before?.shift || '', shift], ...(reason ? { roster_reason: ['', reason] } : {}) }, changed_by: user.id });
       if (auditError) throw auditError;
+      return res.status(200).json({ success: true });
+    }
+    // Download all (Reports): HR must type the HR account's password again before the reports are made. The password is checked against Supabase Auth for the account that is signed in,
+    // never stored or logged, and every attempt that passes is written to a small log (who, when, which month and branch). Wrong tries are slowed down and counted.
+    if (req.method === 'POST' && action === 'bulk_verify') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const key = String(user.id);
+      const now = Date.now(), entry = bulkTries.get(key) || { count: 0, since: now };
+      if (now - entry.since > 15 * 60000) { entry.count = 0; entry.since = now; }
+      if (entry.count >= 5) throw fail(429, 'Too many wrong passwords. Wait 15 minutes and try again.');
+      const password = String(body.password || '');
+      if (!password || password.length > 200 || !profile.email) throw fail(400, 'Type the HR password.');
+      const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL, anon = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) throw fail(500, 'The password check is not set up on the server.');
+      // "The HR password" is the password of the shared HR office account (its email starts with hr@); the password of the account that is signed in now is accepted too (for example System Admin).
+      const candidates = new Set<string>([String(profile.email)]);
+      try {
+        const { data: listed } = await db.auth.admin.listUsers({ perPage: 200 });
+        for (const account of listed?.users || []) if (/^hr@/i.test(String(account.email || '')) && Array.isArray(account.app_metadata?.office_access) && account.app_metadata.office_access.includes('hr')) candidates.add(String(account.email));
+      } catch { /* the signed-in account alone is still checked */ }
+      let passed = false, problem = '';
+      for (const email of candidates) {
+        const checked = await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: anon, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        if (checked.ok) { passed = true; break; }
+        if (checked.status !== 400) problem = `The password check could not be done (code ${checked.status}). Try again.`;
+      }
+      if (!passed) { if (problem) throw fail(502, problem); entry.count += 1; bulkTries.set(key, entry); throw fail(400, 'That password is not correct. Use the HR account password.'); }
+      bulkTries.delete(key);
+      try {
+        const branch = await branchId(db, 'AraOffice HR Private', true);
+        const { data: row } = await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'bulk_download_log').maybeSingle();
+        const list = Array.isArray(row?.payload?.log) ? row.payload.log : [];
+        list.unshift({ at: new Date().toISOString(), by: profile.full_name || profile.email, month: text(body.month, 7), company: text(body.company, 4) || 'KJ and SK' });
+        const record: any = { branch_id: branch, state_key: 'bulk_download_log', payload: { log: list.slice(0, 200) }, updated_at: new Date().toISOString(), updated_by: user.id };
+        const { error: logError } = row ? await db.from('portal_state').update(record).eq('branch_id', branch).eq('state_key', 'bulk_download_log') : await db.from('portal_state').insert(record);
+        if (logError) throw logError;
+      } catch { /* the check passed; the log is best effort */ }
+      return res.status(200).json({ success: true });
+    }
+    // Save the roster of a month as its start-of-month version (from December 2026). It replaces an earlier copy.
+    if (req.method === 'POST' && action === 'roster_original_save') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const month = /^\d{4}-\d{2}$/.test(String(body.month)) ? String(body.month) : '';
+      if (!month || month < ROSTER_ORIGINAL_FROM) throw fail(400, `The two versions start from ${ROSTER_ORIGINAL_FROM}.`);
+      await keepRosterOriginal(db, user.id, month, true);
       return res.status(200).json({ success: true });
     }
     // The changes made on screen for a month, newest first.

@@ -83,6 +83,7 @@ export function PhotoEditor({ employeeId, name, lines, nodeKey, hasPhoto, onClos
       <div className="space-y-3">
         <p className="text-xs font-semibold text-slate-600">Photo</p>
         <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void pick(event.target.files?.[0]); event.target.value = ''; }} className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#0b587b]" />
+        {!fresh && hasPhoto && bitmap && <button type="button" onClick={() => { setOriginal(bitmap); setFresh(true); setMoved(true); setStandard(true); void show(bitmap, true); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b]">Use the standard background</button>}
         {fresh && original && <label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={standard} onChange={(event) => { setStandard(event.target.checked); void show(original, event.target.checked); }} />Use the standard background (like the other staff)</label>}
         {bgNote && <p className="text-xs text-amber-700">{bgNote}</p>}
         {bitmap ? <>

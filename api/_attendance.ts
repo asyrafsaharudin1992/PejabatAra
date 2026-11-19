@@ -706,6 +706,18 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     return res.status(200).json({ from, to, people: out });
   }
 
+  // Every day counted late in a period, one line each (date, shift, clock in, minutes late), for the Late Attendance report.
+  if (req.method === 'GET' && action === 'attendance_late_days') {
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    const from = iso.test(String(req.query.from)) ? String(req.query.from) : `${today().slice(0, 7)}-01`, to = iso.test(String(req.query.to)) ? String(req.query.to) : today();
+    if (to < from || Date.parse(to) - Date.parse(from) > 400 * 86400000) throw fail(400, 'Choose a period of at most a year.');
+    const [people, rules] = await Promise.all([active(), loadRules(db)]);
+    const days = buildDaysFrom(await fetchData(db, from, to, people.map((p) => p.id)), people, from, to, rules);
+    const rows = people.flatMap((p) => (days.get(p.id) || []).filter((day) => day.date >= from && day.date <= to && day.lateCounted > 0).map((day) => ({ ...person(p), date: day.date, shift: day.code || '', startTime: day.start ? hhmm(Date.parse(day.start)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', lateMinutes: day.lateCounted })))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
+    return res.status(200).json({ from, to, grace: rules.lateGrace, rows });
+  }
+
   // Late pattern, for discipline reference: the days counted late in each of the last months.
   if (req.method === 'GET' && action === 'attendance_late_pattern') {
     const thisMonth = today().slice(0, 7);

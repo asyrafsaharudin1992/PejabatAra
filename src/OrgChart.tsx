@@ -4,6 +4,8 @@ import type { ChartsSource } from './CeoCharts';
 import { PhotoEditor } from './PhotoEditor';
 import { downloadBlob } from './lib/downloadBlob';
 import { fileFromDataUrl, SHARE_NOTICE, shareToWhatsApp } from './lib/shareFile';
+import { PrintMenu } from './PrintMenu';
+import { printPdfBlob } from './lib/savePdf';
 
 // Charts > See organization chart: the company chart (Organizational Structure), drawn like the printed one. The photos come from the private
 // staff-photos bucket through short-lived links made by the server; a person with no photo shows a plain circle.
@@ -58,9 +60,9 @@ async function drawChart(data: Data, edition: string, factor = 1.5): Promise<HTM
   const canvas = document.createElement('canvas'); canvas.width = W * factor; canvas.height = H * factor;
   const c = canvas.getContext('2d'); if (!c) throw new Error('This browser cannot draw the chart.');
   c.scale(factor, factor); c.textBaseline = 'middle'; c.textAlign = 'center';
-  c.fillStyle = '#ececec'; c.fillRect(0, 0, W, H);
-  c.fillStyle = '#e3e3e3'; for (let x = 0; x < W; x += 40) c.fillRect(x, 0, 1, H); for (let y = 0; y < H; y += 40) c.fillRect(0, y, W, 1);
-  c.fillStyle = '#e6e6e6'; c.beginPath(); c.ellipse(707, 1070, 727, 735, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#d8dbe2'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#cfd3db'; for (let x = 0; x < W; x += 40) c.fillRect(x, 0, 1, H); for (let y = 0; y < H; y += 40) c.fillRect(0, y, W, 1);
+  c.fillStyle = '#dde0e7'; c.beginPath(); c.ellipse(707, 1070, 727, 735, 0, 0, Math.PI * 2); c.fill();
   c.fillStyle = '#0e2745';
   c.font = `800 62px ${FONT}`; const bold = c.measureText('ORGANIZATIONAL').width; c.font = `400 62px ${FONT}`; const light = c.measureText(' STRUCTURE').width;
   const left = (W - bold - light) / 2; c.textAlign = 'left';
@@ -73,7 +75,7 @@ async function drawChart(data: Data, edition: string, factor = 1.5): Promise<HTM
   c.textAlign = 'center';
   for (const n of NODES) {
     const lines = data.texts?.[keyOf(n)] || n.lines, id = data.ids[n.code], image = id ? photos[id] : undefined;
-    c.fillStyle = '#ddd2c8'; c.beginPath(); c.arc(n.cx, n.cy, D / 2, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#d8dbe2'; c.beginPath(); c.arc(n.cx, n.cy, D / 2, 0, Math.PI * 2); c.fill();
     c.save(); c.strokeStyle = '#fff'; c.lineWidth = 5; c.lineCap = 'round'; c.setLineDash([0.1, 9]); c.beginPath(); c.arc(n.cx, n.cy, D / 2 - 2.5, 0, Math.PI * 2); c.stroke(); c.restore();
     const r = D / 2 - 8;
     if (image) { c.save(); c.beginPath(); c.arc(n.cx, n.cy, r, 0, Math.PI * 2); c.clip(); c.drawImage(image, n.cx - r, n.cy - r, r * 2, r * 2); c.restore(); }
@@ -91,7 +93,7 @@ function Person({ n, url, onEdit, lines }: { n: Node; url?: string; key?: number
   const ring = { left: n.cx - D / 2, top: n.cy - D / 2, width: D, height: D };
   const names = lines;
   return <>
-    <div style={{ ...ring, border: '5px dotted #fff', boxSizing: 'border-box' }} onClick={onEdit} title={onEdit ? 'Edit' : undefined} className={`absolute rounded-full bg-[#ddd2c8] p-[3px] ${onEdit ? 'cursor-pointer hover:ring-4 hover:ring-sky-400' : ''}`}>
+    <div style={{ ...ring, border: '5px dotted #fff', boxSizing: 'border-box' }} onClick={onEdit} title={onEdit ? 'Edit' : undefined} className={`absolute rounded-full bg-[#d8dbe2] p-[3px] ${onEdit ? 'cursor-pointer hover:ring-4 hover:ring-sky-400' : ''}`}>
       {url ? <img src={url} alt="" referrerPolicy="no-referrer" className="h-full w-full rounded-full object-cover" /> : <span className="grid h-full w-full place-items-center rounded-full text-[34px] font-bold text-[#0b2a4a]/40">{n.initials}</span>}
     </div>
     <div style={{ left: n.cx - 150, top: n.at - 16, width: 300 }} className="absolute text-center text-[#0e2745]">
@@ -102,8 +104,8 @@ function Person({ n, url, onEdit, lines }: { n: Node; url?: string; key?: number
 
 function Chart({ data, edition, onEdit }: { data: Data; edition: string; onEdit?: (n: Node) => void }) {
   const count = (text: string, x: number, y: number) => <div key={text} style={{ left: x - 140, top: y - 16, width: 280 }} className="absolute text-center text-[20px] font-bold text-[#0e2745]">{text}</div>;
-  return <div className="relative overflow-hidden bg-[#ececec] text-[#0e2745]" style={{ width: W, height: H, backgroundImage: 'linear-gradient(#e3e3e3 1px, transparent 1px), linear-gradient(90deg, #e3e3e3 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
-    <div className="absolute rounded-[50%] bg-[#e6e6e6]" style={{ left: -20, top: 335, width: 1454, height: 1470 }} />
+  return <div className="relative overflow-hidden bg-[#d8dbe2] text-[#0e2745]" style={{ width: W, height: H, backgroundImage: 'linear-gradient(#cfd3db 1px, transparent 1px), linear-gradient(90deg, #cfd3db 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
+    <div className="absolute rounded-[50%] bg-[#dde0e7]" style={{ left: -20, top: 335, width: 1454, height: 1470 }} />
     <div className="absolute left-0 w-full text-center text-[62px] leading-none" style={{ top: 100 }}><b className="font-extrabold">ORGANIZATIONAL</b> STRUCTURE</div>
     <div className="absolute left-0 w-full text-center text-[28px] font-semibold" style={{ top: 192, letterSpacing: '0.34em' }}>KLINIK ARA 24 JAM</div>
     {LINES.map(([x1, y1, x2, y2], index) => <div key={index} className="absolute bg-black" style={{ left: Math.min(x1, x2) - 1, top: Math.min(y1, y2) - 1, width: Math.abs(x2 - x1) + 2, height: Math.abs(y2 - y1) + 2 }} />)}
@@ -135,7 +137,7 @@ function Scaled({ children }: { children: ReactElement }) {
 }
 
 // Only HR edits the chart (words, photos, positions). Finance, COO, CPO and the CEO's other views only look (`readOnly`, and the server refuses the changes anyway).
-export function OrgChartPage({ onError, source = 'ceo', readOnly = false }: { onError: (message: string) => void; source?: ChartsSource; readOnly?: boolean }) {
+export function OrgChartPage({ onError, source = 'ceo', readOnly = false, report = false }: { onError: (message: string) => void; source?: ChartsSource; readOnly?: boolean; report?: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [edit, setEdit] = useState<Node | null>(null);
   const [again, setAgain] = useState(0);
@@ -162,14 +164,21 @@ export function OrgChartPage({ onError, source = 'ceo', readOnly = false }: { on
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to share.'); } finally { setBusy(false); }
   };
   const downloadPng = () => run(async (canvas) => { downloadBlob([await png(canvas)], `${NAME}.png`, 'image/png'); setNotice('Downloaded.'); });
-  const downloadPdf = () => run(async (canvas) => {
+  const pdfOf = async (canvas: HTMLCanvasElement) => {
     const { jsPDF } = await import('jspdf');
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }), width = 210, height = width * H / W;
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, (297 - height) / 2, width, height, undefined, 'FAST');
-    downloadBlob([pdf.output('blob')], `${NAME}.pdf`, 'application/pdf'); setNotice('Downloaded.');
-  });
+    return pdf.output('blob') as Blob;
+  };
+  const downloadPdf = () => run(async (canvas) => { downloadBlob([await pdfOf(canvas)], `${NAME}.pdf`, 'application/pdf'); setNotice('Downloaded.'); });
+  const printChart = () => run(async (canvas) => { printPdfBlob(await pdfOf(canvas)); });
   return <div className="space-y-2">
-    {source === 'hr' && !readOnly && <div className="flex flex-wrap items-center gap-2">
+    {report && <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-5 print:hidden">
+      <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">Organization Chart</h2><p className="text-sm text-slate-500">The company chart with photos and positions, {edition}. Print it, or choose Download for PDF or a picture.{source === 'hr' && !readOnly ? ' HR: click a photo to edit the words or the photo.' : ''}</p></div>
+      <button type="button" disabled={busy} onClick={() => void share()} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] disabled:opacity-50">Share to WhatsApp</button>
+      <PrintMenu onPrint={() => void printChart()} onPdf={downloadPdf} items={[{ label: 'Picture (PNG)', onClick: () => void downloadPng() }]} disabled={busy} onError={onError} />
+    </section>}
+    {!report && source === 'hr' && !readOnly && <div className="flex flex-wrap items-center gap-2">
       <p className="mr-auto text-xs text-slate-500">HR: click a photo to edit the words, or move, change or remove the photo.</p>
       <button type="button" disabled={busy} onClick={() => void share()} className="h-9 rounded-xl bg-[#0b587b] px-3 text-xs font-semibold text-white disabled:opacity-50">Share to WhatsApp</button>
       <button type="button" disabled={busy} onClick={() => void downloadPdf()} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] disabled:opacity-50">Download PDF</button>

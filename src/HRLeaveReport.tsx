@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { bulk } from './lib/bulkReports';
 import { SubTabs } from './SubTabs';
 import { Printer, X } from 'lucide-react';
+import { PrintMenu } from './PrintMenu';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRLeaveConsolidate } from './HRLeaveConsolidate';
@@ -68,7 +70,7 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
   // The period is chosen as a payroll period, a month or a year (it starts as the whole year, like Infotech's report).
   const [period, setPeriod] = useState<Period | null>(null);
   const from = period?.from || '', to = period?.to || '';
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState<string>(bulk.active ? bulk.company : '');
   const [staffId, setStaffId] = useState(''); // '' is all staff
   const [staff, setStaff] = useState<{ id: string; fullName: string; company: string; employeeCode: string }[]>([]);
   const [people, setPeople] = useState<Person[] | null>(null);
@@ -100,7 +102,7 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
       <PeriodPicker onChange={setPeriod} allowYear defaultMode="year" />
       <label className="text-xs font-bold text-slate-600">Company<select value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
       <label className="text-xs font-bold text-slate-600">Staff<select aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[240px]`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.company}</option>)}</select></label>
-            <button onClick={() => window.print()} disabled={!people?.length} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+            <PrintMenu onPrint={() => window.print()} pdf={{ scope: '.leave-report', filename: `Leave history ${shown?.from || from} to ${shown?.to || to}` }} disabled={!people?.length} onError={onError} />
     </section>
     {!people ? <p className="text-sm text-slate-500">Building the report…</p> : !people.length ? <p className={`${card} text-sm text-slate-500`}>No leave in this period.</p> :
       <div className="leave-report space-y-6 print:space-y-0">{people.map((person) => {
@@ -111,8 +113,8 @@ export function LeaveHistory({ onError }: { onError: (message: string) => void }
         const COLS = 'grid grid-cols-[38px_92px_84px_1fr_104px_92px] gap-x-2';
         const pageNo = people.indexOf(person) + 1;
         const box = (label: string, value: number) => <span key={label} className="flex justify-between gap-2"><span>{label}</span><span className="flex flex-1 justify-between"><span>:</span><span>{n2(value)}</span></span></span>;
-        const page = <article className="leave-report-page bg-white p-6 font-sans text-[10.5px] leading-[1.35] text-slate-900 shadow-sm print:break-after-page print:p-0 print:shadow-none" style={{ minHeight: 1000 }}>
-          <header className="pt-1 text-center"><p className="text-[12px] font-bold text-[#1f3a6b]">{COMPANY[person.company] || person.company}</p><p className="mt-3 text-[11px] font-bold text-[#1f3a6b]">Leave History Report (Individual)</p></header>
+        const page = <article data-pdf-page className="leave-report-page bg-white p-6 font-sans text-[10.5px] leading-[1.35] text-slate-900 shadow-sm print:break-after-page print:p-0 print:shadow-none" style={{ minHeight: 1000 }}>
+          <header className="relative pt-1 text-center"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="absolute left-0 top-1 h-14 w-auto" /><p className="text-[12px] font-bold text-[#1f3a6b]">{COMPANY[person.company] || person.company}</p><p className="mt-3 text-[11px] font-bold text-[#1f3a6b]">Leave History Report (Individual)</p></header>
           <div className="mt-5 grid grid-cols-[1fr_auto_1fr] border-y border-[#1f3a6b] py-1.5"><span>Date : &nbsp;{shown?.at}</span><span>Period From: {dmy(shown?.from || from)} To: {dmy(shown?.to || to)}</span><span className="text-right">Page : {pageNo} of {people.length}</span></div>
           <p className="mx-3 mt-6 border-b border-[#1f3a6b] pb-1 text-center text-[10px] font-bold text-[#1f3a6b]">Emp Code: {person.code} &nbsp; Employee: {person.name} {person.joinDate && <>&nbsp; Leave Calculation Date: {dmy(person.joinDate)}</>}</p>
           <div className={`${COLS} mt-1 border-b border-[#1f3a6b]/60 pb-1 font-bold`}><span>S No.</span><span>Leave Date</span><span>Day</span><span>Remarks</span><span>Day / Hr</span><span>ML Claim Amt</span></div>

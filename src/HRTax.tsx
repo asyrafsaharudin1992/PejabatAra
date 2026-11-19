@@ -4,6 +4,7 @@ import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
 import { HRTaxGuide } from './HRTaxGuide';
+import { PrintMenu } from './PrintMenu';
 import { Cp8dPrint, EaPrint, cp8dCsv, usePrintDocument, type Employer, type FormRow } from './HRTaxForms';
 
 // Office HR > Tax: the yearly tax figures of every staff member in one place (like the Submissions menu in Infotech Payroll).
@@ -13,7 +14,7 @@ const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm';
 const money = (value: number) => value.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const TOTALS: { key: 'gross' | 'fees' | 'pcb' | 'kwsp' | 'socso' | 'eis' | 'childRelief'; label: string }[] = [{ key: 'gross', label: 'Gross pay' }, { key: 'fees', label: 'Fees / bonus' }, { key: 'pcb', label: 'PCB (tax paid)' }, { key: 'kwsp', label: 'KWSP' }, { key: 'socso', label: 'PERKESO' }, { key: 'eis', label: 'EIS' }, { key: 'childRelief', label: 'Child relief' }];
 
-export function HRTax({ onError }: { onError: (message: string) => void }) {
+export function HRTax({ onError, report }: { onError: (message: string) => void; report?: 'ea' | 'cp8d' }) {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [years, setYears] = useState<number[]>([]);
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -60,13 +61,18 @@ export function HRTax({ onError }: { onError: (message: string) => void }) {
       <select value={state} onChange={(event) => setState(event.target.value)} aria-label="Staff status" className={field}><option value="">Active and inactive</option><option value="active">Active</option><option value="inactive">Inactive (resigned)</option></select>
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Search name or staff code" aria-label="Search staff" className={`${field} min-w-[200px] flex-1`} />
       <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
+      {report ? <>
+        <PrintMenu onPrint={() => void forms(report)} disabled={!shown.length || !show || busy || year >= new Date().getFullYear()} items={[...(report === 'cp8d' ? [{ label: 'CP8D sheet (CSV)', onClick: () => void forms('csv') }] : []), { label: 'Tax summary (CSV)', onClick: download }]} onError={onError} />
+      </> : <>
       {year < new Date().getFullYear() && <>
         <button type="button" onClick={() => void forms('ea')} disabled={!shown.length || !show || busy} title={show ? 'Print the Borang EA of everyone shown' : 'Show the amounts first'} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Printer className="h-4 w-4" />Print EA</button>
         <button type="button" onClick={() => void forms('cp8d')} disabled={!shown.length || !show || busy} title={show ? 'Print the CP8D list of everyone shown' : 'Show the amounts first'} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><FileText className="h-4 w-4" />CP8D</button>
         <button type="button" onClick={() => void forms('csv')} disabled={!shown.length || !show || busy} title={show ? 'CP8D as a sheet for e-Data Praisi' : 'Show the amounts first'} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />CP8D sheet</button>
       </>}
       <button type="button" onClick={download} disabled={!shown.length || !show} title={show ? '' : 'Show the amounts first'} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0b587b] px-3 text-sm font-semibold text-white hover:bg-[#0a4b69] disabled:opacity-40"><Download className="h-4 w-4" />Download CSV</button>
-    </section>
+          </>}
+</section>
+    {report && year >= new Date().getFullYear() && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Borang EA and CP8D are for a finished year. Choose an earlier year to print them; this year's figures are shown below.</p>}
     {notSetUp && <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Yearly tax figures from Infotech are not set up yet. System Admin needs to run the latest database migration first.</p>}
     <section className={`${card} overflow-x-auto`}>
       <h3 className="flex items-center gap-2 text-lg font-semibold"><Receipt className="h-5 w-5 text-[#0b587b]" />Tax summary {year || ''}</h3>

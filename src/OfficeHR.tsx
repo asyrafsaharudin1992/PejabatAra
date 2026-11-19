@@ -16,7 +16,7 @@ import { HRRoster } from './HRRoster';
 import { HRLeave } from './HRLeave';
 import { HRIncentives } from './HRIncentives';
 import { HRReports } from './HRReports';
-import { HRPayroll } from './HRPayroll';
+import { HRPayroll, type PayrollTab } from './HRPayroll';
 import { HRTax } from './HRTax';
 import { DirectorCharts } from './DirectorCharts';
 import { EmbeddedTabs } from './EmbeddedTabs';
@@ -153,6 +153,8 @@ export default function OfficeHR({ embedded = false, finance = false }: { embedd
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState('');
   const [profileTab, setProfileTab] = useState<'list' | 'projection'>('list');
+  const [payrollStart, setPayrollStart] = useState<PayrollTab>('run');
+  const [chartsStart, setChartsStart] = useState<'org' | ''>('');
   const [pendingRequests, setPendingRequests] = useState(0);
   // Everything waiting for HR (red numbers on the menu), refreshed when the menu changes and when the tab comes back into view (no timer).
   const [waiting, setWaiting] = useState<{ leave: number; reviews: number; incentive: number; attendanceOt: number; attendanceMissed: number }>({ leave: 0, reviews: 0, incentive: 0, attendanceOt: 0, attendanceMissed: 0 });
@@ -199,9 +201,9 @@ export default function OfficeHR({ embedded = false, finance = false }: { embedd
         {view === 'leave' && !finance && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && !finance && <LeaveTypes onBack={() => navigate('leave')} />}
         {view === 'attendance' && !finance && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
-        {view === 'payroll' && <HRPayroll onError={setError} />}
+        {view === 'payroll' && <HRPayroll start={payrollStart} onError={setError} />}
         {view === 'tax' && <HRTax onError={setError} />}
-        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><DirectorCharts onError={setError} start={finance ? 'finance' : 'hr'} canEditOrg={!finance} /></div>}
+        {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><DirectorCharts onError={setError} start={chartsStart || (finance ? 'finance' : 'hr')} canEditOrg={!finance} /></div>}
         {view === 'memos' && !finance && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading HR memos…</p>}><HRMemoGuide /></Suspense>}
         {view === 'misc' && !finance && <HRMisc onError={setError} />}
         {view === 'reports' && !finance && <HRReports onError={setError} />}

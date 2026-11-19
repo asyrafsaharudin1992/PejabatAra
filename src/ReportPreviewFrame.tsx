@@ -18,6 +18,6 @@ export function ReportPreviewFrame({ portrait = false, children }: { portrait?: 
     return () => observer.disconnect();
   }, [portrait]);
   return <div ref={frame} className="relative mb-4 w-full overflow-hidden" style={{ height: layout.height }}>
-    <div ref={content} className="absolute left-0 top-0 origin-top-left" style={{ width: portrait ? '210mm' : '297mm', transform: `scale(${layout.scale})` }}>{children}</div>
+    <div ref={content} data-pdf-page className="absolute left-0 top-0 origin-top-left" style={{ width: portrait ? '210mm' : '297mm', transform: `scale(${layout.scale})` }}>{children}</div>
   </div>;
 }

@@ -243,6 +243,12 @@
   .leave-report { position: absolute; left: 0; top: 0; width: 100%; page: leave-portrait; }
 }
 @page leave-portrait { size: A4; margin: 14mm; }
+/* Payroll files report (Reports > Maybank, KWSP, PERKESO and ePCB Files): print only the tables. */
+@media print {
+  body:has(.files-report) * { visibility: hidden; }
+  body:has(.files-report) .files-report, body:has(.files-report) .files-report * { visibility: visible; }
+  .files-report { position: absolute; left: 0; top: 0; width: 100%; }
+}
 
 /* The Consolidate Report prints on a landscape page. */
 .consolidate-print { page: landscape-report; }

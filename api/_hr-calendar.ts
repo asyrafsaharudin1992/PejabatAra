@@ -106,6 +106,15 @@ export async function hrCalendarAction(req: any, res: any, db: any, user: { id: 
     const states: Record<string, CalendarOccurrence> = stateRow?.payload?.states || {};
     // Notes from HR > Miscellaneous that have a due date in this month (until they are marked done). Without that page's table there are none.
     const built = buildHrCalendar(month, people, config, states, reviews);
+    // A review that HR marked "Done manually" in Performance Review > Reminders (done outside AraOffice) is done here too: the same staff member, the same month and the same kind of review.
+    const doneManually = people.length ? await db.from('hr_review_reminders').select('employee_id,period_label,due_on').not('completed_at', 'is', null).is('cancelled_at', null).gte('due_on', `${month}-01`).lte('due_on', calendarMonthEnd(month)).limit(500) : { data: [], error: null };
+    const kindOf = (text: string) => /annual|appraisal|yearly|tahunan/i.test(text) ? 'appraisal' : 'assessment';
+    for (const reminder of doneManually.error ? [] : (doneManually.data || [])) {
+      for (const event of built.events) {
+        if (event.state === 'done' || event.employeeId !== reminder.employee_id || !['appraisal', 'evaluation', 'probation', 'review'].includes(event.category)) continue;
+        if (event.date === reminder.due_on || (event.category === 'appraisal' ? 'appraisal' : 'assessment') === kindOf(String(reminder.period_label || ''))) { event.state = 'done'; event.completedOn = event.completedOn || String(reminder.due_on); }
+      }
+    }
     const noteResult = await db.from('hr_misc_items').select('id,title,body,due_on,done').eq('kind', 'note').gte('due_on', `${month}-01`).lte('due_on', `${month}-31`).limit(200);
     for (const note of noteResult.error ? [] : (noteResult.data || [])) built.events.push({ id: `note:${note.id}`, title: `Note: ${note.title}`, category: 'other', date: note.due_on, start: note.due_on, employeeId: '', person: '', company: '', notes: String(note.body || '').slice(0, 300), source: 'manual', state: note.done ? 'done' : 'open' });
     return res.status(200).json({ ...built, people: people.map(({ birthday, ...safe }) => safe), config, configVersion: configRow?.updated_at || null, stateVersion: stateRow?.updated_at || null });

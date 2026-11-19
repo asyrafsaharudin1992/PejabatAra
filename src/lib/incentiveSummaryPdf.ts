@@ -18,9 +18,20 @@ const dmy = (date: string) => date ? date.split('-').reverse().map((part, index)
 export const branchRows = (rows: IncentiveSummaryRow[], company: string) => rows.filter((row) => row.company === company);
 export const totalsOf = (rows: IncentiveSummaryRow[]) => Object.fromEntries(AMOUNT_COLUMNS.map((col) => [col.key, Math.round(rows.reduce((sum, row) => sum + Number(row[col.key]), 0) * 100) / 100])) as Record<string, number>;
 
+// The ARA logo, at the top left of every page.
+async function logo(): Promise<{ data: string; w: number; h: number } | null> {
+  try {
+    const blob = await (await fetch('/ara-logo.png')).blob();
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
+    const bitmap = await createImageBitmap(blob); const size = { w: bitmap.width, h: bitmap.height }; bitmap.close();
+    return { data, ...size };
+  } catch { return null; }
+}
+
 export async function incentiveSummaryPdf(rows: IncentiveSummaryRow[], month: string): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const mark = await logo();
   const first = [{ key: 'no', label: 'No.', w: 6 }, { key: 'name', label: 'Employee Name', w: 50 }, { key: 'ic', label: 'IC/Passport No.', w: 23 }, { key: 'join', label: 'JOIN DATE', w: 16 }];
   const left = 6, widths = [...first.map((col) => col.w), ...AMOUNT_COLUMNS.map((col) => col.w)], tableW = widths.reduce((sum, w) => sum + w, 0), xs: number[] = []; let at = left; for (const w of widths) { xs.push(at); at += w; }
   const perPage = 24, rowH = 5.4, headH = 11;
@@ -31,6 +42,7 @@ export async function incentiveSummaryPdf(rows: IncentiveSummaryRow[], month: st
     const pages = Math.max(1, Math.ceil(list.length / perPage));
     for (let page = 0; page < pages; page++) {
       if (!firstPage) pdf.addPage(); firstPage = false;
+      if (mark) { const height = 14, width = height * mark.w / mark.h; pdf.addImage(mark.data, 'PNG', 8, 5, width, height); }
       pdf.setFont('helvetica', 'bold'); pdf.setTextColor(0, 0, 0);
       pdf.setFontSize(11); pdf.text('KLINIK ARA 24 JAM', 148.5, 16, { align: 'center' });
       pdf.setFontSize(10); pdf.text(`INCENTIVE ALLOWANCE BRANCH ${BRANCH[company]}`, 148.5, 22, { align: 'center' });

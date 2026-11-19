@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
-import { payPeriod } from './lib/payrollRun';
+import { slipPeriod } from './lib/payrollRun';
 import { downloadBlob } from './lib/downloadBlob';
 
 // My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
-export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
+export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
+// The leave summary under the pay: days taken in the pay period / balance at the end of it / days taken so far this year. Annual Leave includes Emergency Leave.
+export type SlipLeave = { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } };
+export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`;
 
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const COMPANY: Record<string, { name: string; address: string }> = {
@@ -49,7 +52,7 @@ export function usePayslipPrint(active: boolean, title: string, onDone: () => vo
 
 export function PayslipDocument({ slip }: { slip: Slip }) {
   const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-  const period = payPeriod(slip.year, slip.month);
+  const period = slipPeriod(slip.year, slip.month, slip.resignDate);
   const line = (label: string, value: number, minus = false, bold = false) => <div key={label} className={`payslip-line${bold ? ' payslip-bold' : ''}`}><span>{label}</span><span>{minus ? '-' : ''}{fmt(value)}</span></div>;
   return <div className="payslip-doc">
     <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><strong>{company.name}</strong><small>{company.address}</small></div></header>
@@ -66,6 +69,7 @@ export function PayslipDocument({ slip }: { slip: Slip }) {
       {line('GROSS WAGES', slip.gross, false, true)}{line('NETT WAGES', slip.net, false, true)}
       {line('Employer EPF', slip.kwspEmployer)}{line('Employer EIS', slip.eisEmployer)}{line('Employer SOCSO', slip.socsoEmployer)}
       {line('Pay so far this year', slip.ytdWages)}{line('PCB so far this year', slip.ytdPcb)}
+      {slip.leave && <><div className="payslip-line"><span>AL taken / balance / this year</span><span>{leaveText(slip.leave.al)}</span></div><div className="payslip-line"><span>ML taken / balance / this year</span><span>{leaveText(slip.leave.ml)}</span></div></>}
     </section>
     <p className="payslip-bank">Salary credited to: BANK GIRO<br />Bank account: {slip.bankName || '—'}{slip.bankAccountEnd ? ` · •••• ${slip.bankAccountEnd}` : ''}<br />Paid on: 26 {MONTHS[slip.month - 1]} {slip.year}</p>
     <p className="payslip-note">This is a system generated payslip and does not require signature.</p>
@@ -116,7 +120,7 @@ export default function MyPayslips() {
   };
   if (slip) {
     const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-    const period = payPeriod(slip.year, slip.month);
+    const period = slipPeriod(slip.year, slip.month, slip.resignDate);
     return <div className="space-y-3">
       {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
       <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
@@ -144,6 +148,7 @@ export default function MyPayslips() {
           <Pair label="Zakat" value={0} /><Pair label="MTD/PCB" value={slip.pcb} />
           {slip.skbbk > 0 && <Pair label="SKBBK" value={slip.skbbk} />}
           <Pair label="Pay so far this year" value={slip.ytdWages} /><Pair label="PCB so far this year" value={slip.ytdPcb} />
+          {slip.leave && <><Field label="AL taken / balance / this year" value={leaveText(slip.leave.al)} /><Field label="ML taken / balance / this year" value={leaveText(slip.leave.ml)} /></>}
         </div>
         <div className="mt-4 space-y-1.5 text-sm">
           <p className="flex gap-3"><span className="w-36 text-slate-500">Salary Credited To</span><span className="font-semibold text-[#3b5da8]">: BANK GIRO</span></p>

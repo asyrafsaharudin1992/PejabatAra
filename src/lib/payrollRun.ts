@@ -19,7 +19,12 @@ export type PayStaff = {
 export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakatPaid: number };
 // What HR enters for the month. OT is entered as hours at each rate (the rate HR chose when approving it in Attendance), rest days and public
 // holidays worked as a count of days; the amounts are worked out from the salary. `ot` and `restPh` are for an amount that does not fit those.
-export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number; annualLeaveDeduction?: number };
+export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number; annualLeaveDeduction?: number; adjustments?: Adjustment[] };
+// A line HR adds for one person in a month (Payroll > Adjustments): a positive amount is added to the pay, a negative one is taken off.
+// Like "other allowance" it counts in the gross and the PCB, and not in KWSP or PERKESO.
+export type Adjustment = { type: string; amount: number; note: string; source?: 'incentive' };
+export const ADJUSTMENT_TYPES = ['Advance', 'Director fee', 'Incentive', 'Bonus', 'Back pay', 'Other'];
+export const adjustmentTotals = (list?: Adjustment[]) => ({ add: money((list || []).reduce((sum, item) => sum + (item.amount > 0 ? item.amount : 0), 0)), less: money((list || []).reduce((sum, item) => sum + (item.amount < 0 ? -item.amount : 0), 0)) });
 export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0, unpaidDays: 0, annualLeaveDeduction: 0 };
 
 const money = (value: number) => Math.round(value * 100) / 100;
@@ -52,6 +57,11 @@ export function proratedSalary(salary: number, year: number, month: number, join
   }
   return { amount: worked >= total ? salary : money((salary * worked) / total), worked, total };
 }
+// The pay period printed on a payslip: for someone who left in it, the period ends on the last day of work (Infotech: 20-09-2026 TO 02-10-2026).
+export function slipPeriod(year: number, month: number, resignDate?: string | null) {
+  const period = payPeriod(year, month);
+  return resignDate && resignDate >= period.from && resignDate < period.to ? { ...period, to: resignDate } : period;
+}
 export const hourlyRate = (salary: number) => money(dailyRate(salary) / 8);
 export function overtimePay(salary: number, hours: { ot10?: number; ot15?: number; ot20?: number; ot30?: number }) {
   const rate = hourlyRate(salary);
@@ -65,7 +75,9 @@ export function childrenForRelief(children: PayChild[], year: number) {
   return children.filter((child) => child.studying || (child.dateOfBirth && Number(child.dateOfBirth.slice(0, 4)) > year - 18)).length;
 }
 
-export function calculatePayslip(staff: PayStaff, inputs: PayInputs, ytd: PayYtd, year: number, month: number) {
+export function calculatePayslip(staff: PayStaff, given: PayInputs, ytd: PayYtd, year: number, month: number) {
+  const extra = adjustmentTotals(given.adjustments);
+  const inputs: PayInputs = { ...given, otherAllowance: money(given.otherAllowance + extra.add), otherDeduction: money(given.otherDeduction + extra.less) };
   const s = staff.settings;
   const unpaid = money(inputs.unpaidLeave + unpaidDayRate(staff.basicSalary) * (inputs.unpaidDays || 0));
   const earned = proratedSalary(staff.basicSalary, year, month, staff.joinDate, staff.resignDate, staff.salaryChanges).amount;

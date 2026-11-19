@@ -9,10 +9,10 @@ import type { ProbationState } from './hrCalendar';
 
 export type ReportSection = { roster?: boolean; title?: string; note?: string; headers: string[]; rows: (string | number)[][]; cellColors?: string[][] };
 export type ForecastReport = { kind: 'forecast'; people: ProjectionPerson[]; plan: ProjectionPlan; probation: Record<string, ProbationState>; months: string[]; branches: string[]; subtitle: string };
-export type PreparedReport = { kind: 'table'; sections: ReportSection[]; subtitle: string } | { kind: 'otclaims'; staff: any[]; from: string; to: string; company: string; filterText: string; sections: ReportSection[]; subtitle: string } | { kind: 'profile'; employee: Employee; career: CareerEntry[] } | { kind: 'review'; review: ReviewFull } | { kind: 'incentives'; claims: Claim[]; subtitle: string } | ForecastReport;
+export type PreparedReport = { kind: 'duty'; pages: any[]; sections: ReportSection[]; subtitle: string } | { kind: 'table'; sections: ReportSection[]; subtitle: string } | { kind: 'otclaims'; staff: any[]; from: string; to: string; company: string; filterText: string; sections: ReportSection[]; subtitle: string } | { kind: 'profile'; employee: Employee; career: CareerEntry[] } | { kind: 'review'; review: ReviewFull } | { kind: 'incentives'; claims: Claim[]; subtitle: string } | ForecastReport;
 
 export function reportExportSections(report: PreparedReport, reveal: boolean): ReportSection[] {
-  if (report.kind === 'table' || report.kind === 'otclaims') return report.sections;
+  if (report.kind === 'table' || report.kind === 'otclaims' || report.kind === 'duty') return report.sections;
   if (report.kind === 'forecast') return report.branches.map((branch) => {
     const people = projectionRows(report.people, report.plan, report.months, branch);
     const columns = report.months.map((month) => people.map((row) => ({ row, cell: displayedCell(row, month, report.plan, report.probation) })).filter((entry) => entry.cell?.company === branch));
