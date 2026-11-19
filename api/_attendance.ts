@@ -600,6 +600,17 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
 export const TEAM_COLUMNS = PERSON;
 
 // ---- Office HR side ----
+// A clock on a date in a payroll month that is already locked (run in AraOffice, from November 2026) cannot be added, changed or removed: the pay was worked out from it.
+// The pay period is the 20th to the 19th. Unlock the month in Payroll first if it really has to change.
+const PAY_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export async function assertPayrollOpen(db: any, employeeId: string, date: string) {
+  let [year, month] = [Number(date.slice(0, 4)), Number(date.slice(5, 7))];
+  if (Number(date.slice(8, 10)) >= 20) { month += 1; if (month > 12) { month = 1; year += 1; } }
+  if (`${year}-${String(month).padStart(2, '0')}` < '2026-11') return;
+  const { data } = await db.from('hr_payslips').select('status').eq('employee_id', employeeId).eq('year', year).eq('month', month).maybeSingle();
+  if (data?.status === 'locked') throw fail(409, `${date.split('-').reverse().join('/')} is in the ${PAY_MONTHS[month - 1]} ${year} payroll, which is locked. Unlock the month in Payroll first if this must change.`);
+}
+
 export async function attendanceHrAction(req: any, res: any, db: any, action: string, body: any, userLabel: string, only?: Set<string>, userId?: string) {
   // `only` limits the people to a team (the COO's own team); HR sees everyone.
   const active = async () => { const { data, error } = await db.from('hr_employees').select(PERSON).eq('status', 'Active').order('full_name').limit(500); if (error) throw error; return ((data || []) as Employee[]).filter((p) => !only || only.has(p.id)); };
@@ -669,6 +680,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       for (const row of rows || []) { const ms = Date.parse(row.clock_at), date = new Date(ms + 8 * HOUR).toISOString().slice(0, 10); const list = rawClocks.get(date) || []; list.push({ id: row.id, kind: row.kind, ms }); rawClocks.set(date, list); }
     }
     const allClocks = [...rawClocks.values()].flat();
+    const decidedOt = new Map<string, any>((data.ot || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
     // Everyone chosen (or the one person), each with every day: the report is drawn from this, and the odd-days summary is worked out from the same days.
     const out = chosen.map((p) => {
       const all = days.get(p.id) || [];
@@ -676,10 +688,17 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       const kindOf = (date: string): DayKind => classifyDay(date, (d) => Boolean(byDate.get(d)?.code), (d) => Boolean(byDate.get(d)?.holiday));
       const list = all.filter((day) => day.date >= from && day.date <= to).map((day) => {
         const v = dayView(day), f = flagsOf(day);
-        // OT hours at each rate, from what HR approved (the rest day / public holiday fixed amount is written as its equal hours, as in Infotech).
-        const byRate: Record<string, number> = {};
-        if (day.otStatus === 'approved') for (const part of day.otParts || []) byRate[String(part.multiplier)] = (byRate[String(part.multiplier)] || 0) + part.minutes;
-        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, credit: day.creditHours, odd: f.odd, soft: f.soft };
+        // OT hours at each rate: what HR approved (read from the decision itself, so a day HR approved is shown even when the clocks no longer show OT),
+        // and, for a day with OT that is not decided yet, what the OT policy would pay (shown apart, as waiting).
+        const byRate: Record<string, number> = {}, waiting: Record<string, number> = {};
+        const decision = decidedOt.get(`${p.id}|${day.date}`);
+        if (decision?.status === 'approved') {
+          const parts: OtPart[] = Array.isArray(decision.parts) && decision.parts.length ? decision.parts : Number(decision.approved_minutes) > 0 ? [{ minutes: Number(decision.approved_minutes), multiplier: Number(decision.multiplier) || 1.5 }] : [];
+          for (const part of parts) byRate[String(part.multiplier)] = (byRate[String(part.multiplier)] || 0) + part.minutes;
+        } else if (day.otCounted > 0 && (!decision || decision.status === 'pending')) {
+          for (const part of otParts(kindOf(day.date), day.ot, rules.policyFor(day.date))) waiting[String(part.multiplier)] = (waiting[String(part.multiplier)] || 0) + part.minutes;
+        }
+        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft };
       });
       return { person: { ...person(p), designation: p.designation }, days: list };
     });
@@ -939,6 +958,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (!isTime(body.time)) throw fail(400, 'Enter the time as hh:mm.');
     let clockAt = at(date, String(body.time)); if (body.nextDay === true) clockAt += 24 * HOUR;
     if (clockAt > Date.now() + 5 * MIN) throw fail(400, 'A clock cannot be in the future.');
+    await assertPayrollOpen(db, id, date);
     // kind 'auto' (the in-place edit screen): the clock after an in is an out, otherwise it is an in, going by the clock just before it.
     if (body.kind === 'auto') { const { data: before } = await db.from('hr_attendance_clocks').select('kind').eq('employee_id', id).lt('clock_at', new Date(clockAt).toISOString()).gte('clock_at', new Date(clockAt - 20 * HOUR).toISOString()).order('clock_at', { ascending: false }).limit(1); kind = before?.[0]?.kind === 'in' ? 'out' : 'in'; }
     const { error } = await db.from('hr_attendance_clocks').insert({ employee_id: id, kind, clock_at: new Date(clockAt).toISOString(), within_place: null, device: 'hr' });
@@ -955,6 +975,8 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const date = isDate(body.date) ? String(body.date) : new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10);
     let clockAt = at(date, String(body.time)); if (body.nextDay === true) clockAt += 24 * HOUR;
     if (clockAt > Date.now() + 5 * MIN) throw fail(400, 'A clock cannot be in the future.');
+    await assertPayrollOpen(db, one.employee_id, new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10));
+    await assertPayrollOpen(db, one.employee_id, new Date(clockAt + 8 * HOUR).toISOString().slice(0, 10));
     const { error } = await db.from('hr_attendance_clocks').update({ clock_at: new Date(clockAt).toISOString(), device: 'hr' }).eq('id', clockId);
     if (error) throw error;
     await db.from('hr_audit').insert({ employee_id: one.employee_id, action: 'update', changes: { clock_changed: `${one.kind} ${new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 16).replace('T', ' ')} to ${new Date(clockAt + 8 * HOUR).toISOString().slice(0, 16).replace('T', ' ')}`, note: text(body.note, 200), by: userLabel } });
@@ -964,6 +986,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const clockId = text(body.clockId, 60);
     const { data: one } = await db.from('hr_attendance_clocks').select('employee_id,kind,clock_at').eq('id', clockId).maybeSingle();
     if (!one) throw fail(404, 'That clock was not found.');
+    await assertPayrollOpen(db, one.employee_id, new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10));
     const { error } = await db.from('hr_attendance_clocks').delete().eq('id', clockId);
     if (error) throw error;
     await db.from('hr_audit').insert({ employee_id: one.employee_id, action: 'update', changes: { clock_deleted: `${one.kind} ${hhmm(Date.parse(one.clock_at))} on ${new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10)}`, note: text(body.note, 200), by: userLabel } });

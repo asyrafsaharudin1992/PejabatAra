@@ -570,7 +570,7 @@ const SHOW_ORDERS = false;
 
 const TABS: { id: Exclude<View, 'home'>; label: string; note: string; icon: typeof Home; tone: string }[] = [
   { id: 'report', label: 'Daily Checklist', note: 'Tick & send to WhatsApp', icon: ClipboardList, tone: 'text-[#20c7f4]' },
-  { id: 'roster', label: 'Roster', note: 'Duty roster by month (view only)', icon: CalendarDays, tone: 'text-violet-400' },
+  { id: 'roster', label: 'Roster', note: 'Duty roster by month (press a day to change it)', icon: CalendarDays, tone: 'text-violet-400' },
   { id: 'history', label: 'History', note: 'What was done each day', icon: History, tone: 'text-[#9b8cff]' },
   // Orders and Vaccine Bookings are hidden for now; their data and screens are kept.
   { id: 'contacts', label: 'Quick Contact', note: 'Suppliers & services', icon: Phone, tone: 'text-emerald-400' },
@@ -910,7 +910,7 @@ export default function OfficeClinical({ embedded = false }: { embedded?: boolea
         {(branches?.length || 0) > 1 && viewAs !== 'all' && <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Viewing as <strong>{ADMIN_NAMES[viewAs] || viewAs}</strong> ({viewAs}): this is what they see. System Admin editing is off here.</span><button onClick={() => setViewAs('all')} className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm hover:bg-amber-100">Back to All</button></div>}
         {error && <div className="mx-auto mb-4 max-w-[1500px] cursor-pointer" onClick={() => setError('')}><Banner tone="error">{error}</Banner></div>}
         {view === 'home' && <HomeView day={day} overseer={overseer} waiting={waiting} waitingBusy={waitingBusy} onRefreshWaiting={refreshWaiting} onNavigate={navigate} onOpenBranch={(name) => { setViewAs(name); setBranch(name); navigate('report'); }} />}
-        {view === 'roster' && <HRRoster readOnly defaultView="calendar" onError={onError} />}
+        {view === 'roster' && <HRRoster readOnly canEdit defaultView="table" onError={onError} />}
         {view === 'caoffice' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the CA office…</p>}><CAOffice key="ca" embedded /></Suspense>}
         {view !== 'home' && view !== 'caoffice' && view !== 'roster' && view !== 'incentives' && view !== 'history' && view !== 'contacts' && view !== 'forms' && view !== 'panel' && view !== 'links' && !day && branch && <p className="text-sm text-slate-500">Loading…</p>}
         {/* Stays mounted while other tabs are open so unsaved ticks are kept; keyed so a new branch or day starts from the server's copy. */}

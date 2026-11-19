@@ -3,7 +3,7 @@ import { ceoCharts, headcount } from './_ceo-charts.js';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
-import { attendanceHrAction } from './_attendance.js';
+import { assertPayrollOpen, attendanceHrAction } from './_attendance.js';
 import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
@@ -375,11 +375,14 @@ function readMiscFile(body: any, fileKind: 'poster' | 'print') {
 // What the COO may read in the HR office: the roster and the CA staffing forecast (read only). Nothing else in HR, and nothing that changes data.
 // Office Finance: the Incentive, Payroll and Tax pages and the charts, for reading and downloading (Maybank, KWSP, PERKESO, ePCB files, summaries). The only
 // things Finance may change are marking an incentive as paid or not. Payroll itself (saving, locking), staff profiles, leave and the rest stay with HR.
-const FINANCE_CAN_READ = /^(payroll|tax_|incentive|incentives$|care_claims|care_staff|charts$|headcount$|employees$|org_chart$|photo_urls$)/;
+const FINANCE_CAN_READ = /^(payroll|payslip_|tax_|incentive|incentives$|care_claims|care_staff|charts$|headcount$|employees$|org_chart$|photo_urls$)/;
 const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid']);
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
 const CLINICAL_CAN_READ = new Set(['roster']);
+// The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
+const CLINICAL_CAN_WRITE = new Set(['roster_set']);
+const CLINICAL_ROSTER_STAFF = /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i;
 
 // The Maybank2U bulk payment file (the layout Infotech writes) for one company: `entries` are the people and the amounts to pay. Used for the salary, for the incentive pay
 // in Payroll, and for the Incentive > Finance use tab.
@@ -472,7 +475,7 @@ export async function hrHandler(req: any, res: any) {
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     const financeOnly = profile.role !== 'super_admin' && !access.includes('hr') && access.includes('finance');
     if (financeOnly) { if (!(req.method === 'GET' ? FINANCE_CAN_READ.test(action) : FINANCE_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.'); }
-    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action))) throw fail(403, 'Access restricted.');
+    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action)) && !(req.method === 'POST' && access.includes('clinical') && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
@@ -2068,6 +2071,52 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ saved: rows.length, locked: lock });
     }
 
+    // Unlock a month run in AraOffice (from November 2026), for a mistake found after locking. A reason is needed and every change is audited. Months brought over from
+    // Infotech cannot be unlocked, and a month cannot be unlocked while a later month is still locked (its PCB feeds the later one).
+    if (req.method === 'POST' && action === 'payroll_unlock') {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      const year = Math.round(Number(body.year)), month = Math.round(Number(body.month)), reason = text(body.reason, 300);
+      if (!(year >= 2026 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
+      if (`${year}-${String(month).padStart(2, '0')}` < '2026-11') throw fail(400, 'Months paid in Infotech (up to October 2026) cannot be unlocked.');
+      if (reason.length < 5) throw fail(400, 'Write the reason for unlocking (at least 5 letters).');
+      const { data: later, error: laterError } = await db.from('hr_payslips').select('year,month').eq('status', 'locked').or(`year.gt.${year},and(year.eq.${year},month.gt.${month})`).limit(1);
+      if (laterError) throw laterError;
+      if (later?.length) throw fail(409, `${MONTHS[later[0].month - 1].toUpperCase()} ${later[0].year} is still locked. Unlock the later month first.`);
+      const { data: slips, error: slipError } = await db.from('hr_payslips').select('employee_id').eq('year', year).eq('month', month).eq('status', 'locked');
+      if (slipError) throw slipError;
+      if (!slips?.length) throw fail(400, 'This month is not locked.');
+      const { error } = await db.from('hr_payslips').update({ status: 'draft', locked_at: null, updated_at: new Date().toISOString() }).eq('year', year).eq('month', month).eq('status', 'locked');
+      if (error) throw error;
+      await db.from('hr_audit').insert(slips.map((row: any) => ({ employee_id: row.employee_id, action: 'update', changes: { payroll_unlocked: `${MONTHS[month - 1].toUpperCase()} ${year}`, reason, by: text((user as any)?.email, 120) }, changed_by: user.id })));
+      return res.status(200).json({ unlocked: slips.length });
+    }
+
+    // Past payslips for HR (and Finance): everyone paid in a payroll month, and one person's payslip in the same shape as the staff member sees it.
+    if (req.method === 'GET' && action === 'payslip_list') {
+      const year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      if (!(year >= 2020 && year <= 2100) || !(month >= 1 && month <= 12)) throw fail(400, 'Choose a month.');
+      const { data: slips, error } = await db.from('hr_payslips').select('employee_id,status,result').eq('year', year).eq('month', month).limit(1000);
+      if (error) throw error;
+      const ids = (slips || []).map((row: any) => row.employee_id);
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] as any[] };
+      const byId = new Map((people || []).map((p: any) => [p.id, p]));
+      return res.status(200).json({ year, month, staff: (slips || []).map((row: any) => { const p: any = byId.get(row.employee_id) || {}; return { id: row.employee_id, code: p.employee_code || '', name: p.full_name || '', company: p.company || '', designation: p.designation || '', status: row.status, net: Number(row.result?.net) || 0 }; }).sort((a: any, b: any) => a.company.localeCompare(b.company) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true })) });
+    }
+    if (req.method === 'GET' && action === 'payslip_view') {
+      const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      const [{ data: slip, error }, { data: me }] = await Promise.all([
+        db.from('hr_payslips').select('year,month,status,result').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
+        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account').eq('id', id).maybeSingle(),
+      ]);
+      if (error) throw error;
+      if (!slip || !me) throw fail(404, 'That payslip is not available.');
+      const r: any = slip.result || {};
+      return res.status(200).json({ status: slip.status, payslip: { year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
+        basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
+        eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
+        bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4) } });
+    }
+
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).
     if (req.method === 'GET' && action === 'payroll_bank') {
       // The same file is made for the confirmed incentive pay of a claim month (claimMonth=YYYY-MM), paid on the 16th, instead of a month's salary.
@@ -2391,9 +2440,12 @@ export async function hrHandler(req: any, res: any) {
       const shift = text(body.shift, 30).toUpperCase();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fail(400, 'Choose a valid date.');
       if (shift && !ROSTER_CODES.has(shift)) throw fail(400, 'Choose a roster code from the list.');
-      const { data: person, error: personError } = await db.from('hr_employees').select('id').eq('id', employeeId).maybeSingle();
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,designation').eq('id', employeeId).maybeSingle();
       if (personError) throw personError;
       if (!person) throw fail(404, 'Profile not found.');
+      // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin.
+      if (profile.role !== 'super_admin' && !access.includes('hr') && !CLINICAL_ROSTER_STAFF.test(String(person.designation || ''))) throw fail(403, 'The Clinical Admin office can change the roster of clinic assistants and clinical admin only.');
+      await assertPayrollOpen(db, employeeId, date);
       const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
       if (beforeError) throw beforeError;
       if ((before?.shift || '') === shift) throw fail(400, 'That is already the code for this day.');

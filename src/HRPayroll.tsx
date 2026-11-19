@@ -8,6 +8,8 @@ import { downloadBlob } from './lib/downloadBlob';
 import { payrollSummaryPdf } from './lib/payrollSummaryPdf';
 import { pdfPageImages } from './lib/pdfPages';
 import { PayrollGuide } from './PayrollGuide';
+import { HRPayrollCompare } from './HRPayrollCompare';
+import { HRPayslips } from './HRPayslips';
 import { MaybankPreview } from './HRIncentiveFinance';
 import { previewStatutory, type FilePreview } from './lib/payrollFilePreview';
 import { calculatePayslip, NO_INPUTS, payPeriod, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
@@ -61,6 +63,9 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState('');
+  // Unlock a month run in AraOffice (a mistake found after locking): the reason is asked on the page, not in a pop-up.
+  const [unlocking, setUnlocking] = useState(false);
+  const [reason, setReason] = useState('');
   const load = async () => {
     setStaff(null); setNote('');
     try {
@@ -104,6 +109,17 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to make the preview.'); }
   };
   const closePreview = () => { preview?.pages.forEach((url) => URL.revokeObjectURL(url)); setPreview(null); };
+  const unlock = async () => {
+    setBusy('unlock'); setNote('');
+    try {
+      const response = await officeFetch(`${API}&action=payroll_unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, month, reason: reason.trim() }) });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Unable to unlock.');
+      setUnlocking(false); setReason('');
+      await load(); setNote(`${MONTH_NAMES[month - 1]} ${year} is unlocked (${data.unlocked} payslips). Change what is needed, Save draft, then Lock month again.`);
+    } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to unlock.'); }
+    setBusy('');
+  };
   const save = async (lock: boolean) => {
     setBusy(lock ? 'lock' : 'save'); setNote('');
     try {
@@ -156,8 +172,15 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
         <button type="button" onClick={summary} disabled={!show} title={show ? '' : 'Press Show amounts first'} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Summary (CSV)</button>
         <button type="button" onClick={() => void summaryPdf()} disabled={!show} title={show ? '' : 'Press Show amounts first'} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Download className="h-4 w-4" />Summary (PDF)</button>
         <button type="button" onClick={() => void openPreview()} disabled={!show} title={show ? 'See the summary on screen' : 'Press Show amounts first'} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-40"><Eye className="h-4 w-4" />Preview summary</button>
+        {locked && month > doneMonth && !unlocking && <button type="button" disabled={Boolean(busy)} onClick={() => { setUnlocking(true); setReason(''); }} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50">Unlock month</button>}
         {locked && <span className="text-sm font-semibold text-emerald-600">This month is locked.</span>}{note && <span className="text-sm text-slate-600">{note}</span>}
       </div>
+      {unlocking && <div role="alertdialog" aria-label="Unlock month" className="mt-3 space-y-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+        <p className="text-sm font-semibold text-rose-800">Unlock {MONTH_NAMES[month - 1]} {year}?</p>
+        <p className="text-sm text-rose-800">Staff will no longer see these payslips, and the month can be changed and locked again. If the KWSP, PERKESO, ePCB or bank file was already sent, the new figures must be sent again. A later month must be unlocked first. This is written to the audit record.</p>
+        <label className="block text-sm font-semibold text-slate-700">Reason (required)<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={300} placeholder="For example: wrong OT hours for one staff" className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal" /></label>
+        <div className="flex gap-2"><button type="button" disabled={Boolean(busy) || reason.trim().length < 5} onClick={() => void unlock()} className="h-10 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white disabled:opacity-50">{busy === 'unlock' ? 'Unlocking…' : 'Yes, unlock this month'}</button><button type="button" onClick={() => setUnlocking(false)} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">No, keep it locked</button></div>
+      </div>}
       <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[1900px] text-left text-xs">
         <thead><tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Basic</th>{FIELDS.map(([, label]) => <th key={label} className="pr-2">{label}</th>)}<th className="pr-3 text-right">Gross</th><th className="pr-3 text-right">KWSP</th><th className="pr-3 text-right">PERKESO</th><th className="pr-3 text-right">EIS</th><th className="pr-3 text-right">SKBBK</th><th className="pr-3 text-right">PCB</th><th className="text-right">Net</th></tr></thead>
         <tbody>{rows.map(({ member, out }) => { const slipLocked = member.payslip?.status === 'locked'; return <tr key={member.id} className="border-t border-slate-100">
@@ -263,15 +286,15 @@ function PayrollFinance({ onError }: { onError: (message: string) => void }) {
 }
 
 export function HRPayroll({ onError = () => {} }: { onError?: (message: string) => void }) {
-  const [tab, setTab] = useState<'run' | 'finance' | 'chart' | 'guide'>('run');
+  const [tab, setTab] = useState<'run' | 'compare' | 'payslips' | 'finance' | 'chart' | 'guide'>('run');
   return <div className="mx-auto max-w-[1500px] space-y-5">
     <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">{window.location.hash.includes('finance') ? 'Office Finance' : 'Office HR'} · Klinik ARA 24 Jam</p>
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>
-    <SubTabs label="Payroll" active={tab} onSelect={setTab} tabs={[{ id: 'run', label: 'Pay run' }, { id: 'finance', label: 'Finance use', short: 'Finance' }, { id: 'chart', label: 'Chart' }, { id: 'guide', label: 'Calculation guide', short: 'Guide' }]} />
-    {tab === 'chart' ? <PayrollCharts /> : tab === 'guide' ? <PayrollGuide /> : tab === 'finance' ? <PayrollFinance onError={onError} /> : <>
+    <SubTabs label="Payroll" active={tab} onSelect={setTab} tabs={[{ id: 'run', label: 'Pay run' }, { id: 'compare', label: 'Compare with last month', short: 'Compare' }, { id: 'payslips', label: 'Payslips' }, { id: 'finance', label: 'Finance use', short: 'Finance' }, { id: 'chart', label: 'Chart' }, { id: 'guide', label: 'Calculation guide', short: 'Guide' }]} />
+    {tab === 'chart' ? <PayrollCharts /> : tab === 'guide' ? <PayrollGuide /> : tab === 'finance' ? <PayrollFinance onError={onError} /> : tab === 'compare' ? <HRPayrollCompare onError={onError} /> : tab === 'payslips' ? <HRPayslips onError={onError} /> : <>
       <PayRun onError={onError} />
       <div className="grid gap-5 lg:grid-cols-2">
         <List title="Set up first" steps={SETUP} />

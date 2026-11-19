@@ -11,7 +11,7 @@ import { usePrintSheet } from './IncentiveSheet';
 
 // Office HR > Attendance > Individual: Infotech's "Individual Attendance Report With Monthly Allowance", one block for each person with every day: the clocks, the shift,
 // Normal / Late / EarlyOut / Actual, OT at each rate and the reason. A last Check column marks the odd days, and "Odd days" lists who has the most, for Admin.
-type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; credit: number; odd: string[]; soft: string[] };
+type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[] };
 type Person = { id: string; company: string; code: string; name: string; designation: string };
 type Block = { person: Person; days: Day[] };
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN BHD' };
@@ -30,6 +30,8 @@ const WIDTHS = [150, 116, 72, 72, 65, 115, 70, 95, 85, 75, 75, 75, 80, 67, 68, 7
 const GRID = { display: 'grid', gridTemplateColumns: WIDTHS.map((width) => `${width}fr`).join(' '), alignItems: 'center', textAlign: 'center' } as const;
 const dark = 'font-bold text-[#8b1a1a]';
 const otMinutes = (day: Day, rate: string) => day.otByRate[rate] || 0;
+// OT that has no decision yet: what the OT policy would pay, shown in grey italics and not added to the totals.
+const otWaiting = (day: Day, rate: string) => day.otByRate[rate] ? 0 : day.otWaiting?.[rate] || 0;
 // Shift column: the shift code, RD on the rest day, OD on any other day off. Reason: leave code, ABS (absent), PH, or RES (rest day).
 const shiftCell = (day: Day) => day.shift ? newCode(day.shift) : day.kind === 'rest' ? 'RD' : 'OD';
 const reasonOf = (day: Day) => day.leave || (day.status === 'absent' ? 'ABS' : day.holiday ? 'PH' : !day.shift && day.kind === 'rest' ? 'RES' : '');
@@ -72,7 +74,7 @@ function Sheet({ block, period, at, page, pages, grand }: { key?: string; block:
     <p className="mt-1.5 font-bold"><span className="text-[#8b1a1a]">Emp Code</span> &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.code}</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span className="text-[#8b1a1a]">Name :</span> &nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.name}</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span className="text-[#8b1a1a]">Designation :</span> &nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.designation}</span></p>
     {days.map((day) => <div key={day.date} className={`tabular-nums ${day.odd.length ? 'bg-rose-50 print:bg-transparent' : ''}`} title={[...day.odd, ...day.soft].join(', ')} style={{ ...GRID, minHeight: 15 }}>
       <span className="text-left">{dmy(day.date)}</span><span>{dayName(day.date)}</span><span>{clock(day.inTime)}</span><span>{clock(day.outTime)}</span><span>{shiftCell(day)}</span><span>{hmDot(shiftMinutes(day))}</span><span>{hmDot(day.late)}</span><span>{hmDot(day.early)}</span><span>{hmDot(day.worked)}</span>
-      {RATES.map((rate) => <span key={rate}>{hmDot(otMinutes(day, rate))}</span>)}<span>0.00</span>{Array.from({ length: 7 }, (_, index) => money(index))}<span>{reasonOf(day)}</span>
+      {RATES.map((rate) => otWaiting(day, rate) ? <span key={rate} className="italic text-slate-400" title="OT waiting for approval">{hmDot(otWaiting(day, rate))}</span> : <span key={rate}>{hmDot(otMinutes(day, rate))}</span>)}<span>0.00</span>{Array.from({ length: 7 }, (_, index) => money(index))}<span>{reasonOf(day)}</span>
     </div>)}
     <div className="mt-0.5 border-t border-slate-700" />
     <Totals labels={['Normal', 'Late', 'EarlyOut', 'Actual', 'OT 1.0', 'OT 1.5', 'OT 2.0', 'OT 3.0', 'Flat']} allowance={['Attd', 'Shift', 'Meal', 'Tran', 'AllowanceOther', 'AllowanceOther2', 'Health']} values={figures} caption="Total :" />
@@ -163,7 +165,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
           <td className={cell}>{shiftCell(day)}</td><td className={`${cell} ${odd ? 'font-semibold text-rose-700' : ''}`}>{reasonOf(day)}</td>
           <td className={cell}>{worked ? colon(shiftMinutes(day)) : '0:00'}</td><td className={cell}>{colon(day.worked)}</td>
           <td className={`${cell} ${day.early ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.early)}</td><td className={`${cell} ${day.late ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.late)}</td>
-          {RATES.map((rate) => <td key={rate} className={`${cell} ${otMinutes(day, rate) ? 'bg-[#f7c8f0]' : ''}`}>{colon(otMinutes(day, rate))}</td>)}
+          {RATES.map((rate) => otWaiting(day, rate) ? <td key={rate} className={`${cell} italic text-slate-400`} title="OT waiting for approval">{colon(otWaiting(day, rate))}</td> : <td key={rate} className={`${cell} ${otMinutes(day, rate) ? 'bg-[#f7c8f0]' : ''}`}>{colon(otMinutes(day, rate))}</td>)}
           <td className={cell}>0:00</td>
           {Array.from({ length: 7 }, (_, i) => <td key={i} className={`${cell} bg-[#fbe3df]`}>0.00</td>)}
         </tr>;
@@ -217,7 +219,7 @@ export function HRAttendanceIndividual({ onError }: { onError: (message: string)
   const num = (value: number) => value ? <b className="text-rose-700">{value}</b> : <span className="text-slate-300">0</span>;
   return <div className="space-y-5">
     <section className={`${card} flex flex-wrap items-end gap-3 print:hidden`}>
-      <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">Individual attendance</h2><p className="text-sm text-slate-500">Every day of each person, like the Infotech Individual Attendance Report. Odd days (absent, no clock out, clocked on a day off, over 14 hours, under 4 hours) are shaded and named in the Check column.</p></div>
+      <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">Individual attendance</h2><p className="text-sm text-slate-500">Every day of each person, like the Infotech Individual Attendance Report. Odd days (absent, no clock out, clocked on a day off, over 14 hours, under 4 hours) are shaded pink. OT shows what HR approved; OT in grey italics is waiting for approval and is not in the totals.</p></div>
       <PeriodPicker onChange={setPeriod} />
       <label className="text-xs font-bold text-slate-600">Company<select aria-label="Company" value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
       <label className="text-xs font-bold text-slate-600">Staff<select ref={staffBox} aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[240px] ${view === 'edit' && !staffId ? 'border-[#0b587b] ring-2 ring-[#0b587b]/40' : ''}`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>

@@ -9,29 +9,29 @@ import { downloadBlob } from './lib/downloadBlob';
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
-type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
+export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string };
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const COMPANY: Record<string, { name: string; address: string }> = {
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const COMPANY: Record<string, { name: string; address: string }> = {
   KJ: { name: 'KJ- HSO Healthcare Sdn Bhd', address: 'D-13-GA Jalan Prima Saujana 2/F, Taman Prima Saujana, 43000 Kajang, Selangor' },
   SK: { name: 'SK- HSO Healthcare Sdn Bhd', address: 'No. F-1-G, Blok F Putra Walk, Jalan PP25, Taman Pinggiran Putra, 43300 Seri Kembangan, Selangor' },
 };
-const fmt = (value: number) => (value || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const longDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+export const fmt = (value: number) => (value || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const longDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
-function Row({ label, value, minus }: { key?: string; label: string; value: number; minus?: boolean }) {
+export function Row({ label, value, minus }: { key?: string; label: string; value: number; minus?: boolean }) {
   return <div className="flex justify-between gap-3 py-1.5 text-sm"><span className="text-slate-600">{label}</span><strong className="tabular-nums text-[#3b5da8]">{minus ? '-' : ''}{fmt(value)}</strong></div>;
 }
-function Field({ label, value }: { label: string; value: string }) {
+export function Field({ label, value }: { label: string; value: string }) {
   return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{value || '—'}</p></div>;
 }
-function Pair({ label, value }: { label: string; value: number }) {
+export function Pair({ label, value }: { label: string; value: number }) {
   return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{fmt(value)}</p></div>;
 }
 
 // Printing uses a separate A4 document (like the staff profile print) so the app's header and navigation never reach the paper, and it
 // always fits one page. The page margin is zero in the print rules; the white border is padding inside the document.
-function usePayslipPrint(active: boolean, title: string, onDone: () => void) {
+export function usePayslipPrint(active: boolean, title: string, onDone: () => void) {
   useEffect(() => {
     if (!active) return;
     const previous = document.title;
@@ -47,7 +47,7 @@ function usePayslipPrint(active: boolean, title: string, onDone: () => void) {
   }, [active]);
 }
 
-function PayslipDocument({ slip }: { slip: Slip }) {
+export function PayslipDocument({ slip }: { slip: Slip }) {
   const company = COMPANY[slip.company] || { name: slip.company, address: '' };
   const period = payPeriod(slip.year, slip.month);
   const line = (label: string, value: number, minus = false, bold = false) => <div key={label} className={`payslip-line${bold ? ' payslip-bold' : ''}`}><span>{label}</span><span>{minus ? '-' : ''}{fmt(value)}</span></div>;

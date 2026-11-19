@@ -60,8 +60,9 @@ function Choice<T extends string>({ value, onChange, options, label }: { value: 
   return <div role="group" aria-label={label} className="inline-flex rounded-xl bg-slate-100 p-0.5 sm:p-1">{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)} className={`h-7 rounded-lg px-2.5 text-xs font-semibold transition sm:h-8 sm:px-3.5 sm:text-sm ${value === key ? 'bg-white text-[#0b587b] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{text}</button>)}</div>;
 }
 
+// `canEdit`: with `readOnly`, a day can still be changed, in the table (press a cell) or on the calendar (pick a person, press a day), and the table view is available (the Clinical Admin office). No upload, no trial draft.
 // `readOnly`: the COO looks at the roster but cannot change it (no editing, no upload, no upload). A trial pattern draft can be allowed with `canDraft`: it only calculates on screen and saves nothing.
-export function HRRoster({ onError, readOnly = false, defaultView = 'table', hideCodes = [], canDraft = false }: { onError: (message: string) => void; readOnly?: boolean; defaultView?: 'table' | 'calendar'; hideCodes?: string[]; canDraft?: boolean }) {
+export function HRRoster({ onError, readOnly = false, canEdit = false, defaultView = 'table', hideCodes = [], canDraft = false }: { onError: (message: string) => void; readOnly?: boolean; canEdit?: boolean; defaultView?: 'table' | 'calendar'; hideCodes?: string[]; canDraft?: boolean }) {
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [printing, setPrinting] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -77,7 +78,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
   // On a phone, and for anyone who can only look at the roster (COO, CEO), the roster is the calendar with AraOffice's codes: no Codes or Table / Calendar choice.
   const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches);
   useEffect(() => { const query = window.matchMedia('(max-width: 639px)'); const change = () => setPhone(query.matches); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
-  const calendarOnly = phone || readOnly;
+  const calendarOnly = phone || (readOnly && !canEdit);
   useEffect(() => { if (calendarOnly) { setView('calendar'); setCompany((current) => current || 'KJ'); } if (phone) setCodes('new'); }, [calendarOnly, phone]);
   const shown = (shift: string) => codes === 'new' ? newCode(shift) : shift;
   const [data, setData] = useState<{ people: Person[]; days: Day[] } | null>(null);
@@ -105,7 +106,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
   };
 
-  const startEdit = (person: Person, date: string, day?: Day) => readOnly ? undefined : setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
+  const startEdit = (person: Person, date: string, day?: Day) => readOnly && !canEdit ? undefined : setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
   const saveEdit = async () => {
     if (!edit) return;
     setEdit({ ...edit, saving: true });
@@ -209,7 +210,7 @@ export function HRRoster({ onError, readOnly = false, defaultView = 'table', hid
             {Array.from({ length: lead }, (_, index) => <div key={`lead-${index}`} className="min-h-[88px] border-b border-r border-slate-200 bg-slate-50" />)}
             {dates.map((date) => {
               const here = onDate(date); const own = selected ? byPerson.get(selected.id)?.get(date) : undefined; const weekend = [0, 6].includes(new Date(`${date}T00:00:00`).getDay());
-              return <button key={date} onClick={() => selected ? startEdit(selected, date, own) : setPicked(picked === date ? '' : date)} title={selected && !readOnly ? 'Click to change this day' : undefined} className={`flex min-h-[88px] flex-col items-stretch justify-start break-words border-b border-r border-slate-200 p-1 text-left align-top ${picked === date ? 'bg-sky-50 ring-2 ring-inset ring-[#0b587b]' : weekend ? 'bg-slate-50 hover:bg-slate-100' : 'bg-white hover:bg-slate-50'}`}>
+              return <button key={date} onClick={() => selected ? startEdit(selected, date, own) : setPicked(picked === date ? '' : date)} title={selected && (!readOnly || canEdit) ? 'Click to change this day' : undefined} className={`flex min-h-[88px] flex-col items-stretch justify-start break-words border-b border-r border-slate-200 p-1 text-left align-top ${picked === date ? 'bg-sky-50 ring-2 ring-inset ring-[#0b587b]' : weekend ? 'bg-slate-50 hover:bg-slate-100' : 'bg-white hover:bg-slate-50'}`}>
                 <span className={`mb-0.5 inline-grid h-5 w-5 place-items-center rounded-full text-xs font-semibold ${date === today ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{Number(date.slice(8))}</span>
                 {selected ? <p className={`mt-1 grid h-9 place-items-center rounded-lg text-sm font-bold ${cellTone(own && { ...own, shift: shown(own.shift) })}`}>{own ? shown(own.shift) : '·'}</p> : <div className="space-y-0.5">
                   {here.shifts.map(([shift, who]) => <p key={shift} className={`truncate rounded px-1 py-0.5 text-[10px] font-semibold leading-tight ${shiftTone(shift)}`}><span className="font-bold">{shift}</span> {who.map((person) => shortName(person)).join(', ')}</p>)}
