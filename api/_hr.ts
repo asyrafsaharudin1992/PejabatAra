@@ -383,6 +383,13 @@ const CLINICAL_CAN_READ = new Set(['roster']);
 // The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
 const CLINICAL_CAN_WRITE = new Set(['roster_set']);
 const CLINICAL_ROSTER_STAFF = /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i;
+// A Clinical Admin account belongs to one branch (its primary branch: Kajang is KJ, Seri Kembangan is SK) and changes only that branch's roster.
+async function clinicalCompany(db: any, userId: string): Promise<string> {
+  const { data } = await db.from('staff_branches').select('is_primary,branches(name)').eq('profile_id', userId).order('is_primary', { ascending: false }).limit(1);
+  const name = String(data?.[0]?.branches?.name || '').toLowerCase();
+  return name === 'kajang' ? 'KJ' : name === 'seri kembangan' ? 'SK' : '';
+}
+const NOT_AUTHORIZED = "You're not authorized to change this roster.";
 
 // The Maybank2U bulk payment file (the layout Infotech writes) for one company: `entries` are the people and the amounts to pay. Used for the salary, for the incentive pay
 // in Payroll, and for the Incentive > Finance use tab.
@@ -1755,7 +1762,9 @@ export async function hrHandler(req: any, res: any) {
       const linked = (people || []).map((p: any) => p.assessment_staff_id).filter(Boolean);
       const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name').in('id', linked) : { data: [] };
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
-      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] });
+      // Who may change what: HR changes everything; a Clinical Admin account only its own branch (`edit.company`).
+      const editCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
+      return res.status(200).json({ month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
@@ -2440,11 +2449,11 @@ export async function hrHandler(req: any, res: any) {
       const shift = text(body.shift, 30).toUpperCase();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fail(400, 'Choose a valid date.');
       if (shift && !ROSTER_CODES.has(shift)) throw fail(400, 'Choose a roster code from the list.');
-      const { data: person, error: personError } = await db.from('hr_employees').select('id,designation').eq('id', employeeId).maybeSingle();
+      const { data: person, error: personError } = await db.from('hr_employees').select('id,designation,company').eq('id', employeeId).maybeSingle();
       if (personError) throw personError;
       if (!person) throw fail(404, 'Profile not found.');
-      // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin.
-      if (profile.role !== 'super_admin' && !access.includes('hr') && !CLINICAL_ROSTER_STAFF.test(String(person.designation || ''))) throw fail(403, 'The Clinical Admin office can change the roster of clinic assistants and clinical admin only.');
+      // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin of its own branch, never doctors or other branches.
+      if (profile.role !== 'super_admin' && !access.includes('hr') && (!CLINICAL_ROSTER_STAFF.test(String(person.designation || '')) || person.company !== await clinicalCompany(db, user.id))) throw fail(403, NOT_AUTHORIZED);
       await assertPayrollOpen(db, employeeId, date);
       const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
       if (beforeError) throw beforeError;

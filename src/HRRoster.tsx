@@ -81,7 +81,8 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
   const calendarOnly = phone || (readOnly && !canEdit);
   useEffect(() => { if (calendarOnly) { setView('calendar'); setCompany((current) => current || 'KJ'); } if (phone) setCodes('new'); }, [calendarOnly, phone]);
   const shown = (shift: string) => codes === 'new' ? newCode(shift) : shift;
-  const [data, setData] = useState<{ people: Person[]; days: Day[] } | null>(null);
+  const [data, setData] = useState<{ people: Person[]; days: Day[]; edit?: { company: string } } | null>(null);
+  const [warning, setWarning] = useState('');
   const [notice, setNotice] = useState('');
   type Change = { at: string; by: string; name: string; company: string; code: string; date: string; from: string; to: string; reason: string };
   const [log, setLog] = useState<Change[]>([]);
@@ -106,7 +107,9 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
   };
 
-  const startEdit = (person: Person, date: string, day?: Day) => readOnly && !canEdit ? undefined : setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false });
+  // A Clinical Admin account changes only clinic assistants and clinical admin of its own branch; anything else shows a warning (the server refuses it too).
+  const allowed = (person: Person) => !(readOnly && canEdit) || (!isDoctor(person) && /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i.test(person.designation) && (!data?.edit?.company || person.company === data.edit.company));
+  const startEdit = (person: Person, date: string, day?: Day) => readOnly && !canEdit ? undefined : !allowed(person) ? setWarning("You're not authorized to change this roster.") : (setWarning(''), setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false }));
   const saveEdit = async () => {
     if (!edit) return;
     setEdit({ ...edit, saving: true });
@@ -177,6 +180,7 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
       </div>
     </section>
     {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
+    {warning && <p role="alert" className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700"><span>{warning}</span><button type="button" onClick={() => setWarning('')} className="text-xs underline">Close</button></p>}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>
