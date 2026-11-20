@@ -532,7 +532,13 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
   if (req.method === 'GET' && action === 'attendance_requests') {
     const { data, error: listError } = await db.from('hr_attendance_requests').select('*').eq('employee_id', me.id).order('created_at', { ascending: false }).limit(30);
     if (listError) throw listError;
-    return res.status(200).json({ requests: (data || []).map((row: any) => requestRow(row, new Map([[me.id, me.full_name]]))) });
+    const rows = (data || []).map((row: any) => requestRow(row, new Map([[me.id, me.full_name]])));
+    // OT that was approved without a request in this app (brought over from Infotech, or approved by HR directly), from every month, so the staff member sees all of their approved OT.
+    const { data: decided, error: decidedError } = await db.from('hr_attendance_ot').select('work_date,approved_minutes,decided_by,decided_at').eq('employee_id', me.id).eq('status', 'approved').gt('approved_minutes', 0).order('work_date', { ascending: false }).limit(400);
+    if (decidedError) throw decidedError;
+    const covered = new Set(rows.filter((row: any) => row.status === 'approved' && row.otMinutes > 0).map((row: any) => row.date));
+    const extra = (decided || []).filter((row: any) => !covered.has(row.work_date)).map((row: any) => ({ id: `ot-${row.work_date}`, employeeId: me.id, name: me.full_name, date: row.work_date, inTime: '', outTime: '', otMinutes: Number(row.approved_minutes), otText: minutesText(Number(row.approved_minutes)), reason: 'OT approved', remarks: '', status: 'approved', supervisorDecidedBy: '', supervisorNote: '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: '', rate: null, createdAt: row.decided_at, source: row.decided_by === 'Infotech migration' ? 'Brought over from Infotech' : 'Approved by HR' }));
+    return res.status(200).json({ requests: [...rows, ...extra].sort((a: any, b: any) => b.date.localeCompare(a.date)) });
   }
   // Create, or edit a draft: the staff member asks for a corrected clock and/or OT hours for a day, as in Infotech's Attendance / OT Request.
   if (req.method === 'POST' && (action === 'attendance_request_create' || action === 'attendance_request_update')) {
