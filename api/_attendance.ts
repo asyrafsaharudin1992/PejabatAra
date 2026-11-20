@@ -525,6 +525,13 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     if (!inTime && !outTime && !otMinutes) throw fail(400, 'Enter the time you clocked in or out, the OT hours, or both.');
     if ((inTime && !isTime(inTime)) || (outTime && !isTime(outTime))) throw fail(400, 'Enter the times as hh:mm.');
     if (!reason) throw fail(400, 'Choose or write the reason.');
+    // A forgotten clock can only be asked for when that clock is really missing on the day (the clocks the person made, or ones already added).
+    if (/forgot to clock/i.test(reason) && !(action === 'attendance_request_update')) {
+      const day = ((await buildDays(db, [me], date, date, rules)).get(me.id) || [])[0];
+      if (day?.inAt && day?.outAt) throw fail(400, 'You already have both a clock in and a clock out on that date, so there is nothing to correct. If you worked extra hours, use OT request.');
+      if (inTime && !outTime && day?.inAt) throw fail(400, 'You already have a clock in on that date. Ask for the clock out you missed.');
+      if (outTime && !inTime && day?.outAt) throw fail(400, 'You already have a clock out on that date. Ask for the clock in you missed.');
+    }
     if (otMinutes > 0 && hasNoOt(me)) throw fail(400, 'Your hours are flexible or you are a doctor, so there is no OT to apply for.');
     // OT cannot be more than the clocks and roster show for that day (when both clocks are there).
     if (otMinutes > 0) {

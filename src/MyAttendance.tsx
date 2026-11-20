@@ -242,7 +242,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
           {(() => {
             // Only the days that fit are offered (a missed clock, or extra time worked), each with the shift and the real clocks, so no date has to be typed or guessed.
             const choices = (missed ? (forgotList || []).map((item) => ({ date: item.date, tail: `forgot to clock ${item.kind}` })) : otDays.map((item) => ({ date: item.date, tail: `OT ${otHours(item.minutes)}` })));
-            const list = [...(choices.some((choice) => choice.date === form.date) ? [] : [{ date: form.date, tail: '' }]), ...choices].sort((a, b) => b.date.localeCompare(a.date));
+            const list = [...(choices.some((choice) => choice.date === form.date) || (missed && !form.id) ? [] : [{ date: form.date, tail: '' }]), ...choices].sort((a, b) => b.date.localeCompare(a.date));
             if (!list.length) return <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">{missed ? 'No missed clock this month.' : 'No extra time to apply OT for.'}</p>;
             return <div className="space-y-1.5">{list.map((choice) => { const info = monthDays?.find((item) => item.date === choice.date); const on = form.date === choice.date;
               return <button type="button" key={choice.date} disabled={Boolean(form.id) && !on} onClick={() => { setForm({ ...form, date: choice.date, ...(missed ? { inTime: info?.inTime || '', outTime: info?.outTime || '' } : {}) }); if (!missed && !form.id) void autofill(choice.date); }} className={`w-full rounded-xl border px-3 py-2 text-left text-xs leading-5 ${on ? 'border-[#0b587b] bg-sky-50 ring-1 ring-[#0b587b]/30' : 'border-slate-200 bg-white'} disabled:opacity-60`}>
