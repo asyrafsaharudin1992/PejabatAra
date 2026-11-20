@@ -34,7 +34,7 @@ const JOBS: Job[] = [
   { key: 'attendance-late', folder: 'Attendance', name: 'Late Attendance', kind: 'pages', make: dialog('attendance-late', 'Late Attendance') },
   { key: 'ot-claims', folder: 'Attendance', name: 'OT Claim Status', kind: 'pages', make: dialog('ot-claims', 'OT Claim Status') },
   { key: 'credit-hours', folder: 'Attendance', name: 'Credit Hours', kind: 'pages', make: dialog('credit-hours', 'Credit Hours') },
-  { key: 'attendance-individual', folder: 'Attendance', name: 'Individual Attendance', kind: 'pages', heavy: true, make: page(HRAttendanceIndividual) },
+  { key: 'attendance-individual', folder: 'Attendance', name: 'Individual Attendance', kind: 'pages', heavy: true, make: (onError) => createElement(HRAttendanceIndividual, { onError, followUp: false }) },
   { key: 'staff-summary', folder: 'Staff', name: 'Staff Profile Summary', kind: 'pages', make: dialog('staff-summary', 'Staff Profile Summary') },
   { key: 'performance', folder: 'Performance Reviews', name: 'Performance Review Reports', kind: 'pages', make: dialog('performance', 'Performance Review Reports') },
   { key: 'incentives', folder: 'Incentive', name: 'Incentive Claims', kind: 'pages', make: dialog('incentives', 'Incentive Claims') },

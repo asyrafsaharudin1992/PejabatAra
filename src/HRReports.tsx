@@ -112,7 +112,7 @@ export function HRReports(_props: { onError: (message: string) => void; onOpen?:
       {!shown.length && <p className={`${card} text-sm text-slate-500`}>No reports match. Try another search or category.</p>}
       <div className="flex flex-col items-start gap-3 border-t border-slate-100 pt-5 [&>section]:w-full"><HRDownloadAll /></div>
     </>}
-    {!embed && report && PAGE_REPORTS.includes(report.id) && <div className="space-y-4"><button type="button" onClick={() => open(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b] hover:underline print:hidden">← Reports</button>{report.id === 'leave-history' ? <LeaveHistory onError={onError} /> : report.id === 'leave-status' ? <HRLeaveStatusReport onError={onError} /> : <HRAttendanceIndividual onError={onError} />}</div>}
+    {!embed && report && PAGE_REPORTS.includes(report.id) && <div className="space-y-4"><button type="button" onClick={() => open(null)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b] hover:underline print:hidden">← Reports</button>{report.id === 'leave-history' ? <LeaveHistory onError={onError} /> : report.id === 'leave-status' ? <HRLeaveStatusReport onError={onError} /> : <HRAttendanceIndividual onError={onError} followUp={false} />}</div>}
     {!embed && report && !PAGE_REPORTS.includes(report.id) && <div key={report.id}><HRReportDialog id={report.id.startsWith('roster-') ? 'roster' : report.id} rosterGroup={report.id === 'roster-doctors' ? 'doctors' : report.id === 'roster-ca' ? 'staff' : undefined} title={report.title} onClose={() => open(null)} /></div>}
   </div>;
 }
