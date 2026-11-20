@@ -133,3 +133,26 @@ console.log('Preferred night day tests passed.');
   for (const [date, shift] of [['2026-12-07', 'PM'], ['2026-12-08', 'PM'], ['2026-12-09', 'OFF'], ['2026-12-10', 'AM'], ['2026-12-14', 'PM'], ['2026-12-15', 'OFF']]) assert.equal(at(r, 'a', date).shift, shift);
 }
 console.log('Day-after-last-night OFF test passed.');
+
+// Automatic adjustment: two doctors on the same day shift are moved apart by swapping days inside the week.
+{
+  const rule = { kind: 'not_together' as const, person_a: 'A', person_b: 'B', shifts: ['AM', 'OH'], amount: null, company: null, scope: 'all' as const, enforce: 'warn' as const, active: true, note: '' };
+  const both = { ...base, people: [a, b], patterns: { a: { enabled: true, anchor: '2026-12-01', cycle: 'AM, AM, AM, AM, OFF, OFF, OFF' }, b: { enabled: true, anchor: '2026-12-01', cycle: 'AM, AM, OFF, AM, AM, OFF, OFF' } }, rules: [rule] };
+  const before = generateRosterDraft(both);
+  const fixed = generateRosterDraft({ ...both, autoFix: true });
+  const clashes = (r: typeof before) => r.warnings.filter((w) => w.includes('at the same time')).length;
+  assert.ok(clashes(before) > 0, 'the plain draft has clashes');
+  assert.ok(clashes(fixed) < clashes(before), 'automatic adjustment reduces the clashes');
+  assert.ok(fixed.adjusted > 0);
+  // A person keeps the same number of working days in every week.
+  const workingIn = (r: typeof before, id: string) => r.cells.filter((c) => c.id === id && ['AM', 'PM', 'OH'].includes(c.shift)).length;
+  assert.equal(workingIn(fixed, 'a'), workingIn(before, 'a'));
+  assert.equal(workingIn(fixed, 'b'), workingIn(before, 'b'));
+  // A protected (locked) day is never moved.
+  const lockKey = cellKey('b', '2026-12-01');
+  const locked = generateRosterDraft({ ...both, autoFix: true, locks: { [lockKey]: 'AM' } });
+  assert.equal(locked.cells.find((c) => c.id === 'b' && c.date === '2026-12-01')!.shift, 'AM');
+  // Off by default: the engine's plain result stays the same.
+  assert.equal(before.adjusted, 0);
+}
+console.log('Automatic adjustment tests passed.');

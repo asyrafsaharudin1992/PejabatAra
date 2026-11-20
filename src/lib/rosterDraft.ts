@@ -7,7 +7,7 @@ export type Pattern = { enabled: boolean; anchor: string; cycle: string; doctorM
 export const preferredNights = (pattern: Pattern): number[] => pattern.nightDays?.length ? pattern.nightDays : pattern.nightPlacement === 'mon-tue' ? [1, 2] : [];
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export type DraftRequest = { id: string; date: string; shift: string; required: boolean };
-export type DraftCell = DraftDay & { source: 'pattern' | 'existing' | 'locked' | 'leave' | 'request'; locked: boolean };
+export type DraftCell = DraftDay & { source: 'pattern' | 'existing' | 'locked' | 'leave' | 'request' | 'auto'; locked: boolean };
 export const draftShifts = ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST', 'AL', 'MC', 'ML', 'UPL', 'EL', 'PH', 'NA', 'RESIGN'];
 export const patternShifts = draftShifts.filter((s) => ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST'].includes(s));
 export const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
@@ -52,7 +52,7 @@ export const DEFAULT_ROSTER_RULES: RosterRule[] = [
   { kind: 'no_day_after_night', person_a: null, person_b: null, shifts: [], amount: null, company: null, scope: 'all', enforce: 'warn', active: true, note: 'Recovery after a night shift' },
   { kind: 'max_consecutive', person_a: null, person_b: null, shifts: [], amount: 6, company: null, scope: 'all', enforce: 'warn', active: true, note: '' },
 ];
-export function generateRosterDraft(input: { rules?: RosterRule[]; month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
+function generateRosterCore(input: { auto?: Record<string, string>; rules?: RosterRule[]; month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
   const { month, people, patterns, existing, leave, requests, locks, preserve } = input;
   // Minimum cover comes from the rules when HR has set them (AM = day cover, PM = night cover); otherwise from the two numbers given.
   const coverRule = (shift: string, fallback: number) => { const found = (input.rules ?? []).filter((r) => r.active && r.kind === 'min_cover' && r.shifts[0] === shift && r.amount != null); return found.length ? Math.max(...found.map((r) => r.amount!)) : fallback; };
@@ -74,6 +74,8 @@ export function generateRosterDraft(input: { rules?: RosterRule[]; month: string
       if (preserve && existingMap.has(key)) { shift = existingMap.get(key)!; source = 'existing'; locked = true; }
       if (locks[key] !== undefined && (!preserve || !existingMap.has(key))) { shift = locks[key]; source = 'locked'; locked = true; }
       else if (locks[key] !== undefined && locks[key] !== shift) warnings.push(`${date} · ${person.name}: draft edit conflicts with protected existing roster (${shift}).`);
+      // A day moved by the automatic adjustment (never a protected, requested or leave day).
+      if (!locked && input.auto?.[key] !== undefined) { shift = input.auto[key]; source = 'auto'; }
       const approved = leave.filter((l) => l.id === person.id && l.start <= date && l.end >= date);
       if (approved.length) {
         if (approved.some((l) => l.halfDay)) warnings.push(`${date} · ${person.name}: approved half-day leave needs manual review; draft export is blocked.`);
@@ -169,5 +171,42 @@ export function generateRosterDraft(input: { rules?: RosterRule[]; month: string
       }
     }
   }
-  return { cells, locum, warnings: [...new Set(warnings)], blocked: warnings.some((w) => w.includes('draft export is blocked')) };
+  return { cells, locum, warnings: [...new Set(warnings)], blocked: warnings.some((w) => w.includes('draft export is blocked')), adjusted: 0 };
+}
+
+// Generates the draft and, when autoFix is on, tries to follow the rules: it swaps two days of the same person inside one week
+// (so each person keeps the same number of nights and days off) whenever that gives fewer checks to review. Protected, requested,
+// leave and edited days are never moved. Several rounds, each taking the first swap that helps.
+export function generateRosterDraft(input: Parameters<typeof generateRosterCore>[0] & { autoFix?: boolean }) {
+  let auto: Record<string, string> = {};
+  let best = generateRosterCore({ ...input, auto });
+  if (!input.autoFix || !best.warnings.length) return best;
+  const monthDays = monthDates(input.month), enabled = input.people.filter((p) => input.patterns[p.id]?.enabled);
+  const weekOf = (date: string) => { const start = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7)); return Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter((d) => monthDays.includes(d)); };
+  let tries = 0;
+  for (let round = 0; round < 60 && best.warnings.length && tries < 4000; round++) {
+    const cellMap = new Map(best.cells.map((c) => [cellKey(c.id, c.date), c]));
+    const movable = (c?: DraftCell) => Boolean(c) && !c!.locked && ['pattern', 'auto'].includes(c!.source) && ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST'].includes(newCode(c!.shift));
+    let improved = false;
+    search: for (const date of [...new Set(best.warnings.map((w) => /^\d{4}-\d{2}-\d{2}/.exec(w)?.[0]).filter(Boolean) as string[])]) {
+      const lines = best.warnings.filter((w) => w.startsWith(date));
+      // The people a warning names; one that names nobody (a coverage shortfall) can be fixed by anyone.
+      const named = enabled.filter((p) => lines.some((w) => w.includes(p.name) || w.includes(p.name.split(' ').slice(0, 2).join(' '))));
+      for (const person of named.length ? named : enabled) {
+        const here = cellMap.get(cellKey(person.id, date));
+        if (!movable(here)) continue;
+        for (const other of weekOf(date)) {
+          const there = cellMap.get(cellKey(person.id, other));
+          if (other === date || !movable(there) || newCode(there!.shift) === newCode(here!.shift)) continue;
+          tries++;
+          const trial = { ...auto, [cellKey(person.id, date)]: there!.shift, [cellKey(person.id, other)]: here!.shift };
+          const result = generateRosterCore({ ...input, auto: trial });
+          if (result.warnings.length < best.warnings.length) { auto = trial; best = result; improved = true; break search; }
+          if (tries >= 4000) break search;
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return { ...best, adjusted: Math.round(Object.keys(auto).length / 2) };
 }
