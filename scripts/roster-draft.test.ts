@@ -86,16 +86,16 @@ assert.equal(at(result, 'a', '2026-12-01').shift, 'PM');
 assert.equal(at(result, 'a', '2026-12-02').shift, 'OFF');
 result = generateRosterDraft({ ...asyrafInput, leave: [{ id: 'a', start: '2026-12-07', end: '2026-12-07', shift: 'AL', halfDay: false }] });
 assert.equal(at(result, 'a', '2026-12-07').shift, 'AL');
-assert.ok(result.warnings.some((w) => w.includes('preferred Monday/Tuesday')));
+assert.ok(result.warnings.some((w) => w.includes('preferred night days (Mon, Tue)')));
 result = generateRosterDraft({ ...asyrafInput, preserve: true, existing: [{ id: 'a', date: '2026-12-10', shift: 'PM' }] });
 assert.equal(at(result, 'a', '2026-12-10').shift, 'PM');
-assert.ok(result.warnings.some((w) => w.includes('2026-12-10') && w.includes('preferred Monday/Tuesday')));
+assert.ok(result.warnings.some((w) => w.includes('2026-12-10') && w.includes('preferred night days (Mon, Tue)')));
 console.log('Asyraf Mon/Tue PM preference, Monday single PM, recovery OFF, month boundaries and exception protection passed.');
 
 // HR's own rules (Roster draft > Rules).
 {
   const two = { ...base, people: [a, b], patterns: { a: { enabled: true, anchor: '2026-12-01', cycle: 'AM' }, b: { enabled: true, anchor: '2026-12-01', cycle: 'OH' } } };
-  const rule = (extra: object) => ({ kind: 'not_together' as const, person_a: 'A', person_b: 'B', shifts: ['AM', 'OH'], amount: null, company: null, enforce: 'warn' as const, active: true, note: '', ...extra });
+  const rule = (extra: object) => ({ kind: 'not_together' as const, person_a: 'A', person_b: 'B', shifts: ['AM', 'OH'], amount: null, company: null, scope: 'all' as const, enforce: 'warn' as const, active: true, note: '', ...extra });
   let r = generateRosterDraft({ ...two, rules: [rule({})] });
   assert.ok(r.warnings.some((w) => w.includes('must not work at the same time')) && !r.blocked, 'AM with OH clashes, warning only');
   r = generateRosterDraft({ ...two, rules: [rule({ enforce: 'block' })] });
@@ -107,9 +107,29 @@ console.log('Asyraf Mon/Tue PM preference, Monday single PM, recovery OFF, month
   r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'not_shift', person_b: null, shifts: ['AM'] }] });
   assert.ok(r.warnings.some((w) => w.includes('must not work')), 'person must not work AM');
   r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'max_consecutive', person_a: null, person_b: null, shifts: [], amount: 6 }] });
-  assert.ok(r.warnings.some((w) => w.includes('more than 6 days in a row')), 'seven days in a row');
+  assert.ok(r.warnings.some((w) => w.includes('7 consecutive working days')), 'seven days in a row');
   r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'min_cover', person_a: null, person_b: null, shifts: ['PM'], amount: 1 }] });
-  assert.ok(r.warnings.some((w) => w.includes('0 on PM, at least 1 needed')), 'nobody on PM');
+  assert.ok(r.warnings.some((w) => w.includes('night 0/1')), 'nobody on PM: the minimum cover rule feeds the coverage check');
   assert.equal(generateRosterDraft({ ...two, rules: [] }).warnings.filter((w) => w.includes('at the same time')).length, 0, 'no rules, no rule warnings');
 }
 console.log('Roster rules tests passed.');
+
+// Preferred night shift on day: the same Mon/Tue result as before, now from the ticked days, and other choices.
+{
+  const pick = (extra: object, week = '2,1') => generateRosterDraft({ ...asyrafInput, patterns: { a: { ...rotation, nightWeeks: week, nightDays: [1, 2], weekdayOff: 0, ...extra }, b: officePattern } });
+  let r = pick({});
+  for (const [date, shift] of [['2026-12-07', 'PM'], ['2026-12-08', 'PM'], ['2026-12-09', 'OFF'], ['2026-12-14', 'PM'], ['2026-12-15', 'OFF']]) assert.equal(at(r, 'a', date).shift, shift);
+  r = pick({ nightDays: [3, 4] });
+  for (const [date, shift] of [['2026-12-07', 'AM'], ['2026-12-09', 'PM'], ['2026-12-10', 'PM'], ['2026-12-11', 'OFF'], ['2026-12-14', 'AM'], ['2026-12-16', 'PM'], ['2026-12-17', 'OFF']]) assert.equal(at(r, 'a', date).shift, shift, `Wed/Thu nights ${date}`);
+  r = pick({ nightDays: [1, 2], weekdayOff: 5 });
+  assert.equal(at(r, 'a', '2026-12-11').shift, 'OFF');
+  assert.equal(at(r, 'a', '2026-12-09').shift, 'AM');
+}
+console.log('Preferred night day tests passed.');
+
+// Weekday OFF "day after last night" without preferred days: nights start on Monday.
+{
+  const r = generateRosterDraft({ ...asyrafInput, patterns: { a: { ...rotation, nightWeeks: '2,1', weekdayOff: 0 }, b: officePattern } });
+  for (const [date, shift] of [['2026-12-07', 'PM'], ['2026-12-08', 'PM'], ['2026-12-09', 'OFF'], ['2026-12-10', 'AM'], ['2026-12-14', 'PM'], ['2026-12-15', 'OFF']]) assert.equal(at(r, 'a', date).shift, shift);
+}
+console.log('Day-after-last-night OFF test passed.');

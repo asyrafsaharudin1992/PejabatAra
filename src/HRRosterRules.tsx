@@ -4,8 +4,9 @@ import type { DraftPerson, RosterRule } from './lib/rosterDraft';
 
 const field = 'mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-normal text-slate-800';
 const SHIFTS = ['AM', 'PM', 'OH'];
-const KINDS: Record<RosterRule['kind'], string> = { not_together: 'Cannot work together', not_shift: 'Cannot work a shift', min_cover: 'Minimum people on a shift', max_consecutive: 'Maximum days in a row' };
-const blank = (): RosterRule => ({ kind: 'not_together', person_a: null, person_b: null, shifts: ['AM', 'OH'], amount: null, company: null, enforce: 'warn', active: true, note: '' });
+const KINDS: Record<RosterRule['kind'], string> = { not_together: 'Cannot work together', not_shift: 'Cannot work a shift', min_cover: 'Minimum people on a shift', max_consecutive: 'Maximum days in a row', weekend_off: 'Off on weekends', only_shift: 'Only works certain shifts', no_day_after_night: 'No day shift right after a night' };
+const SCOPES = { all: 'Everyone', doctors: 'Doctors', staff: 'Staff (not doctors)' };
+const blank = (): RosterRule => ({ kind: 'not_together', person_a: null, person_b: null, shifts: ['AM', 'OH'], amount: null, company: null, scope: 'all', enforce: 'warn', active: true, note: '' });
 
 async function call(action: string, body: unknown) {
   const response = await officeFetch(`/api/status?resource=hr&action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -23,6 +24,10 @@ export function HRRosterRules({ rules, people, onChanged }: { rules: RosterRule[
     const where = r.company ? ` (${r.company})` : '';
     if (r.kind === 'not_together') return `${name(r.person_a)} and ${name(r.person_b)} cannot work the same shift${r.shifts.length ? `, or ${r.shifts.join(' with ')} together` : ''}`;
     if (r.kind === 'not_shift') return `${name(r.person_a)} must not work ${r.shifts.join(' / ')}`;
+    const who = r.person_a ? name(r.person_a) : `${SCOPES[r.scope || 'all']}${where}`;
+    if (r.kind === 'weekend_off') return `${who} are off on Saturday and Sunday`;
+    if (r.kind === 'only_shift') return `${who} may only work ${r.shifts.join(' / ')}`;
+    if (r.kind === 'no_day_after_night') return `${who}: no day shift right after a night`;
     if (r.kind === 'min_cover') return `At least ${r.amount} on ${r.shifts[0]} each day${where}`;
     return `${r.person_a ? name(r.person_a) : 'Nobody'} works at most ${r.amount} days in a row${r.person_a ? '' : ' (everyone)'}${where}`;
   };
@@ -38,15 +43,16 @@ export function HRRosterRules({ rules, people, onChanged }: { rules: RosterRule[
     {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     {form && <div className="space-y-3 rounded-lg bg-slate-50 p-3">
       <div className="grid gap-3 md:grid-cols-3">
-        <label className="text-sm">Rule type<select value={form.kind} onChange={(e) => { const kind = e.target.value as RosterRule['kind']; set({ kind, shifts: kind === 'not_together' ? ['AM', 'OH'] : kind === 'min_cover' ? ['PM'] : [], amount: kind === 'min_cover' ? 1 : kind === 'max_consecutive' ? 6 : null, person_b: null }); }} className={field}>{Object.entries(KINDS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="text-sm">Rule type<select value={form.kind} onChange={(e) => { const kind = e.target.value as RosterRule['kind']; set({ kind, scope: 'all', shifts: kind === 'not_together' ? ['AM', 'OH'] : kind === 'min_cover' ? ['PM'] : kind === 'only_shift' ? ['OH'] : [], amount: kind === 'min_cover' ? 1 : kind === 'max_consecutive' ? 6 : null, person_b: null }); }} className={field}>{Object.entries(KINDS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {['not_together', 'not_shift'].includes(form.kind) && personSelect(form.kind === 'not_together' ? 'First person' : 'Person', form.person_a, 'person_a')}
         {form.kind === 'not_together' && personSelect('Second person', form.person_b, 'person_b')}
-        {form.kind === 'max_consecutive' && personSelect('Person', form.person_a, 'person_a', true)}
+        {['max_consecutive', 'weekend_off', 'only_shift', 'no_day_after_night'].includes(form.kind) && personSelect('Person', form.person_a, 'person_a', true)}
+        {['max_consecutive', 'weekend_off', 'only_shift', 'no_day_after_night'].includes(form.kind) && !form.person_a && <label className="text-sm">Group<select value={form.scope || 'all'} onChange={(e) => set({ scope: e.target.value as RosterRule['scope'] })} className={field}>{Object.entries(SCOPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
         {['min_cover', 'max_consecutive'].includes(form.kind) && <label className="text-sm">{form.kind === 'min_cover' ? 'At least how many people' : 'At most how many days'}<input type="number" min={form.kind === 'min_cover' ? 0 : 1} max={50} value={form.amount ?? ''} onChange={(e) => set({ amount: e.target.value === '' ? null : Number(e.target.value) })} className={field} /></label>}
-        {['min_cover', 'max_consecutive'].includes(form.kind) && <label className="text-sm">Clinic<select value={form.company || ''} onChange={(e) => set({ company: e.target.value || null })} className={field}><option value="">Both</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>}
+        {['min_cover', 'max_consecutive', 'weekend_off', 'only_shift', 'no_day_after_night'].includes(form.kind) && !form.person_a && <label className="text-sm">Clinic<select value={form.company || ''} onChange={(e) => set({ company: e.target.value || null })} className={field}><option value="">Both</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>}
         <label className="text-sm">If the rule is broken<select value={form.enforce} onChange={(e) => set({ enforce: e.target.value as RosterRule['enforce'] })} className={field}><option value="warn">Warning only</option><option value="block">Block the draft download</option></select></label>
       </div>
-      {form.kind !== 'max_consecutive' && <fieldset className="text-sm"><legend className="font-semibold">{form.kind === 'not_together' ? 'Also clash when both are on (the same shift always clashes)' : form.kind === 'min_cover' ? 'Shift' : 'Shifts'}</legend><div className="mt-1 flex gap-4">{SHIFTS.map((s) => <label key={s} className="flex items-center gap-1"><input type={form.kind === 'min_cover' ? 'radio' : 'checkbox'} name="rule-shift" checked={form.shifts.includes(s)} onChange={() => form.kind === 'min_cover' ? set({ shifts: [s] }) : toggleShift(s)} />{s}</label>)}</div></fieldset>}
+      {['not_together', 'not_shift', 'min_cover', 'only_shift'].includes(form.kind) && <fieldset className="text-sm"><legend className="font-semibold">{form.kind === 'not_together' ? 'Also clash when both are on (the same shift always clashes)' : form.kind === 'min_cover' ? 'Shift (AM = day cover, PM = night cover)' : form.kind === 'only_shift' ? 'Allowed shifts' : 'Shifts'}</legend><div className="mt-1 flex gap-4">{SHIFTS.filter((s) => form.kind !== 'min_cover' || s !== 'OH').map((s) => <label key={s} className="flex items-center gap-1"><input type={form.kind === 'min_cover' ? 'radio' : 'checkbox'} name="rule-shift" checked={form.shifts.includes(s)} onChange={() => form.kind === 'min_cover' ? set({ shifts: [s] }) : toggleShift(s)} />{s}</label>)}</div></fieldset>}
       <label className="block text-sm">Note (optional)<input value={form.note} maxLength={200} onChange={(e) => set({ note: e.target.value })} className={field} /></label>
       <div className="flex gap-2"><button type="button" disabled={busy} onClick={() => void run('roster_rule_save', form)} className="rounded-lg bg-[#0b587b] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Save rule</button><button type="button" onClick={() => setForm(null)} className="rounded-lg border px-4 py-2 text-sm">Cancel</button></div>
     </div>}

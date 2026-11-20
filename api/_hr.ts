@@ -807,23 +807,25 @@ export async function hrHandler(req: any, res: any) {
     }
 
     if (req.method === 'GET' && action === 'roster_rules') {
-      const { data, error } = await db.from('hr_roster_rules').select('id,kind,person_a,person_b,shifts,amount,company,enforce,active,note').order('created_at').limit(200);
+      const { data, error } = await db.from('hr_roster_rules').select('id,kind,scope,person_a,person_b,shifts,amount,company,enforce,active,note').order('created_at').limit(200);
       // Until the table exists the draft keeps using its built-in rule, so nothing breaks.
       if (error) return res.status(200).json({ rules: null });
       return res.status(200).json({ rules: data || [] });
     }
     if (req.method === 'POST' && action === 'roster_rule_save') {
       const kind = text(body.kind, 20), enforce = text(body.enforce, 10) === 'block' ? 'block' : 'warn';
-      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift'].includes(kind)) throw fail(400, 'Choose a rule type.');
+      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift', 'weekend_off', 'only_shift', 'no_day_after_night'].includes(kind)) throw fail(400, 'Choose a rule type.');
+      const scope = ['all', 'doctors', 'staff'].includes(text(body.scope, 10)) ? text(body.scope, 10) : 'all';
       const shifts = (Array.isArray(body.shifts) ? body.shifts : []).map((s: any) => text(s, 10)).filter((s: string) => ['AM', 'PM', 'OH', 'OFF', 'REST'].includes(s));
       const personA = text(body.person_a, 30), personB = text(body.person_b, 30), company = ['KJ', 'SK'].includes(text(body.company, 4)) ? text(body.company, 4) : null;
       const amount = body.amount === null || body.amount === undefined || body.amount === '' ? null : Number(body.amount);
       if (amount !== null && !(Number.isInteger(amount) && amount >= 0 && amount <= 50)) throw fail(400, 'The number must be a whole number from 0 to 50.');
       if (kind === 'not_together' && (!personA || !personB || personA === personB)) throw fail(400, 'Choose two different people.');
+      if (kind === 'only_shift' && !shifts.length) throw fail(400, 'Choose the shifts that are allowed.');
       if (kind === 'not_shift' && (!personA || !shifts.length)) throw fail(400, 'Choose the person and the shifts.');
       if (kind === 'min_cover' && (amount === null || shifts.length !== 1)) throw fail(400, 'Choose one shift and the minimum number of people.');
       if (kind === 'max_consecutive' && !amount) throw fail(400, 'Type the maximum number of days in a row.');
-      const row = { kind, person_a: personA || null, person_b: kind === 'not_together' ? personB : null, shifts, amount, company, enforce, active: body.active !== false, note: text(body.note, 200) };
+      const row = { kind, scope, person_a: personA || null, person_b: kind === 'not_together' ? personB : null, shifts, amount, company, enforce, active: body.active !== false, note: text(body.note, 200) };
       const id = text(body.id, 60);
       const { error } = id ? await db.from('hr_roster_rules').update(row).eq('id', id) : await db.from('hr_roster_rules').insert(row);
       if (error) throw error;
