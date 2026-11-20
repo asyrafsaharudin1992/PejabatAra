@@ -538,6 +538,15 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     if (decidedError) throw decidedError;
     const covered = new Set(rows.filter((row: any) => row.status === 'approved' && row.otMinutes > 0).map((row: any) => row.date));
     const extra = (decided || []).filter((row: any) => !covered.has(row.work_date)).map((row: any) => ({ id: `ot-${row.work_date}`, employeeId: me.id, name: me.full_name, date: row.work_date, inTime: '', outTime: '', otMinutes: Number(row.approved_minutes), otText: minutesText(Number(row.approved_minutes)), reason: 'OT approved', remarks: '', status: 'approved', supervisorDecidedBy: '', supervisorNote: '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: '', rate: null, createdAt: row.decided_at, source: row.decided_by === 'Infotech migration' ? 'Brought over from Infotech' : 'Approved by HR' }));
+    // The clock in and out of those days (the Infotech clocks were brought over too), so the line reads like a request made here.
+    if (extra.length) {
+      try {
+        const dates = extra.map((row: any) => row.date).sort();
+        const days = (await buildDays(db, [me], dates[0], dates[dates.length - 1], rules)).get(me.id) || [];
+        const byDate = new Map(days.map((day: any) => [day.date, dayView(day)]));
+        for (const row of extra as any[]) { const view: any = byDate.get(row.date); if (view) { row.inTime = view.inTime || ''; row.outTime = view.outTime || ''; } }
+      } catch { /* the OT itself is still listed without the times */ }
+    }
     return res.status(200).json({ requests: [...rows, ...extra].sort((a: any, b: any) => b.date.localeCompare(a.date)) });
   }
   // Create, or edit a draft: the staff member asks for a corrected clock and/or OT hours for a day, as in Infotech's Attendance / OT Request.
