@@ -173,5 +173,14 @@ console.log('Automatic adjustment tests passed.');
   // A doctor put on a Monday night by hand is warned.
   const manual = generateRosterDraft({ ...input, rules: [rule], locks: { [cellKey('d1', '2026-12-07')]: 'PM' } });
   assert.ok(manual.warnings.some((w) => w.includes('2026-12-07') && w.includes('left for a locum')));
+  // Saturday and Sunday, AM and PM, are both left for a locum (a rule made on screen).
+  const weekend = { ...rule, shifts: ['SAT', 'SUN', 'AM', 'PM'] };
+  const wk = generateRosterDraft({ ...input, rules: [weekend] });
+  const slotsOn = (shift: string, day: number) => wk.locum.filter((slot) => slot.shift === shift && new Date(`${slot.date}T00:00:00Z`).getUTCDay() === day).length;
+  assert.equal(slotsOn('AM', 6), 4);
+  assert.equal(slotsOn('PM', 0), 4);
+  assert.equal(slotsOn('AM', 1), 0, 'weekdays are not affected');
+  const saturday = generateRosterDraft({ ...input, rules: [weekend], locks: { [cellKey('d1', '2026-12-05')]: 'AM' } });
+  assert.ok(saturday.warnings.some((w) => w.includes('2026-12-05') && w.includes('AM, which is left for a locum')));
 }
 console.log('Locum nights tests passed.');
