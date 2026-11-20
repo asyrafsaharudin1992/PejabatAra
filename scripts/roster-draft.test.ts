@@ -184,3 +184,20 @@ console.log('Automatic adjustment tests passed.');
   assert.ok(saturday.warnings.some((w) => w.includes('2026-12-05') && w.includes('AM, which is left for a locum')));
 }
 console.log('Locum nights tests passed.');
+
+// Custom rules made on screen: never, must, at least, at most.
+{
+  const a1: DraftPerson = { id: 'c1', company: 'KJ', code: 'C1', name: 'Doctor C1', designation: 'DOCTOR' };
+  const a2: DraftPerson = { id: 'c2', company: 'KJ', code: 'C2', name: 'Doctor C2', designation: 'DOCTOR' };
+  const pat = (cycle: string) => ({ enabled: true, anchor: '2026-12-07', cycle, doctorMode: 'sample' as const });
+  const base2 = { month: '2026-12', people: [a1, a2], patterns: { c1: pat('AM, AM, PM, AM, AM, OFF, OFF'), c2: pat('PM, AM, AM, OFF, AM, OFF, OFF') }, existing: [], leave: [], requests: [], locks: {}, preserve: false, minDay: 0, minNight: 0 };
+  const custom = (extra: object) => ({ kind: 'custom' as const, condition: 'never' as const, person_a: null, person_b: null, shifts: ['PM'], amount: null, company: null, scope: 'all' as const, enforce: 'warn' as const, active: true, note: '', ...extra });
+  const warn = (rule: object, text: string) => generateRosterDraft({ ...base2, rules: [custom(rule)] }).warnings.some((w) => w.includes(text));
+  assert.ok(warn({ condition: 'never', person_a: 'C1', shifts: ['WED', 'PM'] }, 'Doctor C1 is on PM, which is not allowed'), 'C1 on a Wednesday night');
+  assert.ok(!warn({ condition: 'never', person_a: 'C1', shifts: ['TUE', 'PM'] }, 'Doctor C1 is on PM'), 'C1 has no Tuesday night');
+  assert.ok(warn({ condition: 'must', person_a: 'C2', shifts: ['MON', 'AM'] }, 'Doctor C2 is on PM, but must be on AM'), 'C2 must be on AM on Monday');
+  assert.ok(warn({ condition: 'min', shifts: ['PM'], amount: 2 }, '1 on PM, at least 2 needed'), 'two on PM needed');
+  assert.ok(warn({ condition: 'max', shifts: ['AM'], amount: 1 }, '2 on AM, at most 1 allowed'), 'at most one on AM');
+  assert.ok(generateRosterDraft({ ...base2, rules: [custom({ condition: 'never', enforce: 'block', person_a: 'C1', shifts: ['WED', 'PM'] })] }).blocked, 'a blocking custom rule stops the export');
+}
+console.log('Custom rule tests passed.');

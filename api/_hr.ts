@@ -828,26 +828,32 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ success: true });
     }
     if (req.method === 'GET' && action === 'roster_rules') {
-      const { data, error } = await db.from('hr_roster_rules').select('id,kind,scope,person_a,person_b,shifts,amount,company,enforce,active,note').order('created_at').limit(200);
+      const { data, error } = await db.from('hr_roster_rules').select('id,kind,condition,scope,person_a,person_b,shifts,amount,company,enforce,active,note').order('created_at').limit(200);
       // Until the table exists the draft keeps using its built-in rule, so nothing breaks.
       if (error) return res.status(200).json({ rules: null });
       return res.status(200).json({ rules: data || [] });
     }
     if (req.method === 'POST' && action === 'roster_rule_save') {
       const kind = text(body.kind, 20), enforce = text(body.enforce, 10) === 'block' ? 'block' : 'warn';
-      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift', 'weekend_off', 'only_shift', 'no_day_after_night', 'locum_nights'].includes(kind)) throw fail(400, 'Choose a rule type.');
+      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift', 'weekend_off', 'only_shift', 'no_day_after_night', 'locum_nights', 'custom'].includes(kind)) throw fail(400, 'Choose a rule type.');
+      const condition = ['never', 'must', 'min', 'max'].includes(text(body.condition, 10)) ? text(body.condition, 10) : '';
       const scope = ['all', 'doctors', 'staff'].includes(text(body.scope, 10)) ? text(body.scope, 10) : 'all';
-      const shifts = (Array.isArray(body.shifts) ? body.shifts : []).map((s: any) => text(s, 10)).filter((s: string) => (kind === 'locum_nights' ? ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN', 'AM', 'PM', 'OH'] : ['AM', 'PM', 'OH', 'OFF', 'REST']).includes(s));
+      const shifts = (Array.isArray(body.shifts) ? body.shifts : []).map((s: any) => text(s, 10)).filter((s: string) => (kind === 'locum_nights' ? ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN', 'AM', 'PM', 'OH'] : kind === 'custom' ? ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN', 'AM', 'PM', 'OH', 'OFF'] : ['AM', 'PM', 'OH', 'OFF', 'REST']).includes(s));
       const personA = text(body.person_a, 30), personB = text(body.person_b, 30), company = ['KJ', 'SK'].includes(text(body.company, 4)) ? text(body.company, 4) : null;
       const amount = body.amount === null || body.amount === undefined || body.amount === '' ? null : Number(body.amount);
       if (amount !== null && !(Number.isInteger(amount) && amount >= 0 && amount <= 50)) throw fail(400, 'The number must be a whole number from 0 to 50.');
       if (kind === 'not_together' && (!personA || !personB || personA === personB)) throw fail(400, 'Choose two different people.');
+      if (kind === 'custom') {
+        if (!condition) throw fail(400, 'Choose what the rule asks for (never, must, at least or at most).');
+        if (!shifts.some((s: string) => ['AM', 'PM', 'OH', 'OFF'].includes(s))) throw fail(400, 'Choose at least one shift.');
+        if (['min', 'max'].includes(condition) && amount === null) throw fail(400, 'Type how many people.');
+      }
       if (kind === 'locum_nights' && !shifts.some((s: string) => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].includes(s))) throw fail(400, 'Choose the days that are left for a locum.');
       if (kind === 'only_shift' && !shifts.length) throw fail(400, 'Choose the shifts that are allowed.');
       if (kind === 'not_shift' && (!personA || !shifts.length)) throw fail(400, 'Choose the person and the shifts.');
       if (kind === 'min_cover' && (amount === null || shifts.length !== 1)) throw fail(400, 'Choose one shift and the minimum number of people.');
       if (kind === 'max_consecutive' && !amount) throw fail(400, 'Type the maximum number of days in a row.');
-      const row = { kind, scope, person_a: personA || null, person_b: kind === 'not_together' ? personB : null, shifts, amount, company, enforce, active: body.active !== false, note: text(body.note, 200) };
+      const row = { kind, condition, scope, person_a: personA || null, person_b: kind === 'not_together' ? personB : null, shifts, amount, company, enforce, active: body.active !== false, note: text(body.note, 200) };
       const id = text(body.id, 60);
       const { error } = id ? await db.from('hr_roster_rules').update(row).eq('id', id) : await db.from('hr_roster_rules').insert(row);
       if (error) throw error;
@@ -1805,6 +1811,8 @@ export async function hrHandler(req: any, res: any) {
       const before = new Date(Date.parse(`${start}T00:00:00Z`) - 14 * 86400000).toISOString().slice(0, 10); // two weeks before: the week before the month is shown on the sheet, and the draft checks recovery from the week before that
       let staffQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation,holiday_group', { count: 'exact' }).eq('status', 'Active');
       if (company) staffQuery = staffQuery.eq('company', company);
+      // Everyone of this kind in both clinics, so a rule can be made about a person of the other clinic too (the names list in Rules).
+      const everyone = await db.from('hr_employees').select('employee_code,full_name,company,designation').eq('status', 'Active').limit(600);
       const staff = await staffQuery.limit(501);
       if (staff.error) throw staff.error;
       if ((staff.count || 0) > 500 || (staff.count || 0) > (staff.data || []).length) throw fail(422, 'Too many staff for the roster trial. Choose one clinic.');
@@ -1824,7 +1832,7 @@ export async function hrHandler(req: any, res: any) {
         if ((result.count || 0) > (result.data || []).length) throw fail(422, 'Roster trial exceeds its read limit. Choose one clinic to avoid incomplete results.');
       }
       const mapDays = (rows: any[]) => rows.map((r) => ({ id: r.employee_id, date: r.work_date, shift: r.shift }));
-      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', holidayGroup: p.holiday_group || '' })), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), holidays: (holidays.error ? [] : holidays.data || []).map((h: any) => ({ group: h.group_code, date: h.holiday_date, name: h.name })), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
+      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', holidayGroup: p.holiday_group || '' })), rulePeople: (everyone.data || []).filter((p: any) => (group === 'doctors') === /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => ({ code: p.employee_code, name: p.full_name, company: p.company })).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), holidays: (holidays.error ? [] : holidays.data || []).map((h: any) => ({ group: h.group_code, date: h.holiday_date, name: h.name })), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
     }
     if (req.method === 'GET' && action === 'roster') {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';

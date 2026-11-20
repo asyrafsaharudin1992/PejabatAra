@@ -49,7 +49,7 @@ export function doctorWeeklyShift(pattern: Pattern, date: string, avoid: number[
   const priorities = [...new Set([beforeOff, ...workdays.slice().reverse()])].filter((day) => !avoid.includes(day));
   return priorities.slice(0, nights).includes(weekday) ? 'PM' : 'AM';
 }
-export type RosterRule = { id?: string; kind: 'not_together' | 'min_cover' | 'max_consecutive' | 'not_shift' | 'weekend_off' | 'only_shift' | 'no_day_after_night' | 'locum_nights'; scope: 'all' | 'doctors' | 'staff'; person_a: string | null; person_b: string | null; shifts: string[]; amount: number | null; company: string | null; enforce: 'warn' | 'block'; active: boolean; note: string };
+export type RosterRule = { id?: string; kind: 'not_together' | 'min_cover' | 'max_consecutive' | 'not_shift' | 'weekend_off' | 'only_shift' | 'no_day_after_night' | 'locum_nights' | 'custom'; condition?: '' | 'never' | 'must' | 'min' | 'max'; scope: 'all' | 'doctors' | 'staff'; person_a: string | null; person_b: string | null; shifts: string[]; amount: number | null; company: string | null; enforce: 'warn' | 'block'; active: boolean; note: string };
 // Used until the rules table exists: the one rule that used to be written into the code.
 export const DEFAULT_ROSTER_RULES: RosterRule[] = [
   { kind: 'not_together', person_a: 'ARA0001', person_b: 'ARA0002', shifts: ['AM', 'OH'], amount: null, company: null, scope: 'all', enforce: 'warn', active: true, note: 'Asyraf and Syafiq must not work at the same time' },
@@ -173,6 +173,27 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
     } else if (rule.kind === 'locum_nights') {
       const days = locumRuleDays(rule), slots = locumRuleSlots(rule);
       for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && slots.includes(newCode(c.shift)) && days.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) warnings.push(`${date} · ${short(person)} is on ${newCode(c.shift)}, which is left for a locum${tail}`); }
+    } else if (rule.kind === 'custom' && rule.condition) {
+      // A rule made on screen: who, on which weekdays (none: every day), which shifts, and "never", "must", "at least" or "at most".
+      const days = locumRuleDays(rule), slots = rule.shifts.filter((code) => ['AM', 'PM', 'OH', 'OFF'].includes(code));
+      const codeOf = (shift: string) => { const code = newCode(shift); return code === 'REST' ? 'OFF' : code; };
+      const onDay = (date: string) => !days.length || days.includes(new Date(`${date}T00:00:00Z`).getUTCDay());
+      const text = slots.join(' or ');
+      if (slots.length && (rule.condition === 'never' || rule.condition === 'must')) {
+        for (const person of inGroup(rule)) for (const date of dates.filter(onDay)) {
+          const c = byKey.get(cellKey(person.id, date));
+          if (!c || ['AL', 'MC', 'ML', 'UPL', 'EL', 'PH', 'NA', 'RESIGN'].includes(newCode(c.shift))) continue;
+          const inSlot = slots.includes(codeOf(c.shift));
+          if (rule.condition === 'never' && inSlot) warnings.push(`${date} · ${short(person)} is on ${codeOf(c.shift)}, which is not allowed by a rule${tail}`);
+          if (rule.condition === 'must' && !inSlot) warnings.push(`${date} · ${short(person)} is on ${codeOf(c.shift)}, but must be on ${text}${tail}`);
+        }
+      } else if (slots.length && rule.amount != null && (rule.condition === 'min' || rule.condition === 'max')) {
+        for (const company of [...new Set(inGroup(rule).map((p) => p.company))]) for (const date of dates.filter(onDay)) {
+          const count = inGroup(rule).filter((p) => p.company === company && slots.includes(codeOf(byKey.get(cellKey(p.id, date))?.shift || ''))).length;
+          if (rule.condition === 'min' && count < rule.amount) warnings.push(`${date} · ${company}: ${count} on ${text}, at least ${rule.amount} needed${tail}`);
+          if (rule.condition === 'max' && count > rule.amount) warnings.push(`${date} · ${company}: ${count} on ${text}, at most ${rule.amount} allowed${tail}`);
+        }
+      }
     } else if (rule.kind === 'only_shift' && rule.shifts.length) {
       for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && workingShift(c.shift) && !rule.shifts.includes(newCode(c.shift))) warnings.push(`${date} · ${short(person)} is on ${newCode(c.shift)}, but may only work ${rule.shifts.join(' / ')}${tail}`); }
     } else if (rule.kind === 'no_day_after_night' || rule.kind === 'max_consecutive' && rule.amount) {
