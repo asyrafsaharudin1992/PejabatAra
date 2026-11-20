@@ -192,7 +192,8 @@ export function generateRosterDraft(input: Parameters<typeof generateRosterCore>
       const lines = best.warnings.filter((w) => w.startsWith(date));
       // The people a warning names; one that names nobody (a coverage shortfall) can be fixed by anyone.
       const named = enabled.filter((p) => lines.some((w) => w.includes(p.name) || w.includes(p.name.split(' ').slice(0, 2).join(' '))));
-      for (const person of named.length ? named : enabled) {
+      // Move the people with no preferred night days first, so a doctor's chosen nights (Asyraf's Mon/Tue) are the last thing to be moved.
+      for (const person of [...(named.length ? named : enabled)].sort((x, y) => Number(preferredNights(input.patterns[x.id]).length > 0) - Number(preferredNights(input.patterns[y.id]).length > 0))) {
         const here = cellMap.get(cellKey(person.id, date));
         if (!movable(here)) continue;
         for (const other of weekOf(date)) {

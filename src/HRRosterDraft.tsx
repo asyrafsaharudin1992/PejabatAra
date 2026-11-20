@@ -142,6 +142,14 @@ function DraftTables({ view, month, dates, people, cellMap, group, locum, onEdit
 const MS_DAY = ['AHAD', 'ISNIN', 'SELASA', 'RABU', 'KHAMIS', 'JUMAAT', 'SABTU'];
 function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onEdit }: { onEdit?: (id: string, date: string, shift: string) => void; key?: string; month: string; dates: string[]; people: DraftPerson[]; cellMap: Map<string, DraftCell>; group: 'staff' | 'doctors'; company: string; locum: { date: string; missing: number }[] }) {
   const [printing, setPrinting] = useState(false);
+  // Free text for the printed page: while "Edit text" is on, every cell, the title and a note can be typed over like in a document.
+  // It only changes this page (kept while the draft is open), not the draft itself.
+  const [editText, setEditText] = useState(false);
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const [locumColour, setLocumColour] = useState('#fef08a');
+  const typed = (key: string, shown: string) => editText
+    ? <span contentEditable suppressContentEditableWarning className="block min-w-[2ch] rounded outline-dashed outline-1 outline-sky-300" onBlur={(e) => { const value = e.currentTarget.textContent || ''; if (value !== shown) setTexts((all) => ({ ...all, [key]: value })); }}>{shown}</span>
+    : <>{shown}</>;
   usePrintSheet(printing, `Roster draft - ${company} - ${month}`, () => setPrinting(false));
   const letters = group === 'doctors' && people.length <= 26;
   // A is Asyraf, B is Syafiq and C is Hanis; any other doctor gets the next letters (D, E…).
@@ -168,7 +176,7 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
   const td = 'border border-slate-300 px-2 py-1 text-center text-[13px]';
   const table = <table className="w-full border-collapse">
     <thead>
-      <tr><th colSpan={columns.length + 3 + extra} className="border border-slate-400 bg-sky-50 px-2 py-2 text-center text-sm font-bold text-[#14233b]">*: REQUESTS &nbsp;·&nbsp; <span className="bg-yellow-200 px-1">Yellow: locum</span><br />{title}{legend && <><br /><span className="text-xs font-semibold">{legend}</span></>}</th></tr>
+      <tr><th colSpan={columns.length + 3 + extra} className="border border-slate-400 bg-sky-50 px-2 py-2 text-center text-sm font-bold text-[#14233b]">*: REQUESTS &nbsp;·&nbsp; <span className="px-1" style={{ backgroundColor: locumColour }}>{typed('legend', texts.legend ?? 'Colour: locum')}</span><br />{typed('title', texts.title ?? title)}{legend && <><br /><span className="text-xs font-semibold">{legend}</span></>}</th></tr>
       <tr><th className={th} /><th className={th} />{head.map((text) => <th key={text} className={th}>{text}</th>)}{eveningLocum && <th className={th}>LOCUM 6-10</th>}<th className={th}>REMARK</th></tr>
     </thead>
     <tbody>{dates.map((date, index) => {
@@ -177,17 +185,18 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
       return <Fragment key={date}>
         <tr className={weekend ? 'bg-slate-50' : ''}>
           <td className={`${td} font-semibold`}>{MS_DAY[day.getUTCDay()]}</td><td className={td}>{day.getUTCDate()}/{day.getUTCMonth() + 1}</td>
-          {columns.map((code) => { const names = who(date, code); const blocked = code === 'OH' && group === 'doctors' && weekend && !names.length; const lacking = code === 'PM' && needsLocum(date); return <td key={code} className={`${td} ${blocked ? 'bg-slate-800' : lacking ? 'bg-yellow-200 font-semibold' : ''}`}>{names.map((item, i) => <Fragment key={item.id}>{i > 0 && ', '}{onEdit ? <button type="button" aria-label={`Edit ${item.text} ${date}`} className="underline decoration-dotted" onClick={() => onEdit(item.id, date, item.shift)}>{item.text}</button> : item.text}</Fragment>)}{lacking && (names.length ? ' · ' : '') + 'LOCUM'}</td>; })}
-          {eveningLocum && <td className={`${td} bg-yellow-200 font-semibold`}>{locumHours(date)}</td>}
-          <td className={`${td} text-xs`}>{remark(date)}</td>
+          {columns.map((code) => { const names = who(date, code); const blocked = code === 'OH' && group === 'doctors' && weekend && !names.length; const lacking = code === 'PM' && needsLocum(date); return <td key={code} style={lacking && !blocked ? { backgroundColor: locumColour } : undefined} className={`${td} ${blocked ? 'bg-slate-800' : lacking ? 'font-semibold' : ''}`}>{texts[`${date}|${code}`] !== undefined || editText ? typed(`${date}|${code}`, texts[`${date}|${code}`] ?? `${names.map((item) => item.text).join(', ')}${lacking ? (names.length ? ' · ' : '') + 'LOCUM' : ''}`) : <>{names.map((item, i) => <Fragment key={item.id}>{i > 0 && ', '}{onEdit ? <button type="button" aria-label={`Edit ${item.text} ${date}`} className="underline decoration-dotted" onClick={() => onEdit(item.id, date, item.shift)}>{item.text}</button> : item.text}</Fragment>)}{lacking && (names.length ? ' · ' : '') + 'LOCUM'}</>}</td>; })}
+          {eveningLocum && <td style={{ backgroundColor: locumColour }} className={`${td} font-semibold`}>{typed(`${date}|locum`, texts[`${date}|locum`] ?? locumHours(date))}</td>}
+          <td className={`${td} text-xs`}>{typed(`${date}|remark`, texts[`${date}|remark`] ?? remark(date))}</td>
         </tr>
         {(day.getUTCDay() === 0 && index < dates.length - 1) && <tr key={`${date}-sep`}><td colSpan={columns.length + 3 + extra} className="h-2 border border-slate-300 bg-sky-200 p-0" /></tr>}
       </Fragment>;
     })}</tbody>
   </table>;
+  const note = editText || texts.note ? <p className="mt-2 text-xs">{typed('note', texts.note ?? (editText ? 'Type a note here' : ''))}</p> : null;
   return <div className="space-y-2">
-    <div className="flex justify-end"><button type="button" onClick={() => setPrinting(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">Print / PDF · {company}</button></div>
-    <div className="overflow-x-auto">{table}</div>
-    {printing && <PrintPortal margin={8}><PrintPage><div className="cv-fit roster-print"><div className="mb-2 flex items-center gap-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-14 w-14 object-contain" /><p className="text-sm font-bold">KLINIK ARA 24 JAM</p></div>{table}</div></PrintPage></PrintPortal>}
+    <div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-1 text-xs font-semibold">Locum colour<select value={locumColour} onChange={(e) => setLocumColour(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal">{[['#fef08a', 'Yellow'], ['#fed7aa', 'Orange'], ['#bbf7d0', 'Green'], ['#bae6fd', 'Blue'], ['#fbcfe8', 'Pink'], ['#e2e8f0', 'Grey']].map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label><button type="button" onClick={() => setEditText(!editText)} className={`h-9 rounded-lg border px-3 text-sm font-semibold ${editText ? 'border-[#0b587b] bg-sky-50 text-[#0b587b]' : 'border-slate-200 bg-white text-slate-700'}`}>{editText ? 'Done editing text' : 'Edit text'}</button>{Object.keys(texts).length > 0 && <button type="button" onClick={() => setTexts({})} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm">Undo text edits</button>}<button type="button" onClick={() => setPrinting(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">Print / PDF · {company}</button></div>
+    <div className="overflow-x-auto">{table}{note}</div>
+    {printing && <PrintPortal margin={8}><PrintPage><div className="cv-fit roster-print"><div className="mb-2 flex items-center gap-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-14 w-14 object-contain" /><p className="text-sm font-bold">KLINIK ARA 24 JAM</p></div>{table}{note}</div></PrintPage></PrintPortal>}
   </div>;
 }
