@@ -1,5 +1,5 @@
 import { attendanceRequestLabel, attendanceFollowUpStatus, type AttendanceFollowUp, type FollowUpFilter, FOLLOW_UP_LABEL } from './lib/attendanceFollowUp';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { bulk } from './lib/bulkReports';
 import { Download, Printer } from 'lucide-react';
 import { PrintMenu } from './PrintMenu';
@@ -18,9 +18,31 @@ type Day = { date: string; shift: string; startTime: string; endTime: string; in
 type Person = { id: string; company: string; code: string; name: string; designation: string };
 type Block = { person: Person; days: Day[] };
 
-type FollowUpProps = { blocks: Block[]; company: string; staffId: string; staff: { id: string; fullName: string; company: string }[]; filter: FollowUpFilter; onCompany: (company: string) => void; onStaff: (id: string) => void; onFilter: (filter: FollowUpFilter) => void };
+type FollowUpProps = { blocks: Block[]; company: string; staffId: string; staff: { id: string; fullName: string; company: string }[]; filter: FollowUpFilter; onCompany: (company: string) => void; onStaff: (id: string) => void; onFilter: (filter: FollowUpFilter) => void; onChanged: () => void; onError: (message: string) => void };
 
-function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, onStaff, onFilter }: FollowUpProps) {
+function DayFix({ day, staffId, name, onChanged, onError, onSaved }: { day: Day; staffId: string; name: string; onChanged: () => void; onError: (message: string) => void; onSaved: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (work: () => Promise<unknown>, done: string) => {
+    setBusy(true); onSaved('');
+    try { const result = await work() as { duplicate?: boolean } | undefined; onSaved(`${name} · ${dmy(day.date)}: ${result?.duplicate ? 'that clock already exists, nothing was added.' : done}`); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
+    finally { setBusy(false); }
+  };
+  const { saveClock, saveIn, saveOut } = clockSavers(staffId, name, run, onChanged);
+  const cell = 'w-[72px] overflow-hidden rounded border border-slate-200 bg-white text-center';
+  return <div className={busy ? 'opacity-60' : ''}>
+    <p className="mb-2 text-xs text-slate-500">{name} · {dmy(day.date)} {dayName(day.date)} · shift {shiftCell(day) || 'none'} · type a time (for example 8.52 or 20.50) and press Enter. A new time on an empty box adds a clock; clearing a Clock box removes it. Changes go in the audit record.</p>
+    <div className="flex flex-wrap items-end gap-3">
+      {[0, 1, 2, 3].map((slot) => <label key={slot} className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Clock {slot + 1}<div className={`${cell} mt-1 bg-[#e3e1f7]`}><TimeCell key={`${day.date}-${slot}-${day.clocks[slot]?.id || ''}`} value={day.clocks[slot]?.time || ''} tone="bg-transparent" onSave={(value) => saveClock(day, slot, value)} /></div></label>)}
+      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">In<div className={`${cell} mt-1 bg-[#cfc8f5]`}><TimeCell value={day.inTime} tone="bg-transparent" onSave={(value) => saveIn(day, value)} /></div></label>
+      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Out<div className={`${cell} mt-1 bg-[#cfc8f5]`}><TimeCell value={day.outTime} tone="bg-transparent" onSave={(value) => saveOut(day, value)} /></div></label>
+      <p className="pb-1 text-xs text-slate-600">Late {colon(day.late)} · Early {colon(day.early)} · Worked {colon(day.worked)}{day.odd.length || day.soft.length ? ` · ${[...day.odd, ...day.soft].join(', ')}` : ''}</p>
+    </div>
+  </div>;
+}
+
+function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, onStaff, onFilter, onChanged, onError }: FollowUpProps) {
+  const [fixing, setFixing] = useState(''); // the row whose clocks are open for editing
+  const [saved, setSaved] = useState('');
   // Settled days remain in this box even after approved clock corrections remove their odd-day flag.
   const allRows = blocks.flatMap(({ person, days }) => days.filter((day) => day.odd.length || day.soft.length || day.followUp?.ot.length || day.followUp?.missed.length || day.followUp?.credit.length || day.followUp?.otDecision).map((day) => ({ person, day, resolution: attendanceFollowUpStatus(day) }))).sort((a, b) => b.day.date.localeCompare(a.day.date) || a.person.name.localeCompare(b.person.name));
   const rows = allRows.filter((row) => filter === 'all' || row.resolution === filter);
@@ -37,12 +59,16 @@ function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, o
       <p className="pb-2 text-xs text-slate-500" role="status">Showing {rows.length} of {allRows.length} days</p>
     </div>
     <p className="mt-2 text-xs text-slate-500">Awaiting approval means a request or OT decision is still pending, so nothing is needed from HR yet. Unresolved means HR still has to act: no application, a rejected or cancelled request, or a clock, late or early-out issue left. Settled means every request has a final decision and no flags remain.</p>
-    {!rows.length ? <p className="mt-4 text-sm text-slate-500">{allRows.length ? 'No days match the selected status.' : 'No odd days or requests for the selected staff, branch and period.'}</p> : <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[1000px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400">{['Staff', 'Date', 'Status', 'Check', 'OT', 'Forgot to clock', 'Credit hours'].map((label) => <th key={label} className="px-2 py-3">{label}</th>)}</tr></thead><tbody>{rows.map(({ person, day, resolution }) => {
+    {saved && <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-2.5 text-sm font-semibold text-emerald-700">{saved}</p>}
+    {!rows.length ? <p className="mt-4 text-sm text-slate-500">{allRows.length ? 'No days match the selected status.' : 'No odd days or requests for the selected staff, branch and period.'}</p> : <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[1000px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400">{['Staff', 'Date', 'Status', 'Check', 'OT', 'Forgot to clock', 'Credit hours', ''].map((label) => <th key={label} className="px-2 py-3">{label}</th>)}</tr></thead><tbody>{rows.map(({ person, day, resolution }) => {
       const follow = day.followUp;
-      return <tr key={`${person.id}:${day.date}`} className="border-t border-slate-100 align-top"><td className="px-2 py-3"><p className="font-semibold text-[#0b587b]">{person.name}</p><p className="text-xs text-slate-400">{person.code} · {person.company}</p></td><td className="whitespace-nowrap px-2 py-3">{dmy(day.date)}<span className="block text-xs text-slate-400">{dayName(day.date)}</span></td><td className="px-2 py-3"><span className={`inline-block whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold ${resolution === 'settled' ? 'bg-emerald-50 text-emerald-700' : resolution === 'awaiting' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-700'}`}>{FOLLOW_UP_LABEL[resolution]}</span></td><td className="px-2 py-3 text-xs text-slate-600">{[...day.odd, ...day.soft].join(', ') || 'No current flag'}</td>
+      const key = `${person.id}:${day.date}`;
+      return <Fragment key={key}><tr className="border-t border-slate-100 align-top"><td className="px-2 py-3"><p className="font-semibold text-[#0b587b]">{person.name}</p><p className="text-xs text-slate-400">{person.code} · {person.company}</p></td><td className="whitespace-nowrap px-2 py-3">{dmy(day.date)}<span className="block text-xs text-slate-400">{dayName(day.date)}</span></td><td className="px-2 py-3"><span className={`inline-block whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold ${resolution === 'settled' ? 'bg-emerald-50 text-emerald-700' : resolution === 'awaiting' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-700'}`}>{FOLLOW_UP_LABEL[resolution]}</span></td><td className="px-2 py-3 text-xs text-slate-600">{[...day.odd, ...day.soft].join(', ') || 'No current flag'}</td>
       <td className="px-2 py-3">{follow?.ot.length ? follow.ot.map((request, index) => <div key={index}>{status(request.status)}</div>) : follow?.otDecision ? <span className="text-xs font-semibold text-slate-600">{follow.otDecision === 'approved' ? 'Approved by HR' : follow.otDecision === 'rejected' ? 'Rejected by HR' : `HR: ${follow.otDecision}`}</span> : noRequest}</td>
       <td className="px-2 py-3">{follow?.missed.length ? follow.missed.map((request, index) => <div key={index} className="mb-2 last:mb-0"><p className="mb-1 text-xs text-slate-500">{request.reason}</p>{status(request.status, true)}</div>) : noRequest}</td>
-      <td className="px-2 py-3">{follow?.credit.length ? follow.credit.map((use, index) => <p key={index} className="mb-1 rounded-lg bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">Applied · {use.hours} h · {use.kind === 'late' ? 'Late arrival' : use.kind === 'early' ? 'Early leave' : use.kind}</p>) : <span className="text-slate-400">No recorded use</span>}</td></tr>;
+      <td className="px-2 py-3">{follow?.credit.length ? follow.credit.map((use, index) => <p key={index} className="mb-1 rounded-lg bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">Applied · {use.hours} h · {use.kind === 'late' ? 'Late arrival' : use.kind === 'early' ? 'Early leave' : use.kind}</p>) : <span className="text-slate-400">No recorded use</span>}</td>
+      <td className="px-2 py-3"><button type="button" onClick={() => setFixing(fixing === key ? '' : key)} className="whitespace-nowrap rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-[#0b587b] hover:bg-slate-50">{fixing === key ? 'Close' : 'Fix clocks'}</button></td></tr>
+      {fixing === key && <tr className="bg-slate-50"><td colSpan={8} className="px-3 py-3"><DayFix day={day} staffId={person.id} name={person.name} onChanged={onChanged} onError={onError} onSaved={setSaved} /></td></tr>}</Fragment>;
     })}</tbody></table></div>}
   </section>;
 }
@@ -140,20 +166,13 @@ function TimeCell({ value, onSave, tone }: { key?: string | number; value: strin
 const HEAD = ['#', 'Date', 'Day', 'Clk1N', 'Clk2N', 'Clk3N', 'Clk4N', 'In', 'Out', 'Shift', 'Reason', 'NRM', 'Actual', 'Under', 'Lateness', 'OT10', 'OT15', 'OT20', 'OT30', 'Flat', 'Attd', 'Shift', 'Meal', 'Tran', 'Health', 'Oth1', 'Oth2'];
 const isInsufficient = (day: Day) => day.status === 'missing-out' || (day.clocks.length % 2 === 1 && day.status !== 'off') || (Boolean(day.inTime) !== Boolean(day.outTime));
 
-function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onChanged, onError, onPreview, staffList, onStaff }: { block: Block; staffId: string; filters: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }; setFilters: (value: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }) => void; notice: string; setNotice: (value: string) => void; onChanged: () => void; onError: (message: string) => void; onPreview: () => void; staffList: { id: string; fullName: string }[]; onStaff: (id: string) => void }) {
-  const [busy, setBusy] = useState(false);
-  const { person, days } = block;
-  const any = filters.late || filters.under || filters.absent || filters.insufficient;
-  const rows = days.map((day, index) => ({ day, number: index + 1 })).filter(({ day }) => !any || (filters.late && day.late > 0) || (filters.under && day.early > 0) || (filters.absent && (day.status === 'absent' || reasonOf(day) === 'ABS')) || (filters.insufficient && isInsufficient(day)));
-  const run = async (work: () => Promise<unknown>, done: string) => {
-    setBusy(true); setNotice('');
-    try { const result = await work() as { duplicate?: boolean } | undefined; setNotice(result?.duplicate ? 'That clock already exists. Nothing was added.' : done); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
-    finally { setBusy(false); }
-  };
+type RunWork = (work: () => Promise<unknown>, done: string) => unknown;
+// The ways to change a day's clocks in place, shared by the Update by individual grid and the Fix panel of Requests & follow-up.
+function clockSavers(staffId: string, name: string, run: RunWork, onChanged: () => void) {
   // A clock cell: a new time on an empty cell adds a clock, a new time on a used one changes it, and clearing it removes the clock.
   const saveClock = (day: Day, index: number, value: string) => {
     const clockRow = day.clocks[index];
-    if (!value) { if (!clockRow || !window.confirm(`Remove the clock at ${clockRow.time} on ${dmy(day.date)} for ${person.name}?`)) { onChanged(); return; } void run(() => post('attendance_clock_delete', { clockId: clockRow.id, note: 'Removed in Update by individual' }), 'Clock removed.'); return; }
+    if (!value) { if (!clockRow || !window.confirm(`Remove the clock at ${clockRow.time} on ${dmy(day.date)} for ${name}?`)) { onChanged(); return; } void run(() => post('attendance_clock_delete', { clockId: clockRow.id, note: 'Removed in Update by individual' }), 'Clock removed.'); return; }
     if (clockRow) void run(() => post('attendance_clock_update', { clockId: clockRow.id, date: day.date, time: value, note: 'Changed in Update by individual' }), 'Clock changed.');
     else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'auto', time: value, note: 'Added in Update by individual' }), 'Clock added.');
   };
@@ -168,6 +187,19 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
     if (day.outId) void run(() => post('attendance_clock_update', { clockId: day.outId, time: value, note: 'Out changed in Update by individual' }), 'Out changed.');
     else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'out', time: value, nextDay: Boolean(day.inTime) && value < day.inTime, note: 'Out added in Update by individual' }), 'Out added.');
   };
+  return { saveClock, saveIn, saveOut };
+}
+function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onChanged, onError, onPreview, staffList, onStaff }: { block: Block; staffId: string; filters: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }; setFilters: (value: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }) => void; notice: string; setNotice: (value: string) => void; onChanged: () => void; onError: (message: string) => void; onPreview: () => void; staffList: { id: string; fullName: string }[]; onStaff: (id: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const { person, days } = block;
+  const any = filters.late || filters.under || filters.absent || filters.insufficient;
+  const rows = days.map((day, index) => ({ day, number: index + 1 })).filter(({ day }) => !any || (filters.late && day.late > 0) || (filters.under && day.early > 0) || (filters.absent && (day.status === 'absent' || reasonOf(day) === 'ABS')) || (filters.insufficient && isInsufficient(day)));
+  const run = async (work: () => Promise<unknown>, done: string) => {
+    setBusy(true); setNotice('');
+    try { const result = await work() as { duplicate?: boolean } | undefined; setNotice(result?.duplicate ? 'That clock already exists. Nothing was added.' : done); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
+    finally { setBusy(false); }
+  };
+  const { saveClock, saveIn, saveOut } = clockSavers(staffId, person.name, run, onChanged);
   const index = staffList.findIndex((item) => item.id === staffId);
   const step = (by: number) => { const next = staffList[index + by]; if (next) onStaff(next.id); };
   const cell = 'border border-slate-200 px-1 py-0 text-center tabular-nums whitespace-nowrap';
@@ -217,6 +249,7 @@ export function HRAttendanceIndividual({ onError, followUp = true }: { onError: 
   const [blocks, setBlocks] = useState<Block[] | null>(null);
   const [view, setView] = useState<'edit' | 'report' | 'odd'>('edit');
   const [reload, setReload] = useState(0);
+  const quiet = useRef(false); // a refresh after a change made inside Requests & follow-up keeps the page and the open row in place
   const staffBox = useRef<HTMLSelectElement>(null);
   const [filters, setFilters] = useState({ late: false, under: false, absent: false, insufficient: false });
   const [notice, setNotice] = useState('');
@@ -232,7 +265,7 @@ export function HRAttendanceIndividual({ onError, followUp = true }: { onError: 
   }, []);
   useEffect(() => {
     if (!period) return;
-    let live = true; setBlocks(null);
+    let live = true; if (!quiet.current) setBlocks(null); quiet.current = false;
     officeFetch(`/api/status?resource=hr&action=attendance_individual&from=${period.from}&to=${period.to}${staffId ? `&id=${staffId}` : ''}`).then((response) => response.json()).then((result) => {
       if (result.error) throw new Error(result.error);
       if (live) { setBlocks(result.people); setAt(nowText()); }
@@ -265,7 +298,7 @@ export function HRAttendanceIndividual({ onError, followUp = true }: { onError: 
       : shownView === 'edit' && !staffId ? <section className={`${card} print:hidden`}><p className="text-base font-semibold text-[#0b587b]">↑ Click the Staff box above and choose a staff member to edit.</p><p className="mt-1 text-sm text-slate-500">Their days then open here as a grid you can edit in place.</p></section>
       : shownView === 'edit' && shown[0] ? <EditGrid block={shown[0]} staffId={staffId} filters={filters} setFilters={setFilters} notice={notice} setNotice={setNotice} onChanged={() => setReload((n) => n + 1)} onError={onError} onPreview={() => setView('report')} staffList={staff.filter((item) => !company || item.company === company)} onStaff={setStaffId} />
       : shownView === 'odd' ? <><section className={`${card} print:hidden`}><div className="overflow-x-auto"><table className="no-stack w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Odd days</th><th className="pr-3 text-right">Absent</th><th className="pr-3 text-right">No clock out</th><th className="pr-3 text-right">Day off, clocked</th><th className="pr-3 text-right">Over 14 h</th><th className="pr-3 text-right">Under 4 h</th><th className="pr-3 text-right">Late</th><th className="text-right">Early out</th></tr></thead>
-        <tbody>{oddRows.map((row) => <tr key={row.person.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setStaffId(row.person.id); setView('edit'); }}><td className="py-2 pr-3"><span className="font-semibold text-[#0b587b]">{row.person.name}</span><span className="block text-xs text-slate-400">{row.person.code} · {row.person.company}</span></td><td className="pr-3 text-right tabular-nums">{num(row.odd)}</td><td className="pr-3 text-right tabular-nums">{num(row.absent)}</td><td className="pr-3 text-right tabular-nums">{num(row.noOut)}</td><td className="pr-3 text-right tabular-nums">{num(row.extra)}</td><td className="pr-3 text-right tabular-nums">{num(row.long)}</td><td className="pr-3 text-right tabular-nums">{num(row.short)}</td><td className="pr-3 text-right tabular-nums">{row.late || <span className="text-slate-300">0</span>}</td><td className="text-right tabular-nums">{row.early || <span className="text-slate-300">0</span>}</td></tr>)}</tbody></table></div></section>{followUp && <OddDaysFollowUp blocks={shown} company={company} staffId={staffId} staff={staff} filter={followUpFilter} onFilter={setFollowUpFilter} onCompany={(value) => { setCompany(value); setStaffId(''); }} onStaff={setStaffId} />}</>
+        <tbody>{oddRows.map((row) => <tr key={row.person.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setStaffId(row.person.id); setView('edit'); }}><td className="py-2 pr-3"><span className="font-semibold text-[#0b587b]">{row.person.name}</span><span className="block text-xs text-slate-400">{row.person.code} · {row.person.company}</span></td><td className="pr-3 text-right tabular-nums">{num(row.odd)}</td><td className="pr-3 text-right tabular-nums">{num(row.absent)}</td><td className="pr-3 text-right tabular-nums">{num(row.noOut)}</td><td className="pr-3 text-right tabular-nums">{num(row.extra)}</td><td className="pr-3 text-right tabular-nums">{num(row.long)}</td><td className="pr-3 text-right tabular-nums">{num(row.short)}</td><td className="pr-3 text-right tabular-nums">{row.late || <span className="text-slate-300">0</span>}</td><td className="text-right tabular-nums">{row.early || <span className="text-slate-300">0</span>}</td></tr>)}</tbody></table></div></section>{followUp && <OddDaysFollowUp blocks={shown} company={company} staffId={staffId} staff={staff} filter={followUpFilter} onFilter={setFollowUpFilter} onCompany={(value) => { setCompany(value); setStaffId(''); }} onStaff={setStaffId} onChanged={() => { quiet.current = true; setReload((n) => n + 1); }} onError={onError} />}</>
       : <div className="att-individual-pages space-y-6 print:hidden">{shown.map((block, index) => <div key={block.person.id} className={`${card} overflow-x-auto`}><div data-pdf-page className="min-w-[1180px]"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></div>)}</div>}
     {printing && <PrintPortal margin={6}>{shown.map((block, index) => <PrintPage key={block.person.id}><div className="cv-fit"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></PrintPage>)}</PrintPortal>}
   </div>;
