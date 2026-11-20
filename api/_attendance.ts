@@ -537,7 +537,16 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const { data: decided, error: decidedError } = await db.from('hr_attendance_ot').select('work_date,approved_minutes,decided_by,decided_at').eq('employee_id', me.id).eq('status', 'approved').gt('approved_minutes', 0).order('work_date', { ascending: false }).limit(400);
     if (decidedError) throw decidedError;
     const covered = new Set(rows.filter((row: any) => row.status === 'approved' && row.otMinutes > 0).map((row: any) => row.date));
-    const extra = (decided || []).filter((row: any) => !covered.has(row.work_date)).map((row: any) => ({ id: `ot-${row.work_date}`, employeeId: me.id, name: me.full_name, date: row.work_date, inTime: '', outTime: '', otMinutes: Number(row.approved_minutes), otText: minutesText(Number(row.approved_minutes)), reason: 'OT approved', remarks: '', status: 'approved', supervisorDecidedBy: '', supervisorNote: '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: '', rate: null, createdAt: row.decided_at, source: row.decided_by === 'Infotech migration' ? 'Brought over from Infotech' : 'Approved by HR' }));
+    // A day that already has an approved request here (with the clocks but no OT hours) gets the approved hours on that same line, so each day is one line.
+    const sameDay = new Map<string, any>(rows.filter((row: any) => row.status === 'approved' && !isMissedClock(row.reason)).map((row: any) => [row.date, row]));
+    const merged = new Set<string>();
+    for (const row of decided || []) {
+      const line = sameDay.get(row.work_date);
+      if (!line || line.otMinutes > 0) continue;
+      line.otMinutes = Number(row.approved_minutes); line.otText = minutesText(line.otMinutes); line.source = row.decided_by === 'Infotech migration' ? 'Brought over from Infotech' : 'Approved by HR';
+      merged.add(row.work_date);
+    }
+    const extra = (decided || []).filter((row: any) => !covered.has(row.work_date) && !merged.has(row.work_date) && !sameDay.has(row.work_date)).map((row: any) => ({ id: `ot-${row.work_date}`, employeeId: me.id, name: me.full_name, date: row.work_date, inTime: '', outTime: '', otMinutes: Number(row.approved_minutes), otText: minutesText(Number(row.approved_minutes)), reason: 'OT approved', remarks: '', status: 'approved', supervisorDecidedBy: '', supervisorNote: '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: '', rate: null, createdAt: row.decided_at, source: row.decided_by === 'Infotech migration' ? 'Brought over from Infotech' : 'Approved by HR' }));
     // The clock in and out of those days (the Infotech clocks were brought over too), so the line reads like a request made here.
     if (extra.length) {
       try {
