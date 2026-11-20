@@ -539,8 +539,8 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
       if (clock.hasClocks && otMinutes > clock.counted) throw fail(400, clock.counted >= policy.minMinutes ? `Your clocks and roster show ${hoursMinutesText(clock.counted)} of OT on that date. Apply for ${hoursMinutesText(clock.counted)} or less.` : 'Your clocks and roster show less than 1 hour of OT on that date. If a clock is missing, send a Forgot to clock request first.');
     }
     const supervisor = [me.leave_approver_id, me.final_approver_id].find((id: string | null) => id && id !== me.id) || null;
-    const waiting = await db.from('hr_attendance_requests').select('id').eq('employee_id', me.id).eq('work_date', date).in('status', ['pending', 'supervisor_approved']).limit(1);
-    if (waiting.data?.length && !(action === 'attendance_request_update' && waiting.data[0].id === text(body.id, 60))) throw fail(409, 'You already have a request waiting for that date.');
+    const waiting = await db.from('hr_attendance_requests').select('id,reason').eq('employee_id', me.id).eq('work_date', date).in('status', ['pending', 'supervisor_approved']).limit(1);
+    if (waiting.data?.length && !(action === 'attendance_request_update' && waiting.data[0].id === text(body.id, 60))) throw fail(409, isMissedClock(String(waiting.data[0].reason || '')) && !isMissedClock(reason) ? 'You have a Forgot to clock request waiting for that date. Wait for it to be approved, then apply for the OT.' : 'You already have a request waiting for that date.');
     // No supervisor set: it goes straight to HR.
     const fields = { work_date: date, in_time: inTime || null, out_time: outTime || null, ot_minutes: otMinutes, reason, remarks, approver_id: supervisor, status: draft ? 'draft' : supervisor ? 'pending' : 'supervisor_approved' };
     if (action === 'attendance_request_update') {

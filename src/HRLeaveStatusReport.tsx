@@ -76,7 +76,7 @@ export function HRLeaveStatusReport({ onError }: { onError: (message: string) =>
   return <div className="space-y-5">
     <section className={`${card} flex flex-wrap items-end gap-3 print:hidden`}>
       <div className="min-w-[200px] flex-1"><h2 className="text-lg font-semibold">Leave Status Report</h2><p className="text-sm text-slate-500">Every leave request with a leave date in the period: status, who it waits for or who approved it, the comment, and the dates applied and decided.</p></div>
-      <PeriodPicker onChange={setPeriod} />
+      <PeriodPicker onChange={setPeriod} allowCustom />
       <label className="text-xs font-bold text-slate-600">Company<select aria-label="Company" value={company} onChange={(event) => { setCompany(event.target.value); setStaffId(''); }} className={`${field} mt-1 block`}><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select></label>
       <label className="text-xs font-bold text-slate-600">Staff<select aria-label="Staff" value={staffId} onChange={(event) => setStaffId(event.target.value)} className={`${field} mt-1 block max-w-[220px]`}><option value="">All staff</option>{staff.filter((item) => !company || item.company === company).map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
       <label className="text-xs font-bold text-slate-600">Status<select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value)} className={`${field} mt-1 block`}><option value="">All statuses</option><option value="approved">Approved</option><option value="pending">Pending</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select></label>
