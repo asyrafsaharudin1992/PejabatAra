@@ -1,7 +1,7 @@
 import { rewriteColors } from './colorFix';
 
 // The roster sheet as a Word document: the table on screen is copied cell by cell with its colours, borders and alignment written into the cells themselves
-// (Word does not read the page's styles). It is a landscape A4 page saved as .doc, which Word opens and can edit.
+// (Word does not read the page's styles). It is a portrait A4 page saved as .doc, which Word opens and can edit.
 const esc = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export function tableToWordHtml(table: HTMLTableElement, title: string, note: string): string {
   const view = table.ownerDocument.defaultView!;
@@ -16,5 +16,5 @@ export function tableToWordHtml(table: HTMLTableElement, title: string, note: st
     });
     return `<tr>${cells.join('')}</tr>`;
   });
-  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page WordSection1{size:841.9pt 595.3pt;mso-page-orientation:landscape;margin:28pt}div.WordSection1{page:WordSection1}table{border-collapse:collapse;width:100%}</style></head><body><div class="WordSection1"><table>${rows.join('')}</table>${note ? `<p style="font-size:9pt">${esc(note)}</p>` : ''}</div></body></html>`;
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page WordSection1{size:595.3pt 841.9pt;mso-page-orientation:portrait;margin:28pt}div.WordSection1{page:WordSection1}table{border-collapse:collapse;width:100%}</style></head><body><div class="WordSection1"><table>${rows.join('')}</table>${note ? `<p style="font-size:9pt">${esc(note)}</p>` : ''}</div></body></html>`;
 }

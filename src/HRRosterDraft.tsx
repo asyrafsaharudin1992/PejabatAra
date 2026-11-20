@@ -202,7 +202,7 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
   const fileName = `Roster draft ${company} ${month}`;
   const exportPdf = async () => {
     setExportError(''); setExporting(true);
-    try { await new Promise((resolve) => window.setTimeout(resolve, 80)); await savePagesAsPdf(sheetRef.current!.parentElement!, fileName, true); }
+    try { await new Promise((resolve) => window.setTimeout(resolve, 80)); await savePagesAsPdf(sheetRef.current!.parentElement!, fileName, false); }
     catch (cause) { setExportError(cause instanceof Error ? cause.message : 'Unable to save the PDF.'); }
     setExporting(false);
   };
@@ -216,6 +216,6 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
     <div className="flex flex-wrap items-center justify-end gap-2"><label className="flex items-center gap-1 text-xs font-semibold">Locum colour<select value={locumColour} onChange={(e) => setLocumColour(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal">{[['#fef08a', 'Yellow'], ['#fed7aa', 'Orange'], ['#bbf7d0', 'Green'], ['#bae6fd', 'Blue'], ['#fbcfe8', 'Pink'], ['#e2e8f0', 'Grey']].map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label><button type="button" onClick={() => setEditText(!editText)} className={`h-9 rounded-lg border px-3 text-sm font-semibold ${editText ? 'border-[#0b587b] bg-sky-50 text-[#0b587b]' : 'border-slate-200 bg-white text-slate-700'}`}>{editText ? 'Done editing text' : 'Edit text'}</button>{Object.keys(texts).length > 0 && <button type="button" onClick={() => setTexts({})} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm">Undo text edits</button>}<button type="button" onClick={() => void exportPdf()} disabled={exporting} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b] disabled:opacity-50">Download PDF</button><button type="button" onClick={exportWord} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">Download Word</button><button type="button" onClick={() => setPrinting(true)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">Print / PDF · {company}</button></div>
     {exportError && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-800">{exportError}</p>}
     <div className="overflow-x-auto"><div ref={sheetRef} data-pdf-page className="inline-block min-w-full bg-white p-1">{table}{note}</div></div>
-    {printing && <PrintPortal margin={8}><PrintPage><div className="cv-fit roster-print"><div className="mb-2 flex items-center gap-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-14 w-14 object-contain" /><p className="text-sm font-bold">KLINIK ARA 24 JAM</p></div>{table}{note}</div></PrintPage></PrintPortal>}
+    {printing && <PrintPortal margin={8} portrait><PrintPage><div className="cv-fit roster-print"><div className="mb-2 flex items-center gap-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-14 w-14 object-contain" /><p className="text-sm font-bold">KLINIK ARA 24 JAM</p></div>{table}{note}</div></PrintPage></PrintPortal>}
   </div>;
 }

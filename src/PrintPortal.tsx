@@ -9,7 +9,7 @@ const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|chromium|andro
 
 // The page margin is zero so browsers have no room to add their own date, title and address;
 // the white border is padding inside each page instead.
-export function PrintPortal({ margin = 10, children }: { margin?: number; children: ReactNode }) {
+export function PrintPortal({ margin = 10, portrait = false, children }: { margin?: number; portrait?: boolean; children: ReactNode }) {
   const size = { '--pad': `${margin}mm` } as CSSProperties;
   const root = useRef<HTMLDivElement>(null);
   // Anything marked .cv-fit is shrunk to fit its page. It is measured off screen first (the
@@ -19,17 +19,18 @@ export function PrintPortal({ margin = 10, children }: { margin?: number; childr
     if (!node) return;
     node.classList.add('cv-measuring');
     const mm = ((node.querySelector('.cv-mm') as HTMLElement | null)?.offsetWidth || 378) / 100;
-    const room = (209 - margin * 2 - 2) * mm;
+    const pageHeight = portrait ? 296 : 209, pageWidth = portrait ? 209 : 297;
+    const room = (pageHeight - margin * 2 - 2) * mm;
     node.querySelectorAll<HTMLElement>('.cv-fit').forEach((fit) => {
       fit.style.zoom = '1';
       // A little to spare, as print and screen lay text out very slightly differently.
-      fit.style.zoom = String(Math.min(1, (room * 0.96) / Math.max(1, fit.offsetHeight), ((297 - margin * 2) * mm * 0.99) / Math.max(1, fit.scrollWidth)));
+      fit.style.zoom = String(Math.min(1, (room * 0.96) / Math.max(1, fit.offsetHeight), ((pageWidth - margin * 2) * mm * 0.99) / Math.max(1, fit.scrollWidth)));
     });
     node.classList.remove('cv-measuring');
-  }, [margin]);
-  return createPortal(<div ref={root} className={`cv-print${isSafari ? ' cv-rotate' : ''}`} style={size}>
+  }, [margin, portrait]);
+  return createPortal(<div ref={root} className={`cv-print${portrait ? ' cv-portrait' : isSafari ? ' cv-rotate' : ''}`} style={size}>
     <span className="cv-mm" aria-hidden="true" />
-    <style>{`@page{size:A4 ${isSafari ? 'portrait' : 'landscape'};margin:0}`}</style>
+    <style>{`@page{size:A4 ${portrait || isSafari ? 'portrait' : 'landscape'};margin:0}`}</style>
     {children}
   </div>, document.body);
 }
