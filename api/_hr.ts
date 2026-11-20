@@ -806,6 +806,27 @@ export async function hrHandler(req: any, res: any) {
       throw fail(404, 'Unknown request.');
     }
 
+    // A saved roster draft (per month, doctors or staff, and clinic): carried on later, not the live roster.
+    if (req.method === 'GET' && action === 'roster_draft_load') {
+      const month = String(req.query.month || ''), group = String(req.query.group || ''), company = String(req.query.company || '');
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a month, a roster group and a clinic.');
+      const { data, error } = await db.from('hr_roster_drafts').select('payload,updated_by,updated_at').eq('month', month).eq('grp', group).eq('company', company).maybeSingle();
+      if (error) return res.status(200).json({ draft: null, unavailable: true });
+      return res.status(200).json({ draft: data ? { payload: data.payload, updatedBy: data.updated_by, updatedAt: data.updated_at } : null });
+    }
+    if (req.method === 'POST' && (action === 'roster_draft_save' || action === 'roster_draft_delete')) {
+      const month = text(body.month, 7), group = text(body.group, 10), company = text(body.company, 4);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a month, a roster group and a clinic.');
+      if (action === 'roster_draft_delete') {
+        const { error } = await db.from('hr_roster_drafts').delete().eq('month', month).eq('grp', group).eq('company', company);
+        if (error) throw error;
+        return res.status(200).json({ success: true });
+      }
+      if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload) || JSON.stringify(body.payload).length > 400000) throw fail(400, 'This draft is too large to save.');
+      const { error } = await db.from('hr_roster_drafts').upsert({ month, grp: group, company, payload: body.payload, updated_by: text((user as any)?.email, 120), updated_at: new Date().toISOString() }, { onConflict: 'month,grp,company' });
+      if (error) throw fail(500, 'The draft could not be saved. Ask for the roster draft table to be set up.');
+      return res.status(200).json({ success: true });
+    }
     if (req.method === 'GET' && action === 'roster_rules') {
       const { data, error } = await db.from('hr_roster_rules').select('id,kind,scope,person_a,person_b,shifts,amount,company,enforce,active,note').order('created_at').limit(200);
       // Until the table exists the draft keeps using its built-in rule, so nothing breaks.
