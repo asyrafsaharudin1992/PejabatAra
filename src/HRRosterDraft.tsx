@@ -22,6 +22,8 @@ const button = 'rounded-lg bg-[#0b587b] px-4 py-2 text-sm font-semibold text-whi
 const doctor = (person: DraftPerson) => /\b(DR|DOCTOR)\b/i.test(person.designation);
 export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes = [] }: { key?: string; initialMonth: string; group: 'staff' | 'doctors'; company: string; onClose: () => void; hideCodes?: string[] }) {
   const [month, setMonth] = useState(initialMonth);
+  // What is typed in the month box (a browser without a month picker lets half a month be typed); the draft only follows a complete YYYY-MM.
+  const [monthText, setMonthText] = useState(initialMonth);
   const [source, setSource] = useState(() => { const date = new Date(`${initialMonth}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() - 1); return date.toISOString().slice(0, 10); });
   const [length, setLength] = useState(14);
   const [scope, setScope] = useState<'ca' | 'all'>('ca');
@@ -127,9 +129,10 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   const cellMap = new Map<string, DraftCell>((result?.cells || []).map((c: DraftCell) => [cellKey(c.id, c.date), c]));
   const dates = monthDates(month);
   // The last Monday to Friday week before the month starts (for December 2026: 23 to 27 November).
-  const lastFriday = (() => { let day = addDays(`${month}-01`, -1); while (new Date(`${day}T00:00:00Z`).getUTCDay() !== 5) day = addDays(day, -1); return day; })();
+  const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
+  const lastFriday = !monthOk ? '' : (() => { let day = addDays(`${month}-01`, -1); while (new Date(`${day}T00:00:00Z`).getUTCDay() !== 5) day = addDays(day, -1); return day; })();
   // ... and the weekdays after that Friday up to the day before the month (for December 2026 also Monday 30 November).
-  const prevDates = [...Array.from({ length: 5 }, (_, i) => addDays(lastFriday, i - 4)), ...Array.from({ length: 7 }, (_, i) => addDays(lastFriday, i + 1)).filter((d) => d < `${month}-01` && ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()))];
+  const prevDates = !monthOk ? [] : [...Array.from({ length: 5 }, (_, i) => addDays(lastFriday, i - 4)), ...Array.from({ length: 7 }, (_, i) => addDays(lastFriday, i + 1)).filter((d) => d < `${month}-01` && ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()))];
   const sheetCells = new Map(cellMap);
   if (withPrev) for (const d of context?.targetDays || []) if (d.date < `${month}-01`) sheetCells.set(cellKey(d.id, d.date), { id: d.id, date: d.date, shift: d.shift, source: 'existing', locked: true });
   const exportDraft = () => {
@@ -139,7 +142,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   };
   return <section className="draft-compact space-y-5 rounded-2xl border-2 border-[#0b587b]/30 bg-white p-5" aria-label="Roster pattern trial">
     <div className="flex items-start justify-between gap-3"><div><h3 className="text-xl font-semibold">Pattern roster · {group === 'doctors' ? 'Doctors' : 'Staff'} · Trial</h3><p className="mt-1 text-sm text-slate-600">Build and review a draft. The live roster stays unchanged. Closing this trial discards the draft.</p></div><button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">Close trial</button></div>
-    <div className="grid gap-3 md:grid-cols-4"><label className="text-sm font-semibold">Target month<input type="month" value={month} onChange={(e) => e.target.value && (setMonth(e.target.value), setRequest((current) => ({ ...current, date: `${e.target.value}-01` })))} className={field} /></label><label className="text-sm font-semibold">Sample starts on<input type="date" value={source} onChange={(e) => setSource(e.target.value)} className={field} /></label><label className="text-sm font-semibold">Sample length<select value={length} onChange={(e) => setLength(Number(e.target.value))} className={field}>{[7, 14, 28].map((n) => <option key={n} value={n}>{n} days</option>)}</select></label><button type="button" disabled={busy || !source || !month} onClick={() => void load(!context)} className={`${button} self-end`}>{busy ? 'Loading…' : context ? 'Reload sample (resets draft)' : 'Generate draft'}</button></div>
+    <div className="grid gap-3 md:grid-cols-4"><label className="text-sm font-semibold">Target month<input type="month" value={monthText} placeholder="YYYY-MM" onChange={(e) => { const value = e.target.value; setMonthText(value); if (/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) { setMonth(value); setRequest((current) => ({ ...current, date: `${value}-01` })); } }} className={field} /></label><label className="text-sm font-semibold">Sample starts on<input type="date" value={source} onChange={(e) => setSource(e.target.value)} className={field} /></label><label className="text-sm font-semibold">Sample length<select value={length} onChange={(e) => setLength(Number(e.target.value))} className={field}>{[7, 14, 28].map((n) => <option key={n} value={n}>{n} days</option>)}</select></label><button type="button" disabled={busy || !source || !month} onClick={() => void load(!context)} className={`${button} self-end`}>{busy ? 'Loading…' : context ? 'Reload sample (resets draft)' : 'Generate draft'}</button></div>
     {group === 'staff' && <label className="block max-w-xs text-sm font-semibold">Roster scope<select value={scope} onChange={(e) => setScope(e.target.value as 'ca' | 'all')} className={field}><option value="ca">Clinic assistants only</option><option value="all">All non-doctor staff</option></select></label>}
     <p className="text-xs text-slate-500">A copied sample is a starting point, not a confirmed repeating pattern. Check each person’s cycle and its start date. Missing sample days appear as ?. Samples containing leave, holidays or missing days are not selected automatically; replace exceptions with the usual shift first. Loads only when requested; editing and generation run in your browser.</p>
     {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
