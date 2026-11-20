@@ -227,9 +227,8 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
     onClick: editText ? () => setPicked(key) : undefined,
   });
   const before = (date: string) => date < `${month}-01`;
-  // Public holidays of the holiday group most of this clinic's people are in, shown on the sheet itself (the row is tinted and the name is in REMARK).
-  const groupCounts = new Map<string, number>(); for (const person of people) if (person.holidayGroup) groupCounts.set(person.holidayGroup, (groupCounts.get(person.holidayGroup) || 0) + 1);
-  const holidayGroup = [...groupCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  // Public holidays that operations takes (SG-OPS), shown on the sheet itself: the row is tinted and the name is in REMARK.
+  const holidayGroup = 'SG-OPS';
   const phName = new Map(holidays.filter((h) => h.group === holidayGroup).map((h) => [h.date, h.name]));
   const table = <table className="w-full border-collapse">
     <thead>
@@ -244,7 +243,7 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
           <td {...box(`${date}|day`)} className={`${td} font-semibold`}>{MS_DAY[day.getUTCDay()]}</td><td {...box(`${date}|date`)} className={td}>{day.getUTCDate()}/{day.getUTCMonth() + 1}</td>
           {columns.map((code) => { const names = who(date, code); const blocked = code === 'OH' && group === 'doctors' && weekend && !names.length; const lacking = code === 'PM' && needsLocum(date); return <td key={code} {...box(`${date}|${code}`, lacking && !blocked ? { backgroundColor: locumColour } : undefined)} className={`${td} ${blocked ? 'bg-slate-800' : lacking ? 'font-semibold' : ''}`}>{texts[`${date}|${code}`] !== undefined || editText ? typed(`${date}|${code}`, texts[`${date}|${code}`] ?? `${names.map((item) => item.text).join(', ')}${lacking ? (names.length ? ' · ' : '') + 'LOCUM' : ''}`) : <>{names.map((item, i) => <Fragment key={item.id}>{i > 0 && ', '}{onEdit && !before(date) ? <button type="button" aria-label={`Edit ${item.text} ${date}`} className="underline decoration-dotted" onClick={() => onEdit(item.id, date, item.shift)}>{item.text}</button> : item.text}</Fragment>)}{lacking && (names.length ? ' · ' : '') + 'LOCUM'}</>}</td>; })}
           {eveningLocum && <td {...box(`${date}|locum`, { backgroundColor: locumColour })} className="border border-slate-300 px-2 py-1 text-left text-[13px] font-semibold">{typed(`${date}|locum`, texts[`${date}|locum`] ?? (before(date) ? '' : locumHours(date)), true)}</td>}
-          <td {...box(`${date}|remark`)} className={`${td} text-xs`}>{typed(`${date}|remark`, texts[`${date}|remark`] ?? [phName.has(date) ? `PH ${holidayGroup.replace('SG-', '')} · ${phName.get(date)}` : '', remark(date), before(date) ? '(prev. month)' : ''].filter(Boolean).join(' '))}</td>
+          <td {...box(`${date}|remark`)} className={`${td} text-xs`}>{typed(`${date}|remark`, texts[`${date}|remark`] ?? [phName.has(date) ? `PH · ${phName.get(date)}` : '', remark(date), before(date) ? '(prev. month)' : ''].filter(Boolean).join(' '))}</td>
         </tr>
         {((day.getUTCDay() === 0 || before(date) && (!before(dates[index + 1] || date) || addDays(date, 1) !== dates[index + 1])) && index < dates.length - 1) && <tr key={`${date}-sep`}><td colSpan={columns.length + 3 + extra} className="h-2 border border-slate-300 bg-sky-200 p-0" /></tr>}
       </Fragment>;
