@@ -200,7 +200,7 @@ export default function OfficeHR({ embedded = false, finance = false }: { embedd
         {view === 'incentives' && <HRIncentives onError={setError} />}
         {view === 'leave' && !finance && <HRLeave onError={setError} onTypes={() => navigate('leaveTypes')} />}
         {view === 'leaveTypes' && !finance && <LeaveTypes onBack={() => navigate('leave')} />}
-        {view === 'attendance' && !finance && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} />}
+        {view === 'attendance' && !finance && <HRAttendance onError={setError} badges={{ ot: waiting.attendanceOt, missed: waiting.attendanceMissed }} onOpenRoster={() => navigate('roster')} />}
         {view === 'payroll' && <HRPayroll start={payrollStart} onError={setError} />}
         {view === 'tax' && <HRTax onError={setError} />}
         {view === 'charts' && <div className="mx-auto max-w-[1500px] space-y-4"><DirectorCharts onError={setError} start={chartsStart || (finance ? 'finance' : 'hr')} canEditOrg={!finance} /></div>}

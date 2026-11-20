@@ -185,11 +185,19 @@ function Month({ onError, source }: { onError: (message: string) => void; source
 
 // OT is now asked for by staff (the Requests below). From the clocks we only raise an alert: extra time that nobody has asked for yet,
 // so HR can check whether the person did overtime and ask them to apply. Nothing is approved from here.
-function OtAlerts({ onError }: { onError: (message: string) => void }) {
+function OtAlerts({ onError, onOpenRoster, nameQuery = '' }: { onError: (message: string) => void; onOpenRoster?: () => void; nameQuery?: string }) {
   const [month, setMonth] = useState(monthOf(new Date()));
   const [allRows, setRows] = useState<OtRow[] | null>(null);
   const [group, setGroup] = useState('');
-  const rows = allRows && allRows.filter((row) => !group || row.group === group);
+  const [removing, setRemoving] = useState('');
+  const [busy, setBusy] = useState('');
+  const rows = allRows && allRows.filter((row) => (!group || row.group === group) && (!nameQuery.trim() || `${row.name} ${row.code || ''}`.toLowerCase().includes(nameQuery.trim().toLowerCase())));
+  // Not overtime after all: HR removes the alert. It is kept as a rejected OT line (so it does not come back) and can still be seen in the OT summary.
+  const remove = async (row: OtRow) => {
+    const key = `${row.id}|${row.date}`; setBusy(key);
+    try { const result = await api('action=attendance_ot_decide', { id: row.id, date: row.date, status: 'rejected', note: 'HR: not overtime, removed from possible OT.' }); if (result.error) throw new Error(result.error); setRows((current) => current && current.filter((item) => `${item.id}|${item.date}` !== key)); setRemoving(''); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to remove.'); } finally { setBusy(''); }
+  };
   useEffect(() => {
     let live = true; setRows(null);
     Promise.all([api(`action=attendance_ot&month=${month}`), api('action=attendance_requests&status=all')]).then(([ot, requests]) => {
@@ -201,22 +209,23 @@ function OtAlerts({ onError }: { onError: (message: string) => void }) {
   }, [month]);
   return <section className={`${card} space-y-3`}>
     <MonthBar month={month} setMonth={setMonth}><select aria-label="Staff group" value={group} onChange={(event) => setGroup(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All staff</option><option value="CA">CA</option><option value="Others">Others</option></select>{rows && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${rows.length ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{rows.length ? `${rows.length} possible OT without a request` : 'No unreported extra time'}</span>}</MonthBar>
-    <p className="text-sm text-slate-500">Alert only: these staff clocked extra time (before the shift, after it ended, or on a day off) but have not applied for OT. Check whether it was overtime and ask them to apply. Doctors have no OT.</p>
-    {!rows ? <p className="text-sm text-slate-500">Loading…</p> : rows.length > 0 && <table className="w-full min-w-[640px] text-sm">
-      <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Date</th><th className="pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">Clocks</th><th>Extra time</th></tr></thead>
+    <p className="text-sm text-slate-500">Alert only: these staff clocked extra time (before the shift, after it ended, or on a day off) but have not applied for OT. Check whether it was overtime and ask them to apply. If it was not overtime, press Delete to remove it, and Adjust roster if the roster is wrong. Doctors have no OT.</p>
+    {!rows ? <p className="text-sm text-slate-500">Loading…</p> : rows.length > 0 && <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm">
+      <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Date</th><th className="pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">Clocks</th><th className="pr-3">Extra time</th><th className="text-right">If it is not OT</th></tr></thead>
       <tbody>{rows.map((row) => <tr key={`${row.id}|${row.date}`} className="border-t border-slate-100">
         <td className="py-2.5 pr-3 font-medium">{dayName(row.date)}</td>
         <td className="pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
         <td className="pr-3 text-xs"><span className="font-mono font-bold text-[#0b587b]">{row.shift ? newCode(row.shift) : 'Day off'}</span></td>
         <td className="pr-3">{row.inTime} → {row.outTime}</td>
-        <td className="font-semibold text-amber-700">{hours(row.captured)}</td>
+        <td className="pr-3 font-semibold text-amber-700">{hours(row.captured)}</td>
+        <td className="py-2 text-right">{removing === `${row.id}|${row.date}` ? <span className="inline-flex flex-wrap items-center justify-end gap-2 text-xs"><span className="text-slate-500">Not OT? Remove it from this list.</span><button type="button" disabled={busy === `${row.id}|${row.date}`} onClick={() => void remove(row)} className="rounded-lg bg-rose-600 px-2.5 py-1 font-semibold text-white disabled:opacity-60">Yes, delete</button><button type="button" onClick={() => setRemoving('')} className="rounded-lg border border-slate-200 px-2.5 py-1 font-semibold text-slate-600">Keep</button></span> : <span className="inline-flex items-center justify-end gap-2"><button type="button" onClick={() => setRemoving(`${row.id}|${row.date}`)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-rose-700">Delete</button>{onOpenRoster && <button type="button" onClick={onOpenRoster} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-[#0b587b]">Adjust roster</button>}</span>}</td>
       </tr>)}</tbody>
-    </table>}
+    </table></div>}
   </section>;
 }
 
 const monthEndOf = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
-function Requests({ onError, kind }: { onError: (message: string) => void; kind: 'ot' | 'missed' }) {
+function Requests({ onError, kind, sharedQuery }: { onError: (message: string) => void; kind: 'ot' | 'missed'; sharedQuery?: string }) {
   // Everything is listed (waiting, approved, rejected, cancelled); the filters narrow it down.
   const all = true;
   const [requests, setRequests] = useState<Req[] | null>(null);
@@ -226,6 +235,8 @@ function Requests({ onError, kind }: { onError: (message: string) => void; kind:
   const [payrollFilter, setPayrollFilter] = useState('');
   const [placeFilter, setPlaceFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [ownQuery, setOwnQuery] = useState('');
+  const nameQuery = sharedQuery ?? ownQuery;
   const [policyOpen, setPolicyOpen] = useState(false);
   const [confirming, setConfirming] = useState('');
   const ofKind = requests && requests.filter((request) => isMissedClock(request.reason) === (kind === 'missed'));
@@ -239,13 +250,13 @@ function Requests({ onError, kind }: { onError: (message: string) => void; kind:
   const payrollRange = (value: string) => { const [year, month] = value.split('-').map(Number); const before = new Date(year, month - 2, 1); return { from: `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-20`, to: `${value}-19` }; };
   const payrolls: string[] = recent;
   const range = payrollFilter ? payrollRange(payrollFilter) : monthFilter ? { from: `${monthFilter}-01`, to: `${monthFilter}-31` } : null;
-  const shown = ofKind && ofKind.filter((request) => (!range || (request.date >= range.from && request.date <= range.to)) && (!placeFilter || request.company === placeFilter) && (!statusFilter || request.status === statusFilter));
+  const shown = ofKind && ofKind.filter((request) => (!range || (request.date >= range.from && request.date <= range.to)) && (!placeFilter || request.company === placeFilter) && (!statusFilter || request.status === statusFilter) && (!nameQuery.trim() || `${request.name} ${request.code || ''}`.toLowerCase().includes(nameQuery.trim().toLowerCase())));
   const load = () => { setRequests(null); api(`action=attendance_requests&status=${all ? 'all' : 'pending'}${range ? `&from=${range.from}&to=${monthFilter ? monthEndOf(monthFilter) : range.to}` : ''}`).then((result) => { if (result.error) throw new Error(result.error); setRequests(result.requests); }).catch((cause: Error) => { setRequests([]); onError(cause.message); }); };
   useEffect(load, [monthFilter, payrollFilter]);
   const decide = async (request: Req, decision: 'approved' | 'rejected') => { setBusy(request.id); try { const result = await api('action=attendance_request_decide', { id: request.id, decision }); if (result.error) throw new Error(result.error); load(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); } finally { setBusy(''); } };
   const stage = (request: Req) => request.status === 'pending' ? 'Waiting for supervisor' : request.status === 'supervisor_approved' ? (request.supervisorDecidedBy ? `Supervisor approved (${request.supervisorDecidedBy}) · waiting for HR` : 'Waiting for HR') : request.status === 'approved' ? `Approved · ${request.decidedBy}${request.rate ? ` · OT ${request.rate}x` : ''}` : request.status === 'cancelled' ? 'Cancelled by staff' : `Rejected · ${request.decidedBy}`;
   return <section className={`${card} space-y-3`}>
-    <div className="flex flex-wrap items-center gap-3"><select aria-label="Month" value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setPayrollFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All months</option>{months.map((value) => <option key={value} value={value}>{new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</option>)}</select><select aria-label="Payroll" value={payrollFilter} onChange={(event) => { setPayrollFilter(event.target.value); setMonthFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All payrolls</option>{payrolls.map((value) => { const r = payrollRange(value); const d = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); return <option key={value} value={value}>{`Payroll ${new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} · ${d(r.from)} to ${d(r.to)}`}</option>; })}</select><select aria-label="Location" value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All locations</option>{places.map((value) => <option key={value} value={value}>{PLACE_NAME[value] ? `${value} · ${PLACE_NAME[value]}` : value}</option>)}</select><select aria-label="Approval status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All statuses</option><option value="pending">Waiting for supervisor</option><option value="supervisor_approved">Waiting for HR</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{kind === 'ot' && <button type="button" onClick={() => setPolicyOpen(!policyOpen)} aria-expanded={policyOpen} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">OT policy {policyOpen ? '▴' : '▾'}</button>}{kind === 'missed' && <p className="order-last basis-full text-[11px] leading-4 text-slate-500 sm:order-none sm:basis-0 sm:flex-1 sm:text-sm">Staff ask for a clock they forgot (in or out) to be added. The supervisor approves first, then HR confirms here.</p>}</div>
+    <div className="flex flex-wrap items-center gap-3"><select aria-label="Month" value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setPayrollFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All months</option>{months.map((value) => <option key={value} value={value}>{new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</option>)}</select><select aria-label="Payroll" value={payrollFilter} onChange={(event) => { setPayrollFilter(event.target.value); setMonthFilter(''); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All payrolls</option>{payrolls.map((value) => { const r = payrollRange(value); const d = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); return <option key={value} value={value}>{`Payroll ${new Date(`${value}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} · ${d(r.from)} to ${d(r.to)}`}</option>; })}</select><select aria-label="Location" value={placeFilter} onChange={(event) => setPlaceFilter(event.target.value)} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All locations</option>{places.map((value) => <option key={value} value={value}>{PLACE_NAME[value] ? `${value} · ${PLACE_NAME[value]}` : value}</option>)}</select><select aria-label="Approval status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); }} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All statuses</option><option value="pending">Waiting for supervisor</option><option value="supervisor_approved">Waiting for HR</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{sharedQuery === undefined && <input value={nameQuery} onChange={(event) => setOwnQuery(event.target.value)} placeholder="Search staff name" aria-label="Search staff name" className="h-9 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b]" />}{kind === 'ot' && <button type="button" onClick={() => setPolicyOpen(!policyOpen)} aria-expanded={policyOpen} className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">OT policy {policyOpen ? '▴' : '▾'}</button>}{kind === 'missed' && <p className="order-last basis-full text-[11px] leading-4 text-slate-500 sm:order-none sm:basis-0 sm:flex-1 sm:text-sm">Staff ask for a clock they forgot (in or out) to be added. The supervisor approves first, then HR confirms here.</p>}</div>
     {kind === 'ot' && policyOpen && <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-sm leading-6 text-slate-600"><p className="font-semibold text-slate-800">OT policy</p><OtPolicyBody /></div>}
     {!shown ? <p className="text-sm text-slate-500">Loading…</p> : !shown.length ? <p className="text-sm text-slate-500">{all ? 'No requests yet.' : 'Nothing waiting.'}</p> : <ul className="divide-y divide-slate-100">{shown.map((request) => <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 text-sm sm:py-3">
       <div className="min-w-0 basis-full sm:basis-0 sm:flex-1"><p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {request.shiftCode !== undefined && <><span className="font-semibold text-[#0b587b]">{request.shiftCode ? `${newCode(request.shiftCode)} ${request.shiftStart}–${request.shiftEnd}` : 'No shift'}</span> · </>}{[(request.clockIn || request.inTime) && `in ${request.clockIn || request.inTime}`, (request.clockOut || request.outTime) && `out ${request.clockOut || request.outTime}`, (request.otShown ?? request.otMinutes) > 0 && `OT ${Math.floor((request.otShown ?? request.otMinutes) / 60)} h ${(request.otShown ?? request.otMinutes) % 60} m`].filter(Boolean).join(' · ')}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>{request.otPreview && <p className="mt-0.5 text-xs font-semibold text-[#0b587b]">Pay: {request.otPreview}</p>}{request.supervisorNote && <p className="mt-0.5 text-xs text-slate-400">Supervisor: {request.supervisorNote}</p>}</div>
@@ -587,18 +598,20 @@ function OtSettings({ onError }: { onError: (message: string) => void }) {
   </div>;
 }
 
-function OtArea({ onError, badges }: { onError: (message: string) => void; badges?: number }) {
+function OtArea({ onError, badges, onOpenRoster }: { onError: (message: string) => void; badges?: number; onOpenRoster?: () => void }) {
   const [sub, setSub] = useState<'requests' | 'summary' | 'claims' | 'settings'>('requests');
+  // One staff name filter for both lists on the Requests tab: the requests and the possible OT of the same person, to compare.
+  const [nameQuery, setNameQuery] = useState('');
   return <div className="space-y-5">
     <SubTabs active={sub} onSelect={setSub} tabs={[{ id: 'requests' as const, label: 'Requests', badge: badges || 0 }, { id: 'summary' as const, label: 'Summary' }, { id: 'claims' as const, label: 'Claim report' }, { id: 'settings' as const, label: 'Settings' }]} />
-    {sub === 'requests' && <><Requests onError={onError} kind="ot" /><OtAlerts onError={onError} /></>}
+    {sub === 'requests' && <><div className="flex flex-wrap items-center gap-2"><input value={nameQuery} onChange={(event) => setNameQuery(event.target.value)} placeholder="Search staff name" aria-label="Search staff name" className="h-9 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0b587b]" /><span className="text-xs text-slate-400">Filters the requests and the possible OT below by staff name or code.</span></div><Requests onError={onError} kind="ot" sharedQuery={nameQuery} /><OtAlerts onError={onError} onOpenRoster={onOpenRoster} nameQuery={nameQuery} /></>}
     {sub === 'summary' && <OtSummary onError={onError} />}
     {sub === 'claims' && <OtClaims onError={onError} />}
     {sub === 'settings' && <OtSettings onError={onError} />}
   </div>;
 }
 
-export function HRAttendance({ onError, badges = {} }: { onError: (message: string) => void; badges?: { ot?: number; missed?: number } }) {
+export function HRAttendance({ onError, badges = {}, onOpenRoster }: { onError: (message: string) => void; badges?: { ot?: number; missed?: number }; onOpenRoster?: () => void }) {
   const [tab, setTab] = useState<Tab>('today');
   const tabs: [Tab, string][] = [['today', 'Today'], ['month', 'Month'], ['individual', 'Individual'], ['ot', 'OT'], ['missed', 'Missed clock'], ['late', 'Late'], ['credit', 'Credit hrs'], ['import', 'Import'], ['places', 'Places'], ['staff', 'Staff'], ['rules', 'Rules']];
   return <div className="text-compact mx-auto max-w-[1500px] space-y-3 sm:space-y-5">
@@ -606,7 +619,7 @@ export function HRAttendance({ onError, badges = {} }: { onError: (message: stri
     {tab === 'today' && <Today onError={onError} />}
     {tab === 'month' && <Month onError={onError} />}
     {tab === 'individual' && <HRAttendanceIndividual onError={onError} />}
-    {tab === 'ot' && <OtArea onError={onError} />}
+    {tab === 'ot' && <OtArea onError={onError} onOpenRoster={onOpenRoster} />}
     {tab === 'missed' && <Requests onError={onError} kind="missed" />}
     {tab === 'late' && <Late onError={onError} />}
     {tab === 'credit' && <CreditHours onError={onError} />}

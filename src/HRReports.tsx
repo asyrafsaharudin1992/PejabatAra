@@ -98,7 +98,6 @@ export function HRReports(_props: { onError: (message: string) => void; onOpen?:
         {embed.view === 'charts' && <EmbedOrgChart onError={onError} source="hr" report />}
       </Suspense></div>}
     {!embed && !report && <>
-      <div className="flex flex-col items-end gap-3 [&>section]:w-full"><HRDownloadAll /></div>
       <section className={`${card} space-y-4`}>
         <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3"><Search className="h-4 w-4 text-slate-400" /><input aria-label="Search reports" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reports" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
         <SubTabs label="Report category" active={category} onSelect={setCategory} tabs={CATEGORIES.map((item) => ({ id: item, label: item, short: item === 'Performance Reviews' ? 'Reviews' : item === 'Staff Profiles' ? 'Profiles' : undefined }))} />
