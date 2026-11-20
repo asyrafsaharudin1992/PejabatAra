@@ -151,8 +151,13 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
   }
   // The rules HR set (Roster draft > Rules). Each one gives a warning; a rule set to "block" also stops the draft export.
   const short = (p: DraftPerson) => p.name.split(' ').slice(0, 2).join(' ');
+  // A broken rule counts much more than a soft check when the draft is adjusted: a rule set to Block most, then a rule set to Warning.
+  const weights = new Map<string, number>();
+  let ruleWeight = 6;
+  const flag = (text: string) => { warnings.push(text); weights.set(text, ruleWeight); };
   const who = (code?: string | null) => people.find((p) => p.code === code);
   for (const rule of (input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active)) {
+    ruleWeight = rule.enforce === 'block' ? 20 : 6;
     const tail = rule.enforce === 'block' ? '; draft export is blocked.' : '.';
     // The people a rule is about: the person named, or everyone in the draft in its group and clinic.
     const inGroup = (r: RosterRule) => people.filter((p) => patterns[p.id]?.enabled && (!r.company || p.company === r.company) && (!r.person_a || p.code === r.person_a) && (r.scope === 'all' || (r.scope === 'doctors') === isDraftDoctor(p)));
@@ -163,16 +168,16 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
         const ca = byKey.get(cellKey(a.id, date)), cb = byKey.get(cellKey(b.id, date));
         if (!ca || !cb) continue;
         const x = newCode(ca.shift), y = newCode(cb.shift);
-        if (workingShift(x) && workingShift(y) && (x === y || rule.shifts.includes(x) && rule.shifts.includes(y))) warnings.push(`${date} · ${short(a)} and ${short(b)} are both working (${x} and ${y}); they must not work at the same time${tail}`);
+        if (workingShift(x) && workingShift(y) && (x === y || rule.shifts.includes(x) && rule.shifts.includes(y))) flag(`${date} · ${short(a)} and ${short(b)} are both working (${x} and ${y}); they must not work at the same time${tail}`);
       }
     } else if (rule.kind === 'not_shift') {
       const a = who(rule.person_a);
-      if (a) for (const date of dates) { const c = byKey.get(cellKey(a.id, date)); if (c && rule.shifts.includes(newCode(c.shift))) warnings.push(`${date} · ${short(a)} is on ${newCode(c.shift)}, a shift this person must not work${tail}`); }
+      if (a) for (const date of dates) { const c = byKey.get(cellKey(a.id, date)); if (c && rule.shifts.includes(newCode(c.shift))) flag(`${date} · ${short(a)} is on ${newCode(c.shift)}, a shift this person must not work${tail}`); }
     } else if (rule.kind === 'weekend_off') {
-      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()) && workingShift(c.shift)) warnings.push(`${date} · ${short(person)} works on a weekend (${newCode(c.shift)}), which must be off${tail}`); }
+      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()) && workingShift(c.shift)) flag(`${date} · ${short(person)} works on a weekend (${newCode(c.shift)}), which must be off${tail}`); }
     } else if (rule.kind === 'locum_nights') {
       const days = locumRuleDays(rule), slots = locumRuleSlots(rule);
-      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && slots.includes(newCode(c.shift)) && days.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) warnings.push(`${date} · ${short(person)} is on ${newCode(c.shift)}, which is left for a locum${tail}`); }
+      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && slots.includes(newCode(c.shift)) && days.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) flag(`${date} · ${short(person)} is on ${newCode(c.shift)}, which is left for a locum${tail}`); }
     } else if (rule.kind === 'custom' && rule.condition) {
       // A rule made on screen: who, on which weekdays (none: every day), which shifts, and "never", "must", "at least" or "at most".
       const days = locumRuleDays(rule), slots = rule.shifts.filter((code) => ['AM', 'PM', 'OH', 'OFF'].includes(code));
@@ -184,18 +189,18 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
           const c = byKey.get(cellKey(person.id, date));
           if (!c || ['AL', 'MC', 'ML', 'UPL', 'EL', 'PH', 'NA', 'RESIGN'].includes(newCode(c.shift))) continue;
           const inSlot = slots.includes(codeOf(c.shift));
-          if (rule.condition === 'never' && inSlot) warnings.push(`${date} · ${short(person)} is on ${codeOf(c.shift)}, which is not allowed by a rule${tail}`);
-          if (rule.condition === 'must' && !inSlot) warnings.push(`${date} · ${short(person)} is on ${codeOf(c.shift)}, but must be on ${text}${tail}`);
+          if (rule.condition === 'never' && inSlot) flag(`${date} · ${short(person)} is on ${codeOf(c.shift)}, which is not allowed by a rule${tail}`);
+          if (rule.condition === 'must' && !inSlot) flag(`${date} · ${short(person)} is on ${codeOf(c.shift)}, but must be on ${text}${tail}`);
         }
       } else if (slots.length && rule.amount != null && (rule.condition === 'min' || rule.condition === 'max')) {
         for (const company of [...new Set(inGroup(rule).map((p) => p.company))]) for (const date of dates.filter(onDay)) {
           const count = inGroup(rule).filter((p) => p.company === company && slots.includes(codeOf(byKey.get(cellKey(p.id, date))?.shift || ''))).length;
-          if (rule.condition === 'min' && count < rule.amount) warnings.push(`${date} · ${company}: ${count} on ${text}, at least ${rule.amount} needed${tail}`);
-          if (rule.condition === 'max' && count > rule.amount) warnings.push(`${date} · ${company}: ${count} on ${text}, at most ${rule.amount} allowed${tail}`);
+          if (rule.condition === 'min' && count < rule.amount) flag(`${date} · ${company}: ${count} on ${text}, at least ${rule.amount} needed${tail}`);
+          if (rule.condition === 'max' && count > rule.amount) flag(`${date} · ${company}: ${count} on ${text}, at most ${rule.amount} allowed${tail}`);
         }
       }
     } else if (rule.kind === 'only_shift' && rule.shifts.length) {
-      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && workingShift(c.shift) && !rule.shifts.includes(newCode(c.shift))) warnings.push(`${date} · ${short(person)} is on ${newCode(c.shift)}, but may only work ${rule.shifts.join(' / ')}${tail}`); }
+      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && workingShift(c.shift) && !rule.shifts.includes(newCode(c.shift))) flag(`${date} · ${short(person)} is on ${newCode(c.shift)}, but may only work ${rule.shifts.join(' / ')}${tail}`); }
     } else if (rule.kind === 'no_day_after_night' || rule.kind === 'max_consecutive' && rule.amount) {
       // Walks each person's days (the week before the month is read from the existing roster) for a night followed by a day shift, or too many working days in a row.
       for (const person of inGroup(rule)) {
@@ -203,14 +208,16 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
         for (let offset = -7; offset < dates.length; offset++) {
           const date = addDays(dates[0], offset), shift = offset < 0 ? existingMap.get(cellKey(person.id, date)) || '' : byKey.get(cellKey(person.id, date))?.shift || '';
           run = workingShift(shift) ? run + 1 : 0;
-          if (rule.kind === 'no_day_after_night' && offset >= 0 && previous === 'PM' && dayShift(shift)) warnings.push(`${date} · ${person.name}: night-to-day transition; check recovery time${tail}`);
-          if (rule.kind === 'max_consecutive' && offset >= 0 && run > rule.amount! && (run === rule.amount! + 1 || offset === 0)) warnings.push(`${date} · ${person.name}: ${run} consecutive working days; review rest days${tail}`);
+          if (rule.kind === 'no_day_after_night' && offset >= 0 && previous === 'PM' && dayShift(shift)) flag(`${date} · ${person.name}: night-to-day transition; check recovery time${tail}`);
+          if (rule.kind === 'max_consecutive' && offset >= 0 && run > rule.amount! && (run === rule.amount! + 1 || offset === 0)) flag(`${date} · ${person.name}: ${run} consecutive working days; review rest days${tail}`);
           previous = shift;
         }
       }
     }
   }
-  return { cells, locum, warnings: [...new Set(warnings)], blocked: warnings.some((w) => w.includes('draft export is blocked')), adjusted: 0 };
+  const unique = [...new Set(warnings)];
+  const score = unique.reduce((sum, w) => sum + (weights.get(w) ?? (w.includes('draft export is blocked') ? 20 : 1)), 0);
+  return { score, cells, locum, warnings: unique, blocked: warnings.some((w) => w.includes('draft export is blocked')), adjusted: 0 };
 }
 
 // Generates the draft and, when autoFix is on, tries to follow the rules: it swaps two days of the same person inside one week
@@ -219,14 +226,15 @@ function generateRosterCore(input: { auto?: Record<string, string>; rules?: Rost
 export function generateRosterDraft(input: Parameters<typeof generateRosterCore>[0] & { autoFix?: boolean }) {
   let auto: Record<string, string> = {};
   let best = generateRosterCore({ ...input, auto });
-  if (!input.autoFix || !best.warnings.length) return best;
+  if (!input.autoFix || !best.score) return best;
   const monthDays = monthDates(input.month), enabled = input.people.filter((p) => input.patterns[p.id]?.enabled);
   const weekOf = (date: string) => { const start = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7)); return Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter((d) => monthDays.includes(d)); };
-  let tries = 0;
-  for (let round = 0; round < 60 && best.warnings.length && tries < 4000; round++) {
+  let tries = 0, sideways = 0;
+  const visited = new Set<string>([JSON.stringify(auto)]);
+  for (let round = 0; round < 90 && best.score && tries < 2500; round++) {
     const cellMap = new Map(best.cells.map((c) => [cellKey(c.id, c.date), c]));
     const movable = (c?: DraftCell) => Boolean(c) && !c!.locked && ['pattern', 'auto'].includes(c!.source) && ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST'].includes(newCode(c!.shift));
-    let improved = false;
+    let improved = false, side: { trial: Record<string, string>; result: typeof best } | null = null;
     search: for (const date of [...new Set(best.warnings.map((w) => /^\d{4}-\d{2}-\d{2}/.exec(w)?.[0]).filter(Boolean) as string[])]) {
       const lines = best.warnings.filter((w) => w.startsWith(date));
       // The people a warning names; one that names nobody (a coverage shortfall) can be fixed by anyone.
@@ -241,12 +249,17 @@ export function generateRosterDraft(input: Parameters<typeof generateRosterCore>
           tries++;
           const trial = { ...auto, [cellKey(person.id, date)]: there!.shift, [cellKey(person.id, other)]: here!.shift };
           const result = generateRosterCore({ ...input, auto: trial });
-          if (result.warnings.length < best.warnings.length) { auto = trial; best = result; improved = true; break search; }
-          if (tries >= 4000) break search;
+          if (result.score < best.score) { auto = trial; best = result; improved = true; visited.add(JSON.stringify(auto)); break search; }
+          // A swap that is no better but no worse is kept as a step sideways, used when no swap improves (it can open the way to one that does).
+          if (!side && result.score === best.score && !visited.has(JSON.stringify(trial))) side = { trial, result };
+          if (tries >= 2500) break search;
         }
       }
     }
-    if (!improved) break;
+    if (!improved) {
+      if (side && sideways < 12) { auto = side.trial; best = side.result; visited.add(JSON.stringify(auto)); sideways++; continue; }
+      break;
+    }
   }
   return { ...best, adjusted: Math.round(Object.keys(auto).length / 2) };
 }
