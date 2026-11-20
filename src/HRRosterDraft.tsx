@@ -60,7 +60,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   const people: DraftPerson[] = context?.people || [];
   const selectedPeople = people.filter((p) => patterns[p.id]?.enabled);
   const options = draftShifts.filter((s) => group !== 'doctors' || !['AM-9', 'AM-12', 'AM-6', 'AM-5'].includes(s));
-  const load = async () => {
+  const load = async (thenGenerate = false) => {
     setBusy(true); setError(''); setResult(null);
     try {
       const response = await officeFetch(`/api/status?resource=hr&action=roster_draft_context&month=${encodeURIComponent(month)}&source=${encodeURIComponent(source)}&length=${length}&scope=${scope}&group=${group}&company=${encodeURIComponent(company)}`);
@@ -78,7 +78,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
         const weekdayOff = offCounts.sort((a, b) => b.count - a.count || a.weekday - b.weekday)[0].weekday;
         next[person.id] = { enabled: kjDoctor || sample.every((s) => options.includes(s) && patternShifts.includes(s)), anchor: source, cycle: sample.join(', '), doctorMode: kjDoctor ? office ? 'office' : 'rotation' : 'sample', weekdayOff, nightWeeks: kjDoctor && !office && rotationIndex++ % 2 === 1 ? '1,2' : '2,1', nightPlacement: 'before-off', ...(kjDoctor && /\bMOHAMAD ASYRAF BIN SAHARUDIN\b/i.test(person.name) ? { nightDays: [1, 2], weekdayOff: 0 } : {}) };
       }
-      setContext(filtered); setPatterns(next); setLocks({}); setRequests([]); setSheetStyles({}); setLoadedKey(loadKey); setSaveMessage(''); loadSaved();
+      setContext(filtered); setPatterns(next); setLocks({}); setRequests([]); setSheetStyles({}); setLoadedKey(loadKey); setSaveMessage(''); loadSaved(); if (thenGenerate) setPendingRun((n) => n + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load sample.'); }
     setBusy(false);
   };
@@ -124,7 +124,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   };
   return <section className="draft-compact space-y-5 rounded-2xl border-2 border-[#0b587b]/30 bg-white p-5" aria-label="Roster pattern trial">
     <div className="flex items-start justify-between gap-3"><div><h3 className="text-xl font-semibold">Pattern roster · {group === 'doctors' ? 'Doctors' : 'Staff'} · Trial</h3><p className="mt-1 text-sm text-slate-600">Build and review a draft. The live roster stays unchanged. Closing this trial discards the draft.</p></div><button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">Close trial</button></div>
-    <div className="grid gap-3 md:grid-cols-4"><label className="text-sm font-semibold">Target month<input type="month" value={month} onChange={(e) => e.target.value && (setMonth(e.target.value), setRequest((current) => ({ ...current, date: `${e.target.value}-01` })))} className={field} /></label><label className="text-sm font-semibold">Sample starts on<input type="date" value={source} onChange={(e) => setSource(e.target.value)} className={field} /></label><label className="text-sm font-semibold">Sample length<select value={length} onChange={(e) => setLength(Number(e.target.value))} className={field}>{[7, 14, 28].map((n) => <option key={n} value={n}>{n} days</option>)}</select></label><button type="button" disabled={busy || !source || !month} onClick={() => void load()} className={`${button} self-end`}>{busy ? 'Loading…' : context ? 'Reload sample (resets draft)' : 'Load pattern sample'}</button></div>
+    <div className="grid gap-3 md:grid-cols-4"><label className="text-sm font-semibold">Target month<input type="month" value={month} onChange={(e) => e.target.value && (setMonth(e.target.value), setRequest((current) => ({ ...current, date: `${e.target.value}-01` })))} className={field} /></label><label className="text-sm font-semibold">Sample starts on<input type="date" value={source} onChange={(e) => setSource(e.target.value)} className={field} /></label><label className="text-sm font-semibold">Sample length<select value={length} onChange={(e) => setLength(Number(e.target.value))} className={field}>{[7, 14, 28].map((n) => <option key={n} value={n}>{n} days</option>)}</select></label><button type="button" disabled={busy || !source || !month} onClick={() => void load(!context)} className={`${button} self-end`}>{busy ? 'Loading…' : context ? 'Reload sample (resets draft)' : 'Generate draft'}</button></div>
     {group === 'staff' && <label className="block max-w-xs text-sm font-semibold">Roster scope<select value={scope} onChange={(e) => setScope(e.target.value as 'ca' | 'all')} className={field}><option value="ca">Clinic assistants only</option><option value="all">All non-doctor staff</option></select></label>}
     <p className="text-xs text-slate-500">A copied sample is a starting point, not a confirmed repeating pattern. Check each person’s cycle and its start date. Missing sample days appear as ?. Samples containing leave, holidays or missing days are not selected automatically; replace exceptions with the usual shift first. Loads only when requested; editing and generation run in your browser.</p>
     {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
