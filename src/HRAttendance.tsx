@@ -24,7 +24,7 @@ async function hrApi(query: string, body?: unknown) {
 const api = hrApi;
 type Source = (query: string) => Promise<any>;
 type Tab = 'today' | 'month' | 'individual' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
-type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; ot2InTime?: string; ot2OutTime?: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
+type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
 type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
 const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${minutes < 0 ? '-' : ''}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
@@ -107,13 +107,13 @@ function Today({ onError, source }: { onError: (message: string) => void; source
       {(row.lateCounted > 0 || row.late > 0) && <p className={`mt-1.5 text-[11px] ${row.lateCounted > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Late {row.lateCounted > 0 ? `${row.lateCounted} min` : `${row.late} min (grace)`}</p>}
     </li>)}{!shown.length && <li className="text-sm text-slate-500">Nobody on this date.</li>}</ul>}
     <section className={`${card} overflow-x-auto${source ? ' hidden sm:block' : ''}`}>
-      {!rows ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[900px] text-sm">
-        <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">In</th><th className="pr-3">Out</th><th className="pr-3">OT In</th><th className="pr-3">OT Out</th><th className="pr-3">Late</th><th className="pr-3">Status</th><th /></tr></thead>
+      {!rows ? <p className="text-sm text-slate-500">Loading…</p> : <table className="w-full min-w-[760px] text-sm">
+        <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Shift</th><th className="pr-3">In</th><th className="pr-3">Out</th><th className="pr-3">Late</th><th className="pr-3">Status</th><th /></tr></thead>
         <tbody>{shown.filter((row) => row.status !== 'off').map((row) => <>
           <tr key={row.id} className="border-t border-slate-100">
             <td className="py-2.5 pr-3"><p className="font-semibold text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></td>
             <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{newCode(row.shift)}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
-            <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td><td className="pr-3 font-medium text-fuchsia-700">{row.ot2InTime || '—'}</td><td className="pr-3 font-medium text-fuchsia-700">{row.ot2OutTime || '—'}</td>
+            <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
             <td className="pr-3">{badge(row.status, row.leave)}</td>
             <td className="text-right">{!source && <button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button>}</td>
