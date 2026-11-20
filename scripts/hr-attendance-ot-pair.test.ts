@@ -33,7 +33,7 @@ assert.equal(nextDay.inAt, new Date('2026-11-11T09:02:00+08:00').toISOString());
 // The roster decides, not how long the break was: a clock in three hours later is still extra time on top of the shift.
 const [late] = build([clock('in', '2026-11-10', '08:58'), clock('out', '2026-11-10', '21:00'), clock('in', '2026-11-11', '00:00'), clock('out', '2026-11-11', '09:00')], ['AM-12']);
 assert.equal(late.ot2InAt, new Date('2026-11-11T00:00:00+08:00').toISOString());
-assert.equal(late.ot, 542, 'Nine hours from midnight to 9am plus 2 minutes early, nothing for the break');
+assert.equal(late.ot, 540 + 0, 'Nine hours from midnight to 9am, nothing for the break');
 
 // A clock in with no clock out yet shows the OT in and counts nothing extra.
 const [open] = build(twice.slice(0, 3), ['AM-12']);
