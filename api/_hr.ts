@@ -1808,6 +1808,7 @@ export async function hrHandler(req: any, res: any) {
       if (!['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a roster group and clinic.');
       const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
       const sourceEnd = new Date(Date.parse(`${source}T00:00:00Z`) + (sampleLength - 1) * 86400000).toISOString().slice(0, 10);
+      const afterEnd = new Date(Date.parse(`${end}T00:00:00Z`) + 6 * 86400000).toISOString().slice(0, 10); // the days after the month that complete its last week
       const before = new Date(Date.parse(`${start}T00:00:00Z`) - 14 * 86400000).toISOString().slice(0, 10); // two weeks before: the week before the month is shown on the sheet, and the draft checks recovery from the week before that
       let staffQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation,holiday_group', { count: 'exact' }).eq('status', 'Active');
       if (company) staffQuery = staffQuery.eq('company', company);
@@ -1823,9 +1824,9 @@ export async function hrHandler(req: any, res: any) {
       if (!ids.length) return res.status(200).json({ people: [], sourceDays: [], targetDays: [], leave: [] });
       const [sourceDays, targetDays, leave, holidays] = await Promise.all([
         db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', source).lte('work_date', sourceEnd).limit(2000),
-        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', before).lte('work_date', end).limit(4000),
+        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', before).lte('work_date', afterEnd).limit(4000),
         db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day', { count: 'exact' }).in('employee_id', ids).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(500),
-        db.from('hr_holidays').select('group_code,holiday_date,name').gte('holiday_date', before).lte('holiday_date', end).limit(200),
+        db.from('hr_holidays').select('group_code,holiday_date,name').gte('holiday_date', before).lte('holiday_date', afterEnd).limit(200),
       ]);
       for (const result of [sourceDays, targetDays, leave]) {
         if (result.error) throw result.error;
