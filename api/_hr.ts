@@ -1801,8 +1801,8 @@ export async function hrHandler(req: any, res: any) {
       if (!['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a roster group and clinic.');
       const start = `${month}-01`, end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
       const sourceEnd = new Date(Date.parse(`${source}T00:00:00Z`) + (sampleLength - 1) * 86400000).toISOString().slice(0, 10);
-      const before = new Date(Date.parse(`${start}T00:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
-      let staffQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation', { count: 'exact' }).eq('status', 'Active');
+      const before = new Date(Date.parse(`${start}T00:00:00Z`) - 14 * 86400000).toISOString().slice(0, 10); // two weeks before: the week before the month is shown on the sheet, and the draft checks recovery from the week before that
+      let staffQuery = db.from('hr_employees').select('id,company,employee_code,full_name,designation,holiday_group', { count: 'exact' }).eq('status', 'Active');
       if (company) staffQuery = staffQuery.eq('company', company);
       const staff = await staffQuery.limit(501);
       if (staff.error) throw staff.error;
@@ -1812,17 +1812,18 @@ export async function hrHandler(req: any, res: any) {
       const people = (staff.data || []).filter((p: any) => (group === 'doctors') === /\b(DR|DOCTOR)\b/i.test(p.designation || '')).filter((p: any) => group === 'doctors' || scope === 'all' || /CLINIC ASSISTANT|PEMBANTU KLINIK/i.test(p.designation || ''));
       const ids = people.map((p: any) => p.id);
       if (!ids.length) return res.status(200).json({ people: [], sourceDays: [], targetDays: [], leave: [] });
-      const [sourceDays, targetDays, leave] = await Promise.all([
+      const [sourceDays, targetDays, leave, holidays] = await Promise.all([
         db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', source).lte('work_date', sourceEnd).limit(2000),
-        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', before).lte('work_date', end).limit(2000),
+        db.from('hr_roster').select('employee_id,work_date,shift', { count: 'exact' }).in('employee_id', ids).gte('work_date', before).lte('work_date', end).limit(4000),
         db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day', { count: 'exact' }).in('employee_id', ids).eq('status', 'approved').lte('start_date', end).gte('end_date', start).limit(500),
+        db.from('hr_holidays').select('group_code,holiday_date,name').gte('holiday_date', before).lte('holiday_date', end).limit(200),
       ]);
       for (const result of [sourceDays, targetDays, leave]) {
         if (result.error) throw result.error;
         if ((result.count || 0) > (result.data || []).length) throw fail(422, 'Roster trial exceeds its read limit. Choose one clinic to avoid incomplete results.');
       }
       const mapDays = (rows: any[]) => rows.map((r) => ({ id: r.employee_id, date: r.work_date, shift: r.shift }));
-      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '' })), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
+      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', holidayGroup: p.holiday_group || '' })), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), holidays: (holidays.error ? [] : holidays.data || []).map((h: any) => ({ group: h.group_code, date: h.holiday_date, name: h.name })), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
     }
     if (req.method === 'GET' && action === 'roster') {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';

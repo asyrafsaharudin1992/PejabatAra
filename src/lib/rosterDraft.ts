@@ -1,5 +1,5 @@
 import { newCode } from './shiftCodes';
-export type DraftPerson = { id: string; company: string; code: string; name: string; designation: string };
+export type DraftPerson = { id: string; company: string; code: string; name: string; designation: string; holidayGroup?: string };
 export type DraftDay = { id: string; date: string; shift: string };
 export type DraftLeave = { id: string; start: string; end: string; shift: string; halfDay: boolean };
 export type Pattern = { enabled: boolean; anchor: string; cycle: string; doctorMode?: 'sample' | 'rotation' | 'office'; weekdayOff?: number; nightWeeks?: string; nightDays?: number[]; nightPlacement?: 'before-off' | 'mon-tue' };

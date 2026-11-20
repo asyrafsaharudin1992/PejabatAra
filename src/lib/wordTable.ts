@@ -9,7 +9,8 @@ export function tableToWordHtml(table: HTMLTableElement, title: string, note: st
     const cells = Array.from(row.cells).map((cell) => {
       const css = view.getComputedStyle(cell);
       const colour = (value: string) => rewriteColors(value);
-      const bg = colour(css.backgroundColor), fg = colour(css.color);
+      // A box with no colour of its own takes its row's (tinted weekend and public holiday rows).
+      const own = colour(css.backgroundColor), bg = /rgba\([^)]*,\s*0\)/.test(own) ? colour(view.getComputedStyle(row).backgroundColor) : own, fg = colour(css.color);
       const lines = (cell.innerText || '').replace(/ /g, ' ').trim().split(/\n+/).map((line) => esc(line.trim())).filter(Boolean).join('<br>');
       const style = [`border:1px solid ${colour(css.borderTopColor) || '#94a3b8'}`, 'padding:3pt 5pt', `text-align:${css.textAlign === 'start' ? 'left' : css.textAlign}`, `font-weight:${css.fontWeight}`, `font-size:${Math.round(parseFloat(css.fontSize) * 0.75 * (fontPt / 9.75) * 10) / 10}pt`, `color:${fg}`, /rgba\([^)]*,\s*0\)/.test(bg) ? '' : `background:${bg}`].filter(Boolean).join(';');
       return `<${cell.tagName.toLowerCase()} colspan="${cell.colSpan}" style="${style}">${lines || '&nbsp;'}</${cell.tagName.toLowerCase()}>`;
