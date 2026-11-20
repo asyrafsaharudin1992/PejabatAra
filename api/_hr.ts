@@ -44,7 +44,7 @@ const decode = (row: any) => ({
   race: row.race || '', foreignIdNo: row.foreign_id_no || '', addressLine1: row.address_line1 || '', addressLine2: row.address_line2 || '', postcode: row.postcode || '', city: row.city || '', state: row.state || '',
   spouseName: row.spouse_name || '', spouseIc: row.spouse_ic || '', spouseEmployer: row.spouse_employer || '', spousePhone: row.spouse_phone || '', education: row.education || [],
   branch: row.branch, department: row.department, designation: row.designation, employmentType: row.employment_type,
-  joinDate: row.join_date, confirmDate: row.confirm_date, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
+  joinDate: row.join_date, confirmDate: row.confirm_date, retirementDate: row.payroll_settings?.retirementDate || null, resignDate: row.resign_date, status: row.status, leaveGroup: row.leave_group,
   payroll: row.payroll_settings || {}, basicSalary: Number(row.basic_salary), fixedAllowances: row.fixed_allowances || [], bankName: row.bank_name, bankAccount: row.bank_account,
   workDays: Array.isArray(row.work_days) && row.work_days.length ? row.work_days : /\b(DR|DOCTOR)\b/i.test(row.designation || '') ? [] : [1, 2, 3, 4, 5, 6], holidayGroup: row.holiday_group || '', leaveCalendarCompanies: row.leave_calendar_companies || [], leaveApproverId: row.leave_approver_id || null, leaveBackupApproverId: row.leave_backup_approver_id || null, finalApproverId: row.final_approver_id || null, epfNo: row.epf_no, socsoNo: row.socso_no, taxNo: row.tax_no, remarks: row.remarks, updatedAt: row.updated_at,
 });
@@ -2675,23 +2675,28 @@ export async function hrHandler(req: any, res: any) {
 
     if (req.method === 'POST' && action === 'save_employee') {
       const row = encode(body.employee || {});
+      // Keep this tax/profile date in the existing settings JSON, separate from the last working day.
+      const retirementDate = body.employee?.retirementDate;
+      if (retirementDate && (!isDate(retirementDate) || !Number.isFinite(Date.parse(retirementDate)) || new Date(retirementDate).toISOString().slice(0, 10) !== retirementDate)) throw fail(400, 'Enter a valid retirement / end of contract date.');
+      const retirementSettings = retirementDate !== undefined ? { retirementDate: retirementDate || '' } : {};
       if (!row.company) throw fail(400, 'Choose the company (KJ or SK).');
       const id = text(body.employee?.id, 60);
       if (id) {
         const { data: before, error: readError } = await db.from('hr_employees').select('*').eq('id', id).maybeSingle();
         if (readError) throw readError;
         if (!before) throw fail(404, 'Profile not found.');
+        const savedRow = { ...row, payroll_settings: { ...(before.payroll_settings || {}), ...retirementSettings } };
         // Only fields that really changed go in the audit log (salary comes back from the database as text).
         const same = (key: string, value: unknown) => key === 'basic_salary' ? Number((before as any)[key]) === value : canonical((before as any)[key] ?? null) === canonical(value ?? null);
-        const changes = Object.fromEntries(Object.entries(row).filter(([key, value]) => !same(key, value)).map(([key, value]) => [key, [(before as any)[key] ?? null, value]]));
-        const { data, error } = await db.from('hr_employees').update({ ...row, updated_at: now, updated_by: user.id }).eq('id', id).select('*').single();
+        const changes = Object.fromEntries(Object.entries(savedRow).filter(([key, value]) => !same(key, value)).map(([key, value]) => [key, [(before as any)[key] ?? null, value]]));
+        const { data, error } = await db.from('hr_employees').update({ ...savedRow, updated_at: now, updated_by: user.id }).eq('id', id).select('*').single();
         if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
         if (error) throw error;
         if (Object.keys(changes).length) await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes, changed_by: user.id });
         return res.status(200).json({ employee: decode(data) });
       }
       const malaysian = !String(row.nationality || '').trim() || /malaysia/i.test(String(row.nationality));
-      const { data, error } = await db.from('hr_employees').insert({ ...row, ...(malaysian ? { payroll_settings: STANDARD_PAYROLL } : {}), updated_by: user.id }).select('*').single();
+      const { data, error } = await db.from('hr_employees').insert({ ...row, payroll_settings: { ...(malaysian ? STANDARD_PAYROLL : {}), ...retirementSettings }, updated_by: user.id }).select('*').single();
       if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
       if (error) throw error;
       await db.from('hr_audit').insert({ employee_id: data.id, action: 'create', changes: {}, changed_by: user.id });
