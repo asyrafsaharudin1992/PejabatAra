@@ -131,8 +131,8 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   // The last Monday to Friday week before the month starts (for December 2026: 23 to 27 November).
   const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
   const lastFriday = !monthOk ? '' : (() => { let day = addDays(`${month}-01`, -1); while (new Date(`${day}T00:00:00Z`).getUTCDay() !== 5) day = addDays(day, -1); return day; })();
-  // ... and the weekdays after that Friday up to the day before the month (for December 2026 also Monday 30 November).
-  const prevDates = !monthOk ? [] : [...Array.from({ length: 5 }, (_, i) => addDays(lastFriday, i - 4)), ...Array.from({ length: 7 }, (_, i) => addDays(lastFriday, i + 1)).filter((d) => d < `${month}-01` && ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()))];
+  // ... and every day after that Friday up to the day before the month (for December 2026: 28, 29 and 30 November too).
+  const prevDates = !monthOk ? [] : Array.from({ length: 12 }, (_, i) => addDays(lastFriday, i - 4)).filter((d) => d < `${month}-01`);
   const sheetCells = new Map(cellMap);
   if (withPrev) for (const d of context?.targetDays || []) if (d.date < `${month}-01`) sheetCells.set(cellKey(d.id, d.date), { id: d.id, date: d.date, shift: d.shift, source: 'existing', locked: true });
   const exportDraft = () => {
