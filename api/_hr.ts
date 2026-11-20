@@ -1786,7 +1786,7 @@ export async function hrHandler(req: any, res: any) {
       const { data: fixedPeople } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id,work_days,default_shift,holiday_group').eq('status', 'Active').not('default_shift', 'is', null).neq('default_shift', '').limit(500);
       const fixed = wantOriginal ? [] : (fixedPeople || []).filter((p: any) => Array.isArray(p.work_days) && p.work_days.length && !p.work_days.includes(-1));
       const ids = [...new Set([...(data || []).map((row: any) => row.employee_id), ...fixed.map((p: any) => p.id)])];
-      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').in('id', ids) : { data: [] };
+      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,join_date,confirm_date,resign_date,assessment_staff_id').in('id', ids) : { data: [] };
       const stored = new Set((data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
       const fixedIds = fixed.map((p: any) => p.id);
       const [{ data: leaves }, { data: holidays }] = fixedIds.length ? await Promise.all([
@@ -1813,7 +1813,7 @@ export async function hrHandler(req: any, res: any) {
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
       // Who may change what: HR changes everything; a Clinical Admin account only its own branch (`edit.company`).
       const editCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
-      return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '' })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
+      return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '', department: p.department || '', joinDate: p.join_date || null, confirmDate: p.confirm_date || null, resignDate: p.resign_date || null })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];

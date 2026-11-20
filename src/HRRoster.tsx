@@ -13,7 +13,7 @@ import { HRRosterDraft } from './HRRosterDraft';
 // or as a calendar. Leave is counted on the days marked as working here; a date with no roster falls back to the
 // person's usual working weekdays.
 const API = '/api/status?resource=hr';
-type Person = { id: string; company: string; code: string; name: string; short?: string; designation: string };
+type Person = { id: string; company: string; code: string; name: string; short?: string; designation: string; department?: string; joinDate?: string | null; confirmDate?: string | null; resignDate?: string | null };
 type Day = { id: string; date: string; shift: string; works: boolean; note: string; auto?: boolean };
 
 async function api(query: string, body?: unknown) {
@@ -25,6 +25,23 @@ const shiftMonth = (month: string, by: number) => { const [year, number] = month
 const monthName = (month: string) => new Date(`${month}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 const WEEKDAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const isDoctor = (person: Person) => /\b(DR|DOCTOR)\b/i.test(person.designation);
+// Clinic assistants and clinical admins share one roster group, including clinical admins in the Admin department.
+const isOperation = (person: Person) => /^OPERATION$|^OPR\b/i.test((person.department || '').trim());
+const CLINICAL_ADMIN_CODES = new Set(['ARA0041', 'ARASK0060']); // Izzah and Amirah Dayana.
+const isClinicAssistant = (person: Person) => isOperation(person) || CLINICAL_ADMIN_CODES.has(person.code) || /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN|ADMIN KLINIKAL/i.test(person.designation || '');
+// The colour of a name. Probation runs from the join date until the confirmation date. If there is no confirmation after 3 months it is an extended probation. A last day that has not passed is a pending resign.
+const todayIso = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+const addMonthsIso = (iso: string, months: number) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + months); return d.toISOString().slice(0, 10); };
+const staffState = (person: Person): { label: string; bar: string; tag: string } | null => {
+  const today = todayIso();
+  if (person.resignDate && person.resignDate >= today) return { label: `Resigns ${person.resignDate.slice(8)}/${person.resignDate.slice(5, 7)}`, bar: 'border-l-4 border-l-rose-500', tag: 'bg-rose-50 text-rose-700' };
+  const confirmed = Boolean(person.confirmDate) && (person.confirmDate as string) <= today;
+  if (!confirmed && person.joinDate) {
+    if (today > addMonthsIso(person.joinDate, 3)) return { label: 'Extended probation', bar: 'border-l-4 border-l-amber-500', tag: 'bg-amber-50 text-amber-700' };
+    return { label: 'Probation', bar: 'border-l-4 border-l-violet-500', tag: 'bg-violet-50 text-violet-700' };
+  }
+  return { label: 'Permanent', bar: 'border-l-4 border-l-emerald-500', tag: 'bg-emerald-50 text-emerald-700' };
+};
 // "AHMAD SYAFIQ BIN SO'IB" becomes "Syafiq": the first name that is not a common first word.
 export const guessName = (name: string) => { const words = name.split(/\s+/).filter(Boolean); const word = words.find((item) => !/^(AHMAD|MOHAMAD|MUHAMAD|MUHAMMAD|MOHD|NUR|NURUL|SITI)$/i.test(item)) || words[0] || ''; return word.charAt(0) + word.slice(1).toLowerCase(); };
 const isLeave = (day: Day) => !day.works && ['AL', 'UPL', 'MC', 'ML', 'EL', 'HOSP', 'MATN', 'MARRG'].includes(day.shift);
@@ -69,7 +86,9 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
   usePrintSheet(printing, `Roster - ${month}`, () => setPrinting(false));
   // The calendar view shows one clinic at a time, so it starts on KJ.
   const [company, setCompany] = useState(defaultView === 'calendar' ? 'KJ' : '');
-  const [group, setGroup] = useState<'staff' | 'doctors'>('staff');
+  // Who: Clinic Assistants, Office (every other staff member) or Doctors. `group` keeps the old two-way split the rest of the page uses.
+  const [who, setWho] = useState<'ca' | 'office' | 'doctors'>('ca');
+  const group: 'staff' | 'doctors' = who === 'doctors' ? 'doctors' : 'staff';
   const [view, setView] = useState<'table' | 'calendar'>(defaultView);
   const [personId, setPersonId] = useState('');
   const [picked, setPicked] = useState('');
@@ -123,7 +142,7 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
 
   const count = Number(month.slice(5)), year = Number(month.slice(0, 4));
   const dates = Array.from({ length: new Date(year, count, 0).getDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
-  const people = (data?.people || []).filter((person) => !hideCodes.includes(person.code)).filter((person) => (group === 'doctors') === isDoctor(person)).filter((person) => !company || person.company === company).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
+  const people = (data?.people || []).filter((person) => !hideCodes.includes(person.code)).filter((person) => (group === 'doctors') === isDoctor(person)).filter((person) => who === 'doctors' || (who === 'ca') === isClinicAssistant(person)).filter((person) => !company || person.company === company).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name));
   const byPerson = new Map<string, Map<string, Day>>();
   for (const day of data?.days || []) { if (!byPerson.has(day.id)) byPerson.set(day.id, new Map()); byPerson.get(day.id)!.set(day.date, day); }
   const selected = people.find((person) => person.id === personId);
@@ -172,7 +191,7 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
         {!readOnly && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 pt-3 sm:gap-x-5 sm:gap-y-3 sm:pt-4">
-        <Choice label="Who" value={group} onChange={setGroup} options={[['staff', 'Staff'], ['doctors', 'Doctors']]} />
+        <Choice label="Who" value={who} onChange={setWho} options={[['ca', 'CA + Admin Klinikal'], ['office', 'Office'], ['doctors', 'Doctors']]} />
         <Choice label="Clinic" value={company} onChange={setCompany} options={[...(view === 'table' ? [['', 'KJ and SK'] as [string, string]] : []), ['KJ', 'KJ'], ['SK', 'SK']]} />
         {!readOnly && !phone && <Choice label="Codes" value={codes} onChange={setCodes} options={[['new', 'New codes'], ['original', 'Infotech codes']]} />}
         {!calendarOnly && <Choice label="View" value={view} onChange={(next) => { setView(next); if (next === 'calendar' && !company) setCompany('KJ'); }} options={[['table', 'Table'], ['calendar', 'Calendar']]} />}
@@ -182,13 +201,14 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
     {warning && <p role="alert" className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700"><span>{warning}</span><button type="button" onClick={() => setWarning('')} className="text-xs underline">Close</button></p>}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
+    {group !== 'doctors' && <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500"><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-emerald-500" />Permanent</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-violet-500" />Probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-amber-500" />Extended probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-rose-500" />Pending resign</span></p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>
       {!data ? <p className="text-sm text-slate-500">Loading…</p> : !people.length ? <p className="text-sm text-slate-500">{empty}</p> : view === 'table' ?
         <table className="no-stack border-separate border-spacing-0 text-xs">
           <thead><tr><th className="sticky left-0 z-10 min-w-[110px] bg-white px-3 py-2 text-left sm:min-w-[210px] text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group === 'doctors' ? 'Doctor' : 'Staff'}</th>{dates.map((date) => { const day = new Date(`${date}T00:00:00`).getDay(); return <th key={date} className={`min-w-[46px] rounded-t-lg px-1 py-2 text-center font-semibold ${date === today ? 'bg-[#0b587b] text-white' : day === 0 || day === 6 ? 'bg-slate-50 text-[#0b587b]' : 'text-slate-500'}`}>{WEEKDAY[day]}<br />{Number(date.slice(8))}</th>; })}</tr></thead>
           <tbody>{people.map((person) => <tr key={person.id}>
-            <td className="sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2"><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800" title={person.name}>{label(person)}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}</p></td>
+            <td className={`sticky left-0 z-10 border-t border-slate-100 bg-white px-3 py-2 ${group === 'doctors' ? '' : staffState(person)?.bar || ''}`}><p className="max-w-[200px] truncate text-[13px] font-semibold text-slate-800" title={person.name}>{label(person)}</p><p className="text-[10px] text-slate-400">{person.company} · {person.code}{group !== 'doctors' && (() => { const state = staffState(person); return state && state.label !== 'Permanent' ? <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${state.tag}`}>{state.label}</span> : null; })()}</p></td>
             {dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className="border-t border-slate-100 p-0.5"><button type="button" onClick={() => startEdit(person, date, day)} title={day ? `${person.name} · ${date} · ${shown(day.shift)}${shown(day.shift) !== day.shift ? ` (Infotech ${day.shift})` : ''}${day.works ? '' : ' (not a working day)'}${day.auto ? ' · from the profile (not saved in the roster)' : ''}` : 'No roster'} className={`grid h-9 w-full cursor-pointer place-items-center rounded-md px-0.5 text-[11px] font-bold transition hover:ring-2 hover:ring-[#0b587b]/40 ${cellTone(day && { ...day, shift: shown(day.shift) })}${day?.auto ? ' opacity-60' : ''}`}>{day ? shown(day.shift) : '·'}</button></td>; })}
           </tr>)}</tbody>
         </table> :
