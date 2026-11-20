@@ -219,12 +219,12 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
       if (clockIn) day.inAt = new Date(clockIn.at).toISOString();
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
-      // Any further pair of clocks after the shift (clock out, then clock in again) is time worked on top of the roster, so it is OT. The roster decides, not the gap.
-      // The only clock in left alone is one that belongs to the next day's rostered shift.
+      // A second pair of clocks straight after the shift (clock out, then clock in again): the extra hours worked on top of the shift, counted as OT.
+      // It is not taken if that clock in belongs to the next day's rostered shift.
       const nextRow = rosterOf.get(`${person.id}|${addDay(date, 1)}`);
       const nextShift = nextRow?.works ? shiftTimes(rules, nextRow.shift, doctor) : null;
       const nextStart = nextShift ? at(addDay(date, 1), nextShift.start) : Infinity;
-      const extraIn = clockOut ? mine.find((clock) => clock.kind === 'in' && (!clock.workDate || clock.workDate === date) && clock.at >= clockOut.at && clock.at < nextStart - 5 * HOUR) : undefined;
+      const extraIn = clockOut ? mine.find((clock) => clock.kind === 'in' && (!clock.workDate || clock.workDate === date) && clock.at >= clockOut.at && clock.at - clockOut.at <= 90 * MIN && clock.at < nextStart - 5 * HOUR) : undefined;
       const extraOut = extraIn ? mine.find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > extraIn.at && clock.at <= extraIn.at + 16 * HOUR) : undefined;
       if (extraIn) day.ot2InAt = new Date(extraIn.at).toISOString();
       if (extraOut) day.ot2OutAt = new Date(extraOut.at).toISOString();
