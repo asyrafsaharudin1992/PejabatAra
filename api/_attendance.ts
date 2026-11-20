@@ -1,3 +1,4 @@
+import { attendanceFollowUps, emptyFollowUp } from '../src/lib/attendanceFollowUp.js';
 import { createHash } from 'node:crypto';
 import { NEW_CODE } from '../src/lib/shiftCodes.js';
 import { branchId } from './_office-db.js';
@@ -97,7 +98,12 @@ export type Day = { date: string; code: string; start: string; end: string; stat
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
-type Data = { roster: any[]; clocks: any[]; leave: any[]; waiting?: any[]; holidays: any[]; ot: any[]; credit: any[] };
+type Data = { roster: any[]; clocks: any[]; leave: any[]; waiting?: any[]; holidays: any[]; ot: any[]; credit: any[]; clockRequests?: any[] };
+export function clockSource(device: string): 'request' | 'hr' | 'infotech' | 'phone' {
+  if (device === 'request' || String(device).startsWith('request:')) return 'request';
+  if (device === 'hr' || String(device).startsWith('hr:')) return 'hr';
+  return String(device).startsWith('infotech') ? 'infotech' : 'phone';
+}
 // Annual leave credit used in hours counts 8 hours as one day.
 export const CREDIT_HOURS_PER_DAY = 8;
 // Everything a range needs, fetched at the same time (the database is far from the server, so one round of
@@ -117,16 +123,18 @@ async function readAll(build: () => any): Promise<{ data: any[]; error: any }> {
 export async function fetchData(db: any, from: string, to: string, ids?: string[]): Promise<Data> {
   const wide = { from: `${addDay(from, -1)}T00:00:00+08:00`, to: `${addDay(to, 2)}T00:00:00+08:00` };
   const only = (query: any) => ids ? query.in('employee_id', ids) : query;
-  const [{ data: roster }, { data: clocks }, { data: leave }, { data: waiting }, { data: holidays }, { data: ot }, { data: credit }] = await Promise.all([
+  const [{ data: roster }, { data: clocks }, { data: leave }, { data: waiting }, { data: holidays }, { data: ot }, { data: credit }, clockRequests] = await Promise.all([
     readAll(() => only(db.from('hr_roster').select('employee_id,work_date,shift,works').gte('work_date', from).lte('work_date', to)).order('work_date').order('employee_id')),
-    readAll(() => only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').order('id')),
+    readAll(() => only(db.from('hr_attendance_clocks').select('employee_id,clock_at,kind,device').gte('clock_at', wide.from).lte('clock_at', wide.to)).order('clock_at').order('id')),
     readAll(() => only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').eq('status', 'approved').lte('start_date', to).gte('end_date', from)).order('start_date').order('id')),
     only(db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date').in('status', ['pending', 'supervisor_approved']).lte('start_date', to).gte('end_date', from)).limit(2000),
     db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to).limit(1000),
     (async () => { const read = (columns: string) => readAll(() => only(db.from('hr_attendance_ot').select(columns).gte('work_date', from).lte('work_date', to)).order('work_date').order('employee_id')); const first = await read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note,parts'); return first.error ? read('employee_id,work_date,status,captured_minutes,approved_minutes,multiplier,note') : first; })(),
     readAll(() => only(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).order('work_date').order('id')),
+    readAll(() => only(db.from('hr_attendance_requests').select('employee_id,work_date,in_time,out_time,reason,status').in('status', ['pending', 'supervisor_approved', 'approved']).gte('work_date', from).lte('work_date', to)).order('work_date').order('id')),
   ]);
-  return { roster: roster || [], clocks: clocks || [], leave: leave || [], waiting: waiting || [], holidays: holidays || [], ot: ot || [], credit: credit || [] };
+  if (clockRequests.error) throw clockRequests.error;
+  return { roster: roster || [], clocks: clocks || [], leave: leave || [], waiting: waiting || [], holidays: holidays || [], ot: ot || [], credit: credit || [], clockRequests: clockRequests.data };
 }
 
 export async function buildDays(db: any, people: Employee[], from: string, to: string, rules: Rules) {
@@ -147,8 +155,21 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
   const rosterOf = new Map<string, { shift: string; works: boolean }>((roster || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
   const holidayOn = new Set((holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
   const decided = new Map<string, any>((otRows || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
-  const clocksOf = new Map<string, { at: number; kind: string }[]>();
-  for (const row of clocks || []) { const list = clocksOf.get(row.employee_id) || []; list.push({ at: Date.parse(row.clock_at), kind: row.kind }); clocksOf.set(row.employee_id, list); }
+  // Older corrections have no date in their device tag. Recover their work date
+  // from the approved request, including overnight out times. Ambiguous matches
+  // keep the ordinary time-window rules instead of assigning the same clock twice.
+  const approvedDates = new Map<string, string | null>();
+  const assign = (id: string, kind: string, ms: number, date: string) => { const key = `${id}|${kind}|${ms}`; approvedDates.set(key, approvedDates.has(key) && approvedDates.get(key) !== date ? null : date); };
+  const pendingCorrections = new Set((data.clockRequests || []).filter((request) => ['pending', 'supervisor_approved'].includes(request.status) && isMissedClock(request.reason)).map((request) => `${request.employee_id}|${request.work_date}`));
+  for (const request of data.clockRequests || []) {
+    if (request.status !== 'approved') continue;
+    const inAt = request.in_time ? at(request.work_date, request.in_time) : null;
+    if (inAt !== null) assign(request.employee_id, 'in', inAt, request.work_date);
+    if (request.out_time) { let outAt = at(request.work_date, request.out_time); if (inAt !== null && outAt <= inAt) outAt += 24 * HOUR; assign(request.employee_id, 'out', outAt, request.work_date); }
+  }
+  const clocksOf = new Map<string, { at: number; kind: string; workDate?: string }[]>();
+  for (const row of clocks || []) { const list = clocksOf.get(row.employee_id) || [], ms = Date.parse(row.clock_at); const tagged = /^(?:hr|request|infotech):(\d{4}-\d{2}-\d{2})$/.exec(String(row.device || ''))?.[1]; list.push({ at: ms, kind: row.kind, workDate: tagged || approvedDates.get(`${row.employee_id}|${row.kind}|${ms}`) || undefined }); clocksOf.set(row.employee_id, list); }
+  for (const list of clocksOf.values()) list.sort((a, b) => a.at - b.at);
   const now = Date.now();
 
   for (const person of people) {
@@ -179,7 +200,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       if (date < recordsFromFor(person.company) && !leaveRow && !mine.some((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date)) { push({ ...blank, status: 'no-record' }); continue; }
       if (!shift) {
         // A day off, a public holiday, or a code with no times set. A day worked anyway (a rest day) is captured as OT for HR to decide.
-        const same = mine.filter((clock) => new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date);
+        const same = mine.filter((clock) => clock.workDate ? clock.workDate === date : new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date);
         const first = same.find((clock) => clock.kind === 'in'), last = [...same].reverse().find((clock) => clock.kind === 'out');
         // A lone clock out here is the end of last night's shift, not a day worked.
         const day: Day = { ...blank, status: leaveRow ? 'leave' : first ? 'extra' : code ? 'no-times' : 'off', inAt: first ? new Date(first.at).toISOString() : null, outAt: first && last ? new Date(last.at).toISOString() : null };
@@ -191,9 +212,11 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const shiftStart = at(date, shift.start); let shiftEnd = at(date, shift.end); if (shiftEnd <= shiftStart) shiftEnd += 24 * HOUR;
       const start = shiftStart + lateCredit * HOUR, end = shiftEnd - earlyCredit * HOUR;
       const day: Day = { ...blank, start: new Date(start).toISOString(), end: new Date(end).toISOString(), creditHours: lateCredit + earlyCredit };
-      // A clock in counts for this shift from 5 hours before it starts until 10 hours after, but not once the shift is nearly over (that is a clock out recorded as an in).
-      const clockIn = mine.find((clock) => clock.kind === 'in' && clock.at >= start - 5 * HOUR && clock.at <= Math.min(start + 10 * HOUR, end - 30 * MIN));
-      const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
+      // Phone clocks use the shift window. A dated HR correction or approved
+      // request belongs to its specified work date, even when work began earlier
+      // than that window. A clock assigned to another shift date is never reused.
+      const clockIn = mine.find((clock) => clock.kind === 'in' && (clock.workDate ? clock.workDate === date && clock.at >= at(date, '00:00') : clock.at >= start - 5 * HOUR) && clock.at <= Math.min(start + 10 * HOUR, end - 30 * MIN));
+      const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
       if (clockIn) day.inAt = new Date(clockIn.at).toISOString();
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
       if (leaveRow && !clockIn) { push({ ...day, status: 'leave' }); continue; }
@@ -216,8 +239,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           const pol = rules.policyFor(date); day.otCounted = day.ot >= pol.minMinutes ? wholeHours(day.ot, pol) : 0;
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
-        else day.status = now > end + 8 * HOUR ? 'missing-out' : 'working';
-      } else day.status = waitingRow ? 'leave-pending' : now >= end ? 'absent' : now >= start + rules.lateGrace * MIN ? 'not-in' : 'upcoming';
+        else day.status = pendingCorrections.has(`${person.id}|${date}`) ? 'clock-pending' : now > end + 8 * HOUR ? 'missing-out' : 'working';
+      } else day.status = waitingRow ? 'leave-pending' : pendingCorrections.has(`${person.id}|${date}`) ? 'clock-pending' : now >= end ? 'absent' : now >= start + rules.lateGrace * MIN ? 'not-in' : 'upcoming';
       push(day);
     }
   }
@@ -330,12 +353,12 @@ async function withOtPreview(db: any, rows: any[], requests: any[]) {
 }
 async function applyRequest(db: any, request: any) {
   const rows: any[] = [];
-  if (request.in_time) rows.push({ employee_id: request.employee_id, kind: 'in', clock_at: new Date(at(request.work_date, String(request.in_time))).toISOString(), within_place: null, device: 'request' });
+  if (request.in_time) rows.push({ employee_id: request.employee_id, kind: 'in', clock_at: new Date(at(request.work_date, String(request.in_time))).toISOString(), within_place: null, device: `request:${request.work_date}` });
   if (request.out_time) {
     let outAt = at(request.work_date, String(request.out_time));
     const inAt = request.in_time ? at(request.work_date, String(request.in_time)) : null;
     if (inAt !== null && outAt <= inAt) outAt += 24 * HOUR;
-    rows.push({ employee_id: request.employee_id, kind: 'out', clock_at: new Date(outAt).toISOString(), within_place: null, device: 'request' });
+    rows.push({ employee_id: request.employee_id, kind: 'out', clock_at: new Date(outAt).toISOString(), within_place: null, device: `request:${request.work_date}` });
   }
   if (rows.length) { const { error } = await db.from('hr_attendance_clocks').insert(rows); if (error) throw error; }
 }
@@ -664,7 +687,15 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const one = text(req.query.id, 60);
     // The week around the period is read too, so the rest day (the last day off of each Monday to Sunday week) is right on the first and last week.
     const wideFrom = addDay(from, -6), wideTo = addDay(to, 6);
-    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, wideFrom, wideTo)]);
+    const onlyRequested = (query: any) => one ? query.eq('employee_id', one) : query;
+    const [people, rules, data, requests, creditUses] = await Promise.all([
+      active(), loadRules(db), fetchData(db, wideFrom, wideTo),
+      readAll(() => onlyRequested(db.from('hr_attendance_requests').select('employee_id,work_date,reason,status').neq('status', 'draft').gte('work_date', from).lte('work_date', to)).order('created_at', { ascending: false }).order('id', { ascending: false })),
+      readAll(() => onlyRequested(db.from('hr_credit_hour_use').select('employee_id,work_date,kind,hours').gte('work_date', from).lte('work_date', to)).order('work_date').order('id')),
+    ]);
+    if (requests.error) throw requests.error;
+    if (creditUses.error) throw creditUses.error;
+    const followUps = attendanceFollowUps(requests.data, creditUses.data, data.ot || []);
     const chosen = one ? people.filter((p) => p.id === one) : people;
     const days = buildDaysFrom(data, chosen, wideFrom, wideTo, rules);
     // The odd days: absent, a clock in with no clock out, a clock on a day off, a very long day, a very short day. Late and early out are shown too but are not "odd".
@@ -677,6 +708,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       if (day.status === 'present' && day.worked > 0 && day.worked < 4 * 60) odd.push('Less than 4 hours');
       if (day.lateCounted > 0) soft.push('Late');
       if (day.earlyCounted > 0) soft.push('Early out');
+      if (day.status === 'clock-pending') soft.push('Clock correction pending');
       return { odd, soft };
     };
     // For one person the clocks themselves are sent too (with their ids), so the screen can edit them in place like Infotech's Update By Individual.
@@ -705,7 +737,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
         } else if (day.otCounted > 0 && (!decision || decision.status === 'pending')) {
           for (const part of otParts(kindOf(day.date), day.ot, rules.policyFor(day.date))) waiting[String(part.multiplier)] = (waiting[String(part.multiplier)] || 0) + part.minutes;
         }
-        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft };
+        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft, followUp: followUps.get(`${p.id}|${day.date}`) || emptyFollowUp() };
       });
       return { person: { ...person(p), designation: p.designation }, days: list };
     });
@@ -852,7 +884,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     let { data, error } = await readClocks('id,kind,clock_at,distance_m,within_place,accuracy_m,device,remarks,address,latitude,longitude,hr_clock_places(name)');
     if (error) ({ data, error } = await readClocks('id,kind,clock_at,distance_m,within_place,accuracy_m,device,hr_clock_places(name)')); // before the migration
     if (error) throw error;
-    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: row.device === 'request' ? 'request' : row.device === 'hr' ? 'hr' : String(row.device).startsWith('infotech') ? 'infotech' : 'phone', kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', remarks: row.remarks || '', address: row.address || '', map: row.latitude != null ? `https://www.google.com/maps?q=${row.latitude},${row.longitude}` : '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && !['request', 'hr'].includes(row.device) && !String(row.device).startsWith('infotech'), fromRequest: row.device === 'request', device: row.device })) });
+    return res.status(200).json({ clocks: (data || []).map((row: any) => ({ id: row.id, source: clockSource(row.device), kind: row.kind, at: row.clock_at, time: hhmm(Date.parse(row.clock_at)), date: new Date(Date.parse(row.clock_at) + 8 * HOUR).toISOString().slice(0, 10), place: row.hr_clock_places?.name || '', remarks: row.remarks || '', address: row.address || '', map: row.latitude != null ? `https://www.google.com/maps?q=${row.latitude},${row.longitude}` : '', distance: row.distance_m, accuracy: row.accuracy_m === null ? null : Math.round(row.accuracy_m), anywhere: row.within_place === null && clockSource(row.device) === 'phone', fromRequest: clockSource(row.device) === 'request', device: row.device })) });
   }
 
   // Annual leave credit used in hours: what a day already has, and the person's Annual Leave balance.
@@ -980,7 +1012,10 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     await assertPayrollOpen(db, id, date);
     // kind 'auto' (the in-place edit screen): the clock after an in is an out, otherwise it is an in, going by the clock just before it.
     if (body.kind === 'auto') { const { data: before } = await db.from('hr_attendance_clocks').select('kind').eq('employee_id', id).lt('clock_at', new Date(clockAt).toISOString()).gte('clock_at', new Date(clockAt - 20 * HOUR).toISOString()).order('clock_at', { ascending: false }).limit(1); kind = before?.[0]?.kind === 'in' ? 'out' : 'in'; }
-    const { error } = await db.from('hr_attendance_clocks').insert({ employee_id: id, kind, clock_at: new Date(clockAt).toISOString(), within_place: null, device: 'hr' });
+    const { data: existing, error: existingError } = await db.from('hr_attendance_clocks').select('id').eq('employee_id', id).eq('kind', kind).eq('clock_at', new Date(clockAt).toISOString()).limit(1);
+    if (existingError) throw existingError;
+    if (existing?.length) return res.status(200).json({ success: true, duplicate: true });
+    const { error } = await db.from('hr_attendance_clocks').insert({ employee_id: id, kind, clock_at: new Date(clockAt).toISOString(), within_place: null, device: `hr:${date}` });
     if (error) throw error;
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { clock_added: `${kind} ${date} ${body.time}${body.nextDay === true ? ' (next day)' : ''}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
@@ -996,7 +1031,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (clockAt > Date.now() + 5 * MIN) throw fail(400, 'A clock cannot be in the future.');
     await assertPayrollOpen(db, one.employee_id, new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 10));
     await assertPayrollOpen(db, one.employee_id, new Date(clockAt + 8 * HOUR).toISOString().slice(0, 10));
-    const { error } = await db.from('hr_attendance_clocks').update({ clock_at: new Date(clockAt).toISOString(), device: 'hr' }).eq('id', clockId);
+    const { error } = await db.from('hr_attendance_clocks').update({ clock_at: new Date(clockAt).toISOString(), device: `hr:${date}` }).eq('id', clockId);
     if (error) throw error;
     await db.from('hr_audit').insert({ employee_id: one.employee_id, action: 'update', changes: { clock_changed: `${one.kind} ${new Date(Date.parse(one.clock_at) + 8 * HOUR).toISOString().slice(0, 16).replace('T', ' ')} to ${new Date(clockAt + 8 * HOUR).toISOString().slice(0, 16).replace('T', ' ')}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });

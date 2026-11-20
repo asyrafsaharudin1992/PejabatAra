@@ -1,3 +1,4 @@
+import { attendanceRequestLabel, attendanceFollowUpStatus, type AttendanceFollowUp, type FollowUpFilter, FOLLOW_UP_LABEL } from './lib/attendanceFollowUp';
 import { useEffect, useRef, useState } from 'react';
 import { bulk } from './lib/bulkReports';
 import { Download, Printer } from 'lucide-react';
@@ -13,9 +14,39 @@ import { usePrintSheet } from './IncentiveSheet';
 
 // Office HR > Attendance > Individual: Infotech's "Individual Attendance Report With Monthly Allowance", one block for each person with every day: the clocks, the shift,
 // Normal / Late / EarlyOut / Actual, OT at each rate and the reason. A last Check column marks the odd days, and "Odd days" lists who has the most, for Admin.
-type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[] };
+type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[]; followUp?: AttendanceFollowUp };
 type Person = { id: string; company: string; code: string; name: string; designation: string };
 type Block = { person: Person; days: Day[] };
+
+type FollowUpProps = { blocks: Block[]; company: string; staffId: string; staff: { id: string; fullName: string; company: string }[]; filter: FollowUpFilter; onCompany: (company: string) => void; onStaff: (id: string) => void; onFilter: (filter: FollowUpFilter) => void };
+
+function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, onStaff, onFilter }: FollowUpProps) {
+  // Settled days remain in this box even after approved clock corrections remove their odd-day flag.
+  const allRows = blocks.flatMap(({ person, days }) => days.filter((day) => day.odd.length || day.soft.length || day.followUp?.ot.length || day.followUp?.missed.length || day.followUp?.credit.length || day.followUp?.otDecision).map((day) => ({ person, day, resolution: attendanceFollowUpStatus(day) }))).sort((a, b) => b.day.date.localeCompare(a.day.date) || a.person.name.localeCompare(b.person.name));
+  const rows = allRows.filter((row) => filter === 'all' || row.resolution === filter);
+  const total = (status: string) => allRows.filter((row) => row.resolution === status).length;
+  const noRequest = <span className="text-slate-400">Not applied</span>;
+  const status = (value: string, missed = false) => <span className={`inline-block rounded-lg px-2 py-1 text-xs font-semibold ${value === 'approved' ? 'bg-emerald-50 text-emerald-700' : value === 'rejected' || value === 'cancelled' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800'}`}>{attendanceRequestLabel(value, missed)}</span>;
+  return <section className={`${card} print:hidden`}>
+    <h3 className="font-semibold">Odd days · Requests & follow-up</h3>
+    <p className="mt-1 text-sm text-slate-500">OT, forgotten-clock requests and credit hours for the selected staff and period. Settled requests stay listed after the clock is corrected. Credit hours show recorded use.</p>
+    <div className="mt-4 flex flex-wrap items-end gap-3">
+      <label className="text-xs font-semibold text-slate-600">Status<select aria-label="Follow-up status" value={filter} onChange={(event) => onFilter(event.target.value as FollowUpFilter)} className={`${field} mt-1 block`}><option value="all">All statuses ({allRows.length})</option><option value="awaiting">Awaiting approval ({total('awaiting')})</option><option value="unresolved">Unresolved ({total('unresolved')})</option><option value="settled">Settled ({total('settled')})</option></select></label>
+      <label className="text-xs font-semibold text-slate-600">Branch<select aria-label="Follow-up branch" value={company} onChange={(event) => onCompany(event.target.value)} className={`${field} mt-1 block`}><option value="">All branches</option><option value="KJ">KJ · Kajang</option><option value="SK">SK · Seri Kembangan</option></select></label>
+      <label className="text-xs font-semibold text-slate-600">Staff<select aria-label="Follow-up staff" value={staffId} onChange={(event) => onStaff(event.target.value)} className={`${field} mt-1 block max-w-full sm:max-w-[320px]`}><option value="">All staff</option>{staff.filter((person) => !company || person.company === company).map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select></label>
+      <p className="pb-2 text-xs text-slate-500" role="status">Showing {rows.length} of {allRows.length} days</p>
+    </div>
+    <p className="mt-2 text-xs text-slate-500">Awaiting approval means a request or OT decision is still pending, so nothing is needed from HR yet. Unresolved means HR still has to act: no application, a rejected or cancelled request, or a clock, late or early-out issue left. Settled means every request has a final decision and no flags remain.</p>
+    {!rows.length ? <p className="mt-4 text-sm text-slate-500">{allRows.length ? 'No days match the selected status.' : 'No odd days or requests for the selected staff, branch and period.'}</p> : <div className="mt-4 overflow-x-auto"><table className="no-stack w-full min-w-[1000px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400">{['Staff', 'Date', 'Status', 'Check', 'OT', 'Forgot to clock', 'Credit hours'].map((label) => <th key={label} className="px-2 py-3">{label}</th>)}</tr></thead><tbody>{rows.map(({ person, day, resolution }) => {
+      const follow = day.followUp;
+      return <tr key={`${person.id}:${day.date}`} className="border-t border-slate-100 align-top"><td className="px-2 py-3"><p className="font-semibold text-[#0b587b]">{person.name}</p><p className="text-xs text-slate-400">{person.code} · {person.company}</p></td><td className="whitespace-nowrap px-2 py-3">{dmy(day.date)}<span className="block text-xs text-slate-400">{dayName(day.date)}</span></td><td className="px-2 py-3"><span className={`inline-block whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold ${resolution === 'settled' ? 'bg-emerald-50 text-emerald-700' : resolution === 'awaiting' ? 'bg-amber-50 text-amber-800' : 'bg-rose-50 text-rose-700'}`}>{FOLLOW_UP_LABEL[resolution]}</span></td><td className="px-2 py-3 text-xs text-slate-600">{[...day.odd, ...day.soft].join(', ') || 'No current flag'}</td>
+      <td className="px-2 py-3">{follow?.ot.length ? follow.ot.map((request, index) => <div key={index}>{status(request.status)}</div>) : follow?.otDecision ? <span className="text-xs font-semibold text-slate-600">{follow.otDecision === 'approved' ? 'Approved by HR' : follow.otDecision === 'rejected' ? 'Rejected by HR' : `HR: ${follow.otDecision}`}</span> : noRequest}</td>
+      <td className="px-2 py-3">{follow?.missed.length ? follow.missed.map((request, index) => <div key={index} className="mb-2 last:mb-0"><p className="mb-1 text-xs text-slate-500">{request.reason}</p>{status(request.status, true)}</div>) : noRequest}</td>
+      <td className="px-2 py-3">{follow?.credit.length ? follow.credit.map((use, index) => <p key={index} className="mb-1 rounded-lg bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">Applied · {use.hours} h · {use.kind === 'late' ? 'Late arrival' : use.kind === 'early' ? 'Early leave' : use.kind}</p>) : <span className="text-slate-400">No recorded use</span>}</td></tr>;
+    })}</tbody></table></div>}
+  </section>;
+}
+
 const COMPANY: Record<string, string> = { KJ: 'KJ- HSO HEALTHCARE SDN BHD', SK: 'SK- HSO HEALTHCARE SDN BHD' };
 const field = 'h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm';
 const dmy = (date: string) => date.split('-').reverse().join('-');
@@ -36,7 +67,7 @@ const otMinutes = (day: Day, rate: string) => day.otByRate[rate] || 0;
 const otWaiting = (day: Day, rate: string) => day.otByRate[rate] ? 0 : day.otWaiting?.[rate] || 0;
 // Shift column: the shift code, RD on the rest day, OD on any other day off. Reason: leave code, ABS (absent), PH, or RES (rest day).
 const shiftCell = (day: Day) => day.shift ? newCode(day.shift) : day.kind === 'rest' ? 'RD' : 'OD';
-const reasonOf = (day: Day) => day.leave || (day.status === 'absent' ? 'ABS' : day.holiday ? 'PH' : !day.shift && day.kind === 'rest' ? 'RES' : '');
+const reasonOf = (day: Day) => day.leave || (day.status === 'clock-pending' ? 'FTC pending' : day.status === 'absent' ? 'ABS' : day.holiday ? 'PH' : !day.shift && day.kind === 'rest' ? 'RES' : '');
 const money = (index: number) => <span key={index}>0.00</span>;
 const sumBlocks = (blocks: Block[], pick: (day: Day) => number) => blocks.reduce((total, item) => total + item.days.reduce((inner, day) => inner + pick(day), 0), 0);
 
@@ -116,7 +147,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
   const rows = days.map((day, index) => ({ day, number: index + 1 })).filter(({ day }) => !any || (filters.late && day.late > 0) || (filters.under && day.early > 0) || (filters.absent && (day.status === 'absent' || reasonOf(day) === 'ABS')) || (filters.insufficient && isInsufficient(day)));
   const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true); setNotice('');
-    try { await work(); setNotice(done); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
+    try { const result = await work() as { duplicate?: boolean } | undefined; setNotice(result?.duplicate ? 'That clock already exists. Nothing was added.' : done); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
     finally { setBusy(false); }
   };
   // A clock cell: a new time on an empty cell adds a clock, a new time on a used one changes it, and clearing it removes the clock.
@@ -180,6 +211,7 @@ export function HRAttendanceIndividual({ onError }: { onError: (message: string)
   const [period, setPeriod] = useState<Period | null>(null);
   const [company, setCompany] = useState<string>(bulk.active ? bulk.company : '');
   const [staffId, setStaffId] = useState('');
+  const [followUpFilter, setFollowUpFilter] = useState<FollowUpFilter>('all');
   const [staff, setStaff] = useState<{ id: string; fullName: string; company: string }[]>([]);
   const [blocks, setBlocks] = useState<Block[] | null>(null);
   const [view, setView] = useState<'edit' | 'report' | 'odd'>('edit');
@@ -231,8 +263,8 @@ export function HRAttendanceIndividual({ onError }: { onError: (message: string)
     {!blocks ? <p className="text-sm text-slate-500">Reading the records…</p> : !shown.length ? <p className={`${card} text-sm text-slate-500`}>No staff to show.</p>
       : shownView === 'edit' && !staffId ? <section className={`${card} print:hidden`}><p className="text-base font-semibold text-[#0b587b]">↑ Click the Staff box above and choose a staff member to edit.</p><p className="mt-1 text-sm text-slate-500">Their days then open here as a grid you can edit in place.</p></section>
       : shownView === 'edit' && shown[0] ? <EditGrid block={shown[0]} staffId={staffId} filters={filters} setFilters={setFilters} notice={notice} setNotice={setNotice} onChanged={() => setReload((n) => n + 1)} onError={onError} onPreview={() => setView('report')} staffList={staff.filter((item) => !company || item.company === company)} onStaff={setStaffId} />
-      : shownView === 'odd' ? <section className={`${card} print:hidden`}><div className="overflow-x-auto"><table className="no-stack w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Odd days</th><th className="pr-3 text-right">Absent</th><th className="pr-3 text-right">No clock out</th><th className="pr-3 text-right">Day off, clocked</th><th className="pr-3 text-right">Over 14 h</th><th className="pr-3 text-right">Under 4 h</th><th className="pr-3 text-right">Late</th><th className="text-right">Early out</th></tr></thead>
-        <tbody>{oddRows.map((row) => <tr key={row.person.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setStaffId(row.person.id); setView('edit'); }}><td className="py-2 pr-3"><span className="font-semibold text-[#0b587b]">{row.person.name}</span><span className="block text-xs text-slate-400">{row.person.code} · {row.person.company}</span></td><td className="pr-3 text-right tabular-nums">{num(row.odd)}</td><td className="pr-3 text-right tabular-nums">{num(row.absent)}</td><td className="pr-3 text-right tabular-nums">{num(row.noOut)}</td><td className="pr-3 text-right tabular-nums">{num(row.extra)}</td><td className="pr-3 text-right tabular-nums">{num(row.long)}</td><td className="pr-3 text-right tabular-nums">{num(row.short)}</td><td className="pr-3 text-right tabular-nums">{row.late || <span className="text-slate-300">0</span>}</td><td className="text-right tabular-nums">{row.early || <span className="text-slate-300">0</span>}</td></tr>)}</tbody></table></div></section>
+      : shownView === 'odd' ? <><section className={`${card} print:hidden`}><div className="overflow-x-auto"><table className="no-stack w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3 text-right">Odd days</th><th className="pr-3 text-right">Absent</th><th className="pr-3 text-right">No clock out</th><th className="pr-3 text-right">Day off, clocked</th><th className="pr-3 text-right">Over 14 h</th><th className="pr-3 text-right">Under 4 h</th><th className="pr-3 text-right">Late</th><th className="text-right">Early out</th></tr></thead>
+        <tbody>{oddRows.map((row) => <tr key={row.person.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setStaffId(row.person.id); setView('edit'); }}><td className="py-2 pr-3"><span className="font-semibold text-[#0b587b]">{row.person.name}</span><span className="block text-xs text-slate-400">{row.person.code} · {row.person.company}</span></td><td className="pr-3 text-right tabular-nums">{num(row.odd)}</td><td className="pr-3 text-right tabular-nums">{num(row.absent)}</td><td className="pr-3 text-right tabular-nums">{num(row.noOut)}</td><td className="pr-3 text-right tabular-nums">{num(row.extra)}</td><td className="pr-3 text-right tabular-nums">{num(row.long)}</td><td className="pr-3 text-right tabular-nums">{num(row.short)}</td><td className="pr-3 text-right tabular-nums">{row.late || <span className="text-slate-300">0</span>}</td><td className="text-right tabular-nums">{row.early || <span className="text-slate-300">0</span>}</td></tr>)}</tbody></table></div></section><OddDaysFollowUp blocks={shown} company={company} staffId={staffId} staff={staff} filter={followUpFilter} onFilter={setFollowUpFilter} onCompany={(value) => { setCompany(value); setStaffId(''); }} onStaff={setStaffId} /></>
       : <div className="att-individual-pages space-y-6 print:hidden">{shown.map((block, index) => <div key={block.person.id} className={`${card} overflow-x-auto`}><div data-pdf-page className="min-w-[1180px]"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></div>)}</div>}
     {printing && <PrintPortal margin={6}>{shown.map((block, index) => <PrintPage key={block.person.id}><div className="cv-fit"><Sheet block={block} period={period!} at={at} page={index + 1} pages={shown.length} grand={index === shown.length - 1 ? shown : undefined} /></div></PrintPage>)}</PrintPortal>}
   </div>;
