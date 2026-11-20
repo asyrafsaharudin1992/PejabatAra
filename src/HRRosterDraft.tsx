@@ -113,7 +113,8 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   const dates = monthDates(month);
   // The last Monday to Friday week before the month starts (for December 2026: 23 to 27 November).
   const lastFriday = (() => { let day = addDays(`${month}-01`, -1); while (new Date(`${day}T00:00:00Z`).getUTCDay() !== 5) day = addDays(day, -1); return day; })();
-  const prevDates = Array.from({ length: 5 }, (_, i) => addDays(lastFriday, i - 4));
+  // ... and the weekdays after that Friday up to the day before the month (for December 2026 also Monday 30 November).
+  const prevDates = [...Array.from({ length: 5 }, (_, i) => addDays(lastFriday, i - 4)), ...Array.from({ length: 7 }, (_, i) => addDays(lastFriday, i + 1)).filter((d) => d < `${month}-01` && ![0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()))];
   const sheetCells = new Map(cellMap);
   if (withPrev) for (const d of context?.targetDays || []) if (d.date < `${month}-01`) sheetCells.set(cellKey(d.id, d.date), { id: d.id, date: d.date, shift: d.shift, source: 'existing', locked: true });
   const exportDraft = () => {
@@ -243,9 +244,9 @@ function WeeklySheet({ month, dates, people, cellMap, group, company, locum, onE
           <td {...box(`${date}|day`)} className={`${td} font-semibold`}>{MS_DAY[day.getUTCDay()]}</td><td {...box(`${date}|date`)} className={td}>{day.getUTCDate()}/{day.getUTCMonth() + 1}</td>
           {columns.map((code) => { const names = who(date, code); const blocked = code === 'OH' && group === 'doctors' && weekend && !names.length; const lacking = code === 'PM' && needsLocum(date); return <td key={code} {...box(`${date}|${code}`, lacking && !blocked ? { backgroundColor: locumColour } : undefined)} className={`${td} ${blocked ? 'bg-slate-800' : lacking ? 'font-semibold' : ''}`}>{texts[`${date}|${code}`] !== undefined || editText ? typed(`${date}|${code}`, texts[`${date}|${code}`] ?? `${names.map((item) => item.text).join(', ')}${lacking ? (names.length ? ' · ' : '') + 'LOCUM' : ''}`) : <>{names.map((item, i) => <Fragment key={item.id}>{i > 0 && ', '}{onEdit && !before(date) ? <button type="button" aria-label={`Edit ${item.text} ${date}`} className="underline decoration-dotted" onClick={() => onEdit(item.id, date, item.shift)}>{item.text}</button> : item.text}</Fragment>)}{lacking && (names.length ? ' · ' : '') + 'LOCUM'}</>}</td>; })}
           {eveningLocum && <td {...box(`${date}|locum`, { backgroundColor: locumColour })} className="border border-slate-300 px-2 py-1 text-left text-[13px] font-semibold">{typed(`${date}|locum`, texts[`${date}|locum`] ?? (before(date) ? '' : locumHours(date)), true)}</td>}
-          <td {...box(`${date}|remark`)} className={`${td} text-xs`}>{typed(`${date}|remark`, texts[`${date}|remark`] ?? [phName.has(date) ? `PH · ${phName.get(date)}` : '', remark(date), before(date) ? '(prev. month)' : ''].filter(Boolean).join(' '))}</td>
+          <td {...box(`${date}|remark`)} className={`${td} text-xs`}>{typed(`${date}|remark`, texts[`${date}|remark`] ?? [phName.has(date) ? `PH ${holidayGroup.replace('SG-', '')} · ${phName.get(date)}` : '', remark(date), before(date) ? '(prev. month)' : ''].filter(Boolean).join(' '))}</td>
         </tr>
-        {((day.getUTCDay() === 0 || before(date) && !before(dates[index + 1] || date)) && index < dates.length - 1) && <tr key={`${date}-sep`}><td colSpan={columns.length + 3 + extra} className="h-2 border border-slate-300 bg-sky-200 p-0" /></tr>}
+        {((day.getUTCDay() === 0 || before(date) && (!before(dates[index + 1] || date) || addDays(date, 1) !== dates[index + 1])) && index < dates.length - 1) && <tr key={`${date}-sep`}><td colSpan={columns.length + 3 + extra} className="h-2 border border-slate-300 bg-sky-200 p-0" /></tr>}
       </Fragment>;
     })}</tbody>
   </table>;
