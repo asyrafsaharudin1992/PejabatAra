@@ -1,3 +1,4 @@
+import { resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { validateTaxProfile, taxPayrollPatch } from '../src/lib/hrTaxDetails.js';
 import { randomBytes, scryptSync } from 'node:crypto';
 import { ceoCharts, headcount } from './_ceo-charts.js';
@@ -207,12 +208,12 @@ async function saveLeaveBalance(db: any, userId: string, now: string, employeeId
   const taken = Number(before?.taken ?? 0), advance = Number(before?.advance ?? 0);
   const total = group === 'AL' ? next.brought_forward + next.credit + (next.earn > 0 ? next.earn : next.eligible) - next.forfeit : 0;
   const balance = Math.round(((group === 'AL' ? total : next.eligible + next.brought_forward + next.credit - next.forfeit) - taken + advance) * 100) / 100;
-  const { error } = await db.from('hr_leave_balances').upsert({ employee_id: employeeId, leave_group: group, year, ...next, total, taken, balance, advance, as_of: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }), source: 'hr', updated_at: now }, { onConflict: 'employee_id,leave_group,year' });
+  const { data: saved, error } = await db.from('hr_leave_balances').upsert({ employee_id: employeeId, leave_group: group, year, ...next, total, taken, balance, advance, as_of: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }), source: 'hr', updated_at: now }, { onConflict: 'employee_id,leave_group,year' }).select('total,balance').single();
   if (error) throw error;
   const changes: Record<string, unknown> = {};
   for (const key of ['eligible', 'brought_forward', 'credit', 'earn', 'forfeit'] as const) { const was = Number(before?.[key] ?? 0); if (!before || was !== next[key]) changes[`leave_${group}_${key}`] = [before ? was : null, next[key]]; }
   if (Object.keys(changes).length) await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes, changed_by: userId });
-  return { total, balance };
+  return { total: Number(saved.total), balance: Number(saved.balance) };
 }
 
 // The leave category guessed for a staff member when HR has not set one: doctors and residents follow the Doctor / clinic assistant
@@ -1243,7 +1244,7 @@ export async function hrHandler(req: any, res: any) {
       if (error) throw error;
       const ids = (people || []).map((p: any) => p.id);
       const [{ data: balances }, { data: open }] = await Promise.all([
-        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML', 'UL', 'HOSP', 'MARRG', 'HAJUMR']).limit(8000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,resignation_earned,forfeit,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML', 'UL', 'HOSP', 'MARRG', 'HAJUMR']).limit(8000),
         db.from('hr_leave_requests').select('employee_id').in('status', ['pending', 'supervisor_approved']).limit(2000),
       ]);
       const latest = (employee: string, group: string) => (balances || []).filter((b: any) => b.employee_id === employee && b.leave_group === group).sort((a: any, b: any) => b.year - a.year)[0];
@@ -1429,7 +1430,7 @@ export async function hrHandler(req: any, res: any) {
       if (!preview && ATTACHMENT_REQUIRED_FOR.has(text(body.type, 10)) && !attachmentIds.length && body.skipAttachment !== true) throw fail(400, 'Medical leave needs the medical certificate attached. If HR is entering it without one, tick "No attachment".');
       let attachedFirst = false;
       const byName = user?.email || 'HR';
-      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,company,status,join_date,work_days,holiday_group').in('id', ids);
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,company,status,join_date,resign_date,work_days,holiday_group').in('id', ids);
       if (peopleError) throw peopleError;
       const results: { id: string; name: string; code: string; ok: boolean; days?: number; balanceAfter?: number | null; error?: string }[] = [];
       for (const id of ids) {
@@ -1451,7 +1452,7 @@ export async function hrHandler(req: any, res: any) {
           }
           if (type.group === 'AL' && balance && !allowOver) {
             const allowance = yearAllowance(Number(balance.eligible), person.join_date || null, String(year));
-            const cap = Number(balance.brought_forward) + Number(balance.credit) - Number(balance.forfeit) + Math.max(Number(balance.earn), allowance);
+            const cap = Number(balance.brought_forward) + Number(balance.credit) - Number(balance.forfeit) + (resignationEarned(Number(balance.eligible), year, person.join_date, person.resign_date) ?? Math.max(Number(balance.earn), allowance));
             const { data: waiting } = await db.from('hr_leave_requests').select('days').eq('employee_id', id).eq('leave_group', 'AL').in('status', ['pending', 'supervisor_approved']).gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`);
             const used = Number(balance.taken) + (waiting || []).reduce((sum: number, row: any) => sum + Number(row.days), 0);
             if (used + days > cap + 0.001) throw fail(400, `More than the ${year} annual leave (${Math.round(cap * 100) / 100} days, ${Math.round(used * 100) / 100} used or waiting). Tick "Allow over balance" to go ahead.`);
@@ -1479,14 +1480,14 @@ export async function hrHandler(req: any, res: any) {
       const { data: people, error } = await peopleQuery;
       if (error) throw error;
       const ids = (people || []).map((p: any) => p.id);
-      const { data: balances, error: balanceError } = ids.length ? await db.from('hr_leave_balances').select('employee_id,leave_group,eligible,brought_forward,bf_expiry,forfeit,credit,earn,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000) : { data: [], error: null };
+      const { data: balances, error: balanceError } = ids.length ? await db.from('hr_leave_balances').select('employee_id,leave_group,eligible,brought_forward,bf_expiry,forfeit,credit,earn,resignation_earned,total,taken,balance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000) : { data: [], error: null };
       if (balanceError) throw balanceError;
       const num = (v: any) => Math.round(Number(v || 0) * 100) / 100;
       const rows = (people || []).map((p: any) => {
         const al: any = (balances || []).find((b: any) => b.employee_id === p.id && b.leave_group === 'AL');
         const ml: any = (balances || []).find((b: any) => b.employee_id === p.id && b.leave_group === 'ML');
         return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, joinDate: p.join_date || '', designation: p.designation || '',
-          al: al ? { eligible: num(al.eligible), broughtForward: num(al.brought_forward), forfeit: num(al.forfeit), credit: num(al.credit), earn: num(al.earn), total: num(al.total), taken: num(al.taken), balance: num(al.balance), bfExpiry: al.bf_expiry || '' } : null,
+          al: al ? { eligible: num(al.eligible), broughtForward: num(al.brought_forward), forfeit: num(al.forfeit), credit: num(al.credit), earn: num(al.resignation_earned ?? al.earn), total: num(al.total), taken: num(al.taken), balance: num(al.balance), bfExpiry: al.bf_expiry || '' } : null,
           ml: ml ? { eligible: num(ml.eligible), earn: num(ml.earn), taken: num(ml.taken), balance: num(ml.balance) } : null };
       });
       return res.status(200).json({ year, rows });
@@ -1508,13 +1509,13 @@ export async function hrHandler(req: any, res: any) {
       const year = Number(to.slice(0, 4));
       const [{ data: requests, error: requestError }, { data: balances, error: balanceError }] = await Promise.all([
         db.from('hr_leave_requests').select('employee_id,leave_type,start_date,end_date,half_day,days,reason').in('employee_id', ids).eq('status', 'approved').lte('start_date', to).gte('end_date', from).order('start_date').limit(5000),
-        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance,advance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000),
+        db.from('hr_leave_balances').select('employee_id,leave_group,year,eligible,brought_forward,credit,earn,resignation_earned,forfeit,total,taken,balance,advance').in('employee_id', ids).in('leave_group', ['AL', 'ML']).eq('year', year).limit(4000),
       ]);
       if (requestError || balanceError) throw requestError || balanceError;
       const num = (v: any) => Math.round(Number(v || 0) * 100) / 100;
       const out = (people || []).map((p: any) => {
         const mine = (requests || []).filter((r: any) => r.employee_id === p.id).map((r: any) => ({ type: r.leave_type, start: r.start_date, end: r.end_date, half: r.half_day, days: num(r.days), reason: r.reason || '' }));
-        const bal = (group: string) => { const b: any = (balances || []).find((x: any) => x.employee_id === p.id && x.leave_group === group); return b ? { eligible: num(b.eligible), broughtForward: num(b.brought_forward), credit: num(b.credit), earn: num(b.earn), forfeit: num(b.forfeit), total: num(b.total), taken: num(b.taken), balance: num(b.balance) } : null; };
+        const bal = (group: string) => { const b: any = (balances || []).find((x: any) => x.employee_id === p.id && x.leave_group === group); return b ? { eligible: num(b.eligible), broughtForward: num(b.brought_forward), credit: num(b.credit), earn: num(b.resignation_earned ?? b.earn), forfeit: num(b.forfeit), total: num(b.total), taken: num(b.taken), balance: num(b.balance) } : null; };
         return { id: p.id, company: p.company, code: p.employee_code, name: p.full_name, joinDate: p.join_date || '', requests: mine, al: bal('AL'), ml: bal('ML') };
       });
       // Everyone with leave in the period or a balance on record; the rest have nothing to show.
@@ -1552,19 +1553,19 @@ export async function hrHandler(req: any, res: any) {
     }
     if (req.method === 'GET' && action === 'leave_person') {
       const id = text(req.query.id, 60);
-      const { data: person, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,status').eq('id', id).maybeSingle();
+      const { data: person, error } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,status,join_date,resign_date').eq('id', id).maybeSingle();
       if (error) throw error;
       if (!person) throw fail(404, 'Staff member not found.');
       const [{ data: balances }, { data: requests }] = await Promise.all([
-        db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,forfeit,total,taken,balance,as_of,source').eq('employee_id', id).limit(200),
+        db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,resignation_earned,forfeit,total,taken,balance,advance,as_of,source').eq('employee_id', id).limit(200),
         db.from('hr_leave_requests').select('id,leave_type,start_date,end_date,half_day,days,reason,status,supervisor_note,decision_note,created_at').eq('employee_id', id).order('start_date', { ascending: false }).limit(300),
       ]);
       const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
       // The newest year of each leave group.
       const newest = new Map<string, any>(); for (const b of balances || []) { const have = newest.get(b.leave_group); if (!have || b.year > have.year) newest.set(b.leave_group, b); }
       return res.status(200).json({
-        person: { id: person.id, company: person.company, code: person.employee_code, name: person.full_name, designation: person.designation, status: person.status },
-        balances: [...newest.values()].sort((a: any, b: any) => (rank.indexOf(a.leave_group) + 1 || 99) - (rank.indexOf(b.leave_group) + 1 || 99)).map((b: any) => ({ group: b.leave_group, year: b.year, eligible: Number(b.eligible), broughtForward: Number(b.brought_forward), credit: Number(b.credit), earn: Number(b.earn), forfeit: Number(b.forfeit), total: Number(b.total), taken: Number(b.taken), balance: Number(b.balance), asOf: b.as_of, source: b.source })),
+        person: { id: person.id, company: person.company, code: person.employee_code, name: person.full_name, designation: person.designation, status: person.status, joinDate: person.join_date, resignDate: person.resign_date },
+        balances: [...newest.values()].sort((a: any, b: any) => (rank.indexOf(a.leave_group) + 1 || 99) - (rank.indexOf(b.leave_group) + 1 || 99)).map((b: any) => ({ group: b.leave_group, year: b.year, eligible: Number(b.eligible), broughtForward: Number(b.brought_forward), credit: Number(b.credit), earn: Number(b.earn), forfeit: Number(b.forfeit), total: Number(b.total), taken: Number(b.taken), balance: Number(b.balance), advance: Number(b.advance || 0), asOf: b.as_of, source: b.source })),
         requests: (requests || []).map((r: any) => ({ id: r.id, type: r.leave_type, start: r.start_date, end: r.end_date, half: r.half_day, days: Number(r.days), reason: r.reason, status: r.status, supervisorNote: r.supervisor_note || '', note: r.decision_note || '' })),
       });
     }

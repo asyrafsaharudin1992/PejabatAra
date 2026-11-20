@@ -1,3 +1,4 @@
+import { resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -365,7 +366,7 @@ export async function reviewAction(req: any, res: any, db: any, staff: { id: str
 }
 
 export async function leaveAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
-  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date,designation').eq('assessment_staff_id', staff.id).maybeSingle();
+  const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,company,branch,department,leave_calendar_companies,leave_approver_id,leave_backup_approver_id,final_approver_id,work_days,holiday_group,join_date,resign_date,designation').eq('assessment_staff_id', staff.id).maybeSingle();
   if (meError) throw meError;
   // Leave is counted on the roster; where there is none a doctor who follows the doctor roster counts Monday to Friday.
   const workDays: number[] = Array.isArray(me?.work_days) && me.work_days.length ? me.work_days : /\b(DR|DOCTOR)\b/i.test(me?.designation || '') ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6];
@@ -508,7 +509,7 @@ export async function leaveAction(req: any, res: any, db: any, staff: { id: stri
       {
         const year = String(leaveYear);
         const allowance = yearAllowance(Number(b.eligible), me.join_date || null, year);
-        const cap = Number(b.brought_forward) + Number(b.credit) - Number(b.forfeit) + Math.max(Number(b.earn), allowance);
+        const cap = Number(b.brought_forward) + Number(b.credit) - Number(b.forfeit) + (resignationEarned(Number(b.eligible), leaveYear, me.join_date, me.resign_date) ?? Math.max(Number(b.earn), allowance));
         const { data: waiting } = await db.from('hr_leave_requests').select('days').eq('employee_id', me.id).eq('leave_group', 'AL').in('status', ['pending', 'supervisor_approved']).gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`);
         const used = Number(b.taken) + (waiting || []).reduce((sum: number, row: any) => sum + Number(row.days), 0);
         if (used + days > cap + 0.001) throw fail(400, `That is more than your annual leave for ${year}: ${Math.round(cap * 100) / 100} days in all, ${Math.round(used * 100) / 100} already used or waiting for approval. Ask HR if you need more.`);
@@ -793,10 +794,10 @@ async function staffAction(req: any, res: any, action: string, body: any) {
       spouse: { name: person.spouse_name || '', occupation: person.spouse_employer || '', phone: person.spouse_phone || '', working: typeof person.spouse_working === 'boolean' ? person.spouse_working : null },
       children: (Array.isArray(person.children) ? person.children : []).map((child: any) => ({ name: child?.name || '', dateOfBirth: child?.dateOfBirth || null })),
       education: Array.isArray(person.education) ? person.education : [] } });
-    const { data: balances, error } = await db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,total,taken,balance,bf_expiry,as_of').eq('employee_id', person.id);
+    const { data: balances, error } = await db.from('hr_leave_balances').select('leave_group,year,eligible,brought_forward,credit,earn,resignation_earned,total,taken,balance,bf_expiry,as_of').eq('employee_id', person.id);
     if (error) throw error;
     const rank = ['AL', 'ML', 'HOSP', 'MARRG', 'HAJUMR', 'UL'];
-    return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
+    return res.status(200).json({ linked: true, name: person.full_name, balances: (balances || []).map((row: any) => ({ group: row.leave_group, year: row.year, eligible: Number(row.eligible), broughtForward: Number(row.brought_forward), earn: Number(row.resignation_earned ?? row.earn), credit: Number(row.credit), total: Number(row.total), taken: Number(row.taken), balance: Number(row.balance), bfExpiry: row.bf_expiry, asOf: row.as_of })).sort((a: any, b: any) => (rank.indexOf(a.group) + 1 || 99) - (rank.indexOf(b.group) + 1 || 99)) });
   }
   // Everyone can read the announcements; the clinic assistants and Clinical Admin on the reading list record their own read.
   // HR's influenza vaccine form: every staff member answers it from Announcements (agree or refuse).

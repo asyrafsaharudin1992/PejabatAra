@@ -1,3 +1,4 @@
+import { resignationEarned } from './lib/annualLeaveProration';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
@@ -7,7 +8,7 @@ import { card } from './AssessmentStaff';
 // person's balances (HR can correct them) and their whole leave history.
 type Pair = { year: number; eligible: number; total: number; taken: number; balance: number } | null;
 type Staff = { id: string; company: string; code: string; name: string; designation: string; status: string; al: Pair; ml: Pair; others?: { group: string; eligible: number; taken: number; balance: number }[]; waiting: number };
-type Balance = { group: string; year: number; eligible: number; broughtForward: number; credit: number; earn: number; forfeit: number; total: number; taken: number; balance: number; asOf: string; source: string };
+type Balance = { group: string; year: number; eligible: number; broughtForward: number; credit: number; earn: number; forfeit: number; total: number; taken: number; balance: number; advance?: number; asOf: string; source: string };
 type Req = { id: string; type: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorNote: string; note: string };
 
 const GROUP_NAME: Record<string, string> = { AL: 'Annual leave', ML: 'Medical leave', HOSP: 'Hospitalization', MARRG: 'Marriage', HAJUMR: 'Haji / Umrah', UL: 'Unpaid leave' };
@@ -86,7 +87,7 @@ export function HRLeaveStaff({ onError }: { onError: (message: string) => void }
 
 // One person: balances HR can correct, and the whole leave history.
 function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack: () => void; onError: (message: string) => void }) {
-  const [data, setData] = useState<{ person: { name: string; code: string; company: string; designation: string; status: string }; balances: Balance[]; requests: Req[] } | null>(null);
+  const [data, setData] = useState<{ person: { name: string; code: string; company: string; designation: string; status: string; joinDate?: string; resignDate?: string }; balances: Balance[]; requests: Req[] } | null>(null);
   const load = () => api(`action=leave_person&id=${id}`).then((result) => { if (result.error) throw new Error(result.error); setData(result); }).catch((cause: Error) => onError(cause.message));
   useEffect(() => { void load(); }, [id]);
   const remove = async (request: Req) => {
@@ -104,9 +105,9 @@ function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack
     <section className={card}>
       <h3 className="font-semibold">Leave balance</h3>
       <p className="mt-1 text-sm text-slate-500">Change the entitlement and the figures below when Infotech or a policy says so. Days already taken come from approved leave and cannot be typed here; delete a wrong leave in the history below instead. Every change is written to this person's HR history.</p>
-      <div className="mt-4 space-y-4">{data.balances.filter((balance) => balance.group === 'AL' || balance.group === 'ML').map((balance) => <BalanceRow key={`${balance.group}-${balance.year}`} id={id} balance={balance} onSaved={load} onError={onError} />)}</div>
+      <div className="mt-4 space-y-4">{data.balances.filter((balance) => balance.group === 'AL' || balance.group === 'ML').map((balance) => <BalanceRow key={`${balance.group}-${balance.year}`} id={id} balance={balance} joinDate={data.person.joinDate} resignDate={data.person.resignDate} onSaved={load} onError={onError} />)}</div>
       {data.balances.some((balance) => balance.group !== 'AL' && balance.group !== 'ML') && <details className="mt-4 rounded-2xl border border-slate-100 p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-600">Other leave types ({data.balances.filter((balance) => balance.group !== 'AL' && balance.group !== 'ML').map((balance) => GROUP_NAME[balance.group] || balance.group).join(', ')})</summary>
-        <div className="mt-4 space-y-4">{data.balances.filter((balance) => balance.group !== 'AL' && balance.group !== 'ML').map((balance) => <BalanceRow key={`${balance.group}-${balance.year}`} id={id} balance={balance} onSaved={load} onError={onError} />)}</div></details>}
+        <div className="mt-4 space-y-4">{data.balances.filter((balance) => balance.group !== 'AL' && balance.group !== 'ML').map((balance) => <BalanceRow key={`${balance.group}-${balance.year}`} id={id} balance={balance} joinDate={data.person.joinDate} resignDate={data.person.resignDate} onSaved={load} onError={onError} />)}</div></details>}
       {missing.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{missing.map((group) => <button key={group} onClick={() => void api('action=leave_balance_save', { id, group, year: THIS_YEAR, eligible: 0 }).then(load).catch((cause: Error) => onError(cause.message))} className="rounded-xl border border-dashed border-slate-300 px-4 py-2 text-sm font-semibold text-[#0b587b] hover:bg-slate-50">Set up {GROUP_NAME[group].toLowerCase()} for {THIS_YEAR}</button>)}</div>}
     </section>
     <section className={card}>
@@ -123,15 +124,16 @@ function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack
   </div>;
 }
 
-function BalanceRow({ id, balance, onSaved, onError }: { key?: string; id: string; balance: Balance; onSaved: () => Promise<void> | void; onError: (message: string) => void }) {
+function BalanceRow({ id, balance, joinDate, resignDate, onSaved, onError }: { key?: string; id: string; balance: Balance; joinDate?: string; resignDate?: string; onSaved: () => Promise<void> | void; onError: (message: string) => void }) {
   const [form, setForm] = useState({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.earn), forfeit: String(balance.forfeit) });
   const [saving, setSaving] = useState(false);
   useEffect(() => { setForm({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.earn), forfeit: String(balance.forfeit) }); }, [balance.eligible, balance.broughtForward, balance.credit, balance.earn, balance.forfeit, balance.taken]);
   const n = (value: string) => Number(value) || 0;
   const annual = balance.group === 'AL';
+  const prorated = annual ? resignationEarned(n(form.eligible), balance.year, joinDate, resignDate) : null;
   // The same working-out as the server, so HR sees the result before saving.
-  const total = annual ? n(form.broughtForward) + n(form.credit) + (n(form.earn) > 0 ? n(form.earn) : n(form.eligible)) - n(form.forfeit) : n(form.eligible) + n(form.broughtForward) + n(form.credit) - n(form.forfeit);
-  const left = total - balance.taken;
+  const total = annual ? n(form.broughtForward) + n(form.credit) + (prorated ?? (n(form.earn) > 0 ? n(form.earn) : n(form.eligible))) - n(form.forfeit) : n(form.eligible) + n(form.broughtForward) + n(form.credit) - n(form.forfeit);
+  const left = Math.round((total - balance.taken + (balance.advance || 0)) * 100) / 100;
   const changed = n(form.eligible) !== balance.eligible || n(form.broughtForward) !== balance.broughtForward || n(form.credit) !== balance.credit || n(form.earn) !== balance.earn || n(form.forfeit) !== balance.forfeit;
   const fields: [keyof typeof form, string, boolean][] = annual ? [['eligible', 'Entitlement', true], ['broughtForward', 'Brought forward', true], ['credit', 'Credit', true], ['earn', 'Earned so far', true], ['forfeit', 'Forfeited', true]] : [['eligible', 'Entitlement', true]];
   const save = async () => {
@@ -143,8 +145,9 @@ function BalanceRow({ id, balance, onSaved, onError }: { key?: string; id: strin
   return <div className="rounded-2xl border border-slate-100 p-4">
     <div className="flex flex-wrap items-baseline justify-between gap-2"><h4 className="font-semibold">{GROUP_NAME[balance.group] || balance.group}<span className="ml-2 text-xs font-normal text-slate-400">{balance.year ? balance.year : 'whole service'}</span></h4>
       <p className="text-sm text-slate-500">Taken <strong className="text-slate-700">{num(balance.taken)}</strong> · Balance <strong className={left < 0 ? 'text-rose-600' : 'text-[#0b587b]'}>{num(left)}</strong>{annual ? <> · Total {num(total)}</> : null}</p></div>
-    <div className="mt-3 flex flex-wrap items-end gap-3">{fields.map(([key, label]) => <label key={key} className="block"><span className="mb-1 block text-[11px] font-semibold text-slate-500">{label}</span><input inputMode="decimal" value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value.replace(/[^\d.]/g, '') })} className="h-10 w-28 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label>)}
+    <div className="mt-3 flex flex-wrap items-end gap-3">{fields.map(([key, label]) => <label key={key} className="block"><span className="mb-1 block text-[11px] font-semibold text-slate-500">{label}</span><input inputMode="decimal" value={key === 'earn' && prorated !== null ? String(prorated) : form[key]} disabled={key === 'earn' && prorated !== null} onChange={(event) => setForm({ ...form, [key]: event.target.value.replace(/[^\d.]/g, '') })} className="h-10 w-28 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></label>)}
       <button onClick={() => void save()} disabled={!changed || saving} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-bold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button></div>
-    {annual && n(form.earn) > 0 && <p className="mt-2 text-xs text-slate-400">While "Earned so far" is above 0, the total uses what has been earned. Set it to 0 once the full entitlement applies.</p>}
+    {prorated !== null && <p className="mt-2 text-xs text-amber-700">Prorated to last working day {dmy(resignDate!)}: {num(prorated)} days from completed months of service. Change employment dates in Staff Profile to recalculate.</p>}
+    {annual && prorated === null && n(form.earn) > 0 && <p className="mt-2 text-xs text-slate-400">While "Earned so far" is above 0, the total uses what has been earned. Set it to 0 once the full entitlement applies.</p>}
   </div>;
 }
