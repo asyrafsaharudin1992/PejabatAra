@@ -101,6 +101,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   const [mine, setMine] = useState<Req[]>([]);
   const [waiting, setWaiting] = useState<Req[]>([]);
   const [form, setForm] = useState<{ id?: string; date: string; inTime: string; outTime: string; otTime: string; reason: string; remarks: string } | null>(null);
+  useEffect(() => { setError(''); }, [form === null]);
   const [blocked, setBlocked] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [tip, setTip] = useState(false);
@@ -156,7 +157,10 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
     if (!form) return;
     setBusy(true); setError(''); setMessage('');
     try {
-      await assessmentFetch(form.id ? 'action=attendance_request_update' : 'action=attendance_request_create', { method: 'POST', body: JSON.stringify({ ...form, draft }) });
+      // The Reason box shows the first choice when the saved reason does not belong to this screen (for example a "Forgot to clock out" reason carried over from the Forgot to clock form into the OT form). Send what the box shows, not the hidden leftover, or an OT request is filed as a missed clock.
+      const allowed = mode === 'ot' ? OT_REASONS : MISSED_REASONS;
+      const reason = allowed.includes(form.reason) ? form.reason : allowed[0];
+      await assessmentFetch(form.id ? 'action=attendance_request_update' : 'action=attendance_request_create', { method: 'POST', body: JSON.stringify({ ...form, reason, draft }) });
       setForm(null); setMessage(draft ? 'Saved as a draft. Send it when you are ready.' : 'Your request was sent. Your supervisor approves first, then HR confirms.'); loadRequests();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to send the request.'); } finally { setBusy(false); }
   };
@@ -230,6 +234,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
     </section>}
 
     <section id={missed ? 'missed-clock-box' : 'apply-ot-box'} className={`${card} space-y-3`}>
+      {mode === 'ot' && !form && message && <p className="rounded-2xl bg-emerald-50 p-3 text-sm font-medium text-emerald-700">{message}</p>}
+      {mode === 'ot' && !form && error && <p role="alert" className="rounded-2xl bg-rose-50 p-3 text-sm leading-6 text-rose-700">{error}</p>}
       <div className="flex items-center gap-3"><h3 className="flex-1 font-semibold">{missed ? 'Forgot to clock?' : 'Apply OT'}</h3>{!form && missed && forgotDates && !forgotDates.length && <span className="text-xs text-slate-400">No missed clock this month</span>}{!form && !missed && !otDays.length && <span className="text-xs text-slate-400">No extra time to apply for</span>}{!form && !(missed && forgotDates && !forgotDates.length) && !(!missed && !otDays.length) && <button onClick={() => { setForm({ date: missed && forgotDates ? forgotDates[0] : otDays[0]?.date || state.today, inTime: '', outTime: '', otTime: '', reason: missed ? reasons[1] : reasons[0], remarks: '' }); if (!missed && otDays[0]) void autofill(otDays[0].date); }} className="text-sm font-semibold text-[#0b587b]">{missed ? 'Send a request' : 'New request'}</button>}</div>
       {form && <div className="space-y-3">
         <div className="block text-sm"><span className="mb-1 block text-slate-500">{missed ? 'Which day?' : 'Which day did you work OT?'}</span>
@@ -251,6 +257,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
         {!missed && noClock && <p className="text-xs text-amber-700">No clock record for this day, so type the times or the OT hours yourself.</p>}
         {missed && <p className="text-xs text-slate-400">Enter the clock time you missed. Your supervisor approves first, then HR confirms.</p>}
         <div className="flex flex-wrap gap-2"><button onClick={() => void send(false)} disabled={busy} className="h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-60">Send request</button><button onClick={() => void send(true)} disabled={busy} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-[#0b587b] disabled:opacity-60">Save draft</button><button onClick={() => setForm(null)} className="h-11 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600">Close</button></div>
+        {error && <p role="alert" className="rounded-2xl bg-rose-50 p-3 text-sm leading-6 text-rose-700">{error}</p>}
       </div>}
       {mineHere.length > 0 && <ul className="divide-y divide-slate-100">{mineHere.slice(0, 8).map((request) => <li key={request.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm"><span className="min-w-0 flex-1 text-slate-600">{dayName(request.date)} · {reqDetail(request)}{request.status === 'rejected' && (request.note || request.supervisorNote) && <span className="block text-xs text-slate-400">{request.note || request.supervisorNote}</span>}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${reqStatus(request)}`}>{REQ_LABEL[request.status] || request.status}</span>{request.status === 'draft' && <button onClick={() => setForm({ id: request.id, date: request.date, inTime: request.inTime, outTime: request.outTime, otTime: request.otMinutes > 0 ? request.otText : '', reason: request.reason, remarks: request.remarks })} className="text-xs font-semibold text-[#0b587b]">Edit</button>}{['draft', 'pending', 'supervisor_approved'].includes(request.status) && <button onClick={() => void cancelRequest(request.id)} disabled={busy} className="text-xs font-semibold text-rose-700">Cancel</button>}</li>)}</ul>}
     </section>
@@ -293,7 +300,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
     </div>}
     {message && <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{message}</p>}
     {tip && <section className="rounded-2xl bg-[#eef5ff] p-4 text-sm leading-6 text-[#0b2a4a]"><p className="font-semibold">So your iPhone does not ask every time</p><p className="mt-1">Tap <strong>aA</strong> on the left of the web address, then <strong>Website Settings</strong>, <strong>Location</strong> and choose <strong>Allow</strong>. You only need to do this once.</p><button onClick={() => { try { localStorage.setItem('ara_location_tip', '1'); } catch { /* storage not available */ } setTip(false); }} className="mt-2 text-sm font-semibold text-[#1f6feb]">Got it</button></section>}
-    {error && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
+    {error && !form && <p className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{error}</p>}
     {state.yesterday.status === 'missing-out' && <p className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">You did not clock out on {dayName(state.yesterday.date)}. Send it from <strong>Forgot to clock?</strong> below so it can be corrected.</p>}
 
     {mode === 'clock' && requestSections('missed')}

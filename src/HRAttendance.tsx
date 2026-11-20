@@ -202,7 +202,7 @@ function OtAlerts({ onError, onOpenRoster, nameQuery = '' }: { onError: (message
     let live = true; setRows(null);
     Promise.all([api(`action=attendance_ot&month=${month}`), api('action=attendance_requests&status=all')]).then(([ot, requests]) => {
       if (ot.error) throw new Error(ot.error);
-      const asked = new Set<string>(((requests.requests || []) as Req[]).filter((request) => request.status !== 'cancelled').map((request) => `${request.employeeId}|${request.date}`));
+      const asked = new Set<string>(((requests.requests || []) as Req[]).filter((request) => !['cancelled', 'rejected'].includes(request.status)).map((request) => `${request.employeeId}|${request.date}`));
       if (live) setRows((ot.rows as OtRow[]).filter((row) => !row.status && !asked.has(`${row.id}|${row.date}`)));
     }).catch((cause: Error) => { if (live) { setRows([]); onError(cause.message); } });
     return () => { live = false; };
