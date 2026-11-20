@@ -2689,6 +2689,10 @@ export async function hrHandler(req: any, res: any) {
         try { taxSettings = taxPayrollPatch(body.employee.payroll); }
         catch (cause) { throw fail(400, cause instanceof Error ? cause.message : 'Invalid tax details.'); }
       }
+      // SKBBK (24-hour cover) is the staff member's own choice, so HR can switch it on or off: only a real Yes/No is saved.
+      const skbbkChoice = body.employee?.payroll?.skbbk;
+      if (skbbkChoice !== undefined && typeof skbbkChoice !== 'boolean') throw fail(400, 'Choose Yes or No for SKBBK.');
+      if (typeof skbbkChoice === 'boolean') taxSettings = { ...taxSettings, skbbk: skbbkChoice };
       if (!row.company) throw fail(400, 'Choose the company (KJ or SK).');
       const id = text(body.employee?.id, 60);
       if (id) {
