@@ -20,9 +20,9 @@ export function installUpdateRecovery() {
   window.addEventListener('unhandledrejection', (event) => { if (STALE.test(String((event.reason as Error)?.message || event.reason || ''))) reloadOnce(); });
 }
 
-export class AppErrorBoundary extends React.Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
+export class AppErrorBoundary extends React.Component<{ children: ReactNode }, { failed: boolean; detail: string }> {
+  state = { failed: false, detail: '' };
+  static getDerivedStateFromError(error: Error) { return { failed: true, detail: `${error?.name || 'Error'}: ${error?.message || error}\n${String(error?.stack || '').split('\n').slice(1, 6).join('\n')}`.slice(0, 900) }; }
   componentDidCatch(error: Error) { console.error(error); if (STALE.test(String(error?.message || ''))) reloadOnce(); }
   render() {
     if (!this.state.failed) return (this as any).props.children as ReactNode;
@@ -30,6 +30,7 @@ export class AppErrorBoundary extends React.Component<{ children: ReactNode }, {
       <h2 style={{ fontSize: 20, fontWeight: 600 }}>Something went wrong</h2>
       <p style={{ margin: '12px 0 20px', color: '#475569' }}>This page could not be shown. The app may have been updated while it was open. Reload to carry on; your saved work is not lost.</p>
       <button type="button" onClick={() => window.location.reload()} style={{ background: '#0b587b', color: '#fff', border: 0, borderRadius: 10, padding: '10px 20px', fontWeight: 600 }}>Reload</button>
+      <details style={{ marginTop: 20, textAlign: 'left', fontSize: 12, color: '#64748b' }}><summary style={{ cursor: 'pointer' }}>Details for support</summary><pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{(this.state as { detail: string }).detail}</pre></details>
     </div>;
   }
 }
