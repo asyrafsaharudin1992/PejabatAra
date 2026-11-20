@@ -156,3 +156,22 @@ console.log('Day-after-last-night OFF test passed.');
   assert.equal(before.adjusted, 0);
 }
 console.log('Automatic adjustment tests passed.');
+
+// Locum nights: the night shift on Monday and Friday is left for a locum.
+{
+  const doc = (id: string, code: string): DraftPerson => ({ id, company: 'KJ', code, name: `Doctor ${code}`, designation: 'DOCTOR' });
+  const d1 = doc('d1', 'D1'), d2 = doc('d2', 'D2');
+  const rot = (nightWeeks: string) => ({ enabled: true, anchor: '2026-12-07', cycle: '', doctorMode: 'rotation' as const, weekdayOff: 3, nightWeeks, nightPlacement: 'before-off' as const });
+  const rule = { kind: 'locum_nights' as const, person_a: null, person_b: null, shifts: ['MON', 'FRI'], amount: null, company: 'KJ', scope: 'doctors' as const, enforce: 'warn' as const, active: true, note: '' };
+  const input = { month: '2026-12', people: [d1, d2], patterns: { d1: rot('2,1'), d2: rot('1,2') }, existing: [], leave: [], requests: [], locks: {}, preserve: false, minDay: 0, minNight: 1 };
+  const nightsOn = (r: ReturnType<typeof generateRosterDraft>, weekday: number) => r.cells.filter((c) => c.shift === 'PM' && new Date(`${c.date}T00:00:00Z`).getUTCDay() === weekday).length;
+  const without = generateRosterDraft({ ...input, rules: [] });
+  const withRule = generateRosterDraft({ ...input, rules: [rule] });
+  assert.ok(nightsOn(without, 5) > 0 || nightsOn(without, 1) > 0, 'without the rule a doctor has a Monday or Friday night');
+  assert.equal(nightsOn(withRule, 1) + nightsOn(withRule, 5), 0, 'with the rule nobody is on a Monday or Friday night');
+  assert.ok(withRule.locum.some((slot) => new Date(`${slot.date}T00:00:00Z`).getUTCDay() === 1), 'the Monday nights are listed as locum needs');
+  // A doctor put on a Monday night by hand is warned.
+  const manual = generateRosterDraft({ ...input, rules: [rule], locks: { [cellKey('d1', '2026-12-07')]: 'PM' } });
+  assert.ok(manual.warnings.some((w) => w.includes('2026-12-07') && w.includes('left for a locum')));
+}
+console.log('Locum nights tests passed.');

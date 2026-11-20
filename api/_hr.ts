@@ -835,13 +835,14 @@ export async function hrHandler(req: any, res: any) {
     }
     if (req.method === 'POST' && action === 'roster_rule_save') {
       const kind = text(body.kind, 20), enforce = text(body.enforce, 10) === 'block' ? 'block' : 'warn';
-      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift', 'weekend_off', 'only_shift', 'no_day_after_night'].includes(kind)) throw fail(400, 'Choose a rule type.');
+      if (!['not_together', 'min_cover', 'max_consecutive', 'not_shift', 'weekend_off', 'only_shift', 'no_day_after_night', 'locum_nights'].includes(kind)) throw fail(400, 'Choose a rule type.');
       const scope = ['all', 'doctors', 'staff'].includes(text(body.scope, 10)) ? text(body.scope, 10) : 'all';
-      const shifts = (Array.isArray(body.shifts) ? body.shifts : []).map((s: any) => text(s, 10)).filter((s: string) => ['AM', 'PM', 'OH', 'OFF', 'REST'].includes(s));
+      const shifts = (Array.isArray(body.shifts) ? body.shifts : []).map((s: any) => text(s, 10)).filter((s: string) => (kind === 'locum_nights' ? ['MON', 'TUE', 'WED', 'THU', 'FRI'] : ['AM', 'PM', 'OH', 'OFF', 'REST']).includes(s));
       const personA = text(body.person_a, 30), personB = text(body.person_b, 30), company = ['KJ', 'SK'].includes(text(body.company, 4)) ? text(body.company, 4) : null;
       const amount = body.amount === null || body.amount === undefined || body.amount === '' ? null : Number(body.amount);
       if (amount !== null && !(Number.isInteger(amount) && amount >= 0 && amount <= 50)) throw fail(400, 'The number must be a whole number from 0 to 50.');
       if (kind === 'not_together' && (!personA || !personB || personA === personB)) throw fail(400, 'Choose two different people.');
+      if (kind === 'locum_nights' && !shifts.length) throw fail(400, 'Choose the days whose nights are left for a locum.');
       if (kind === 'only_shift' && !shifts.length) throw fail(400, 'Choose the shifts that are allowed.');
       if (kind === 'not_shift' && (!personA || !shifts.length)) throw fail(400, 'Choose the person and the shifts.');
       if (kind === 'min_cover' && (amount === null || shifts.length !== 1)) throw fail(400, 'Choose one shift and the minimum number of people.');
