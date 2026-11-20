@@ -1,4 +1,4 @@
-import { resignationEarned } from '../src/lib/annualLeaveProration.js';
+import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -230,11 +230,10 @@ export const LEAVE_TYPES: Record<string, { name: string; group: string; half: bo
   UL: { name: 'Unpaid Leave', group: 'UL', half: true },
 };
 // As in Infotech: leave must be applied for at least 1 day before the leave date, except medical, hospitalization and emergency leave
-// (which can be applied for after the day). Annual leave can be taken up to the full year's entitlement, which is shared by month in the year someone joins.
+// (which can be applied for after the day). Annual leave can be taken up to the full year's entitlement, which is prorated by completed months from the join date in the year someone joins.
 export const APPLY_AFTER_THE_DAY = new Set(['ML', 'HOSP', 'EL', 'MATN', 'ULEL']);
 export function yearAllowance(eligible: number, joinDate: string | null, year: string) {
-  if (!joinDate || joinDate.slice(0, 4) !== year) return eligible;
-  return Math.round(eligible * (12 - Number(joinDate.slice(5, 7)) + 1) / 12);
+  return joinYearEarned(eligible, Number(year), joinDate) ?? eligible;
 }
 export const isoDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
 // Days between two dates that are working days for the person: a date on their uploaded duty roster counts

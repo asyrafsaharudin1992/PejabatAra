@@ -1,4 +1,4 @@
-import { resignationEarned } from '../src/lib/annualLeaveProration.js';
+import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { validateTaxProfile, taxPayrollPatch } from '../src/lib/hrTaxDetails.js';
 import { randomBytes, scryptSync } from 'node:crypto';
 import { ceoCharts, headcount } from './_ceo-charts.js';
@@ -154,12 +154,11 @@ function policyFor(track: string, joinDate: string, year = Number(new Date().toL
   return { al: Math.round(sum / 12), ml: part ? null : LEAVE_POLICY.ml[tierOf(yearsAt(`${year}-12-31`))], hosp: part ? null : LEAVE_POLICY.hosp };
 }
 // In the year someone joins, annual leave is shared by month, as Infotech does (the setting "Annual Leave Prorate based on leave calculation Date Joined"):
-// the entitlement x (months from the join month to December) / 12, rounded. People can take leave up to this for the year. Staff who joined in an
-// earlier year have the whole entitlement, so this returns null for them.
+// the entitlement x (completed months from the join date to 31 December) / 12, rounded; with a last working day the same rule ends on that day
+// (resignationEarned). People can take leave up to this for the year. Staff who joined in an earlier year have the whole entitlement, so this returns null.
 function firstYearEarn(eligible: number, joinDate: string) {
   const thisYear = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).slice(0, 4);
-  if (joinDate.slice(0, 4) !== thisYear) return null;
-  return Math.round(eligible * (12 - Number(joinDate.slice(5, 7)) + 1) / 12);
+  return joinYearEarned(eligible, Number(thisYear), joinDate);
 }
 // Sets a balance row. Annual leave: total = brought forward + credit + (earned so far, or the full entitlement once nothing more is
 // being earned) - forfeited. Other groups keep a total of 0 as in Infotech. Balance = total - taken (+ advance). Every change is written

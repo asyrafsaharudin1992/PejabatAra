@@ -12,6 +12,10 @@ annual entitlement by completed months / 12 and round to the nearest whole day
 and a last working day of 15 December earns 11 days; after 7 days taken the
 balance is 4 days. This example does not establish Qamarina's employment dates.
 
+In the year someone joins, with no last working day, the same rule runs from the join date to 31 December (15 days, joined
+3 Feb 2026: 10 completed months, 15 x 10 / 12 = 12.5, so 13). Staff who joined in an earlier year have the whole entitlement.
+So the entitlement is prorated from both ends: the join date and the last working day.
+
 Brought-forward days, credit, forfeiture, taken days and advance retain their
 existing roles. Zero prorated days is a valid result. A last day in a later year
 does not reduce earlier years' entitlement. With no last day, existing leave

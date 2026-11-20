@@ -1,3 +1,9 @@
+// The year someone joins: the same completed-month rule, from the join date to 31 December. A staff member who joined in an
+// earlier year has the whole entitlement (null). A last working day in that year is handled by resignationEarned instead.
+export function joinYearEarned(eligible: number, year: number, joinDate?: string | null): number | null {
+  if (!joinDate || joinDate.slice(0, 4) !== String(year)) return null;
+  return resignationEarned(eligible, year, joinDate, `${year}-12-31`);
+}
 // Resignation uses completed months in the balance year, including the last working day.
 // null means the existing annual leave rules still apply; zero is a real entitlement.
 export function resignationEarned(eligible: number, year: number, joinDate?: string | null, resignDate?: string | null): number | null {
