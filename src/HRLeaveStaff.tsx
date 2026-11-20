@@ -8,7 +8,7 @@ import { card } from './AssessmentStaff';
 // person's balances (HR can correct them) and their whole leave history.
 type Pair = { year: number; eligible: number; total: number; taken: number; balance: number } | null;
 type Staff = { id: string; company: string; code: string; name: string; designation: string; status: string; al: Pair; ml: Pair; others?: { group: string; eligible: number; taken: number; balance: number }[]; waiting: number };
-type Balance = { group: string; year: number; eligible: number; broughtForward: number; credit: number; earn: number; forfeit: number; total: number; taken: number; balance: number; advance?: number; asOf: string; source: string };
+type Balance = { group: string; year: number; eligible: number; broughtForward: number; credit: number; earn: number; manualEarn?: number; forfeit: number; total: number; taken: number; balance: number; advance?: number; asOf: string; source: string };
 type Req = { id: string; type: string; start: string; end: string; half: 'AM' | 'PM' | null; days: number; reason: string; status: 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; supervisorNote: string; note: string };
 
 const GROUP_NAME: Record<string, string> = { AL: 'Annual leave', ML: 'Medical leave', HOSP: 'Hospitalization', MARRG: 'Marriage', HAJUMR: 'Haji / Umrah', UL: 'Unpaid leave' };
@@ -125,16 +125,16 @@ function PersonLeave({ id, onBack, onError }: { key?: string; id: string; onBack
 }
 
 function BalanceRow({ id, balance, joinDate, resignDate, onSaved, onError }: { key?: string; id: string; balance: Balance; joinDate?: string; resignDate?: string; onSaved: () => Promise<void> | void; onError: (message: string) => void }) {
-  const [form, setForm] = useState({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.earn), forfeit: String(balance.forfeit) });
+  const [form, setForm] = useState({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.manualEarn ?? balance.earn), forfeit: String(balance.forfeit) });
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setForm({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.earn), forfeit: String(balance.forfeit) }); }, [balance.eligible, balance.broughtForward, balance.credit, balance.earn, balance.forfeit, balance.taken]);
+  useEffect(() => { setForm({ eligible: String(balance.eligible), broughtForward: String(balance.broughtForward), credit: String(balance.credit), earn: String(balance.manualEarn ?? balance.earn), forfeit: String(balance.forfeit) }); }, [balance.eligible, balance.broughtForward, balance.credit, balance.earn, balance.manualEarn, balance.forfeit, balance.taken]);
   const n = (value: string) => Number(value) || 0;
   const annual = balance.group === 'AL';
   const prorated = annual ? resignationEarned(n(form.eligible), balance.year, joinDate, resignDate) : null;
   // The same working-out as the server, so HR sees the result before saving.
   const total = annual ? n(form.broughtForward) + n(form.credit) + (prorated ?? (n(form.earn) > 0 ? n(form.earn) : n(form.eligible))) - n(form.forfeit) : n(form.eligible) + n(form.broughtForward) + n(form.credit) - n(form.forfeit);
   const left = Math.round((total - balance.taken + (balance.advance || 0)) * 100) / 100;
-  const changed = n(form.eligible) !== balance.eligible || n(form.broughtForward) !== balance.broughtForward || n(form.credit) !== balance.credit || n(form.earn) !== balance.earn || n(form.forfeit) !== balance.forfeit;
+  const changed = n(form.eligible) !== balance.eligible || n(form.broughtForward) !== balance.broughtForward || n(form.credit) !== balance.credit || n(form.earn) !== (balance.manualEarn ?? balance.earn) || n(form.forfeit) !== balance.forfeit;
   const fields: [keyof typeof form, string, boolean][] = annual ? [['eligible', 'Entitlement', true], ['broughtForward', 'Brought forward', true], ['credit', 'Credit', true], ['earn', 'Earned so far', true], ['forfeit', 'Forfeited', true]] : [['eligible', 'Entitlement', true]];
   const save = async () => {
     setSaving(true);
