@@ -27,12 +27,11 @@ function DayFix({ day, staffId, name, onChanged, onError, onSaved }: { day: Day;
     try { const result = await work() as { duplicate?: boolean } | undefined; onSaved(`${name} · ${dmy(day.date)}: ${result?.duplicate ? 'that clock already exists, nothing was added.' : done}`); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
     finally { setBusy(false); }
   };
-  const { saveClock, saveIn, saveOut } = clockSavers(staffId, name, run, onChanged);
+  const { saveIn, saveOut } = clockSavers(staffId, name, run, onChanged);
   const cell = 'w-[72px] overflow-hidden rounded border border-slate-200 bg-white text-center';
   return <div className={busy ? 'opacity-60' : ''}>
-    <p className="mb-2 text-xs text-slate-500">{name} · {dmy(day.date)} {dayName(day.date)} · shift {shiftCell(day) || 'none'} · type a time (for example 8.52 or 20.50) and press Enter. A new time on an empty box adds a clock; clearing a Clock box removes it. Changes go in the audit record.</p>
+    <p className="mb-2 text-xs text-slate-500">{name} · {dmy(day.date)} {dayName(day.date)} · shift {shiftCell(day) || 'none'} · type a time (for example 8.52 or 20.50) and press Enter. A time on an empty box adds the clock. Changes go in the audit record.</p>
     <div className="flex flex-wrap items-end gap-3">
-      {[0, 1, 2, 3].map((slot) => <label key={slot} className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Clock {slot + 1}<div className={`${cell} mt-1 bg-[#e3e1f7]`}><TimeCell key={`${day.date}-${slot}-${day.clocks[slot]?.id || ''}`} value={day.clocks[slot]?.time || ''} tone="bg-transparent" onSave={(value) => saveClock(day, slot, value)} /></div></label>)}
       <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">In<div className={`${cell} mt-1 bg-[#cfc8f5]`}><TimeCell value={day.inTime} tone="bg-transparent" onSave={(value) => saveIn(day, value)} /></div></label>
       <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Out<div className={`${cell} mt-1 bg-[#cfc8f5]`}><TimeCell value={day.outTime} tone="bg-transparent" onSave={(value) => saveOut(day, value)} /></div></label>
       <p className="pb-1 text-xs text-slate-600">Late {colon(day.late)} · Early {colon(day.early)} · Worked {colon(day.worked)}{day.odd.length || day.soft.length ? ` · ${[...day.odd, ...day.soft].join(', ')}` : ''}</p>
