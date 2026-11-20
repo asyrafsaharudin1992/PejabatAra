@@ -94,7 +94,7 @@ function shiftTimes(rules: Rules, code: string, doctor: boolean) {
 }
 
 export type Employee = { id: string; company: string; employee_code: string; full_name: string; designation: string; work_days: number[] | null; holiday_group: string | null; default_shift?: string | null; clock_required?: string | null; join_date?: string | null; resign_date?: string | null };
-export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; otParts: OtPart[]; creditHours: number; leave: string; holiday?: boolean };
+export type Day = { date: string; code: string; start: string; end: string; status: string; inAt: string | null; outAt: string | null; late: number; lateCounted: number; early: number; earlyCounted: number; worked: number; ot: number; otCounted: number; otStatus: string; otApproved: number; otRate: number; otNote: string; otParts: OtPart[]; creditHours: number; leave: string; holiday?: boolean; ot2InAt?: string | null; ot2OutAt?: string | null };
 
 // One entry per person and date between from and to: what was expected (roster, then holiday, then the usual shift on
 // working weekdays), leave on that date, the clocks that match it, and HR's decision on its OT.
@@ -219,6 +219,15 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
       if (clockIn) day.inAt = new Date(clockIn.at).toISOString();
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
+      // A second pair of clocks straight after the shift (clock out, then clock in again): the extra hours worked on top of the shift, counted as OT.
+      // It is not taken if that clock in belongs to the next day's rostered shift.
+      const nextRow = rosterOf.get(`${person.id}|${addDay(date, 1)}`);
+      const nextShift = nextRow?.works ? shiftTimes(rules, nextRow.shift, doctor) : null;
+      const nextStart = nextShift ? at(addDay(date, 1), nextShift.start) : Infinity;
+      const extraIn = clockOut ? mine.find((clock) => clock.kind === 'in' && (!clock.workDate || clock.workDate === date) && clock.at >= clockOut.at && clock.at - clockOut.at <= 90 * MIN && clock.at < nextStart - 5 * HOUR) : undefined;
+      const extraOut = extraIn ? mine.find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > extraIn.at && clock.at <= extraIn.at + 16 * HOUR) : undefined;
+      if (extraIn) day.ot2InAt = new Date(extraIn.at).toISOString();
+      if (extraOut) day.ot2OutAt = new Date(extraOut.at).toISOString();
       if (leaveRow && !clockIn) { push({ ...day, status: 'leave' }); continue; }
       // Management do not clock: their working days count as present.
       // They may still clock: a clock in/out is shown and the hours are recorded, but nothing is counted against them (no late, early or OT).
@@ -235,7 +244,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           day.earlyCounted = rules.countEarly && day.early > rules.earlyGrace ? day.early : 0;
           // Extra time: before the shift starts and after it ends (doctors have no OT).
           const before = Math.max(0, Math.round((start - clockIn.at) / MIN)), after = Math.max(0, Math.round((clockOut.at - end) / MIN));
-          day.ot = noOt ? 0 : before + after;
+          const extra = extraIn && extraOut ? Math.round((extraOut.at - extraIn.at) / MIN) : 0;
+          day.ot = noOt ? 0 : before + after + extra;
           const pol = rules.policyFor(date); day.otCounted = day.ot >= pol.minMinutes ? wholeHours(day.ot, pol) : 0;
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
@@ -247,7 +257,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
   return out;
 }
 
-const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '' });
+const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '', ot2InTime: day.ot2InAt ? hhmm(Date.parse(day.ot2InAt)) : '', ot2OutTime: day.ot2OutAt ? hhmm(Date.parse(day.ot2OutAt)) : '' });
 const PERSON = 'id,company,employee_code,full_name,designation,work_days,holiday_group,default_shift,clock_required,join_date,resign_date';
 const minutesText = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', otMinutes: Number(row.ot_minutes || 0), otText: minutesText(Number(row.ot_minutes || 0)), reason: row.reason, remarks: row.remarks || '', status: row.status, supervisorDecidedBy: row.supervisor_decided_by || '', supervisorNote: row.supervisor_note || '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, rate: row.ot_multiplier === null || row.ot_multiplier === undefined ? null : Number(row.ot_multiplier), createdAt: row.created_at });
@@ -737,7 +747,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
         } else if (day.otCounted > 0 && (!decision || decision.status === 'pending')) {
           for (const part of otParts(kindOf(day.date), day.ot, rules.policyFor(day.date))) waiting[String(part.multiplier)] = (waiting[String(part.multiplier)] || 0) + part.minutes;
         }
-        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft, followUp: followUps.get(`${p.id}|${day.date}`) || emptyFollowUp() };
+        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', ot2InTime: v.ot2InTime, ot2OutTime: v.ot2OutTime, ot2InId: day.ot2InAt ? allClocks.find((clock) => clock.ms === Date.parse(day.ot2InAt!))?.id || '' : '', ot2OutId: day.ot2OutAt ? allClocks.find((clock) => clock.ms === Date.parse(day.ot2OutAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft, followUp: followUps.get(`${p.id}|${day.date}`) || emptyFollowUp() };
       });
       return { person: { ...person(p), designation: p.designation }, days: list };
     });

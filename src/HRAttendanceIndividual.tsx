@@ -14,7 +14,7 @@ import { usePrintSheet } from './IncentiveSheet';
 
 // Office HR > Attendance > Individual: Infotech's "Individual Attendance Report With Monthly Allowance", one block for each person with every day: the clocks, the shift,
 // Normal / Late / EarlyOut / Actual, OT at each rate and the reason. A last Check column marks the odd days, and "Odd days" lists who has the most, for Admin.
-type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[]; followUp?: AttendanceFollowUp };
+type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; ot2InTime?: string; ot2OutTime?: string; ot2InId?: string; ot2OutId?: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[]; followUp?: AttendanceFollowUp };
 type Person = { id: string; company: string; code: string; name: string; designation: string };
 type Block = { person: Person; days: Day[] };
 
@@ -137,7 +137,7 @@ function TimeCell({ value, onSave, tone }: { key?: string | number; value: strin
   const commit = () => { const next = normal(text); if (next === null) { setText(clock(value)); return; } if (next !== value) onSave(next); else setText(clock(value)); };
   return <input value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} inputMode="decimal" aria-label="Time (hh.mm)" className={`h-6 w-full min-w-[46px] border-0 px-1 text-center tabular-nums outline-none focus:bg-white focus:ring-1 focus:ring-[#0b587b] ${tone}`} />;
 }
-const HEAD = ['#', 'Date', 'Day', 'Clk1N', 'Clk2N', 'Clk3N', 'Clk4N', 'In', 'Out', 'Shift', 'Reason', 'NRM', 'Actual', 'Under', 'Lateness', 'OT10', 'OT15', 'OT20', 'OT30', 'Flat', 'Attd', 'Shift', 'Meal', 'Tran', 'Health', 'Oth1', 'Oth2'];
+const HEAD = ['#', 'Date', 'Day', 'Clk1N', 'Clk2N', 'Clk3N', 'Clk4N', 'In', 'Out', 'OT In', 'OT Out', 'Shift', 'Reason', 'NRM', 'Actual', 'Under', 'Lateness', 'OT10', 'OT15', 'OT20', 'OT30', 'Flat', 'Attd', 'Shift', 'Meal', 'Tran', 'Health', 'Oth1', 'Oth2'];
 const isInsufficient = (day: Day) => day.status === 'missing-out' || (day.clocks.length % 2 === 1 && day.status !== 'off') || (Boolean(day.inTime) !== Boolean(day.outTime));
 
 function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onChanged, onError, onPreview, staffList, onStaff }: { block: Block; staffId: string; filters: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }; setFilters: (value: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }) => void; notice: string; setNotice: (value: string) => void; onChanged: () => void; onError: (message: string) => void; onPreview: () => void; staffList: { id: string; fullName: string }[]; onStaff: (id: string) => void }) {
@@ -168,6 +168,18 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
     if (day.outId) void run(() => post('attendance_clock_update', { clockId: day.outId, time: value, note: 'Out changed in Update by individual' }), 'Out changed.');
     else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'out', time: value, nextDay: Boolean(day.inTime) && value < day.inTime, note: 'Out added in Update by individual' }), 'Out added.');
   };
+  // OT In and OT Out: a second pair of clocks straight after the shift (clock out, then clock in again). Its hours are counted as OT.
+  const saveOtIn = (day: Day, value: string) => {
+    if (!value) { onChanged(); return; }
+    if (day.ot2InId) void run(() => post('attendance_clock_update', { clockId: day.ot2InId, date: day.date, time: value, note: 'OT in changed in Update by individual' }), 'OT in changed.');
+    else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'in', time: value, note: 'OT in added in Update by individual' }), 'OT in added.');
+  };
+  const saveOtOut = (day: Day, value: string) => {
+    if (!value) { onChanged(); return; }
+    const nextDay = Boolean(day.ot2InTime) && value < (day.ot2InTime || '');
+    if (day.ot2OutId) void run(() => post('attendance_clock_update', { clockId: day.ot2OutId, date: day.date, time: value, nextDay, note: 'OT out changed in Update by individual' }), 'OT out changed.');
+    else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'out', time: value, nextDay, note: 'OT out added in Update by individual' }), 'OT out added.');
+  };
   const index = staffList.findIndex((item) => item.id === staffId);
   const step = (by: number) => { const next = staffList[index + by]; if (next) onStaff(next.id); };
   const cell = 'border border-slate-200 px-1 py-0 text-center tabular-nums whitespace-nowrap';
@@ -184,7 +196,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
       <span className="ml-auto flex flex-wrap items-center gap-4">{legend('#e3e1f7', 'Clock / In / Out (editable)')}{legend('#f7c8f0', 'Over time')}{legend('#f3c9c4', 'Lateness and Under')}{legend('#fbe3df', 'Allowance')}</span></div>
     {notice && <p role="status" className="rounded-xl bg-emerald-50 p-2.5 text-sm font-semibold text-emerald-700">{notice}</p>}
     <p className="text-xs text-slate-500">Type a time (for example 8.52 or 20.50) in a Clk, In or Out cell and press Enter. A new time on an empty cell adds a clock; clearing a Clk cell removes it. Every change is written to the audit record.</p>
-    <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1500px] border-collapse text-[11px]">
+    <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1600px] border-collapse text-[11px]">
       <thead className="sticky top-0 z-10 bg-slate-100"><tr>{HEAD.map((label, i) => <th key={i} className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-600">{label}</th>)}</tr></thead>
       <tbody>{rows.map(({ day, number }) => {
         const worked = day.worked > 0, odd = day.odd.length > 0;
@@ -195,6 +207,8 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
           {[0, 1, 2, 3].map((slot) => <td key={slot} className={`${cell} bg-[#e3e1f7] p-0`}><TimeCell key={`${day.date}-${slot}-${day.clocks[slot]?.id || ''}`} value={day.clocks[slot]?.time || ''} tone="bg-transparent" onSave={(value) => saveClock(day, slot, value)} /></td>)}
           <td className={`${cell} bg-[#cfc8f5] p-0`}><TimeCell value={day.inTime} tone="bg-transparent" onSave={(value) => saveIn(day, value)} /></td>
           <td className={`${cell} bg-[#cfc8f5] p-0`}><TimeCell value={day.outTime} tone="bg-transparent" onSave={(value) => saveOut(day, value)} /></td>
+          <td className={`${cell} bg-[#f7c8f0] p-0`}><TimeCell key={`ot-in-${day.date}-${day.ot2InId || ''}`} value={day.ot2InTime || ''} tone="bg-transparent" onSave={(value) => saveOtIn(day, value)} /></td>
+          <td className={`${cell} bg-[#f7c8f0] p-0`}><TimeCell key={`ot-out-${day.date}-${day.ot2OutId || ''}`} value={day.ot2OutTime || ''} tone="bg-transparent" onSave={(value) => saveOtOut(day, value)} /></td>
           <td className={cell}>{shiftCell(day)}</td><td className={`${cell} ${odd ? 'font-semibold text-rose-700' : ''}`}>{reasonOf(day)}</td>
           <td className={cell}>{worked ? colon(shiftMinutes(day)) : '0:00'}</td><td className={cell}>{colon(day.worked)}</td>
           <td className={`${cell} ${day.early ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.early)}</td><td className={`${cell} ${day.late ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.late)}</td>
