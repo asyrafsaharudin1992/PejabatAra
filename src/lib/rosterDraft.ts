@@ -34,7 +34,10 @@ export function doctorWeeklyShift(pattern: Pattern, date: string): string {
   const priorities = [...new Set([beforeOff, ...workdays.slice().reverse()])];
   return priorities.slice(0, nights).includes(weekday) ? 'PM' : 'AM';
 }
-export function generateRosterDraft(input: { month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
+export type RosterRule = { id?: string; kind: 'not_together' | 'min_cover' | 'max_consecutive' | 'not_shift'; person_a: string | null; person_b: string | null; shifts: string[]; amount: number | null; company: string | null; enforce: 'warn' | 'block'; active: boolean; note: string };
+// Used until the rules table exists: the one rule that used to be written into the code.
+export const DEFAULT_ROSTER_RULES: RosterRule[] = [{ kind: 'not_together', person_a: 'ARA0001', person_b: 'ARA0002', shifts: ['AM', 'OH'], amount: null, company: null, enforce: 'warn', active: true, note: 'Asyraf and Syafiq must not work at the same time' }];
+export function generateRosterDraft(input: { rules?: RosterRule[]; month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
   const { month, people, patterns, existing, leave, requests, locks, preserve, minDay, minNight } = input;
   const dates = monthDates(month), cells: DraftCell[] = [], warnings: string[] = [], locum: { company: string; date: string; shift: 'PM'; missing: number }[] = [];
   const countsDay = (id: string, shift: string) => { const person = people.find((p) => p.id === id); return person && isDraftDoctor(person) ? shift === 'AM' : dayShift(shift); };
@@ -121,13 +124,39 @@ export function generateRosterDraft(input: { month: string; people: DraftPerson[
       previous = shift;
     }
   }
-  // Asyraf (ARA0001) and Syafiq (ARA0002) must not work at the same time: the same shift, or a day shift (AM) with office hours (OH).
-  const apart = ['ARA0001', 'ARA0002'].map((code) => people.find((p) => p.code === code));
-  if (apart[0] && apart[1]) for (const date of dates) {
-    const a = byKey.get(cellKey(apart[0].id, date)), b = byKey.get(cellKey(apart[1].id, date));
-    if (!a || !b) continue;
-    const x = newCode(a.shift), y = newCode(b.shift);
-    if (workingShift(x) && workingShift(y) && (x === y || ['AM', 'OH'].includes(x) && ['AM', 'OH'].includes(y))) warnings.push(`${date} · ${apart[0].name.split(' ').slice(0, 2).join(' ')} and ${apart[1].name.split(' ').slice(0, 2).join(' ')} are both working (${x} and ${y}); they must not work at the same time.`);
+  // The rules HR set (Roster draft > Rules). Each one gives a warning; a rule set to "block" also stops the draft export.
+  const short = (p: DraftPerson) => p.name.split(' ').slice(0, 2).join(' ');
+  const who = (code?: string | null) => people.find((p) => p.code === code);
+  for (const rule of (input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active)) {
+    const tail = rule.enforce === 'block' ? '; draft export is blocked.' : '.';
+    const inScope = (p: DraftPerson) => !rule.company || p.company === rule.company;
+    if (rule.kind === 'not_together') {
+      // The same working shift, or two of the chosen shifts (for example AM with OH), on the same day.
+      const a = who(rule.person_a), b = who(rule.person_b);
+      if (a && b) for (const date of dates) {
+        const ca = byKey.get(cellKey(a.id, date)), cb = byKey.get(cellKey(b.id, date));
+        if (!ca || !cb) continue;
+        const x = newCode(ca.shift), y = newCode(cb.shift);
+        if (workingShift(x) && workingShift(y) && (x === y || rule.shifts.includes(x) && rule.shifts.includes(y))) warnings.push(`${date} · ${short(a)} and ${short(b)} are both working (${x} and ${y}); they must not work at the same time${tail}`);
+      }
+    } else if (rule.kind === 'not_shift') {
+      const a = who(rule.person_a);
+      if (a) for (const date of dates) { const c = byKey.get(cellKey(a.id, date)); if (c && rule.shifts.includes(newCode(c.shift))) warnings.push(`${date} · ${short(a)} is on ${newCode(c.shift)}, a shift this person must not work${tail}`); }
+    } else if (rule.kind === 'min_cover' && rule.amount != null && rule.shifts[0]) {
+      const wanted = rule.shifts[0];
+      for (const company of [...new Set(people.filter((p) => patterns[p.id]?.enabled && inScope(p)).map((p) => p.company))]) for (const date of dates) {
+        const count = cells.filter((c) => c.date === date && newCode(c.shift) === wanted && people.some((p) => p.id === c.id && p.company === company)).length;
+        if (count < rule.amount) warnings.push(`${date} · ${company}: ${count} on ${wanted}, at least ${rule.amount} needed${tail}`);
+      }
+    } else if (rule.kind === 'max_consecutive' && rule.amount) {
+      for (const person of people.filter((p) => patterns[p.id]?.enabled && inScope(p) && (!rule.person_a || p.code === rule.person_a))) {
+        let run = 0;
+        for (const date of dates) {
+          run = workingShift(byKey.get(cellKey(person.id, date))?.shift || '') ? run + 1 : 0;
+          if (run === rule.amount + 1) warnings.push(`${date} · ${short(person)} works more than ${rule.amount} days in a row${tail}`);
+        }
+      }
+    }
   }
   return { cells, locum, warnings: [...new Set(warnings)], blocked: warnings.some((w) => w.includes('draft export is blocked')) };
 }

@@ -1,4 +1,5 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { HRRosterRules } from './HRRosterRules';
 import { SubTabs } from './SubTabs';
 import { PrintPage, PrintPortal } from './PrintPortal';
 import { usePrintSheet } from './IncentiveSheet';
@@ -6,7 +7,7 @@ import { officeFetch } from './lib/officeApi';
 import { newCode } from './lib/shiftCodes';
 import { downloadReportCsv } from './lib/hrReportExport';
 import { rosterShiftColor } from './lib/rosterColors';
-import { addDays, cellKey, cycleCodes, draftShifts, patternShifts, generateRosterDraft, monthDates, type DraftCell, type DraftDay, type DraftLeave, type DraftPerson, type DraftRequest, type Pattern } from './lib/rosterDraft';
+import { addDays, cellKey, cycleCodes, draftShifts, patternShifts, generateRosterDraft, monthDates, type DraftCell, type DraftDay, type DraftLeave, type DraftPerson, type DraftRequest, type Pattern, type RosterRule } from './lib/rosterDraft';
 
 type Context = { people: DraftPerson[]; sourceDays: DraftDay[]; targetDays: DraftDay[]; leave: DraftLeave[] };
 const field = 'mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm font-normal text-slate-800';
@@ -24,6 +25,9 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   const [locks, setLocks] = useState<Record<string, string>>({});
   const [preserve, setPreserve] = useState(true);
   const [minDay, setMinDay] = useState(1), [minNight, setMinNight] = useState(1);
+  const [rules, setRules] = useState<RosterRule[] | null | undefined>(undefined); // undefined: loading, null: no rules table yet (the built-in rule is used)
+  const loadRules = () => { officeFetch('/api/status?resource=hr&action=roster_rules').then((r) => r.json()).then((d) => setRules(Array.isArray(d.rules) ? d.rules : null)).catch(() => setRules(null)); };
+  useEffect(loadRules, []);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [loadedKey, setLoadedKey] = useState('');
   const [result, setResult] = useState<ReturnType<typeof generateRosterDraft> | null>(null);
@@ -31,7 +35,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
   const [edit, setEdit] = useState<{ id: string; date: string; shift: string } | null>(null);
   const [view, setView] = useState<'grid' | 'weekly' | 'calendar'>('weekly');
   const loadKey = JSON.stringify([month, source, length, scope]);
-  const configKey = JSON.stringify([loadKey, patterns, requests, locks, preserve, minDay, minNight]);
+  const configKey = JSON.stringify([loadKey, patterns, requests, locks, preserve, minDay, minNight, rules]);
   const fresh = loadedKey === loadKey;
   const ready = !busy && fresh && generatedKey === configKey;
   const people: DraftPerson[] = context?.people || [];
@@ -64,7 +68,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
     try {
       if (!selectedPeople.length) throw new Error('Select at least one person and enter their pattern.');
       if (![minDay, minNight].every((n) => Number.isInteger(n) && n >= 0 && n <= 50)) throw new Error('Coverage minimums must be whole numbers from 0 to 50.');
-      const next = generateRosterDraft({ month, people, patterns, existing: context!.targetDays, leave: context!.leave, requests, locks, preserve, minDay, minNight });
+      const next = generateRosterDraft({ month, people, patterns, existing: context!.targetDays, leave: context!.leave, requests, locks, preserve, minDay, minNight, rules: rules ?? undefined });
       setResult(next); setGeneratedKey(configKey);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to generate draft.'); }
   };
@@ -89,6 +93,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
       {!people.length && <p className="text-sm text-slate-500">No active {group} found for this clinic.</p>}
       <p className="text-xs text-slate-500">Pattern codes (requests allow other codes): {options.filter((s) => patternShifts.includes(s)).join(', ')}. The cycle repeats continuously from its start date across month boundaries.</p>
       <div className="flex flex-wrap items-end gap-4 rounded-xl bg-slate-50 p-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} />Protect existing roster cells</label><label className="text-sm font-semibold">Minimum day cover / clinic<input aria-label="Minimum day cover" type="number" min={0} max={50} value={minDay} onChange={(e) => setMinDay(Number(e.target.value))} className={`${field} max-w-24`} /></label><label className="text-sm font-semibold">Minimum night cover / clinic<input aria-label="Minimum night cover" type="number" min={0} max={50} value={minNight} onChange={(e) => setMinNight(Number(e.target.value))} className={`${field} max-w-24`} /></label><p className="max-w-lg text-xs text-slate-500">Coverage counts selected {group} only, grouped by KJ/SK. Doctor day cover counts AM only; OH doctors are excluded. Uncovered KJ doctor nights are listed as locum needs. Defaults are trial values; HR must set the clinic’s actual requirements. Approved leave remains protected. Headcount checks do not assess skills, employment hours or individual availability.</p></div>
+      {rules !== null && <HRRosterRules rules={rules ?? null} people={people} onChanged={loadRules} />}
       <div className="space-y-3 rounded-xl border p-4"><h4 className="font-semibold">Staff requests / HR instructions</h4><div className="grid items-end gap-3 md:grid-cols-5"><label className="text-sm">Person<select value={request.id} onChange={(e) => setRequest({ ...request, id: e.target.value })} className={field}><option value="">Choose person</option>{selectedPeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label className="text-sm">Date<input type="date" min={`${month}-01`} max={dates[dates.length - 1]} value={request.date} onChange={(e) => setRequest({ ...request, date: e.target.value })} className={field} /></label><label className="text-sm">Requested shift<select value={request.shift} onChange={(e) => setRequest({ ...request, shift: e.target.value })} className={field}>{options.map((s) => <option key={s}>{s}</option>)}</select></label><label className="text-sm">Priority<select value={request.required ? 'required' : 'preference'} onChange={(e) => setRequest({ ...request, required: e.target.value === 'required' })} className={field}><option value="preference">Preference (if covered)</option><option value="required">Required by HR</option></select></label><button type="button" disabled={!request.id || !dates.includes(request.date)} className={button} onClick={() => setRequests((rows) => [...rows.filter((r) => cellKey(r.id, r.date) !== cellKey(request.id, request.date)), { ...request }])}>Add request</button></div><p className="text-xs text-slate-500">Requests do not create or approve leave applications. Required requests may leave a coverage gap, which is flagged for HR. Preferences are skipped if they reduce coverage below the minimum.</p>{requests.map((r) => <div key={cellKey(r.id, r.date)} className="flex items-center justify-between gap-3 text-sm"><span>{people.find((p) => p.id === r.id)?.name} · {r.date} · {r.shift} · {r.required ? 'Required' : 'Preference'}</span><button type="button" className="text-rose-700" onClick={() => setRequests((rows) => rows.filter((v) => v !== r))}>Remove request</button></div>)}</div>
       <div className="flex flex-wrap items-center gap-3"><button type="button" className={button} disabled={busy || !selectedPeople.length} onClick={generate}>Generate draft</button><button type="button" className={button} disabled={!ready || !result?.cells.length || result.blocked} onClick={exportDraft}>Download draft CSV</button>{result && !ready && <span className="text-sm text-amber-800">Settings changed. Generate again before downloading.</span>}</div>
     </>}

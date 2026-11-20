@@ -91,3 +91,25 @@ result = generateRosterDraft({ ...asyrafInput, preserve: true, existing: [{ id: 
 assert.equal(at(result, 'a', '2026-12-10').shift, 'PM');
 assert.ok(result.warnings.some((w) => w.includes('2026-12-10') && w.includes('preferred Monday/Tuesday')));
 console.log('Asyraf Mon/Tue PM preference, Monday single PM, recovery OFF, month boundaries and exception protection passed.');
+
+// HR's own rules (Roster draft > Rules).
+{
+  const two = { ...base, people: [a, b], patterns: { a: { enabled: true, anchor: '2026-12-01', cycle: 'AM' }, b: { enabled: true, anchor: '2026-12-01', cycle: 'OH' } } };
+  const rule = (extra: object) => ({ kind: 'not_together' as const, person_a: 'A', person_b: 'B', shifts: ['AM', 'OH'], amount: null, company: null, enforce: 'warn' as const, active: true, note: '', ...extra });
+  let r = generateRosterDraft({ ...two, rules: [rule({})] });
+  assert.ok(r.warnings.some((w) => w.includes('must not work at the same time')) && !r.blocked, 'AM with OH clashes, warning only');
+  r = generateRosterDraft({ ...two, rules: [rule({ enforce: 'block' })] });
+  assert.ok(r.blocked, 'a blocking rule stops the export');
+  r = generateRosterDraft({ ...two, rules: [rule({ active: false })] });
+  assert.equal(r.warnings.filter((w) => w.includes('at the same time')).length, 0, 'a rule switched off does nothing');
+  r = generateRosterDraft({ ...two, rules: [rule({ shifts: [] })] });
+  assert.equal(r.warnings.filter((w) => w.includes('at the same time')).length, 0, 'AM and OH are different shifts when none is chosen');
+  r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'not_shift', person_b: null, shifts: ['AM'] }] });
+  assert.ok(r.warnings.some((w) => w.includes('must not work')), 'person must not work AM');
+  r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'max_consecutive', person_a: null, person_b: null, shifts: [], amount: 6 }] });
+  assert.ok(r.warnings.some((w) => w.includes('more than 6 days in a row')), 'seven days in a row');
+  r = generateRosterDraft({ ...two, rules: [{ ...rule({}), kind: 'min_cover', person_a: null, person_b: null, shifts: ['PM'], amount: 1 }] });
+  assert.ok(r.warnings.some((w) => w.includes('0 on PM, at least 1 needed')), 'nobody on PM');
+  assert.equal(generateRosterDraft({ ...two, rules: [] }).warnings.filter((w) => w.includes('at the same time')).length, 0, 'no rules, no rule warnings');
+}
+console.log('Roster rules tests passed.');
