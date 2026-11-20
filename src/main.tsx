@@ -3,8 +3,10 @@ import {createRoot} from 'react-dom/client';
 import OfficeLobby from './OfficeLobby.tsx';
 import './index.css';
 import { installDeviceFetch } from './lib/device';
+import { AppErrorBoundary, installUpdateRecovery } from './AppErrorBoundary';
 
 installDeviceFetch();
+installUpdateRecovery();
 // Everything from the Individual Sign In page onward (hub, leave, profile, assessments, incentives) is drawn a little smaller on phones.
 const syncPhoneScale = () => document.documentElement.classList.toggle('compact-phone', /^#office\/(individual|assessment|incentives)/.test(window.location.hash));
 syncPhoneScale(); window.addEventListener('hashchange', syncPhoneScale);
@@ -12,7 +14,7 @@ syncPhoneScale(); window.addEventListener('hashchange', syncPhoneScale);
 const DevShell = import.meta.env.DEV ? lazy(() => import('./DevPhoneView.tsx')) : null;
 const AttendanceDemo = import.meta.env.DEV && new URLSearchParams(window.location.search).has('attendanceDemo') ? lazy(() => import('./DevAttendanceDemo.tsx')) : null;
 const LocationDemo = import.meta.env.DEV && new URLSearchParams(window.location.search).has('locationDemo') ? lazy(() => import('./DevLocationDemo.tsx')) : null;
-const app = <OfficeLobby />;
+const app = <AppErrorBoundary><OfficeLobby /></AppErrorBoundary>;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
