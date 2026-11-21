@@ -289,6 +289,10 @@
 .roster-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .roster-print th, .roster-print td { border: 1px solid #b7c5d3; padding: 1.8mm 0.3mm; text-align: center; font-size: 6.5pt; overflow-wrap: anywhere; }
 .roster-print th:first-child { text-align: left; padding-left: 1.5mm; font-size: 7.5pt; }
+/* The draft roster sheet (doctors, staff): the text is the size chosen on screen (Text size), not the small default above. */
+.roster-print.roster-draft-print { font-size: var(--sheet-pt, 10pt); }
+.roster-print.roster-draft-print th, .roster-print.roster-draft-print td, .roster-print.roster-draft-print th:first-child { font-size: var(--sheet-pt, 10pt); padding: 0.8mm 0.6mm; line-height: 1.2; }
+.roster-print.roster-draft-print table { table-layout: auto; }
 .roster-print small { display: block; font-size: 6.5pt; font-weight: normal; color: #526477; }
 .roster-print footer { display: flex; flex-wrap: wrap; gap: 1mm 4mm; font-size: 6.5pt; margin-top: 3mm; }
 @page staff-profile { size: A4 portrait; margin: 14mm; }
