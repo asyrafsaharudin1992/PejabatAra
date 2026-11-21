@@ -36,3 +36,10 @@ assert.equal(rows.size, 1);
 assert.equal(attendanceFollowUpStatus(day({ ...emptyFollowUp(), missed: [{ reason: 'Forgot to clock out', status: 'pending' }] }, ['Absent'])), 'awaiting');
 assert.equal(attendanceFollowUpStatus(day({ ...emptyFollowUp(), missed: [{ reason: 'Forgot to clock out', status: 'rejected' }] }, ['No clock out'])), 'unresolved');
 console.log('Attendance follow-up status and request grouping checks passed.');
+
+// A long day whose OT was decided on the next day (covered) is settled, not unresolved.
+{
+  const covered = { odd: ['More than 14 hours'], soft: [], followUp: { ot: [], missed: [], credit: [], otDecision: 'covered' } };
+  assert.equal(attendanceFollowUpStatus(covered), 'settled');
+}
+console.log('Covered OT follow-up check passed.');

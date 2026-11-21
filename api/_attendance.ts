@@ -244,6 +244,16 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       } else day.status = waitingRow ? 'leave-pending' : pendingCorrections.has(`${person.id}|${date}`) ? 'clock-pending' : now >= end ? 'absent' : now >= start + rules.lateGrace * MIN ? 'not-in' : 'upcoming';
       push(day);
     }
+    // OT that was decided on the next day covers this day: Infotech put the OT of a night shift on the day the request was made, so the decision sits one day after the shift.
+    // The hours must match and the next day must have no OT of its own. Such a day is neither odd nor open to a second decision (that would pay the same hours twice).
+    const personDays = out.get(person.id)!, byDate = new Map(personDays.map((item) => [item.date, item]));
+    for (const day of personDays) {
+      if (day.otCounted <= 0 || day.otStatus) continue;
+      const nextDate = addDay(day.date, 1), next = decided.get(`${person.id}|${nextDate}`), nextDay = byDate.get(nextDate);
+      if (!next || !['approved', 'rejected'].includes(next.status) || (nextDay && nextDay.otCounted > 0)) continue;
+      if (Math.abs(Number(next.captured_minutes) - day.otCounted) > 30) continue;
+      day.otStatus = 'covered'; day.otNote = `Already decided on ${nextDate.split('-').reverse().join('/')} (${next.decided_by || 'HR'}).`;
+    }
   }
   return out;
 }
@@ -720,9 +730,11 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     ]);
     if (requests.error) throw requests.error;
     if (creditUses.error) throw creditUses.error;
-    const followUps = attendanceFollowUps(requests.data, creditUses.data, data.ot || []);
+    // (the follow-ups are made below, once the days are known: a day whose OT was decided on the next day counts as decided)
     const chosen = one ? people.filter((p) => p.id === one) : people;
     const days = buildDaysFrom(data, chosen, wideFrom, wideTo, rules);
+    const coveredOt = [...days.entries()].flatMap(([employee_id, list]) => list.filter((day) => day.otStatus === 'covered').map((day) => ({ employee_id, work_date: day.date, status: 'covered' })));
+    const followUps = attendanceFollowUps(requests.data, creditUses.data, [...(data.ot || []), ...coveredOt]);
     // The odd days: absent, a clock in with no clock out, a clock on a day off, a very long day, a very short day. Late and early out are shown too but are not "odd".
     const flagsOf = (day: Day) => {
       const odd: string[] = [], soft: string[] = [];
@@ -854,6 +866,9 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const rules = await loadRules(db);
     const day = ((await buildDays(db, [one], date, date, rules)).get(id) || [])[0];
     if (!day || day.otCounted <= 0) throw fail(400, 'There is no extra time to decide on that date.');
+    // The same hours may already be decided on the next day (a night shift whose OT Infotech dated the day after): deciding again would pay them twice.
+    const { data: nextRow } = await db.from('hr_attendance_ot').select('status,captured_minutes,decided_by').eq('employee_id', id).eq('work_date', addDay(date, 1)).maybeSingle();
+    if (nextRow && ['approved', 'rejected'].includes(nextRow.status) && Math.abs(Number(nextRow.captured_minutes) - day.otCounted) <= 30) throw fail(409, `These hours were already decided on ${addDay(date, 1).split('-').reverse().join('/')} (${nextRow.decided_by || 'HR'}). Deciding again would count them twice.`);
     const gross = status === 'approved' ? wholeHours(Math.min(day.otCounted, Math.round(Number(body.minutes ?? day.otCounted))), rules.policyFor(date)) : 0;
     const pay = gross > 0 ? await otDecision(db, one, date, gross, rules.policyFor(date)) : null;
     if (status === 'approved' && !pay?.parts.length) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(rules.policyFor(date).minMinutes)}.`);

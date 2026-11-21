@@ -15,7 +15,7 @@ export type FollowUpFilter = 'all' | FollowUpStatus;
 export function attendanceFollowUpStatus(day: { odd: string[]; soft: string[]; followUp?: AttendanceFollowUp }): FollowUpStatus {
   const follow = day.followUp;
   if (!follow) return 'unresolved';
-  const final = (status: string) => ['approved', 'rejected', 'cancelled'].includes(status);
+  const final = (status: string) => ['approved', 'rejected', 'cancelled', 'covered'].includes(status);
   // Someone else still has to decide: nothing for HR to chase until they do.
   const waiting = (status: string) => ['pending', 'supervisor_approved'].includes(status);
   if ([...follow.ot, ...follow.missed].some((request) => waiting(request.status)) || waiting(follow.otDecision)) return 'awaiting';
@@ -26,7 +26,7 @@ export function attendanceFollowUpStatus(day: { odd: string[]; soft: string[]; f
   const flags = [...day.odd, ...day.soft];
   const otFlags = new Set(['More than 14 hours', 'Clocked on a day off']);
   if (flags.some((flag) => !otFlags.has(flag))) return 'unresolved';
-  const otDecided = [follow.otDecision, ...follow.ot.map((request) => request.status)].some((status) => ['approved', 'rejected'].includes(status));
+  const otDecided = [follow.otDecision, ...follow.ot.map((request) => request.status)].some((status) => ['approved', 'rejected', 'covered'].includes(status));
   if (flags.length && !otDecided) return 'unresolved';
   return follow.ot.length || follow.missed.length || follow.credit.length || follow.otDecision ? 'settled' : 'unresolved';
 }

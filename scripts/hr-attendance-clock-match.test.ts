@@ -80,3 +80,20 @@ console.log('Early OT, dated HR clocks, approved corrections and consecutive nig
   assert.equal(leaveDay([clock('in', '2026-11-10', '20:55'), clock('out', '2026-11-11', '09:05')]).status, 'present', 'a whole shift worked on a leave day still counts as worked');
 }
 console.log('Leave with a lone clock in tests passed.');
+
+// OT decided on the next day (Infotech dated the OT of a night shift the day after) covers the shift's day.
+{
+  const night = { ...person, work_days: [-1] };
+  const clocks = [clock('in', '2026-10-29', '20:53'), clock('out', '2026-10-30', '12:00')];
+  const rosterNight = [{ employee_id: 'a', work_date: '2026-10-29', shift: 'PM', works: true }];
+  const base = { roster: rosterNight, clocks, leave: [], holidays: [], ot: [] as any[] };
+  const build2 = (ot: any[]) => buildDaysFrom({ ...base, ot }, [night], '2026-10-29', '2026-10-31', rules).get('a')!;
+  const decision = (date: string, minutes: number, status = 'approved') => ({ employee_id: 'a', work_date: date, status, captured_minutes: minutes, approved_minutes: minutes, multiplier: 1.5, decided_by: 'Infotech migration' });
+  const plain = build2([])[0];
+  assert.ok(plain.otCounted > 0 && !plain.otStatus, 'the night shift has OT that nobody decided');
+  assert.equal(build2([decision('2026-10-30', plain.otCounted)])[0].otStatus, 'covered', 'a matching decision on the next day covers it');
+  assert.equal(build2([decision('2026-10-30', plain.otCounted, 'rejected')])[0].otStatus, 'covered');
+  assert.equal(build2([decision('2026-10-30', 60)])[0].otStatus, '', 'different hours are not the same OT');
+  assert.equal(build2([decision('2026-10-29', plain.otCounted)])[0].otStatus, 'approved', 'a decision on the day itself is used as before');
+}
+console.log('OT decided on the next day tests passed.');
