@@ -86,7 +86,7 @@ console.log('Leave with a lone clock in tests passed.');
   const night = { ...person, work_days: [-1] };
   const clocks = [clock('in', '2026-10-29', '20:53'), clock('out', '2026-10-30', '12:00')];
   const rosterNight = [{ employee_id: 'a', work_date: '2026-10-29', shift: 'PM', works: true }];
-  const base = { roster: rosterNight, clocks, leave: [], holidays: [], ot: [] as any[] };
+  const base = { roster: rosterNight, clocks, leave: [], holidays: [], ot: [] as any[], credit: [] as any[] };
   const build2 = (ot: any[]) => buildDaysFrom({ ...base, ot }, [night], '2026-10-29', '2026-10-31', rules).get('a')!;
   const decision = (date: string, minutes: number, status = 'approved') => ({ employee_id: 'a', work_date: date, status, captured_minutes: minutes, approved_minutes: minutes, multiplier: 1.5, decided_by: 'Infotech migration' });
   const plain = build2([])[0];
