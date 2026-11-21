@@ -5,6 +5,10 @@ import { rewriteColors } from './colorFix';
 const esc = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export function tableToWordHtml(table: HTMLTableElement, title: string, note: string, fontPt = 9.75): string {
   const view = table.ownerDocument.defaultView!;
+  // Word cannot shrink a table to the page, so the text size is chosen here: the size asked for, or smaller if the sheet would not fit one A4 page.
+  const unit = (cell: HTMLTableCellElement) => parseFloat(view.getComputedStyle(cell).fontSize) * 0.75 * (fontPt / 9.75);
+  const need = Array.from(table.rows).reduce((sum, row) => sum + Math.max(...Array.from(row.cells).map((cell) => Math.max(1, (cell.innerText || '').trim().split(/\n+/).filter(Boolean).length) * unit(cell) * 1.2)), 0);
+  const room = (841.9 - 56 - (note ? 22 : 0) - table.rows.length * 4.5) * 0.93, k = need > room ? room / need : 1;
   const rows = Array.from(table.rows).map((row) => {
     const cells = Array.from(row.cells).map((cell) => {
       const css = view.getComputedStyle(cell);
@@ -12,7 +16,7 @@ export function tableToWordHtml(table: HTMLTableElement, title: string, note: st
       // A box with no colour of its own takes its row's (tinted weekend and public holiday rows).
       const own = colour(css.backgroundColor), bg = /rgba\([^)]*,\s*0\)/.test(own) ? colour(view.getComputedStyle(row).backgroundColor) : own, fg = colour(css.color);
       const lines = (cell.innerText || '').replace(/ /g, ' ').trim().split(/\n+/).map((line) => esc(line.trim())).filter(Boolean).join('<br>');
-      const style = [`border:1px solid ${colour(css.borderTopColor) || '#94a3b8'}`, 'padding:3pt 5pt', `text-align:${css.textAlign === 'start' ? 'left' : css.textAlign}`, `font-weight:${css.fontWeight}`, `font-size:${Math.round(parseFloat(css.fontSize) * 0.75 * (fontPt / 9.75) * 10) / 10}pt`, `color:${fg}`, /rgba\([^)]*,\s*0\)/.test(bg) ? '' : `background:${bg}`].filter(Boolean).join(';');
+      const style = [`border:1px solid ${colour(css.borderTopColor) || '#94a3b8'}`, 'padding:1.5pt 4pt', `text-align:${css.textAlign === 'start' ? 'left' : css.textAlign}`, `font-weight:${css.fontWeight}`, `font-size:${Math.round(parseFloat(css.fontSize) * 0.75 * (fontPt / 9.75) * k * 10) / 10}pt`, `color:${fg}`, /rgba\([^)]*,\s*0\)/.test(bg) ? '' : `background:${bg}`].filter(Boolean).join(';');
       return `<${cell.tagName.toLowerCase()} colspan="${cell.colSpan}" style="${style}">${lines || '&nbsp;'}</${cell.tagName.toLowerCase()}>`;
     });
     return `<tr>${cells.join('')}</tr>`;

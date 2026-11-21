@@ -37,8 +37,8 @@ export async function rosterSheetPdf(table: HTMLTableElement, options: { company
   const bodyPt = options.fontPt ?? 9.5, MM_PT = 0.3528;
   const ptOf = (css: CSSStyleDeclaration) => bodyPt * ((parseFloat(css.fontSize) || 13) / 13);
   const linesOf = (cell: HTMLTableCellElement) => (cell.innerText || '').split(/\n+/).map(clean).filter(Boolean);
-  // Row heights: the screen's, widened so the largest text in the row fits; if the table is then taller than the page, everything (text too) is scaled down to fit.
-  const heights = Array.from(table.rows).map((row) => Math.max(row.getBoundingClientRect().height * xScale, ...Array.from(row.cells).map((cell) => { const n = Math.max(1, linesOf(cell).length); return n * ptOf(view.getComputedStyle(cell)) * MM_PT * 1.3 + 2.2; })));
+  // Row heights: what the largest text in the row needs (the screen's rows are taller than a printed sheet needs); if the table is then taller than the page, everything (text too) is scaled down to fit.
+  const heights = Array.from(table.rows).map((row) => Math.max(...Array.from(row.cells).map((cell) => { const n = Math.max(1, linesOf(cell).length); return n * ptOf(view.getComputedStyle(cell)) * MM_PT * 1.3 + 2.2; })));
   const total = heights.reduce((sum, value) => sum + value, 0);
   const fit = total > avail ? avail / total : 1, stretch = total < avail ? Math.min(1.35, avail / total) : 1;
   let y = top;
