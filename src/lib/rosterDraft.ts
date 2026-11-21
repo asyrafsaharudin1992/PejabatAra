@@ -7,7 +7,7 @@ export type Pattern = { enabled: boolean; anchor: string; cycle: string; doctorM
 export const preferredNights = (pattern: Pattern): number[] => pattern.nightDays?.length ? pattern.nightDays : pattern.nightPlacement === 'mon-tue' ? [1, 2] : [];
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export type DraftRequest = { id: string; date: string; shift: string; required: boolean };
-export type DraftCell = DraftDay & { source: 'pattern' | 'existing' | 'locked' | 'leave' | 'request' | 'auto'; locked: boolean };
+export type DraftCell = DraftDay & { source: 'pattern' | 'existing' | 'locked' | 'leave' | 'request' | 'auto' | 'locum'; locked: boolean };
 export const draftShifts = ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST', 'AL', 'MC', 'ML', 'UPL', 'EL', 'PH', 'NA', 'RESIGN'];
 export const patternShifts = draftShifts.filter((s) => ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST'].includes(s));
 export const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
@@ -23,6 +23,8 @@ const monday = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`).
 export const WEEKDAY_CODES: Record<string, number> = { MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5 };
 export const DAY_CODES: Record<string, number> = { ...WEEKDAY_CODES, SAT: 6, SUN: 0 };
 // A "left for a locum" rule keeps its days (MON ... SUN) and the shifts (AM, PM, OH) in one list; no shift chosen means the night (PM).
+// A locum rule can also name exact dates (2026-12-25) in its list: those days are left for a locum whatever the weekday.
+export const locumRuleDates = (rule: { shifts: string[] }) => rule.shifts.filter((code) => /^\d{4}-\d{2}-\d{2}$/.test(code));
 export const locumRuleDays = (rule: { shifts: string[] }) => rule.shifts.map((code) => DAY_CODES[code]).filter((day) => day !== undefined);
 export const locumRuleSlots = (rule: { shifts: string[] }) => { const slots = rule.shifts.filter((code) => ['AM', 'PM', 'OH'].includes(code)); return slots.length ? slots : ['PM']; };
 // avoid: weekdays (1 Monday ... 5 Friday) that must not get the night shift (left for a locum).
@@ -69,6 +71,7 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
   const dates = [...monthDates(month), ...(input.completeWeek ? tailDays(month) : [])], cells: DraftCell[] = [], warnings: string[] = [], locum: { company: string; date: string; shift: 'AM' | 'PM' | 'OH'; missing: number }[] = [];
   // Weekdays whose night shift is left for a locum (the "locum nights" rules that apply to this person).
   const locumDays = (person: DraftPerson) => [...new Set((input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active && r.kind === 'locum_nights' && locumRuleSlots(r).includes('PM') && (!r.company || r.company === person.company) && (!r.person_a || r.person_a === person.code) && (r.scope === 'all' || (r.scope === 'doctors') === isDraftDoctor(person))).flatMap((r) => locumRuleDays(r)).filter((day) => day >= 1 && day <= 5))];
+  const locumDateSlots = (person: DraftPerson, date: string) => (input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active && r.kind === 'locum_nights' && locumRuleDates(r).includes(date) && (!r.company || r.company === person.company) && (!r.person_a || r.person_a === person.code) && (r.scope === 'all' || (r.scope === 'doctors') === isDraftDoctor(person))).flatMap((r) => locumRuleSlots(r));
   const countsDay = (id: string, shift: string) => { const person = people.find((p) => p.id === id); return person && isDraftDoctor(person) ? shift === 'AM' : dayShift(shift); };
   const locumNight = (person: DraftPerson) => person.company === 'KJ' && isDraftDoctor(person);
   const existingMap = new Map(existing.map((d) => [cellKey(d.id, d.date), newCode(d.shift)]));
@@ -87,6 +90,8 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
       else if (locks[key] !== undefined && locks[key] !== shift) warnings.push(`${date} · ${person.name}: draft edit conflicts with protected existing roster (${shift}).`);
       // A day moved by the automatic adjustment (never a protected, requested or leave day).
       if (!locked && input.auto?.[key] !== undefined) { shift = input.auto[key]; source = 'auto'; }
+      // A date HR left for a locum: nobody of the rule's group is rostered on those shifts (the cell becomes a day off and the slot is listed as a locum need).
+      if (!locked && workingShift(shift) && locumDateSlots(person, date).includes(newCode(shift))) { shift = 'OFF'; source = 'locum'; }
       const approved = leave.filter((l) => l.id === person.id && l.start <= date && l.end >= date);
       if (approved.length) {
         if (approved.some((l) => l.halfDay)) warnings.push(`${date} · ${person.name}: approved half-day leave needs manual review; draft export is blocked.`);
@@ -147,9 +152,9 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
   }
   // Slots HR left for a locum by rule (for example Saturday and Sunday, AM and PM): listed as locum needs for the clinics the rule is about.
   for (const rule of (input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active && r.kind === 'locum_nights')) {
-    const days = locumRuleDays(rule), slots = locumRuleSlots(rule);
+    const days = locumRuleDays(rule), picked = locumRuleDates(rule), slots = locumRuleSlots(rule);
     for (const company of [...new Set(people.filter((p) => patterns[p.id]?.enabled && (!rule.company || p.company === rule.company) && (rule.scope === 'all' || (rule.scope === 'doctors') === isDraftDoctor(p))).map((p) => p.company))])
-      for (const date of dates.filter((d) => days.includes(new Date(`${d}T00:00:00Z`).getUTCDay()))) for (const slot of slots)
+      for (const date of dates.filter((d) => days.includes(new Date(`${d}T00:00:00Z`).getUTCDay()) || picked.includes(d))) for (const slot of slots)
         if (!locum.some((item) => item.company === company && item.date === date && item.shift === slot)) locum.push({ company, date, shift: slot as 'AM' | 'PM' | 'OH', missing: 1 });
   }
   // The rules HR set (Roster draft > Rules). Each one gives a warning; a rule set to "block" also stops the draft export.
@@ -179,8 +184,8 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
     } else if (rule.kind === 'weekend_off') {
       for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()) && workingShift(c.shift)) flag(`${date} · ${short(person)} works on a weekend (${newCode(c.shift)}), which must be off${tail}`); }
     } else if (rule.kind === 'locum_nights') {
-      const days = locumRuleDays(rule), slots = locumRuleSlots(rule);
-      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && slots.includes(newCode(c.shift)) && days.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) flag(`${date} · ${short(person)} is on ${newCode(c.shift)}, which is left for a locum${tail}`); }
+      const days = locumRuleDays(rule), picked = locumRuleDates(rule), slots = locumRuleSlots(rule);
+      for (const person of inGroup(rule)) for (const date of dates) { const c = byKey.get(cellKey(person.id, date)); if (c && slots.includes(newCode(c.shift)) && (days.includes(new Date(`${date}T00:00:00Z`).getUTCDay()) || picked.includes(date))) flag(`${date} · ${short(person)} is on ${newCode(c.shift)}, which is left for a locum${tail}`); }
     } else if (rule.kind === 'custom' && rule.condition) {
       // A rule made on screen: who, on which weekdays (none: every day), which shifts, and "never", "must", "at least" or "at most".
       const days = locumRuleDays(rule), slots = rule.shifts.filter((code) => ['AM', 'PM', 'OH', 'OFF'].includes(code));

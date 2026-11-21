@@ -219,3 +219,25 @@ console.log('Custom rule tests passed.');
   assert.equal(generateRosterDraft({ ...input, month: '2027-01', patterns: { w1: { ...input.patterns.w1, anchor: '2027-01-04' } }, completeWeek: true }).cells.length, 31, 'January 2027 ends on a Sunday: nothing is added');
 }
 console.log('Finish the week tests passed.');
+
+// Dates left for a locum (picked in advance, or public holidays): nobody is rostered, and the slots are listed as locum needs.
+{
+  const q1: DraftPerson = { id: 'q1', company: 'KJ', code: 'Q1', name: 'Doctor Q1', designation: 'DOCTOR' };
+  const q2: DraftPerson = { id: 'q2', company: 'KJ', code: 'Q2', name: 'Doctor Q2', designation: 'DOCTOR' };
+  const pat = (cycle: string) => ({ enabled: true, anchor: '2026-12-07', cycle, doctorMode: 'sample' as const });
+  const input = { month: '2026-12', people: [q1, q2], patterns: { q1: pat('AM, AM, AM, AM, AM, OFF, OFF'), q2: pat('PM, PM, PM, PM, PM, OFF, OFF') }, existing: [], leave: [], requests: [], locks: {}, preserve: false, minDay: 0, minNight: 0 };
+  const rule = { kind: 'locum_nights' as const, person_a: null, person_b: null, shifts: ['2026-12-11', '2026-12-25', 'AM', 'PM'], amount: null, company: null, scope: 'doctors' as const, enforce: 'warn' as const, active: true, note: '' };
+  const r = generateRosterDraft({ ...input, rules: [rule], completeWeek: true });
+  for (const date of ['2026-12-11', '2026-12-25']) {
+    assert.equal(r.cells.find((c) => c.id === 'q1' && c.date === date)!.shift, 'OFF');
+    assert.equal(r.cells.find((c) => c.id === 'q2' && c.date === date)!.shift, 'OFF');
+    assert.ok(r.locum.some((slot) => slot.date === date && slot.shift === 'AM') && r.locum.some((slot) => slot.date === date && slot.shift === 'PM'), 'both slots are locum needs');
+  }
+  assert.equal(r.cells.find((c) => c.id === 'q1' && c.date === '2026-12-10')!.shift, 'AM', 'other days are not touched');
+  assert.equal(r.warnings.filter((w) => w.includes('left for a locum')).length, 0);
+  // A protected (existing) cell on such a date is kept but warned.
+  const kept = generateRosterDraft({ ...input, preserve: true, existing: [{ id: 'q1', date: '2026-12-11', shift: 'AM' }], rules: [rule] });
+  assert.equal(kept.cells.find((c) => c.id === 'q1' && c.date === '2026-12-11')!.shift, 'AM');
+  assert.ok(kept.warnings.some((w) => w.includes('2026-12-11') && w.includes('left for a locum')));
+}
+console.log('Locum dates tests passed.');

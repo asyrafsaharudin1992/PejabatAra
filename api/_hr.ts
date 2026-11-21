@@ -811,20 +811,20 @@ export async function hrHandler(req: any, res: any) {
       const month = String(req.query.month || ''), group = String(req.query.group || ''), company = String(req.query.company || '');
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a month, a roster group and a clinic.');
       // Every draft saved for this month and group (whichever clinic it was saved under): a draft saved while one clinic was chosen is found from the other views too.
-      const { data, error } = await db.from('hr_roster_drafts').select('company,payload,updated_by,updated_at').eq('month', month).eq('grp', group);
+      const { data, error } = await db.from('hr_roster_drafts').select('name,company,payload,updated_by,updated_at').eq('month', month).eq('grp', group).order('updated_at', { ascending: false });
       if (error) return res.status(200).json({ drafts: [], unavailable: true });
-      return res.status(200).json({ company, drafts: (data || []).map((d: any) => ({ company: d.company, payload: d.payload, updatedBy: d.updated_by, updatedAt: d.updated_at })) });
+      return res.status(200).json({ company, drafts: (data || []).map((d: any) => ({ name: d.name, company: d.company, payload: d.payload, updatedBy: d.updated_by, updatedAt: d.updated_at })) });
     }
     if (req.method === 'POST' && (action === 'roster_draft_save' || action === 'roster_draft_delete')) {
-      const month = text(body.month, 7), group = text(body.group, 10), company = text(body.company, 4);
+      const month = text(body.month, 7), group = text(body.group, 10), company = text(body.company, 4), name = text(body.name, 60) || 'Draft 1';
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !['staff', 'doctors'].includes(group) || !['', 'KJ', 'SK'].includes(company)) throw fail(400, 'Choose a month, a roster group and a clinic.');
       if (action === 'roster_draft_delete') {
-        const { error } = await db.from('hr_roster_drafts').delete().eq('month', month).eq('grp', group).eq('company', company);
+        const { error } = await db.from('hr_roster_drafts').delete().eq('month', month).eq('grp', group).eq('company', company).eq('name', name);
         if (error) throw error;
         return res.status(200).json({ success: true });
       }
       if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload) || JSON.stringify(body.payload).length > 400000) throw fail(400, 'This draft is too large to save.');
-      const { error } = await db.from('hr_roster_drafts').upsert({ month, grp: group, company, payload: body.payload, updated_by: text((user as any)?.email, 120), updated_at: new Date().toISOString() }, { onConflict: 'month,grp,company' });
+      const { error } = await db.from('hr_roster_drafts').upsert({ month, grp: group, company, name, payload: body.payload, updated_by: text((user as any)?.email, 120), updated_at: new Date().toISOString() }, { onConflict: 'month,grp,company,name' });
       if (error) throw fail(500, 'The draft could not be saved. Ask for the roster draft table to be set up.');
       return res.status(200).json({ success: true });
     }
