@@ -742,7 +742,8 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       if (day.status === 'missing-out') odd.push('No clock out');
       if (day.status === 'extra') odd.push('Clocked on a day off');
       if (['present', 'missing-out'].includes(day.status) && day.worked > 14 * 60) odd.push('More than 14 hours');
-      if (day.status === 'present' && day.worked > 0 && day.worked < 4 * 60) odd.push('Less than 4 hours');
+      // A short day on a day of approved leave (a half-day emergency leave, say) is explained by the leave.
+      if (day.status === 'present' && day.worked > 0 && day.worked < 4 * 60 && !day.leave) odd.push('Less than 4 hours');
       if (day.lateCounted > 0) soft.push('Late');
       if (day.earlyCounted > 0) soft.push('Early out');
       if (day.status === 'clock-pending') soft.push('Clock correction pending');

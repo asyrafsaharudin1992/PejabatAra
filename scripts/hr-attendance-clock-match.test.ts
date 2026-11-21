@@ -97,3 +97,11 @@ console.log('Leave with a lone clock in tests passed.');
   assert.equal(build2([decision('2026-10-29', plain.otCounted)])[0].otStatus, 'approved', 'a decision on the day itself is used as before');
 }
 console.log('OT decided on the next day tests passed.');
+
+// A short day on a day of approved leave keeps its leave type on the day (the odd-days list does not flag it as Less than 4 hours).
+{
+  const short = buildDaysFrom({ ...data, clocks: [clock('in', '2026-11-10', '20:55'), clock('out', '2026-11-11', '00:30')], leave: [{ employee_id: 'a', start_date: '2026-11-10', end_date: '2026-11-10', leave_type: 'EL' }] }, [person], '2026-11-10', '2026-11-10', rules).get('a')![0];
+  assert.equal(short.leave, 'EL');
+  assert.equal(short.status, 'present');
+}
+console.log('Short day on leave check passed.');
