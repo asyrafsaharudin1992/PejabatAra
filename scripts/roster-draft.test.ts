@@ -201,3 +201,21 @@ console.log('Locum nights tests passed.');
   assert.ok(generateRosterDraft({ ...base2, rules: [custom({ condition: 'never', enforce: 'block', person_a: 'C1', shifts: ['WED', 'PM'] })] }).blocked, 'a blocking custom rule stops the export');
 }
 console.log('Custom rule tests passed.');
+
+// Finishing the last week: 31 December 2026 is a Thursday, so 1 to 3 January are drafted too (not the whole of January).
+{
+  const x1: DraftPerson = { id: 'w1', company: 'KJ', code: 'W1', name: 'Doctor W1', designation: 'DOCTOR' };
+  const input = { month: '2026-12', people: [x1], patterns: { w1: { enabled: true, anchor: '2026-12-07', cycle: 'AM, AM, AM, AM, AM, OFF, OFF', doctorMode: 'sample' as const } }, existing: [], leave: [], requests: [], locks: {}, preserve: false, minDay: 0, minNight: 0 };
+  const plain = generateRosterDraft(input), full = generateRosterDraft({ ...input, completeWeek: true });
+  assert.equal(plain.cells.length, 31);
+  assert.deepEqual(full.cells.map((c) => c.date).slice(-4), ['2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03']);
+  assert.equal(full.cells.length, 34);
+  assert.equal(full.cells.find((c) => c.date === '2027-01-01')!.shift, 'AM', 'the pattern carries on');
+  assert.equal(full.cells.find((c) => c.date === '2027-01-02')!.shift, 'OFF');
+  const jan = generateRosterDraft({ ...input, completeWeek: true, rules: [{ kind: 'custom' as const, condition: 'never' as const, person_a: null, person_b: null, shifts: ['FRI', 'AM'], amount: null, company: null, scope: 'all' as const, enforce: 'warn' as const, active: true, note: '' }] });
+  assert.ok(jan.warnings.some((w) => w.includes('2027-01-01')), 'rules apply to the days that finish the week');
+  const sun = generateRosterDraft({ ...input, month: '2026-11', patterns: { w1: { ...input.patterns.w1, anchor: '2026-11-02' } }, completeWeek: true });
+  assert.equal(sun.cells.length, 36, '30 November 2026 is a Monday, so 1 to 6 December finish the week');
+  assert.equal(generateRosterDraft({ ...input, month: '2027-01', patterns: { w1: { ...input.patterns.w1, anchor: '2027-01-04' } }, completeWeek: true }).cells.length, 31, 'January 2027 ends on a Sunday: nothing is added');
+}
+console.log('Finish the week tests passed.');

@@ -12,6 +12,8 @@ export const draftShifts = ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', '
 export const patternShifts = draftShifts.filter((s) => ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM', 'OFF', 'REST'].includes(s));
 export const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export const monthDates = (month: string) => Array.from({ length: new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).getUTCDate() }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+// The days after the month that complete its last week, up to Sunday (for December 2026: 1, 2 and 3 January).
+export const tailDays = (month: string) => { const all = monthDates(month), last = all[all.length - 1]; const count = (7 - new Date(`${last}T00:00:00Z`).getUTCDay()) % 7; return Array.from({ length: count }, (_, i) => addDays(last, i + 1)); };
 export const cellKey = (id: string, date: string) => `${id}|${date}`;
 export const cycleCodes = (cycle: string) => cycle.toUpperCase().split(/[\s,;]+/).filter(Boolean).map(newCode);
 export const workingShift = (shift: string) => ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM'].includes(newCode(shift));
@@ -58,12 +60,13 @@ export const DEFAULT_ROSTER_RULES: RosterRule[] = [
   { kind: 'no_day_after_night', person_a: null, person_b: null, shifts: [], amount: null, company: null, scope: 'all', enforce: 'warn', active: true, note: 'Recovery after a night shift' },
   { kind: 'max_consecutive', person_a: null, person_b: null, shifts: [], amount: 6, company: null, scope: 'all', enforce: 'warn', active: true, note: '' },
 ];
-function generateRosterCore(input: { auto?: Record<string, string>; rules?: RosterRule[]; month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
+function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<string, string>; rules?: RosterRule[]; month: string; people: DraftPerson[]; patterns: Record<string, Pattern>; existing: DraftDay[]; leave: DraftLeave[]; requests: DraftRequest[]; locks: Record<string, string>; preserve: boolean; minDay: number; minNight: number }) {
   const { month, people, patterns, existing, leave, requests, locks, preserve } = input;
   // Minimum cover comes from the rules when HR has set them (AM = day cover, PM = night cover); otherwise from the two numbers given.
   const coverRule = (shift: string, fallback: number) => { const found = (input.rules ?? []).filter((r) => r.active && r.kind === 'min_cover' && r.shifts[0] === shift && r.amount != null); return found.length ? Math.max(...found.map((r) => r.amount!)) : fallback; };
   const minDay = coverRule('AM', input.minDay), minNight = coverRule('PM', input.minNight);
-  const dates = monthDates(month), cells: DraftCell[] = [], warnings: string[] = [], locum: { company: string; date: string; shift: 'AM' | 'PM' | 'OH'; missing: number }[] = [];
+  // With completeWeek the draft also covers the days after the month that finish its last week, so those days follow the same pattern and rules.
+  const dates = [...monthDates(month), ...(input.completeWeek ? tailDays(month) : [])], cells: DraftCell[] = [], warnings: string[] = [], locum: { company: string; date: string; shift: 'AM' | 'PM' | 'OH'; missing: number }[] = [];
   // Weekdays whose night shift is left for a locum (the "locum nights" rules that apply to this person).
   const locumDays = (person: DraftPerson) => [...new Set((input.rules ?? DEFAULT_ROSTER_RULES).filter((r) => r.active && r.kind === 'locum_nights' && locumRuleSlots(r).includes('PM') && (!r.company || r.company === person.company) && (!r.person_a || r.person_a === person.code) && (r.scope === 'all' || (r.scope === 'doctors') === isDraftDoctor(person))).flatMap((r) => locumRuleDays(r)).filter((day) => day >= 1 && day <= 5))];
   const countsDay = (id: string, shift: string) => { const person = people.find((p) => p.id === id); return person && isDraftDoctor(person) ? shift === 'AM' : dayShift(shift); };
@@ -227,7 +230,7 @@ export function generateRosterDraft(input: Parameters<typeof generateRosterCore>
   let auto: Record<string, string> = {};
   let best = generateRosterCore({ ...input, auto });
   if (!input.autoFix || !best.score) return best;
-  const monthDays = monthDates(input.month), enabled = input.people.filter((p) => input.patterns[p.id]?.enabled);
+  const monthDays = [...monthDates(input.month), ...(input.completeWeek ? tailDays(input.month) : [])], enabled = input.people.filter((p) => input.patterns[p.id]?.enabled);
   const weekOf = (date: string) => { const start = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7)); return Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter((d) => monthDays.includes(d)); };
   let tries = 0, sideways = 0;
   const visited = new Set<string>([JSON.stringify(auto)]);
