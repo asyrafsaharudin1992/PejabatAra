@@ -219,7 +219,8 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
       if (clockIn) day.inAt = new Date(clockIn.at).toISOString();
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
-      if (leaveRow && !clockIn) { push({ ...day, status: 'leave' }); continue; }
+      // A day of approved leave is not odd. If the person clocked in and then took the leave (no clock out), it is still a leave day, not a missing clock out.
+      if (leaveRow && (!clockIn || !clockOut)) { push({ ...day, status: 'leave' }); continue; }
       // Management do not clock: their working days count as present.
       // They may still clock: a clock in/out is shown and the hours are recorded, but nothing is counted against them (no late, early or OT).
       if (required === 'none') {

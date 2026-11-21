@@ -71,3 +71,12 @@ assert.equal(response.duplicate, true);
 assert.equal(stored.length, 1);
 assert.equal(audits, 1);
 console.log('Early OT, dated HR clocks, approved corrections and consecutive night-shift checks passed.');
+
+// Leave with a lone clock in (came in, then went on leave) is a leave day, not a missing clock out.
+{
+  const leaveDay = (clocks: any[]) => buildDaysFrom({ ...data, clocks, leave: [{ employee_id: 'a', start_date: '2026-11-10', end_date: '2026-11-11', leave_type: 'ML' }] }, [person], '2026-11-10', '2026-11-11', rules).get('a')![0];
+  assert.equal(leaveDay([clock('in', '2026-11-10', '20:55')]).status, 'leave');
+  assert.equal(leaveDay([]).status, 'leave');
+  assert.equal(leaveDay([clock('in', '2026-11-10', '20:55'), clock('out', '2026-11-11', '09:05')]).status, 'present', 'a whole shift worked on a leave day still counts as worked');
+}
+console.log('Leave with a lone clock in tests passed.');
