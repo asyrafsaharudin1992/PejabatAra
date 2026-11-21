@@ -42,9 +42,13 @@ function DayFix({ day, staffId, name, onChanged, onError, onSaved }: { day: Day;
 function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, onStaff, onFilter, onChanged, onError }: FollowUpProps) {
   const [fixing, setFixing] = useState(''); // the row whose clocks are open for editing
   const [saved, setSaved] = useState('');
+  const [issue, setIssue] = useState('all'); // what is wrong with the day: Absent, No clock out, Late ...
   // Settled days remain in this box even after approved clock corrections remove their odd-day flag.
   const allRows = blocks.flatMap(({ person, days }) => days.filter((day) => day.odd.length || day.soft.length || day.followUp?.ot.length || day.followUp?.missed.length || day.followUp?.credit.length || day.followUp?.otDecision).map((day) => ({ person, day, resolution: attendanceFollowUpStatus(day) }))).sort((a, b) => b.day.date.localeCompare(a.day.date) || a.person.name.localeCompare(b.person.name));
-  const rows = allRows.filter((row) => filter === 'all' || row.resolution === filter);
+  const flagsOf = (row: { day: { odd: string[]; soft: string[] } }) => [...row.day.odd, ...row.day.soft];
+  const issues = [...new Set(allRows.flatMap(flagsOf))].sort();
+  const issueCount = (name: string) => allRows.filter((row) => flagsOf(row).includes(name) && (filter === 'all' || row.resolution === filter)).length;
+  const rows = allRows.filter((row) => (filter === 'all' || row.resolution === filter) && (issue === 'all' || flagsOf(row).includes(issue)));
   const total = (status: string) => allRows.filter((row) => row.resolution === status).length;
   const noRequest = <span className="text-slate-400">Not applied</span>;
   const status = (value: string, missed = false) => <span className={`inline-block rounded-lg px-2 py-1 text-xs font-semibold ${value === 'approved' ? 'bg-emerald-50 text-emerald-700' : value === 'rejected' || value === 'cancelled' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800'}`}>{attendanceRequestLabel(value, missed)}</span>;
@@ -53,6 +57,7 @@ function OddDaysFollowUp({ blocks, company, staffId, staff, filter, onCompany, o
     <p className="mt-1 text-sm text-slate-500">OT, forgotten-clock requests and credit hours for the selected staff and period. Settled requests stay listed after the clock is corrected. Credit hours show recorded use.</p>
     <div className="mt-4 flex flex-wrap items-end gap-3">
       <label className="text-xs font-semibold text-slate-600">Status<select aria-label="Follow-up status" value={filter} onChange={(event) => onFilter(event.target.value as FollowUpFilter)} className={`${field} mt-1 block`}><option value="all">All statuses ({allRows.length})</option><option value="awaiting">Awaiting approval ({total('awaiting')})</option><option value="unresolved">Unresolved ({total('unresolved')})</option><option value="settled">Settled ({total('settled')})</option></select></label>
+      <label className="text-xs font-semibold text-slate-600">Issue<select aria-label="Follow-up issue" value={issue} onChange={(event) => setIssue(event.target.value)} className={`${field} mt-1 block`}><option value="all">All issues</option>{issues.map((name) => <option key={name} value={name}>{name} ({issueCount(name)})</option>)}</select></label>
       <label className="text-xs font-semibold text-slate-600">Branch<select aria-label="Follow-up branch" value={company} onChange={(event) => onCompany(event.target.value)} className={`${field} mt-1 block`}><option value="">All branches</option><option value="KJ">KJ · Kajang</option><option value="SK">SK · Seri Kembangan</option></select></label>
       <label className="text-xs font-semibold text-slate-600">Staff<select aria-label="Follow-up staff" value={staffId} onChange={(event) => onStaff(event.target.value)} className={`${field} mt-1 block max-w-full sm:max-w-[320px]`}><option value="">All staff</option>{staff.filter((person) => !company || person.company === company).map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select></label>
       <p className="pb-2 text-xs text-slate-500" role="status">Showing {rows.length} of {allRows.length} days</p>

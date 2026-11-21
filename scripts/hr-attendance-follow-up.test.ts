@@ -43,3 +43,4 @@ console.log('Attendance follow-up status and request grouping checks passed.');
   assert.equal(attendanceFollowUpStatus(covered), 'settled');
 }
 console.log('Covered OT follow-up check passed.');
+
