@@ -17,8 +17,8 @@ function guess(name: string, people: Candidate[]): string {
   return '';
 }
 
-export function RosterPdfImport({ fileName, result, api, fixedCompany, onClose, onDone, onError }: {
-  fileName: string; result: RosterPdfResult; api: (query: string, body?: unknown) => Promise<any>; fixedCompany: string;
+export function RosterPdfImport({ fileName, result, api, fixedCompany, source = 'pdf', onClose, onDone, onError }: {
+  fileName: string; source?: 'pdf' | 'text'; result: RosterPdfResult; api: (query: string, body?: unknown) => Promise<any>; fixedCompany: string;
   onClose: () => void; onDone: (message: string) => void; onError: (message: string) => void;
 }) {
   const [people, setPeople] = useState<Candidate[] | null>(null);
@@ -43,18 +43,18 @@ export function RosterPdfImport({ fileName, result, api, fixedCompany, onClose, 
     try {
       const code = (id: string) => here.find((p) => p.id === id)?.code || '';
       const rows = ready.flatMap((column) => column.days.map((day) => ({ company, code: code(chosen[column.name]), date: day.date, shift: day.shift })));
-      const response = await api('action=roster_import', { rows, source: 'pdf' });
+      const response = await api('action=roster_import', { rows, source });
       if (response.error) throw new Error(response.error);
       let notesNote = '';
       if (keepNotes) { try { const saved = await api('action=roster_notes_save', { company, month: result.month, request: notes.request, remarks: notes.remarks }); if (saved.error) throw new Error(saved.error); notesNote = ` The notes for ${monthLabel} were saved.`; } catch (cause) { notesNote = ` The roster was imported, but the notes were not saved: ${cause instanceof Error ? cause.message : 'unknown error'}.`; } }
-      onDone((response.saved ? `Roster PDF imported: ${response.added} new day${response.added === 1 ? '' : 's'}, ${response.changed} changed, ${response.same} already the same.${response.changed ? ' The changed days are in the change log below.' : ''}` : `Nothing to change: all ${response.same} days in the PDF are already in the roster.`) + notesNote);
+      onDone((response.saved ? `${source === 'text' ? 'Pasted schedule' : 'Roster PDF'} imported: ${response.added} new day${response.added === 1 ? '' : 's'}, ${response.changed} changed, ${response.same} already the same.${response.changed ? ' The changed days are in the change log below.' : ''}` : `Nothing to change: all ${response.same} days in the schedule are already in the roster.`) + notesNote);
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to import the roster.'); }
     setSaving(false);
   };
 
   return <section aria-label="Roster PDF" className="space-y-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
     <div className="flex items-start justify-between gap-3">
-      <div><h3 className="text-base font-semibold text-[#14233b]">Check the roster PDF before importing</h3>
+      <div><h3 className="text-base font-semibold text-[#14233b]">{source === 'text' ? 'Check the pasted schedule before importing' : 'Check the roster PDF before importing'}</h3>
         <p className="text-sm text-slate-600">{fileName} · {result.columns.length} columns · {dates.length ? `${dmy(dates[0])} to ${dmy(dates[dates.length - 1])}` : ''}. Nothing is saved until you press Import.</p></div>
       <button type="button" aria-label="Close" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button>
     </div>
@@ -74,7 +74,7 @@ export function RosterPdfImport({ fileName, result, api, fixedCompany, onClose, 
       <label className="block text-xs font-semibold text-slate-600">Remarks<textarea rows={Math.max(2, notes.remarks.split('\n').length)} value={notes.remarks} onChange={(event) => setNotes({ ...notes, remarks: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" /></label></>}
     </div>}
     {twice && <p role="alert" className="text-sm font-semibold text-rose-700">Two columns point to the same person. Change one of them.</p>}
-    <p className="text-xs text-slate-500">Codes like OFF* (a request) are saved as OFF, and AM-9 (AL) as AL. A blank cell (black on the sheet) saves nothing, so that person's usual working week applies. Existing days are only changed where the PDF says something different, and each change goes into the change log.</p>
+    <p className="text-xs text-slate-500">Codes like OFF* (a request) are saved as OFF, and AM-9 (AL) as AL. AL on the roster is only a marker: it does not use up any annual leave, which still follows the leave application as usual. A blank cell (black on the sheet) saves nothing, so that person's usual working week applies. Existing days are only changed where the PDF says something different, and each change goes into the change log.</p>
     <div className="flex flex-wrap justify-end gap-2">
       <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Cancel</button>
       <button type="button" onClick={() => void save()} disabled={saving || !days || twice} className="min-h-11 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Importing…' : `Import ${days} day${days === 1 ? '' : 's'} for ${ready.length} staff`}</button>

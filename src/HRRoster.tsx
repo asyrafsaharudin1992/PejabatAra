@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Upload, Printer } from 'lucide-react';
 import { RosterPdfImport } from './RosterPdfImport';
 import { RosterNotesBox } from './RosterNotesBox';
 import { noteLines, type RosterNotes } from './lib/rosterNotes';
+import { parseRosterText } from './lib/rosterTextRead';
 import { readRosterPdf, type RosterPdfResult } from './lib/rosterPdfRead';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
@@ -71,7 +72,7 @@ function parseCsv(text: string) {
 // What each code on the roster means. The KJ names are the standard for staff; doctors use AM, PM and OH.
 const STAFF_CODES: [string, string][] = [['AM-9', '9AM – 9PM'], ['AM-12', '12PM – 9PM'], ['PM', '9PM – 9AM (night)'], ['AM-6', '9AM – 6PM'], ['AM-5', 'Office hours, 8AM – 5PM'], ['OFF', 'Off day'], ['REST', 'Rest day']];
 const DOCTOR_CODES: [string, string][] = [['AM', 'Day shift'], ['PM', 'Night shift'], ['OH', 'Office hours, 9AM – 6PM'], ['OFF', 'Off day'], ['AL', 'Annual leave']];
-const OTHER_CODES: [string, string][] = [['PH', 'Public holiday (admin staff)'], ['NA', 'Not working yet / not applicable'], ['RESIGN', 'Resigned (no schedule after)'], ['AL', 'Annual leave already taken'], ['UPL', 'Unpaid leave already taken'], ['MC', 'Medical leave already taken']];
+const OTHER_CODES: [string, string][] = [['PH', 'Public holiday (admin staff)'], ['NA', 'Not working yet / not applicable'], ['RESIGN', 'Resigned (no schedule after)'], ['AL', 'Annual leave (a plan on the roster only; leave taken still follows the leave application)'], ['UPL', 'Unpaid leave already taken'], ['MC', 'Medical leave already taken']];
 const OLD_CODES: [string, string][] = [['ASCL1', 'AM-9 (9AM – 9PM)'], ['ASCL2', 'AM-12 (12PM – 9PM)'], ['ASCL3', 'PM (9PM – 9AM, night)'], ['ASCL4', 'AM-6 (9AM – 6PM)'], ['MNG1', 'AM-5 (Pembantu Tadbir, 8AM – 5PM)'], ['MNG2', 'AM-6 (Pembantu Tadbir, 9AM – 6PM)'], ['KJADMN', 'AM-5 (Admin Klinikal KJ, 8AM – 5PM)'], ['OD', 'OFF (off day)'], ['RD', 'REST (rest day)'], ['DOCRSD', 'AM (doctor day shift)'], ['DOCRS2', 'PM (doctor night shift)'], ['DR96', 'OH (doctor office hours)']];
 
 const MONDAY_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -125,7 +126,9 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     for (const place of company ? [company] : ['KJ', 'SK']) { try { const result = await api(`action=roster_notes&company=${place}&month=${month}`); if (result.request || result.remarks) found[place] = { request: result.request || '', remarks: result.remarks || '' }; } catch { /* no access to the notes of that clinic: print without them */ } }
     setPrintNotes(found); setPrinting(true);
   };
-  const [pdfImport, setPdfImport] = useState<{ fileName: string; result: RosterPdfResult } | null>(null);
+  const [pdfImport, setPdfImport] = useState<{ fileName: string; result: RosterPdfResult; source?: 'pdf' | 'text' } | null>(null);
+  const [pasting, setPasting] = useState(false), [pasted, setPasted] = useState('');
+  const readPasted = () => { const result = parseRosterText(pasted); if (!result.columns.length) { onError('No days found. Write the name, then one line per day, for example: Mon- 23/11/2026 - 9am-9pm'); return; } onError(''); setNotice(''); setPdfImport({ fileName: 'Pasted schedule', result, source: 'text' }); setPasting(false); setPasted(''); };
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
@@ -207,6 +210,7 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
           {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-1 text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}
         </div>
         <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-9 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => void startPrint()} className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+        {(!readOnly || canEdit) && <button type="button" onClick={() => setPasting((open) => !open)} className="h-10 rounded-xl border border-[#0b587b]/30 bg-white px-4 text-sm font-semibold text-[#0b587b] hover:bg-sky-50">Key in schedule</button>}
         {(!readOnly || canEdit) && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster (CSV or PDF)<input type="file" accept=".csv,text/csv,.pdf,application/pdf" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 pt-3 sm:gap-x-5 sm:gap-y-3 sm:pt-4">
@@ -220,7 +224,13 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
     {warning && <p role="alert" className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700"><span>{warning}</span><button type="button" onClick={() => setWarning('')} className="text-xs underline">Close</button></p>}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
-    {pdfImport && <RosterPdfImport fileName={pdfImport.fileName} result={pdfImport.result} api={api} fixedCompany={readOnly && canEdit ? data?.edit?.company || '' : ''} onClose={() => setPdfImport(null)} onError={onError} onDone={(message) => { setPdfImport(null); setNotice(message); load(); setNotesReload((n) => n + 1); }} />}
+    {pasting && <section aria-label="Key in schedule" className="space-y-2 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+      <p className="text-sm font-semibold text-[#14233b]">Key in a schedule (for a staff who joins in the middle of the month)</p>
+      <p className="text-xs text-slate-600">Paste or type the name, then one line per day. Nothing is saved until you have checked it on the next screen.</p>
+      <textarea rows={9} value={pasted} onChange={(event) => setPasted(event.target.value)} placeholder={'Qasdina\nMon- 23/11/2026 - 9am-9pm\nTue- 24/11/2026 - 9am-9pm\nWed- 25/11/2026 - OFF\nSun- 29/11/2026 - REST'} className="w-full rounded-xl border border-slate-200 bg-white p-3 font-mono text-sm" />
+      <div className="flex justify-end gap-2"><button type="button" onClick={() => { setPasting(false); setPasted(''); }} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Cancel</button><button type="button" disabled={!pasted.trim()} onClick={readPasted} className="min-h-10 rounded-xl bg-[#0b587b] px-5 text-sm font-semibold text-white disabled:opacity-50">Read schedule</button></div>
+    </section>}
+    {pdfImport && <RosterPdfImport fileName={pdfImport.fileName} source={pdfImport.source} result={pdfImport.result} api={api} fixedCompany={readOnly && canEdit ? data?.edit?.company || '' : ''} onClose={() => setPdfImport(null)} onError={onError} onDone={(message) => { setPdfImport(null); setNotice(message); load(); setNotesReload((n) => n + 1); }} />}
     {!(readOnly && !canEdit) && <RosterNotesBox api={api} month={month} monthLabel={monthName(month)} fixedCompany={readOnly && canEdit ? data?.edit?.company || '' : ''} defaultCompany={company} reload={notesReload} onError={onError} />}
     {group !== 'doctors' && <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500"><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-emerald-500" />Permanent</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-violet-500" />Probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-amber-500" />Extended probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-rose-500" />Pending resign</span></p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}

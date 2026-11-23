@@ -421,8 +421,8 @@ const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid
 const DIRECTOR_CAN_READ = /^(charts$|headcount$|org_chart$|photo_urls$|payroll_trend$)/;
 const DIRECTOR_OFFICES = ['ceo', 'coo', 'procurement', 'finance'];
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
-// Clinical Admin may only look at the duty roster (read only).
-const CLINICAL_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes']);
+// Clinical Admin may only look at the duty roster and the changes made to it (its own branch's changes only).
+const CLINICAL_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log']);
 // The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
 const CLINICAL_CAN_WRITE = new Set(['roster_set', 'roster_import', 'roster_notes_save']);
 const CLINICAL_ROSTER_STAFF = /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i;
@@ -1977,7 +1977,7 @@ export async function hrHandler(req: any, res: any) {
       const perPerson = new Map<string, Record<string, unknown>>();
       for (const item of changed) perPerson.set(item.employee_id, { ...(perPerson.get(item.employee_id) || {}), [`roster_${item.date}`]: [item.from, item.to] });
       if (perPerson.size) {
-        const { error: auditError } = await db.from('hr_audit').insert([...perPerson].map(([employee_id, days]) => ({ employee_id, action: 'roster', changes: { ...days, roster_reason: ['', body.source === 'pdf' ? 'PDF upload' : 'CSV upload'] }, changed_by: user.id })));
+        const { error: auditError } = await db.from('hr_audit').insert([...perPerson].map(([employee_id, days]) => ({ employee_id, action: 'roster', changes: { ...days, roster_reason: ['', body.source === 'pdf' ? 'PDF upload' : body.source === 'text' ? 'Pasted schedule' : 'CSV upload'] }, changed_by: user.id })));
         if (auditError) throw auditError;
       }
       return res.status(200).json({ success: true, saved: toSave.length, added: toSave.length - changed.length, changed: changed.length, same });
@@ -2742,7 +2742,10 @@ export async function hrHandler(req: any, res: any) {
       ]);
       const who = new Map((people || []).map((p: any) => [p.id, p])), by = new Map((users || []).map((u: any) => [u.id, u.full_name]));
       const log = rows.flatMap((row: any) => Object.keys(row.changes).filter((key) => key.startsWith(`roster_${month}`)).map((key) => { const [from, to] = row.changes[key] || ['', '']; const p: any = who.get(row.employee_id); return { at: row.changed_at, by: by.get(row.changed_by) || '', name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', date: key.slice(7), from, to, reason: row.changes.roster_reason?.[1] || '' }; }));
-      return res.status(200).json({ log: log.sort((a: any, b: any) => String(b.at).localeCompare(String(a.at)) || a.date.localeCompare(b.date)).slice(0, 300) });
+      // HR sees every change; a Clinical Admin account sees only the changes made to its own branch's staff.
+      const logCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
+      const visible = logCompany || !(profile.role === 'super_admin' || access.includes('hr')) ? log.filter((item: any) => item.company === logCompany) : log;
+      return res.status(200).json({ log: visible.sort((a: any, b: any) => String(b.at).localeCompare(String(a.at)) || a.date.localeCompare(b.date)).slice(0, 300) });
     }
 
     // Creates the staff member's individual sign-in from their HR profile and links it: they sign in with the short name given here, their

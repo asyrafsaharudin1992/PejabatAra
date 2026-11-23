@@ -24,7 +24,7 @@ export function RosterNotesBox({ api, month, monthLabel, fixedCompany, defaultCo
     catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save the notes.'); }
     setBusy(false);
   };
-  return <details className="rounded-2xl border border-slate-200 bg-white p-4" open={Boolean(notes && (notes.request || notes.remarks))}>
+  return <details className="rounded-2xl border border-slate-200 bg-white p-4">
     <summary className="cursor-pointer text-sm font-semibold text-[#14233b]">Roster notes · {monthLabel}{notes && (notes.request || notes.remarks) ? ' · has notes' : ''}</summary>
     <div className="mt-3 space-y-3">
       <p className="text-xs text-slate-500">Printed beside the roster (Reports and Print). Request staff is for days off staff asked for before they apply for leave; approved leave from AraOffice is added automatically, without repeating a name written here.</p>
