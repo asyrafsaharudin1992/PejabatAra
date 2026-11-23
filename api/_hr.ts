@@ -433,11 +433,13 @@ const guestDays = (guest: (typeof GUEST_DOCTORS)[number], start: string, end: st
 };
 // The COO may look at the HR Attendance pages (all staff), read only: every write there stays HR.
 const COO_ATTENDANCE_READ = /^attendance_(requests|late_days|late_pattern|credit_hours_list|credit_hours_report|credit_hours_entries|credit_info|places|people|rules|ot_policy)$/;
-const COO_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
+const COO_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log', 'calendar_projection', 'roster_draft_context', 'roster_draft_load', 'roster_rules', 'org_chart']);
 // Clinical Admin may only look at the duty roster and the changes made to it (its own branch's changes only).
 const CLINICAL_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log']);
 // The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
 const CLINICAL_CAN_WRITE = new Set(['roster_set', 'roster_import', 'roster_notes_save']);
+// The COO also keeps roster drafts (Pattern draft > Save draft), shared with HR.
+const COO_CAN_WRITE = new Set([...CLINICAL_CAN_WRITE, 'roster_draft_save', 'roster_draft_delete']);
 const CLINICAL_ROSTER_STAFF = /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i;
 // A Clinical Admin account belongs to one branch (its primary branch: Kajang is KJ, Seri Kembangan is SK) and changes only that branch's roster.
 async function clinicalCompany(db: any, userId: string): Promise<string> {
@@ -538,7 +540,7 @@ export async function hrHandler(req: any, res: any) {
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     const financeOnly = profile.role !== 'super_admin' && !access.includes('hr') && access.includes('finance');
     if (financeOnly) { if (!(req.method === 'GET' ? FINANCE_CAN_READ.test(action) : FINANCE_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.'); }
-    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && DIRECTOR_OFFICES.some((office) => access.includes(office)) && DIRECTOR_CAN_READ.test(action)) && !(req.method === 'GET' && ((access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action) || (access.includes('coo') && COO_ATTENDANCE_READ.test(action)))) && !(req.method === 'POST' && (access.includes('clinical') || access.includes('coo')) && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
+    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && DIRECTOR_OFFICES.some((office) => access.includes(office)) && DIRECTOR_CAN_READ.test(action)) && !(req.method === 'GET' && ((access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action) || (access.includes('coo') && COO_ATTENDANCE_READ.test(action)))) && !(req.method === 'POST' && ((access.includes('clinical') && CLINICAL_CAN_WRITE.has(action)) || (access.includes('coo') && COO_CAN_WRITE.has(action))))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 

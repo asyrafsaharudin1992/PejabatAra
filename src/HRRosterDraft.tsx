@@ -145,7 +145,7 @@ export function HRRosterDraft({ initialMonth, group, company, onClose, hideCodes
     try {
       await draftPost('roster_draft_save', { name, payload: { patterns, requests, locks, preserve, autoFix, minDay, minNight, sheetStyles, source, length, scope, completeWeek, locumPH, locumExtra } });
       setSaveMessage(`${name} saved at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}. Open it later from the saved drafts list.`); setSaveName(''); void fetchSaved(`${company}|${name}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save the draft.'); }
+    } catch (cause) { const message = cause instanceof Error ? cause.message : 'Unable to save the draft.'; setError(message); setSaveMessage(`Not saved: ${message}`); }
   };
   // Puts a saved draft's settings, requests, edits, locum dates, text and colours back on the screen.
   const applySaved = (d: any, known: Set<string>) => {
