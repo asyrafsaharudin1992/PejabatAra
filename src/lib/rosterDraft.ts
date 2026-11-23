@@ -19,6 +19,8 @@ export const cycleCodes = (cycle: string) => cycle.toUpperCase().split(/[\s,;]+/
 export const workingShift = (shift: string) => ['AM', 'AM-9', 'AM-12', 'AM-6', 'AM-5', 'OH', 'PM'].includes(newCode(shift));
 export const dayShift = (shift: string) => workingShift(shift) && newCode(shift) !== 'PM';
 export const isDraftDoctor = (person: DraftPerson) => /\b(DR|DOCTOR)\b/i.test(person.designation);
+// Doctors with a fixed weekly pattern: KJ doctors may be on the AM / PM rotation or fixed OH (Mon-Fri); an SK doctor can be on fixed OH (Mon-Fri) too (Dr Ezza, like Dr Hanis).
+export const weeklyDoctorMode = (person: DraftPerson, mode?: string) => isDraftDoctor(person) && (person.company === 'KJ' ? ['rotation', 'office'] : ['office']).includes(mode || '');
 const monday = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7));
 export const WEEKDAY_CODES: Record<string, number> = { MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5 };
 export const DAY_CODES: Record<string, number> = { ...WEEKDAY_CODES, SAT: 6, SUN: 0 };
@@ -78,7 +80,7 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
   for (const person of people) {
     const pattern = patterns[person.id]; if (!pattern?.enabled) continue;
     const cycle = cycleCodes(pattern.cycle);
-    const weekly = person.company === 'KJ' && isDraftDoctor(person) && ['rotation', 'office'].includes(pattern.doctorMode || '');
+    const weekly = weeklyDoctorMode(person, pattern.doctorMode);
     if (weekly && pattern.doctorMode === 'rotation' && (!preferredNights(pattern).length && ![0, 1, 2, 3, 4, 5].includes(pattern.weekdayOff!) || !(pattern.nightWeeks || '').split(',').every((v) => ['1', '2'].includes(v.trim())) || (pattern.nightWeeks || '').split(',').length > 8)) throw new Error(`Set a weekday OFF and a weekly night sequence of 1 or 2 for ${person.name}.`);
     if (/\b(DR|DOCTOR)\b/i.test(person.designation) && cycle.some((s) => ['AM-9', 'AM-12', 'AM-6', 'AM-5'].includes(s))) throw new Error(`Use AM, PM or OH for doctor ${person.name}.`);
     if ((!weekly && (!cycle.length || cycle.length > 28 || cycle.some((s) => !patternShifts.includes(s)))) || !/^\d{4}-\d{2}-\d{2}$/.test(pattern.anchor) || (!Number.isFinite(Date.parse(`${pattern.anchor}T00:00:00Z`)) || new Date(`${pattern.anchor}T00:00:00Z`).toISOString().slice(0, 10) !== pattern.anchor)) throw new Error(`Check pattern for ${person.name}: use 1–28 working/OFF/REST shift codes and a start date; leave and holidays must not repeat.`);
@@ -114,7 +116,7 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
     const shift = newCode(request.shift);
     if (!draftShifts.includes(shift)) throw new Error('Select a valid request shift.');
     const doctorPattern = patterns[person.id];
-    if (person.company === 'KJ' && isDraftDoctor(person) && ['rotation', 'office'].includes(doctorPattern?.doctorMode || '')) {
+    if (weeklyDoctorMode(person, doctorPattern?.doctorMode)) {
       const weekend = [0, 6].includes(new Date(`${cell.date}T00:00:00Z`).getUTCDay());
       if (weekend && shift !== 'OFF' || doctorPattern.doctorMode === 'office' && ['AM', 'PM'].includes(shift) || doctorPattern.doctorMode === 'rotation' && shift === 'OH') { warnings.push(`${request.date} · ${person.name}: request ${shift} conflicts with the fixed doctor rules.`); continue; }
     }
@@ -127,9 +129,9 @@ function generateRosterCore(input: { completeWeek?: boolean; auto?: Record<strin
     }
     cell.shift = shift; cell.source = 'request'; cell.locked = request.required;
   }
-  for (const person of people.filter((p) => p.company === 'KJ' && isDraftDoctor(p) && patterns[p.id]?.enabled)) {
+  for (const person of people.filter((p) => isDraftDoctor(p) && patterns[p.id]?.enabled)) {
     const pattern = patterns[person.id];
-    if (!['rotation', 'office'].includes(pattern.doctorMode || '')) continue;
+    if (!weeklyDoctorMode(person, pattern.doctorMode)) continue;
     for (const cell of cells.filter((c) => c.id === person.id)) {
       if (pattern.doctorMode === 'rotation' && preferredNights(pattern).length > 0 && (cell.shift === 'PM' || doctorWeeklyShift(pattern, cell.date, locumDays(person)) === 'PM') && cell.shift !== doctorWeeklyShift(pattern, cell.date, locumDays(person))) warnings.push(`${cell.date} · ${person.name}: leave, request or protected cell differs from the preferred night days (${preferredNights(pattern).map((d) => DAY_NAMES[d]).join(', ')}).`);
       // Weekends off and office-hours-only are rules HR can switch (Rules); a rotation doctor on OH is still blocked here.

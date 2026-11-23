@@ -420,6 +420,17 @@ const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid
 // The directors (CEO, COO, CPO, CHRO, CFO) all read the Charts: the figures, the head count, the 12-month payroll cost and the organisation chart (totals, never one person's pay).
 const DIRECTOR_CAN_READ = /^(charts$|headcount$|org_chart$|photo_urls$|payroll_trend$)/;
 const DIRECTOR_OFFICES = ['ceo', 'coo', 'procurement', 'finance'];
+// Locum doctors that appear on the doctor roster by name only: no HR profile, no pay, no leave. Their days come from a weekly pattern (weekday 0 Sunday ... 6 Saturday), from `from` on.
+// Dr Nabila (SK) is the locum on AM every Monday and Tuesday, as on the Jadual Residen SK sheet.
+const GUEST_DOCTORS = [{ id: 'guest-nabila', company: 'SK', code: 'LOCUM-NABILA', name: 'Nabila', designation: 'Locum Doctor', from: '2026-10-26', pattern: { 1: 'AM', 2: 'AM' } as Record<number, string> }];
+const guestDays = (guest: (typeof GUEST_DOCTORS)[number], start: string, end: string) => {
+  const days: { id: string; date: string; shift: string; works: boolean; note: string; auto: boolean }[] = [];
+  for (let date = start > guest.from ? start : guest.from; date <= end; date = new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) {
+    const shift = guest.pattern[new Date(`${date}T00:00:00Z`).getUTCDay()];
+    if (shift) days.push({ id: guest.id, date, shift, works: true, note: 'Locum doctor (name only)', auto: true });
+  }
+  return days;
+};
 // The COO may look at the HR Attendance pages (all staff), read only: every write there stays HR.
 const COO_ATTENDANCE_READ = /^attendance_(requests|late_days|late_pattern|credit_hours_list|credit_hours_report|credit_hours_entries|credit_info|places|people|rules|ot_policy)$/;
 const COO_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
@@ -1879,7 +1890,7 @@ export async function hrHandler(req: any, res: any) {
         if ((result.count || 0) > (result.data || []).length) throw fail(422, 'Roster trial exceeds its read limit. Choose one clinic to avoid incomplete results.');
       }
       const mapDays = (rows: any[]) => rows.map((r) => ({ id: r.employee_id, date: r.work_date, shift: r.shift }));
-      return res.status(200).json({ people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', holidayGroup: p.holiday_group || '' })), rulePeople: (everyone.data || []).filter((p: any) => (group === 'doctors') === /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => ({ code: p.employee_code, name: p.full_name, company: p.company })).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)), sourceDays: mapDays(sourceDays.data || []), targetDays: mapDays(targetDays.data || []), holidays: (holidays.error ? [] : holidays.data || []).map((h: any) => ({ group: h.group_code, date: h.holiday_date, name: h.name })), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
+      return res.status(200).json({ people: [...people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, designation: p.designation || '', holidayGroup: p.holiday_group || '' })), ...(group === 'doctors' ? GUEST_DOCTORS.map((g) => ({ id: g.id, company: g.company, code: g.code, name: g.name, designation: g.designation, holidayGroup: '' })) : [])], rulePeople: (everyone.data || []).filter((p: any) => (group === 'doctors') === /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => ({ code: p.employee_code, name: p.full_name, company: p.company })).sort((a: any, b: any) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)), sourceDays: [...mapDays(sourceDays.data || []), ...(group === 'doctors' ? GUEST_DOCTORS.flatMap((g) => guestDays(g, source, sourceEnd)) : [])], targetDays: [...mapDays(targetDays.data || []), ...(group === 'doctors' ? GUEST_DOCTORS.flatMap((g) => guestDays(g, before, afterEnd)) : [])], holidays: (holidays.error ? [] : holidays.data || []).map((h: any) => ({ group: h.group_code, date: h.holiday_date, name: h.name })), leave: (leave.data || []).map((r: any) => ({ id: r.employee_id, start: r.start_date, end: r.end_date, shift: r.leave_type, halfDay: Boolean(r.half_day) })) });
     }
     if (req.method === 'GET' && action === 'roster') {
       const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : '';
@@ -1925,7 +1936,7 @@ export async function hrHandler(req: any, res: any) {
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
       // Who may change what: HR changes everything; a Clinical Admin account only its own branch (`edit.company`).
       const editCompany = profile.role === 'super_admin' || access.includes('hr') || access.includes('coo') ? '' : await clinicalCompany(db, user.id);
-      return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '', department: p.department || '', joinDate: p.join_date || null, confirmDate: p.confirm_date || null, resignDate: p.resign_date || null })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
+      return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: [...(people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '', department: p.department || '', joinDate: p.join_date || null, confirmDate: p.confirm_date || null, resignDate: p.resign_date || null })), ...GUEST_DOCTORS.map((g) => ({ id: g.id, company: g.company, code: g.code, name: g.name, short: g.name, designation: g.designation, department: '', joinDate: null, confirmDate: null, resignDate: null }))], days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic, ...GUEST_DOCTORS.flatMap((g) => guestDays(g, start, end))] , edit: { company: editCompany } });
     }
     if (req.method === 'POST' && action === 'roster_import') {
       const rows: any[] = Array.isArray(body.rows) ? body.rows.slice(0, 5000) : [];
