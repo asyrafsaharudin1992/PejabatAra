@@ -637,3 +637,5 @@ export function HRAttendance({ onError, badges = {}, onOpenRoster }: { onError: 
 
 // Reuse the same report views in the central HR Reports page.
 export { Today as AttendanceDailyReport, Month as AttendanceMonthlyReport, Late as AttendanceLateReport };
+// The COO looks at these (inside a disabled fieldset, so nothing can be changed).
+export { Requests as AttendanceRequests, CreditHours as AttendanceCreditHours, Places as AttendancePlaces, Staff as AttendanceStaff, Rules as AttendanceRules };

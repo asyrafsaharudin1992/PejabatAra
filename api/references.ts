@@ -8,7 +8,7 @@ import { isHrReference } from '../src/lib/hrReferences.js';
 const SHARED_BRANCH = 'AraOffice Shared';
 const STATE_KEY = 'reference_resources';
 const CA_BRANCH = 'AraSpace Clinical Assistants';
-const READER_OFFICES = ['ca', 'quality'];
+const READER_OFFICES = ['ca', 'quality', 'coo'];
 const DRIVE_SYNC_INTERVAL = 10 * 60 * 1000;
 // Memo wording for search lives in its own record so normal page loads do not carry it.
 const TEXT_KEY = 'reference_text';
@@ -69,7 +69,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const hrOnly = req.query.department === 'hr';
-    const { db, user, profile } = await officeAccess(req, false, hrOnly ? 'hr' : READER_OFFICES);
+    const { db, user, profile } = await officeAccess(req, false, hrOnly ? ['hr', 'coo'] : READER_OFFICES);
     if (hrOnly && (req.method !== 'GET' || req.query.action)) return res.status(405).json({ error: 'HR Memo/Guide is a read-only list.' });
     const sharedBranch = await branchId(db, SHARED_BRANCH, true);
     const { data: existing, error: readError } = await db.from('portal_state').select('payload,updated_at').eq('branch_id', sharedBranch).eq('state_key', STATE_KEY).maybeSingle();

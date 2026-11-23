@@ -420,7 +420,9 @@ const FINANCE_CAN_WRITE = new Set(['incentive_mark_paid', 'incentive_unmark_paid
 // The directors (CEO, COO, CPO, CHRO, CFO) all read the Charts: the figures, the head count, the 12-month payroll cost and the organisation chart (totals, never one person's pay).
 const DIRECTOR_CAN_READ = /^(charts$|headcount$|org_chart$|photo_urls$|payroll_trend$)/;
 const DIRECTOR_OFFICES = ['ceo', 'coo', 'procurement', 'finance'];
-const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
+// The COO may look at the HR Attendance pages (all staff), read only: every write there stays HR.
+const COO_ATTENDANCE_READ = /^attendance_(requests|late_days|late_pattern|credit_hours_list|credit_hours_report|credit_hours_entries|credit_info|places|people|rules|ot_policy)$/;
+const COO_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
 // Clinical Admin may only look at the duty roster and the changes made to it (its own branch's changes only).
 const CLINICAL_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes', 'roster_log']);
 // The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
@@ -525,7 +527,7 @@ export async function hrHandler(req: any, res: any) {
     const access: string[] = Array.isArray((user as any).app_metadata?.office_access) ? (user as any).app_metadata.office_access : [];
     const financeOnly = profile.role !== 'super_admin' && !access.includes('hr') && access.includes('finance');
     if (financeOnly) { if (!(req.method === 'GET' ? FINANCE_CAN_READ.test(action) : FINANCE_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.'); }
-    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && DIRECTOR_OFFICES.some((office) => access.includes(office)) && DIRECTOR_CAN_READ.test(action)) && !(req.method === 'GET' && (access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action)) && !(req.method === 'POST' && access.includes('clinical') && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
+    else if (profile.role !== 'super_admin' && !access.includes('hr') && !(req.method === 'GET' && DIRECTOR_OFFICES.some((office) => access.includes(office)) && DIRECTOR_CAN_READ.test(action)) && !(req.method === 'GET' && ((access.includes('coo') ? COO_CAN_READ : CLINICAL_CAN_READ).has(action) || (access.includes('coo') && COO_ATTENDANCE_READ.test(action)))) && !(req.method === 'POST' && (access.includes('clinical') || access.includes('coo')) && CLINICAL_CAN_WRITE.has(action))) throw fail(403, 'Access restricted.');
 
     if (action.startsWith('calendar_')) return await hrCalendarAction(req, res, db, user, action, body);
 
@@ -1809,8 +1811,9 @@ export async function hrHandler(req: any, res: any) {
     // The staff a roster PDF can be matched to (its columns are short names): active staff, with the name they sign in with. A Clinical Admin account gets its own branch's clinic assistants and clinical admin only.
     if (req.method === 'GET' && action === 'roster_people') {
       const hrUser = profile.role === 'super_admin' || access.includes('hr');
-      const company = hrUser ? '' : await clinicalCompany(db, user.id);
-      if (!hrUser && !company) throw fail(403, NOT_AUTHORIZED);
+      const wide = hrUser || access.includes('coo');
+      const company = wide ? '' : await clinicalCompany(db, user.id);
+      if (!wide && !company) throw fail(403, NOT_AUTHORIZED);
       let query = db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').eq('status', 'Active').order('full_name').limit(500);
       if (company) query = query.eq('company', company);
       const { data, error } = await query;
@@ -1828,7 +1831,7 @@ export async function hrHandler(req: any, res: any) {
       const company = text(src.company, 4).toUpperCase(), month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(src.month)) ? String(src.month) : '';
       if (!['KJ', 'SK'].includes(company) || !month) throw fail(400, 'Choose a clinic and a month.');
       const hrUser = profile.role === 'super_admin' || access.includes('hr');
-      if (!hrUser && company !== await clinicalCompany(db, user.id)) throw fail(403, NOT_AUTHORIZED);
+      if (!hrUser && !access.includes('coo') && company !== await clinicalCompany(db, user.id)) throw fail(403, NOT_AUTHORIZED);
       const HR_PRIVATE = 'AraOffice HR Private', KEY = `roster_notes:${company}:${month}`;
       const branch = await branchId(db, HR_PRIVATE, action === 'roster_notes_save');
       if (action === 'roster_notes') {
@@ -1921,7 +1924,7 @@ export async function hrHandler(req: any, res: any) {
       const { data: logins } = linked.length ? await db.from('assessment_staff').select('id,name').in('id', linked) : { data: [] };
       const shortNames = new Map((logins || []).map((login: any) => [login.id, String(login.name || '')])); // the name they sign in with
       // Who may change what: HR changes everything; a Clinical Admin account only its own branch (`edit.company`).
-      const editCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
+      const editCompany = profile.role === 'super_admin' || access.includes('hr') || access.includes('coo') ? '' : await clinicalCompany(db, user.id);
       return res.status(200).json({ original: original ? { savedAt: original.savedAt, source: original.source } : null, version: wantOriginal ? 'original' : 'current', month, people: (people || []).map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortNames.get(p.assessment_staff_id) || '', designation: p.designation || '', department: p.department || '', joinDate: p.join_date || null, confirmDate: p.confirm_date || null, resignDate: p.resign_date || null })), days: [...(data || []).map((row: any) => ({ id: row.employee_id, date: row.work_date, shift: row.shift, works: row.works, note: row.note })), ...automatic] , edit: { company: editCompany } });
     }
     if (req.method === 'POST' && action === 'roster_import') {
@@ -1931,7 +1934,8 @@ export async function hrHandler(req: any, res: any) {
       if (peopleError) throw peopleError;
       // HR uploads for everyone; a Clinical Admin account only for clinic assistants and clinical admin of its own branch (like roster_set).
       const isHrUser = profile.role === 'super_admin' || access.includes('hr');
-      const ownCompany = isHrUser ? '' : await clinicalCompany(db, user.id);
+      const anyBranch = isHrUser || access.includes('coo');
+      const ownCompany = anyBranch ? '' : await clinicalCompany(db, user.id);
       const personById = new Map((people || []).map((p: any) => [p.id, p]));
       const byCode = new Map((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p.id]));
       const doctors = new Set((people || []).filter((p: any) => /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => p.id));
@@ -1945,7 +1949,7 @@ export async function hrHandler(req: any, res: any) {
         const id = byCode.get(`${text(row.company, 4).toUpperCase()}|${text(row.code, 20).toUpperCase()}`);
         if (!date) continue;
         if (!id) { unknown.add(`${row.company}|${row.code}`); continue; }
-        if (!isHrUser) { const who: any = personById.get(id); if (!ownCompany || who?.company !== ownCompany || !CLINICAL_ROSTER_STAFF.test(String(who?.designation || '')) || /\b(DR|DOCTOR)\b/i.test(String(who?.designation || ''))) throw fail(403, NOT_AUTHORIZED); }
+        if (!isHrUser) { const who: any = personById.get(id); if ((!anyBranch && (!ownCompany || who?.company !== ownCompany)) || !CLINICAL_ROSTER_STAFF.test(String(who?.designation || '')) || /\b(DR|DOCTOR)\b/i.test(String(who?.designation || ''))) throw fail(403, NOT_AUTHORIZED); }
         let shift = text(row.shift, 30).toUpperCase().replace(/\s+/g, ' ');
         if (text(row.company, 4).toUpperCase() === 'SK' && !doctors.has(id)) shift = SK_CODES[shift] || shift;
         if (!shift) continue; // a blank cell means no schedule, so the weekly working days apply
@@ -2665,7 +2669,7 @@ export async function hrHandler(req: any, res: any) {
       if (personError) throw personError;
       if (!person) throw fail(404, 'Profile not found.');
       // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin of its own branch, never doctors or other branches.
-      if (profile.role !== 'super_admin' && !access.includes('hr') && (!CLINICAL_ROSTER_STAFF.test(String(person.designation || '')) || person.company !== await clinicalCompany(db, user.id))) throw fail(403, NOT_AUTHORIZED);
+      if (profile.role !== 'super_admin' && !access.includes('hr') && (!CLINICAL_ROSTER_STAFF.test(String(person.designation || '')) || (!access.includes('coo') && person.company !== await clinicalCompany(db, user.id)))) throw fail(403, NOT_AUTHORIZED);
       await assertPayrollOpen(db, employeeId, date);
       if (todayMY() >= `${date.slice(0, 7)}-01`) await keepRosterOriginal(db, user.id, date.slice(0, 7));
       const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
@@ -2743,8 +2747,9 @@ export async function hrHandler(req: any, res: any) {
       const who = new Map((people || []).map((p: any) => [p.id, p])), by = new Map((users || []).map((u: any) => [u.id, u.full_name]));
       const log = rows.flatMap((row: any) => Object.keys(row.changes).filter((key) => key.startsWith(`roster_${month}`)).map((key) => { const [from, to] = row.changes[key] || ['', '']; const p: any = who.get(row.employee_id); return { at: row.changed_at, by: by.get(row.changed_by) || '', name: p?.full_name || '', company: p?.company || '', code: p?.employee_code || '', date: key.slice(7), from, to, reason: row.changes.roster_reason?.[1] || '' }; }));
       // HR sees every change; a Clinical Admin account sees only the changes made to its own branch's staff.
-      const logCompany = profile.role === 'super_admin' || access.includes('hr') ? '' : await clinicalCompany(db, user.id);
-      const visible = logCompany || !(profile.role === 'super_admin' || access.includes('hr')) ? log.filter((item: any) => item.company === logCompany) : log;
+      const seesAll = profile.role === 'super_admin' || access.includes('hr') || access.includes('coo');
+      const logCompany = seesAll ? '' : await clinicalCompany(db, user.id);
+      const visible = seesAll ? log : log.filter((item: any) => item.company === logCompany);
       return res.status(200).json({ log: visible.sort((a: any, b: any) => String(b.at).localeCompare(String(a.at)) || a.date.localeCompare(b.date)).slice(0, 300) });
     }
 

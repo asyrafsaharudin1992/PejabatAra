@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { AraLogo } from './AraLogo';
 import { StackTables } from './StackTables';
 import { SubTabs } from './SubTabs';
-import { ArrowUpRight, BarChart3, CalendarCheck, CalendarDays, Users, UserMinus, UserRoundPlus, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, ExternalLink, HeartPulse, Home, IdCard, Stethoscope, LogOut, Menu, UsersRound, X } from 'lucide-react';
+import { ArrowUpRight, BookOpen, BarChart3, CalendarCheck, CalendarDays, Users, UserMinus, UserRoundPlus, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Clock3, GraduationCap, ExternalLink, HeartPulse, Home, IdCard, Stethoscope, LogOut, Menu, UsersRound, X } from 'lucide-react';
 import { CareReviewPage } from './CareReviewUI';
 import { HRRoster, guessName } from './HRRoster';
 import COOCalendar from './COOCalendar';
@@ -13,7 +13,7 @@ import HRStaffContact from './HRStaffContact';
 import { ReviewRoom } from './OfficeReview';
 import { Approvals } from './LeaveScreens';
 import COOAttendance from './COOAttendance';
-import { AttendanceDailyReport, AttendanceMonthlyReport } from './HRAttendance';
+import { AttendanceDailyReport, AttendanceMonthlyReport, AttendanceLateReport, AttendanceRequests, AttendanceCreditHours, AttendancePlaces, AttendanceStaff, AttendanceRules } from './HRAttendance';
 // The two offices the COO leads open inside this office, with all their own pages (shown as tabs above the page).
 const OfficeClinical = lazy(() => import('./OfficeClinical'));
 const AssessmentAdmin = lazy(() => import('./AssessmentAdmin'));
@@ -27,15 +27,16 @@ import { card } from './AssessmentStaff';
 
 // Office COO: the COO leads Clinical Admin and the Clinical Assistants. Read only: how the team looks today (who is in, late, on leave) and
 // the team's leave. HR still decides leave, OT and pay.
-type View = 'home' | 'charts' | 'assessment' | 'attendance' | 'review' | 'leave' | 'care' | 'roster' | 'staff' | 'clinical' | 'ca';
+type View = 'home' | 'charts' | 'assessment' | 'attendance' | 'review' | 'leave' | 'care' | 'roster' | 'staff' | 'clinical' | 'ca' | 'memos';
 type Row = { id: string; company: string; code: string; name: string; designation: string; group: string; branch: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; status: string; creditHours?: number };
 type Leave = { id: string; name: string; code: string; group: string; type: string; start: string; end: string; halfDay: boolean; days: number; status: string; reason: string; createdAt?: string };
 const API = '/api/status?resource=coo';
 // Office staff who are not on the COO's duty roster (HR admin, finance admin, quality control and the admin assistant).
 const ROSTER_HIDDEN = ['ARASK0058', 'ARA0061', 'ARA0035', 'ARASK0036'];
+const HRMemoGuide = lazy(() => import('./HRMemoGuide'));
 const LOCUM_URL = 'https://aralocum.hsohealthcare.com/';
-const TONE: Record<string, string> = { home: 'text-sky-400', charts: 'text-violet-400', roster: 'text-violet-400', staff: 'text-emerald-400', leave: 'text-amber-400', care: 'text-rose-400', review: 'text-orange-400', attendance: 'text-teal-400', assessment: 'text-lime-400',  clinical: 'text-cyan-300', ca: 'text-fuchsia-400' };
-const NAV: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'home', label: 'Home', note: 'My calendar and reminders', icon: Home }, { id: 'charts', label: 'Charts', note: 'People, attendance and incentives', icon: BarChart3 }, { id: 'roster', label: 'Roster', note: 'Duty roster by month (view only)', icon: CalendarDays }, { id: 'staff', label: 'Staff', note: 'Who is where, by group and clinic', icon: Users }, { id: 'leave', label: 'Leave', note: 'Who is on leave, and what is waiting', icon: CalendarCheck }, { id: 'care', label: 'AraCare reviews', note: 'Check the KPIs of the allowance', icon: HeartPulse }, { id: 'assessment', label: 'Assessment Room', note: 'Quizzes and results', icon: GraduationCap }, { id: 'attendance', label: 'Attendance', note: 'Team attendance and OT for your approval', icon: Clock3 }, { id: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck }];
+const TONE: Record<string, string> = { home: 'text-sky-400', charts: 'text-violet-400', roster: 'text-violet-400', staff: 'text-emerald-400', leave: 'text-amber-400', care: 'text-rose-400', review: 'text-orange-400', attendance: 'text-teal-400', memos: 'text-sky-400', assessment: 'text-lime-400',  clinical: 'text-cyan-300', ca: 'text-fuchsia-400' };
+const NAV: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'home', label: 'Home', note: 'My calendar and reminders', icon: Home }, { id: 'charts', label: 'Charts', note: 'People, attendance and incentives', icon: BarChart3 }, { id: 'roster', label: 'Roster', note: 'Duty roster by month (view only)', icon: CalendarDays }, { id: 'staff', label: 'Staff', note: 'Who is where, by group and clinic', icon: Users }, { id: 'leave', label: 'Leave', note: 'Who is on leave, and what is waiting', icon: CalendarCheck }, { id: 'care', label: 'AraCare reviews', note: 'Check the KPIs of the allowance', icon: HeartPulse }, { id: 'assessment', label: 'Assessment Room', note: 'Quizzes and results', icon: GraduationCap }, { id: 'attendance', label: 'Attendance', note: 'Team attendance and OT for your approval', icon: Clock3 }, { id: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck }, { id: 'memos', label: 'Memo / Reference Hub', note: 'All memos, guides and references (view only)', icon: BookOpen }];
 // The two offices the COO leads: they open inside this office, with all their own pages.
 const OFFICES: { id: View; label: string; note: string; icon: typeof Home }[] = [{ id: 'clinical', label: 'Clinical Admin', note: 'Daily checklist, orders, vaccine bookings', icon: ClipboardList }, { id: 'ca', label: 'Clinical Assistants (CA)', note: 'Training, panel guides, references', icon: GraduationCap }];
 const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emerald-50 text-emerald-700'], working: ['Working', 'bg-sky-50 text-sky-700'], absent: ['Absent', 'bg-rose-50 text-rose-700'], 'not-in': ['Not in yet', 'bg-amber-50 text-amber-700'], leave: ['Leave', 'bg-violet-50 text-violet-700'], 'clock-pending': ['Clock correction · pending approval', 'bg-amber-50 text-amber-700'], 'missing-out': ['No clock out', 'bg-amber-50 text-amber-700'], extra: ['Clocked on a day off', 'bg-slate-100 text-slate-500'], off: ['Off', 'bg-slate-100 text-slate-400'], upcoming: ['Upcoming', 'bg-slate-100 text-slate-500'], 'no-times': ['Shift not set', 'bg-slate-100 text-slate-500'], exempt: ['No clock needed', 'bg-slate-100 text-slate-500'], 'post-call': ['Post night', 'bg-indigo-50 text-indigo-700'], 'no-record': ['No record', 'bg-slate-50 text-slate-400'] };
@@ -185,12 +186,14 @@ export function TeamGlance({ onError, onStaff }: { onError: (message: string) =>
 }
 
 function AttendanceHub({ onError }: { onError: (message: string) => void }) {
-  const [part, setPart] = useState<'today' | 'month' | 'ot'>('today');
+  const [part, setPart] = useState<'today' | 'month' | 'ot' | 'missed' | 'late' | 'credit' | 'places' | 'staff' | 'rules'>('today');
   // The attendance of the COO's own team, read only; the OT tab is where the COO approves.
   const source = (query: string) => call(query);
   return <div className="text-compact space-y-3 sm:space-y-4">
-    <SubTabs active={part} onSelect={setPart} tabs={[{ id: 'today', label: 'Today' }, { id: 'month', label: 'Month' }, { id: 'ot', label: 'OT' }]} />
-    {part === 'today' ? <AttendanceDailyReport onError={onError} source={source} /> : part === 'month' ? <AttendanceMonthlyReport onError={onError} source={source} /> : <COOAttendance call={call} onError={onError} />}
+    <SubTabs active={part} onSelect={setPart} tabs={[{ id: 'today', label: 'Today' }, { id: 'month', label: 'Month' }, { id: 'ot', label: 'OT' }, { id: 'missed', label: 'Missed clock', short: 'Missed' }, { id: 'late', label: 'Late' }, { id: 'credit', label: 'Credit hrs', short: 'Credit' }, { id: 'places', label: 'Places' }, { id: 'staff', label: 'Staff' }, { id: 'rules', label: 'Rules' }]} />
+    {part === 'today' ? <AttendanceDailyReport onError={onError} source={source} /> : part === 'month' ? <AttendanceMonthlyReport onError={onError} source={source} /> : part === 'ot' ? <COOAttendance call={call} onError={onError} /> : <fieldset disabled className="m-0 min-w-0 border-0 p-0">
+      {part === 'missed' ? <AttendanceRequests onError={onError} kind="missed" /> : part === 'late' ? <AttendanceLateReport onError={onError} /> : part === 'credit' ? <AttendanceCreditHours onError={onError} /> : part === 'places' ? <AttendancePlaces onError={onError} /> : part === 'staff' ? <AttendanceStaff onError={onError} /> : <AttendanceRules onError={onError} />}
+    </fieldset>}
   </div>;
 }
 
@@ -252,9 +255,10 @@ export default function OfficeCOO({ embedded = false }: { embedded?: boolean } =
           {view === 'home' && <div className="space-y-6"><WaitingForYou loading={!waiting || waitingBusy} onRefresh={refreshWaiting} items={[{ key: 'leave', label: 'Leave approvals', note: 'Leave waiting for your decision', icon: CalendarCheck, count: waiting?.leave, onOpen: () => navigate('leave') }, { key: 'ot', label: 'OT & clock requests', note: 'Overtime and forgotten clocks', icon: Clock3, count: waiting?.requests, onOpen: () => navigate('attendance') }, { key: 'review', label: 'Performance Review', note: 'Reviews HR has given to you', icon: ClipboardCheck, count: waiting?.reviews, onOpen: () => navigate('review') }, { key: 'care', label: 'AraCare to check', note: 'Check the KPIs of the allowance', icon: HeartPulse, count: waiting?.care, onOpen: () => navigate('care') }]} /><TeamGlance onError={setError} onStaff={() => navigate('staff')} /><COOCalendar /></div>}
           {view === 'staff' && <StaffDirectory onError={setError} />}
           {view === 'leave' && <TeamLeave onError={setError} />}
-          {view === 'roster' && <HRRoster readOnly canDraft hideCodes={ROSTER_HIDDEN} defaultView="calendar" onError={setError} />}
+          {view === 'roster' && <HRRoster readOnly canEdit canDraft hideCodes={ROSTER_HIDDEN} defaultView="table" onError={setError} />}
           {view === 'assessment' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Opening the Assessment Room…</p>}><AssessmentAdmin embedded /></Suspense>}
           {view === 'attendance' && <AttendanceHub onError={setError} />}
+          {view === 'memos' && <Suspense fallback={<p role="status" className="p-4 text-sm text-slate-500">Loading…</p>}><HRMemoGuide all /></Suspense>}
           {view === 'review' && <ReviewRoom embedded onSignedOut={() => undefined} api={(query, body) => call(query.replace('action=', 'action=review_'), body)} />}
           {view === 'charts' && <DirectorCharts onError={setError} start="operation" />}
           {view === 'care' && <CareReviewPage load={() => call('action=care')} review={(payload) => call('action=care_review', payload)} onError={setError} />}
