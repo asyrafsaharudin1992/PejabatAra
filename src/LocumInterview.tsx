@@ -7,13 +7,13 @@ import { dmy, knowledgeText, locumInterviewPdf } from './lib/locumInterviewPdf';
 // a locum doctor, fill it in, save it and print it as a PDF. Both see the same list. `api` talks to the right endpoint for whoever is signed in.
 export type Interview = {
   id: string; name: string; mmc: string; phone: string; branch: string; workplace: string; interviewer: string; date: string; timeStart: string; timeEnd: string;
-  experience: string; skills: string; marks: number | null; outOf: number | null; suggestion: string; savedBy: string; updatedAt: string;
+  experience: string; skills: string; strength?: string; weakness?: string; marks: number | null; outOf: number | null; suggestion: string; savedBy: string; updatedAt: string;
 };
 type Draft = Omit<Interview, 'id' | 'marks' | 'outOf' | 'savedBy' | 'updatedAt'> & { id?: string; marks: string; outOf: string };
 const field = 'mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0b587b] focus:ring-2 focus:ring-[#0b587b]/10';
 const label = 'block text-sm font-semibold text-slate-600';
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const blank = (interviewer: string): Draft => ({ name: '', mmc: '', phone: '', branch: '', workplace: '', interviewer, date: today(), timeStart: '', timeEnd: '', experience: '', skills: '', marks: '', outOf: '14', suggestion: '' });
+const blank = (interviewer: string): Draft => ({ name: '', mmc: '', phone: '', branch: '', workplace: '', interviewer, date: today(), timeStart: '', timeEnd: '', experience: '', skills: '', strength: '', weakness: '', marks: '', outOf: '14', suggestion: '' });
 const toDraft = (item: Interview): Draft => ({ ...item, marks: item.marks === null ? '' : String(item.marks), outOf: item.outOf === null ? '' : String(item.outOf) });
 const toPayload = (draft: Draft) => ({ ...draft, marks: draft.marks.trim() === '' ? null : Number(draft.marks), outOf: draft.outOf.trim() === '' ? null : Number(draft.outOf) });
 
@@ -68,6 +68,10 @@ export default function LocumInterview({ api, interviewer, onError }: { api: (ac
       <label className={label}>Current workplace / dept<textarea rows={2} value={draft.workplace} onChange={(e) => set('workplace', e.target.value)} className={field} /></label>
       <label className={label}>Working experience<textarea rows={4} value={draft.experience} onChange={(e) => set('experience', e.target.value)} className={field} /></label>
       <label className={label}>Procedure / Skills<textarea rows={4} value={draft.skills} onChange={(e) => set('skills', e.target.value)} className={field} /></label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className={label}>Strength<textarea rows={3} value={draft.strength ?? ''} onChange={(e) => set('strength', e.target.value)} className={field} /></label>
+        <label className={label}>Weakness<textarea rows={3} value={draft.weakness ?? ''} onChange={(e) => set('weakness', e.target.value)} className={field} /></label>
+      </div>
       <label className={label}>Suggestion<textarea rows={3} value={draft.suggestion} onChange={(e) => set('suggestion', e.target.value)} className={field} /></label>
       <div className="flex flex-wrap items-end gap-3">
         <label className={label}>Knowledge marks<input value={draft.marks} onChange={(e) => set('marks', e.target.value)} className={`${field} w-28`} inputMode="decimal" /></label>
