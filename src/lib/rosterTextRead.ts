@@ -13,7 +13,10 @@ const hour24 = (hour: string, minute: string | undefined, meridiem: string) => {
 export function shiftFromText(text: string): string {
   const range = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:-|–|to|hingga|sehingga)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (range) return HOURS_TO_CODE[`${hour24(range[1], range[2], range[3])}-${hour24(range[4], range[5], range[6])}`] || '';
-  return cleanShift(text.replace(/[.,;]+$/, ''));
+  // Words around a code are dropped: "OFF DAY", "REST DAY", "Hari OFF", "Public Holiday" and so on.
+  const plain = text.replace(/[.,;]+$/, '').trim().toUpperCase();
+  if (/^(PUBLIC HOLIDAY|CUTI AM)$/.test(plain)) return 'PH';
+  return cleanShift(plain.replace(/\b(DAY|HARI)\b/g, '').replace(/\s+/g, ' ').trim());
 }
 
 export function parseRosterText(text: string): RosterPdfResult {
