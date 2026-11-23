@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Download, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, Eye, FileText, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { downloadBlob } from './lib/downloadBlob';
+import { pdfPageImages } from './lib/pdfPages';
 import { BLANK_INTERVIEW, dmy, knowledgeText, locumInterviewPdf } from './lib/locumInterviewPdf';
 
 // Locum Medical Officer Interview Assessment. Nobody assigns it: HR (Office HR > Miscellaneous) and Dr Atikah (Individual Sign In) open it when they interview
@@ -23,8 +24,11 @@ export default function LocumInterview({ api, interviewer, onError }: { api: (ac
   const [items, setItems] = useState<Interview[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false), [busy, setBusy] = useState('');
+  const [view, setView] = useState<{ item: Interview; blob: Blob; pages: string[] } | null>(null);
   const load = () => api('locum_interviews').then((data) => setItems(data.items || [])).catch((cause) => { setItems([]); report(cause instanceof Error ? cause.message : 'Unable to load the interviews.'); });
-  useEffect(() => { void load(); }, []);
+  // jspdf is loaded now, so a Download click does not wait for it (Safari only allows a download soon after the click).
+  useEffect(() => { void load(); void import('jspdf'); }, []);
+  useEffect(() => () => { view?.pages.forEach((url) => URL.revokeObjectURL(url)); }, [view]);
   const set = (key: keyof Draft, value: string) => setDraft((old) => old && { ...old, [key]: value });
 
   const save = async () => {
@@ -39,10 +43,22 @@ export default function LocumInterview({ api, interviewer, onError }: { api: (ac
     setBusy(key); report('');
     try {
       const data = 'marks' in item && typeof item.marks === 'string' ? toPayload(item as Draft) : item as Interview;
-      downloadBlob([await locumInterviewPdf(data)], `Locum interview - ${data.name || 'doctor'}${data.date ? ` ${data.date}` : ''}.pdf`, 'application/pdf');
+      const started = Date.now(), blob = await locumInterviewPdf(data);
+      const name = `Locum interview - ${data.name || 'doctor'}${data.date ? ` ${data.date}` : ''}.pdf`;
+      // Safari only allows a download right after the click. If making the PDF took long (the first time), show it with a Download button instead of losing it.
+      if (Date.now() - started > 700 && 'id' in item && item.id) setView({ item: item as Interview, blob, pages: await pdfPageImages(blob, 1.5) });
+      else downloadBlob([blob], name, 'application/pdf');
     } catch (cause) { report(cause instanceof Error ? cause.message : 'Unable to make the PDF.'); }
     setBusy('');
   };
+  // View: the filled form shown on screen like the PDF, with a Download button that works at once (the PDF is already made).
+  const open = async (item: Interview) => {
+    setBusy(`view${item.id}`); report('');
+    try { const blob = await locumInterviewPdf(item); setView({ item, blob, pages: await pdfPageImages(blob, 1.5) }); }
+    catch (cause) { report(cause instanceof Error ? cause.message : 'Unable to show the form.'); }
+    setBusy('');
+  };
+  const fileName = (item: Interview) => `Locum interview - ${item.name || 'doctor'}${item.date ? ` ${item.date}` : ''}.pdf`;
   // The empty form (PDF) to print and write on by hand.
   const blankForm = async () => {
     setBusy('blank'); report('');
@@ -95,6 +111,12 @@ export default function LocumInterview({ api, interviewer, onError }: { api: (ac
 
   return <div className="space-y-4">
     {alert}
+    {view && <div role="dialog" aria-modal="true" aria-label={`Interview of ${view.item.name}`} className="fixed inset-0 z-50 flex flex-col bg-slate-900/70 p-3 sm:p-6">
+      <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-2 pb-3 text-white"><p className="min-w-0 truncate text-sm font-semibold">{view.item.name}</p>
+        <div className="flex gap-2"><button type="button" onClick={() => downloadBlob([view.blob], fileName(view.item), 'application/pdf')} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-semibold text-[#0b587b]"><Download className="h-4 w-4" />Download</button>
+          <button type="button" aria-label="Close" onClick={() => setView(null)} className="grid h-10 w-10 place-items-center rounded-xl bg-white/15 text-white"><X className="h-5 w-5" /></button></div></div>
+      <div className="mx-auto w-full max-w-3xl flex-1 space-y-3 overflow-y-auto">{view.pages.map((url, index) => <img key={url} src={url} alt={`Page ${index + 1}`} className="w-full rounded-lg bg-white shadow" />)}</div>
+    </div>}
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h3 className="text-xl font-semibold text-[#14233b]">Locum interviews</h3><p className="text-sm text-slate-500">Open a new form when you interview a locum doctor. HR and Dr Atikah see the same list.</p></div>
       <div className="flex flex-wrap gap-2">
@@ -106,7 +128,8 @@ export default function LocumInterview({ api, interviewer, onError }: { api: (ac
       <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">{items.map((item) => <li key={item.id} className="flex flex-wrap items-center gap-3 p-3.5">
         <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[#14233b]">{item.name}{item.mmc ? <span className="font-normal text-slate-500"> · MMC {item.mmc}</span> : null}</p>
           <p className="text-xs text-slate-500">{dmy(item.date) || 'No date'}{item.branch ? ` · ${item.branch}` : ''}{item.interviewer ? ` · ${item.interviewer}` : ''}{knowledgeText(item) ? ` · ${knowledgeText(item)}` : ''}</p></div>
-        <button type="button" aria-label={`Download the PDF of ${item.name}`} onClick={() => void pdf(item)} disabled={busy === item.id} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-[#0b587b] disabled:opacity-50"><Download className="h-4 w-4" /></button>
+        <button type="button" aria-label={`View the interview of ${item.name}`} title="View" onClick={() => void open(item)} disabled={busy === `view${item.id}`} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-[#0b587b] disabled:opacity-50"><Eye className="h-4 w-4" /></button>
+        <button type="button" aria-label={`Download the PDF of ${item.name}`} title="Download" onClick={() => void pdf(item)} disabled={busy === item.id} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-[#0b587b] disabled:opacity-50"><Download className="h-4 w-4" /></button>
         <button type="button" aria-label={`Edit the interview of ${item.name}`} onClick={() => setDraft(toDraft(item))} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-600"><Pencil className="h-4 w-4" /></button>
         <button type="button" aria-label={`Delete the interview of ${item.name}`} onClick={() => void remove(item)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-rose-600"><Trash2 className="h-4 w-4" /></button>
       </li>)}</ul>}
