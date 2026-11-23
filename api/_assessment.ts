@@ -5,6 +5,7 @@ import { careAction, careWaitingCount, isCooTitle } from './_care.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { fluFormFor, fluFormSave, fluFormVaccine, fluFormWaiting } from './_staff-forms.js';
+import { canLocumInterview, locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { photoLinks } from './_photos.js';
@@ -800,6 +801,13 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
   // Everyone can read the announcements; the clinic assistants and Clinical Admin on the reading list record their own read.
   // HR's influenza vaccine form: every staff member answers it from Announcements (agree or refuse).
+  // Locum interview form: the doctors who interview locums (Dr Atikah) fill it in themselves; HR sees the same list.
+  if (action.startsWith('locum_interview')) {
+    if (!canLocumInterview(staff.staff_code)) throw fail(403, 'Access restricted.');
+    if (req.method === 'GET' && action === 'locum_interviews') return res.status(200).json({ items: await locumInterviewList(db) });
+    if (req.method === 'POST' && action === 'locum_interview_save') return res.status(200).json({ item: await locumInterviewSave(db, body, staff.name) });
+    if (req.method === 'POST' && action === 'locum_interview_delete') { await locumInterviewDelete(db, text(body?.id)); return res.status(200).json({ ok: true }); }
+  }
   if (req.method === 'GET' && action === 'flu_form') return res.status(200).json(await fluFormFor(db, staff.id));
   if (req.method === 'POST' && action === 'flu_form_vaccine') return res.status(200).json(await fluFormVaccine(db, staff.id, body));
   if (req.method === 'POST' && action === 'flu_form_save') return res.status(200).json(await fluFormSave(db, staff.id, body));
@@ -867,7 +875,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, ceoOffice, hrOffice, cpoOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, locumInterview: canLocumInterview(staff.staff_code), ceoOffice, hrOffice, cpoOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

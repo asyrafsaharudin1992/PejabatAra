@@ -9,6 +9,7 @@ import { CustomDetail } from './CustomReview';
 import { HRReviewTemplates } from './HRReviewTemplates';
 import type { ReviewTemplate } from './lib/reviewTemplate';
 import { HRReviewSamples } from './HRReviewSamples';
+import LocumInterview from './LocumInterview';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { HRReviewReminders } from './HRReviewReminders';
@@ -25,7 +26,7 @@ const blankAssign = () => ({ formType: 'standard' as 'standard' | 'assistant', t
 
 export function HRReviews({ onError, reportOnly = false }: { onError: (message: string) => void; reportOnly?: boolean }) {
   useFormText();
-  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders' | 'samples' | 'templates'>(reportOnly ? 'reports' : 'assign');
+  const [tab, setTab] = useState<'assign' | 'reports' | 'reminders' | 'samples' | 'templates' | 'locum'>(reportOnly ? 'reports' : 'assign');
   const [openTemplate, setOpenTemplate] = useState('');
   const [staff, setStaff] = useState<Person[]>([]);
   const [supervisors, setSupervisors] = useState<{ id: string; name: string; person?: string }[]>([]);
@@ -113,8 +114,9 @@ export function HRReviews({ onError, reportOnly = false }: { onError: (message: 
 
   return <div className="review-compact mx-auto max-w-[1500px] space-y-5">
     {!reportOnly && <section className="ara-hero rounded-[30px] p-7 text-white sm:p-9"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#70d8fa]">Office HR · Klinik ARA 24 Jam</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Performance Reviews</h2><p className="mt-2 max-w-2xl leading-7 text-[#b9cfdd]">Reviews submitted by CEO, CFO, COO, CHRO and Clinical Admin. Record when HR received each one.</p></section>}
-    {!reportOnly && <SubTabs label="Performance reviews" idPrefix="review" active={tab} onSelect={setTab} tabs={[{ id: 'assign', label: 'Assign Review', short: 'Assign' }, { id: 'reports', label: 'View Report', short: 'Report', badge: newReviews }, { id: 'reminders', label: 'Reminder', badge: dueReminders }, { id: 'templates', label: 'Templates', short: 'Templates' }, { id: 'samples', label: 'Review samples', short: 'Samples' }]} />}
+    {!reportOnly && <SubTabs label="Performance reviews" idPrefix="review" active={tab} onSelect={setTab} tabs={[{ id: 'assign', label: 'Assign Review', short: 'Assign' }, { id: 'reports', label: 'View Report', short: 'Report', badge: newReviews }, { id: 'reminders', label: 'Reminder', badge: dueReminders }, { id: 'templates', label: 'Templates', short: 'Templates' }, { id: 'samples', label: 'Review samples', short: 'Samples' }, { id: 'locum', label: 'Locum interview', short: 'Locum' }]} />}
     {tab === 'samples' && <HRReviewSamples templates={(templates || []).filter((template) => !template.archived)} onEditTemplate={(id) => { setOpenTemplate(id); setTab('templates'); }} />}
+    {tab === 'locum' && <section className={card}><LocumInterview interviewer="" onError={onError} api={(action, body) => officeFetch(`/api/status?resource=hr&action=${action}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}).then((response) => response.json())} /></section>}
     {tab === 'templates' && <HRReviewTemplates templates={templates} onReload={loadTemplates} onError={onError} openId={openTemplate} onOpened={() => setOpenTemplate('')} />}
     {tab === 'reminders' && <HRReviewReminders reminders={reminders} notSetUp={remindersNotSetUp} settings={reviewSettings} settingsVersion={settingsVersion} settingsNotSetUp={settingsNotSetUp} staff={staff} onReload={loadReminders} onError={onError}
       onAssign={(item) => { setAssign({ formType: isProbationAssessment(item.periodLabel) ? 'assistant' : 'standard', templateId: '', candidateName: '', candidatePosition: '', candidateCompany: '', employeeId: item.employeeId, assessorId: '', periodLabel: item.periodLabel, periodStart: item.periodStart || '', periodEnd: item.dueOn, remarks: item.notes }); setTab('assign'); setNotice(isProbationAssessment(item.periodLabel) ? 'Reminder details filled in. A probation assessment uses Review 2 (Penilaian Bulanan Pembantu Klinik). Choose the supervisor and assign the review.' : 'Reminder details filled in. Choose the supervisor and assign the review.'); window.scrollTo({ top: 0 }); }}

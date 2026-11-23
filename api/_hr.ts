@@ -14,6 +14,7 @@ import { payslipLeave } from './_leave-summary.js';
 import { ADJUSTMENT_TYPES, calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
+import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
 import { checkPhoto, checkSource, isStaffId, orgChart, photoLinks, removePhoto, saveOrgText, savePhoto, saveSource, sourceLink } from './_photos.js';
@@ -552,6 +553,11 @@ export async function hrHandler(req: any, res: any) {
     }
     if (req.method === 'GET' && action === 'photo_source') return res.status(200).json({ url: await sourceLink(db, text(req.query.employeeId, 60)) });
     if ((action === 'flu_form_hr' || action === 'flu_form_open') && profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+    // Locum interview form: HR fills it in itself (nobody assigns it) and sees every interview, including Dr Atikah's.
+    if (action.startsWith('locum_interview') && profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+    if (req.method === 'GET' && action === 'locum_interviews') return res.status(200).json({ items: await locumInterviewList(db) });
+    if (req.method === 'POST' && action === 'locum_interview_save') return res.status(200).json({ item: await locumInterviewSave(db, body, text((profile as any).full_name || (user as any)?.email, 120), user.id) });
+    if (req.method === 'POST' && action === 'locum_interview_delete') { await locumInterviewDelete(db, text(body.id, 60)); return res.status(200).json({ ok: true }); }
     if (req.method === 'GET' && action === 'flu_form_hr') return res.status(200).json(await fluFormHr(db));
     if (req.method === 'POST' && action === 'flu_form_open') { await fluFormOpen(db, user.id, body.open === true); return res.status(200).json(await fluFormHr(db)); }
     if (req.method === 'POST' && action === 'org_text') {
