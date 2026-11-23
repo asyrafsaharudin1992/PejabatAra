@@ -3,7 +3,7 @@ import { FormEvent, lazy, ReactNode, Suspense, useContext, useEffect, useMemo, u
 import { StackTables } from './StackTables';
 import { AraLogo } from './AraLogo';
 import { OfficeShortcuts } from './lib/officeShortcuts';
-import { ArrowLeft, ArrowRightLeft, CalendarDays, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
+import { ClipboardCheck, UserMinus, UserRoundPlus, Users, ArrowLeft, ArrowRightLeft, CalendarDays, AlertCircle, ArrowRight, BookOpen, Phone, Search, ChevronLeft, Clock3, History, Printer, Coins, Link2, Minus, Check, ChevronRight, ClipboardList, Copy, Home, LogOut, Menu, MessageCircle, Package, Pencil, Plus, Save, SquarePen, Stethoscope, Syringe, Trash2, X } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
 import { signOutSupabase } from './lib/supabase';
 import { card, input, Modal } from './AssessmentStaff';
@@ -809,7 +809,7 @@ function QuickContacts({ branch, onError }: { key?: string; branch: string; onEr
 const ADMIN_NAMES: Record<string, string> = { Kajang: 'Izzah', 'Seri Kembangan': 'Amirah' };
 const BRANCH_CODES: Record<string, string> = { Kajang: 'KJ', 'Seri Kembangan': 'SK' };
 
-type Waiting = { claims: number | null; leave: number; requests: number; reviews: number };
+type Waiting = { claims: number | null; leave: number; requests: number; reviews: number; team?: { count: number; permanent: number; probation: string[]; contract: string[]; other: string[]; starters: string[]; leaving: string[]; branches: { branch: string; count: number }[] } };
 function HomeView({ day, overseer, waiting, waitingBusy, onRefreshWaiting, onNavigate, onOpenBranch }: { day: Day | null; overseer: boolean; waiting: Waiting | null; waitingBusy: boolean; onRefreshWaiting: () => void; onNavigate: (view: View) => void; onOpenBranch: (branch: string) => void }) {
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuala_Lumpur' });
   return <div className="mx-auto max-w-[1500px] space-y-4 sm:space-y-8">
@@ -819,6 +819,22 @@ function HomeView({ day, overseer, waiting, waitingBusy, onRefreshWaiting, onNav
         <div><p className="text-xs font-bold uppercase tracking-[0.24em] text-[#70d8fa]">Klinik ARA 24 Jam · Clinical Administration</p><h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] sm:mt-3 sm:text-[2.45rem]">{overseer ? 'Branch overview' : `Welcome, ${ADMIN_NAMES[day?.branch || ''] || `Clinical Admin ${day?.branch || ''}`}`}</h2><p className="mt-3 hidden text-base text-[#bed2df] sm:block">{overseer ? 'Both branches at a glance.' : `${day?.branch || ''} clinic administration.`}</p></div>
         <div className="text-left md:text-right"><span className="inline-flex rounded-full bg-white/12 px-4 py-2 text-xs font-semibold text-[#d9e7ef] sm:px-5 sm:py-2.5 sm:text-sm">{date}</span><p className="mt-2 sm:mt-4 text-[11px] leading-4 italic text-[#a9c1d0] sm:text-sm sm:leading-6 md:ml-auto md:max-w-[360px]">“{homeQuote}”</p></div>
       </div>
+    </section>
+    {/* At a glance, like HR's: the clinic assistants (CAs) of this admin's team, with who is on probation, on contract, starting or leaving. Both branches in the overview. */}
+    <section aria-label="My team" className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2"><h3 className="text-base font-semibold tracking-tight">{overseer ? 'Clinic assistants at a glance' : 'My team at a glance'}</h3><span className="text-xs text-slate-500">Clinic assistants (CA) · starters and leavers within 30 days</span></div>
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">{(() => { const team = waiting?.team; const names = (list?: string[], none = '') => list?.length ? list.join(' · ') : none;
+        const cards: { title: string; count?: number; icon: typeof Users; tone: string; detail: string; note: string }[] = [
+          { title: 'Clinic assistants', count: team?.count, icon: Users, tone: 'bg-sky-50 text-sky-700', detail: team ? (team.branches.length > 1 ? team.branches.map((item) => `${item.branch} ${item.count}`).join(' · ') : 'Active in your team') : '', note: team ? `${team.permanent} permanent${team.other.length ? ` · ${team.other.length} other` : ''}` : '' },
+          { title: 'On probation', count: team?.probation.length, icon: ClipboardCheck, tone: 'bg-violet-50 text-violet-700', detail: names(team?.probation, 'No CA on probation'), note: 'HR-verified list' },
+          { title: 'Starters', count: team?.starters.length, icon: UserRoundPlus, tone: 'bg-emerald-50 text-emerald-700', detail: names(team?.starters, 'No new CA in the last 30 days'), note: 'Joined in the last 30 days' },
+          { title: 'Leaving', count: team?.leaving.length, icon: UserMinus, tone: 'bg-rose-50 text-rose-700', detail: names(team?.leaving, 'No CA leaving'), note: 'Last working day' },
+        ];
+        return cards.map((item) => <div key={item.title} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_5px_20px_rgba(20,35,59,0.03)] sm:rounded-2xl sm:p-3.5">
+          <span className={`grid h-8 w-8 place-items-center rounded-lg ${item.tone}`}><item.icon size={15} /></span>
+          <p className="mt-2 truncate text-xs font-medium text-slate-500">{item.title}</p><p className="text-2xl font-semibold tracking-tight text-[#17364c]">{item.count ?? '—'}</p>
+          <p className="mt-1 text-xs font-semibold leading-4 text-slate-700">{team ? item.detail : waitingBusy || !waiting ? 'Loading…' : ''}</p><p className="mt-0.5 text-[11px] leading-4 text-slate-500">{team ? item.note : ''}</p>
+        </div>); })()}</div>
     </section>
     <WaitingForYou loading={!waiting || waitingBusy} onRefresh={onRefreshWaiting} items={[{ key: 'claims', label: 'Incentive claims', note: 'Staff claims waiting for your approval', icon: Coins, count: waiting?.claims, onOpen: () => onNavigate('incentives') }, { key: 'leave', label: 'Leave approvals', note: 'In your Individual Sign In', icon: CalendarDays, count: waiting?.leave, href: '#office/individual' }, { key: 'ot', label: 'OT & clock requests', note: 'In your Individual Sign In', icon: Clock3, count: waiting?.requests, href: '#office/individual' }, { key: 'review', label: 'Performance Review', note: 'In your Individual Sign In', icon: Check, count: waiting?.reviews, href: '#office/individual' }]} />
     <section>

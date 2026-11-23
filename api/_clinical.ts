@@ -218,7 +218,7 @@ export async function clinicalHandler(req: any, res: any) {
         if (result.error?.code === '42703') result = await db.from('incentive_claims').select('id', { count: 'exact', head: true }).in('branch', targets.map((branch) => branch.name)).eq('status', 'submitted');
         claims = result.error ? null : result.count ?? 0;
       } catch { claims = null; }
-      const { data: people, error: peopleError } = await db.from('hr_employees').select('company,employee_code,designation,assessment_staff_id').eq('status', 'Active');
+      const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,full_name,employee_code,designation,assessment_staff_id,employment_type,join_date,confirm_date,resign_date').eq('status', 'Active');
       if (peopleError) throw peopleError;
       const total = { leave: 0, requests: 0, reviews: 0 };
       for (const branch of targets) {
@@ -228,7 +228,34 @@ export async function clinicalHandler(req: any, res: any) {
         const counts = await waitingCounts(db, admin.assessment_staff_id, req.headers);
         total.leave += counts.leave || 0; total.requests += counts.requests || 0; total.reviews += counts.reviews || 0;
       }
-      return res.status(200).json({ claims, ...total });
+      // The admin's team, as HR sees its staff: the active clinic assistants (CAs) of each branch, how many are on probation (the HR-verified list, like HR's At a glance),
+      // permanent, on contract or other. Numbers only.
+      let probationList: Record<string, string> = {};
+      try {
+        const { data: hrBranch } = await db.from('branches').select('id').eq('name', 'AraOffice HR Private').maybeSingle();
+        if (hrBranch?.id) { const { data: config } = await db.from('portal_state').select('payload').eq('branch_id', hrBranch.id).eq('state_key', 'hr_calendar_config').maybeSingle(); if (config?.payload?.probation && typeof config.payload.probation === 'object') probationList = config.payload.probation; }
+      } catch { probationList = {}; }
+      const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+      const dateLabel = (date: string) => new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kuala_Lumpur' });
+      const addDays = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:00Z`) + by * 86400000).toISOString().slice(0, 10);
+      const team = { count: 0, permanent: 0, probation: [] as string[], contract: [] as string[], other: [] as string[], starters: [] as string[], leaving: [] as string[], branches: [] as { branch: string; count: number }[] };
+      for (const branch of targets) {
+        const company = branch.name === 'Seri Kembangan' ? 'SK' : 'KJ';
+        const tag = targets.length > 1 ? ` · ${company}` : '';
+        const nameOf = (person: any) => `${String(person.full_name || '').split(/\s+/).filter((word: string) => !/^(NUR|NURUL|SITI)$/i.test(word))[0] || person.full_name}`.replace(/^(.)(.*)$/, (_m: string, a: string, b: string) => a.toUpperCase() + b.toLowerCase()) + tag;
+        const cas = (people || []).filter((person: any) => person.company === company && locationGroup({ designation: person.designation || '', employeeCode: person.employee_code, company: person.company }) === 'CAs');
+        const onProbation = (person: any) => Boolean(person.join_date && person.join_date <= today && probationList[person.id] === 'probation' && (!person.confirm_date || person.confirm_date > today));
+        const rest = cas.filter((person: any) => !onProbation(person));
+        team.count += cas.length; team.branches.push({ branch: branch.name, count: cas.length });
+        team.probation.push(...cas.filter(onProbation).map(nameOf));
+        team.permanent += rest.filter((person: any) => person.employment_type === 'Permanent').length;
+        team.contract.push(...rest.filter((person: any) => person.employment_type === 'Contract').map(nameOf));
+        team.other.push(...rest.filter((person: any) => !['Permanent', 'Contract'].includes(person.employment_type)).map(nameOf));
+        // Starters (joined in the last 30 days) and leavers (a last working day in the last 30 days or still ahead), like HR's At a glance.
+        team.starters.push(...cas.filter((person: any) => person.join_date && person.join_date <= today && person.join_date >= addDays(today, -30)).map((person: any) => `${nameOf(person)} ${dateLabel(person.join_date)}`));
+        team.leaving.push(...cas.filter((person: any) => person.resign_date && person.resign_date >= addDays(today, -30)).map((person: any) => `${nameOf(person)} ${dateLabel(person.resign_date)}`));
+      }
+      return res.status(200).json({ claims, ...total, team });
     }
     if (req.method === 'GET' && action === 'incentives') {
       // branch=all and month=all list every branch this account can see, or every month.

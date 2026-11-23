@@ -1032,6 +1032,24 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { credit_hours_used: `${hours} h for ${kind === 'late' ? 'a late arrival' : 'an early leave'} on ${date}`, note: text(body.note, 200), by: userLabel } });
     return res.status(200).json({ success: true });
   }
+  // HR changes the hours of a credit use that was already recorded (for example 4 h to 4 h 30 min). The balance follows: the difference is taken off (or given back) in the same ledger entry.
+  if (req.method === 'POST' && action === 'attendance_credit_use_update') {
+    const useId = text(body.useId, 60), hours = Math.round(Number(body.hours) * 4) / 4;
+    if (!(hours >= 0.25 && hours <= 12)) throw fail(400, 'Enter the hours, from 0.25 to 12 (in steps of 15 minutes).');
+    const { data: use } = await db.from('hr_credit_hour_use').select('id,employee_id,work_date,kind,hours').eq('id', useId).maybeSingle();
+    if (!use) throw fail(404, 'That credit use was not found.');
+    if (Number(use.hours) === hours) return res.status(200).json({ success: true, unchanged: true });
+    const minutes = Math.round(hours * 60), { data: entry } = await db.from('hr_credit_hours').select('id,minutes').eq('use_id', useId).maybeSingle();
+    if (entry) {
+      const balance = await creditMinutes(db, [use.employee_id]), extra = minutes + Number(entry.minutes);
+      if (balance.ok && extra > 0 && (balance.totals.get(use.employee_id) || 0) < extra) throw fail(400, `Only ${hm(balance.totals.get(use.employee_id) || 0)} of credit hours left, and ${hm(extra)} more was asked for.`);
+    }
+    const { error } = await db.from('hr_credit_hour_use').update({ hours, days: Math.round((hours / CREDIT_HOURS_PER_DAY) * 100) / 100 || 0.01 }).eq('id', useId);
+    if (error) throw error;
+    if (entry) { const { error: ledgerError } = await db.from('hr_credit_hours').update({ minutes: -minutes }).eq('id', entry.id); if (ledgerError) throw ledgerError; }
+    await db.from('hr_audit').insert({ employee_id: use.employee_id, action: 'update', changes: { credit_hours_changed: `${use.hours} h to ${hours} h on ${use.work_date}`, by: userLabel } });
+    return res.status(200).json({ success: true });
+  }
   if (req.method === 'POST' && action === 'attendance_credit_use_delete') {
     const useId = text(body.useId, 60);
     const { data: use } = await db.from('hr_credit_hour_use').select('id,employee_id,work_date,kind,hours,days').eq('id', useId).maybeSingle();
