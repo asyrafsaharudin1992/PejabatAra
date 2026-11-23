@@ -2258,7 +2258,9 @@ export async function hrHandler(req: any, res: any) {
         rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result: saved, locked_at: lock ? now : null, updated_at: now });
       }
       if (lock) {
-        const missing = context.staff.filter((member: any) => member.payslip?.status !== 'locked' && !rows.some((row) => row.employee_id === member.id));
+        // Locking for one branch (KJ or SK) only needs the staff of that branch; with no branch chosen it needs everyone.
+        const scope = ['KJ', 'SK'].includes(String(body.company)) ? String(body.company) : '';
+        const missing = context.staff.filter((member: any) => (!scope || member.company === scope) && member.payslip?.status !== 'locked' && !rows.some((row) => row.employee_id === member.id));
         if (missing.length) throw fail(400, `Every staff member needs a payslip before the month is locked: ${missing.slice(0, 5).map((member: any) => member.employeeCode).join(', ')}${missing.length > 5 ? ' and more' : ''}.`);
       }
       if (rows.length) { const { error } = await db.from('hr_payslips').upsert(rows, { onConflict: 'employee_id,year,month' }); if (error) throw error; }

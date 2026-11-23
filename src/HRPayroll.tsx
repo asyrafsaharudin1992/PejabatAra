@@ -60,7 +60,10 @@ const fmt = (value: number) => value.toLocaleString('en-MY', { minimumFractionDi
 function PayRun({ onError }: { onError: (message: string) => void }) {
   const [year] = useState(2026);
   const [month, setMonth] = useState(11);
-  const [staff, setStaff] = useState<RunStaff[] | null>(null);
+  const [allStaff, setStaff] = useState<RunStaff[] | null>(null);
+  // HR picks the branch to run: KJ, SK or both. The table, totals, summary report, OT fill, Save draft and Lock month all follow the choice.
+  const [branch, setBranch] = useState<'both' | 'KJ' | 'SK'>('both');
+  const staff = useMemo(() => allStaff && (branch === 'both' ? allStaff : allStaff.filter((member) => member.company === branch)), [allStaff, branch]);
   const [asOf, setAsOf] = useState('');
   const [comparison, setComparison] = useState(false);
   const [inputs, setInputs] = useState<Record<string, PayInputs>>({});
@@ -127,7 +130,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
   const save = async (lock: boolean) => {
     setBusy(lock ? 'lock' : 'save'); setNote('');
     try {
-      const response = await officeFetch(`${API}&action=payroll_save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, month, lock, items: (staff || []).map((member) => ({ employeeId: member.id, inputs: inputs[member.id] || NO_INPUTS })) }) });
+      const response = await officeFetch(`${API}&action=payroll_save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, month, lock, company: branch === 'both' ? '' : branch, items: (staff || []).map((member) => ({ employeeId: member.id, inputs: inputs[member.id] || NO_INPUTS })) }) });
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       setNote(lock ? `${MONTH_NAMES[month - 1]} ${year} is locked.` : `Draft saved for ${data.saved} staff.`);
@@ -149,6 +152,7 @@ function PayRun({ onError }: { onError: (message: string) => void }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="font-semibold">Monthly pay run</h3><p className="mt-0.5 text-xs text-slate-500">Pay period {dmy(period.from)} to {dmy(period.to)} (OT and unpaid leave are counted for these days). Year-to-date totals in from Infotech up to {asOf || 'October 2026'}; each month needs the one before it locked.</p></div>
       <div className="flex flex-wrap items-center gap-2">
+        <select aria-label="Branch" value={branch} onChange={(event) => setBranch(event.target.value as 'both' | 'KJ' | 'SK')} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold"><option value="both">Both · KJ and SK</option><option value="KJ">KJ · Kajang</option><option value="SK">SK · Seri Kembangan</option></select>
         <select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => <option key={m} value={m}>{MONTH_NAMES[m - 1]} {year}</option>)}</select>
         <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-[#0b587b]">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
       </div>
