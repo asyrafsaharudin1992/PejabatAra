@@ -48,9 +48,61 @@ export function readPanelNotes(items: TextItem[], tableRight: number, topY: numb
   return { request: request.join('\n'), remarks: remarks.join('\n') };
 }
 
+
+// The doctors' sheet made by Roster draft (JADUAL KLINIK ARA 24 JAM ... RESIDEN/LOCUM): one row per day, the columns are the shifts (9-6PM OH, AM, PM, OFF) and the cells hold a letter
+// for each doctor (A: DR LUQMAN B: DR HAZIQ ... is written under the title). Locum names, the locum column and "-" are not people on the roster and are left out; the days of the previous
+// month are the live roster already, so they are not read again.
+const MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+export function parseDoctorSheetItems(all: TextItem[]): RosterPdfResult {
+  const text = all.map((item) => item.str).join(' ');
+  const title = text.match(new RegExp(`(${MONTHS.join('|')}) (\\d{4})`, 'i'));
+  if (!title) throw new Error('The month of the sheet was not found in its title.');
+  const sheetMonth = MONTHS.indexOf(title[1].toUpperCase()) + 1, sheetYear = Number(title[2]);
+  const legend = new Map<string, string>();
+  for (const match of text.matchAll(/\b([A-Z]):\s*DR\s+([A-Z][A-Z'.]*)/g)) legend.set(match[1], match[2]);
+  if (!legend.size) throw new Error('The doctors under the title (A: DR NAME ...) were not found.');
+  const header = all.find((item) => /^REMARK$/i.test(item.str));
+  if (!header) throw new Error('The column titles (AM, PM, OFF, REMARK) were not found.');
+  const columnItems = all.filter((item) => Math.abs(item.y - header.y) <= 2.5);
+  const kind = (str: string) => /9-6PM/i.test(str) ? 'OH' : /^AM\*?$/i.test(str) ? 'AM' : /^PM\*?$/i.test(str) ? 'PM' : /^OFF$/i.test(str) ? 'OFF' : /LOCUM/i.test(str) ? 'LOCUM' : /REMARK/i.test(str) ? 'REMARK' : '';
+  const heads = columnItems.map((item) => ({ code: kind(item.str), x: item.x + (item.w ?? item.str.length * 3) / 2 })).filter((head) => head.code);
+  if (!heads.some((head) => head.code === 'AM') || !heads.some((head) => head.code === 'OFF')) throw new Error('The column titles (AM, PM, OFF) were not found.');
+  const company = /\bKJ\b|KAJANG/i.test(text) ? 'KJ' : /\bSK\b|KEMBANGAN/i.test(text) ? 'SK' : '';
+  const dateItems = all.filter((item) => /^\d{1,2}\/\d{1,2}$/.test(item.str) && item.y < header.y);
+  const people = new Map<string, RosterPdfColumn>(); const skipped: RosterPdfResult['skipped'] = [];
+  const add = (letter: string, date: string, shift: string) => { const name = legend.get(letter); if (!name) return; const column = people.get(name) || { name, days: [] }; people.set(name, column); column.days = column.days.filter((day) => day.date !== date); column.days.push({ date, shift }); };
+  const letters = new Set(legend.keys());
+  for (const dateItem of dateItems) {
+    const [day, month] = dateItem.str.split('/').map(Number);
+    const diff = month - sheetMonth, year = diff > 6 ? sheetYear - 1 : diff < -6 ? sheetYear + 1 : sheetYear;
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const row = all.filter((item) => Math.abs(item.y - dateItem.y) <= 2.5 && item.x > dateItem.x + 8);
+    if (row.some((item) => /\(prev\. month\)/i.test(item.str))) continue;
+    const cells = new Map<string, string[]>(); let remark = '';
+    for (const item of row.sort((a, b) => a.x - b.x)) {
+      const mid = item.x + (item.w ?? item.str.length * 3) / 2;
+      const nearest = heads.reduce((best, head) => Math.abs(head.x - mid) < Math.abs(best.x - mid) ? head : best, heads[0]);
+      if (nearest.code === 'REMARK') remark += ` ${item.str}`; else cells.set(nearest.code, [...(cells.get(nearest.code) || []), item.str]);
+    }
+    for (const code of ['OH', 'AM', 'PM', 'OFF']) {
+      for (const raw of (cells.get(code) || []).join(' ').split(/[,.\s]+/).map((token) => token.replace(/\*/g, '')).filter(Boolean)) {
+        if (raw === '-' || /^LOCUM$/i.test(raw)) continue;
+        // A single letter, or letters written together (AB*): doctors; anything else is a locum's name.
+        if ([...raw].every((char) => letters.has(char)) && raw.length <= letters.size) for (const letter of raw) add(letter, date, code);
+      }
+    }
+    // "B AL" in the remark: that doctor is on leave that day (a plan only; the leave itself still follows the leave application).
+    for (const match of remark.matchAll(/\b([A-Z]) (AL|MC|UPL|ML|EL)\b/g)) add(match[1], date, match[2]);
+  }
+  const columns = [...people.values()].filter((column) => column.days.length).map((column) => ({ ...column, name: column.name.toUpperCase() }));
+  if (!columns.length) throw new Error('No doctor days were found on this sheet.');
+  return { company, month: `${sheetYear}-${String(sheetMonth).padStart(2, '0')}`, columns, skipped, notes: { request: '', remarks: '' } };
+}
+
 // Works on the text items of one page (x across, y up the page, as pdf.js gives them), so it can be tested without a browser.
 export function parseRosterItems(items: TextItem[]): RosterPdfResult {
   const all = items.map((item) => ({ ...item, str: item.str.trim() })).filter((item) => item.str);
+  if (/RESIDEN\/LOCUM/i.test(all.map((item) => item.str).join(' '))) return parseDoctorSheetItems(all);
   const dateItems = all.filter((item) => toIso(item.str));
   if (!dateItems.length) throw new Error('No dates (like 23/11/2026) were found. This does not look like a duty roster sheet, or the PDF is a scan.');
   const dateX = Math.max(...dateItems.map((item) => item.x));

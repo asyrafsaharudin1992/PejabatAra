@@ -145,7 +145,7 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
   };
 
   // A Clinical Admin account changes only clinic assistants and clinical admin of its own branch; anything else shows a warning (the server refuses it too).
-  const allowed = (person: Person) => !(readOnly && canEdit) || (!isDoctor(person) && /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i.test(person.designation) && (!data?.edit?.company || person.company === data.edit.company));
+  const allowed = (person: Person) => !(readOnly && canEdit) || data?.edit?.company === '' || (!isDoctor(person) && /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i.test(person.designation) && (!data?.edit?.company || person.company === data.edit.company));
   const startEdit = (person: Person, date: string, day?: Day) => readOnly && !canEdit ? undefined : person.code.startsWith('LOCUM-') ? setWarning(`${person.name} is a locum doctor shown by name only: her days follow a fixed weekly pattern and cannot be changed here.`) : !allowed(person) ? setWarning("You're not authorized to change this roster.") : (setWarning(''), setEdit({ person, date, day, shift: day ? newCode(day.shift) : '', reason: '', saving: false }));
   const saveEdit = async () => {
     if (!edit) return;

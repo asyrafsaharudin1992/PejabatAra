@@ -1832,7 +1832,7 @@ export async function hrHandler(req: any, res: any) {
       const logins = [...new Set((data || []).map((p: any) => p.assessment_staff_id).filter(Boolean))];
       const { data: staffRows } = logins.length ? await db.from('assessment_staff').select('id,name').in('id', logins) : { data: [] };
       const shortOf = new Map((staffRows || []).map((row: any) => [row.id, String(row.name || '')]));
-      const people = (data || []).filter((p: any) => hrUser || (CLINICAL_ROSTER_STAFF.test(String(p.designation || '')) && !/\b(DR|DOCTOR)\b/i.test(String(p.designation || ''))));
+      const people = (data || []).filter((p: any) => hrUser || access.includes('coo') || (CLINICAL_ROSTER_STAFF.test(String(p.designation || '')) && !/\b(DR|DOCTOR)\b/i.test(String(p.designation || ''))));
       return res.status(200).json({ company, people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortOf.get(p.assessment_staff_id) || '', designation: p.designation || '' })) });
     }
     // The notes printed beside a month's roster (Request staff and Remarks), one row for each clinic and month. Staff ask for days off before they apply for leave, so these are typed
@@ -1960,7 +1960,7 @@ export async function hrHandler(req: any, res: any) {
         const id = byCode.get(`${text(row.company, 4).toUpperCase()}|${text(row.code, 20).toUpperCase()}`);
         if (!date) continue;
         if (!id) { unknown.add(`${row.company}|${row.code}`); continue; }
-        if (!isHrUser) { const who: any = personById.get(id); if ((!anyBranch && (!ownCompany || who?.company !== ownCompany)) || !CLINICAL_ROSTER_STAFF.test(String(who?.designation || '')) || /\b(DR|DOCTOR)\b/i.test(String(who?.designation || ''))) throw fail(403, NOT_AUTHORIZED); }
+        if (!isHrUser) { const who: any = personById.get(id), isDoc = /\b(DR|DOCTOR)\b/i.test(String(who?.designation || '')); if ((!anyBranch && (!ownCompany || who?.company !== ownCompany)) || !(isDoc ? access.includes('coo') : CLINICAL_ROSTER_STAFF.test(String(who?.designation || '')))) throw fail(403, NOT_AUTHORIZED); }
         let shift = text(row.shift, 30).toUpperCase().replace(/\s+/g, ' ');
         if (text(row.company, 4).toUpperCase() === 'SK' && !doctors.has(id)) shift = SK_CODES[shift] || shift;
         if (!shift) continue; // a blank cell means no schedule, so the weekly working days apply
@@ -2680,7 +2680,7 @@ export async function hrHandler(req: any, res: any) {
       if (personError) throw personError;
       if (!person) throw fail(404, 'Profile not found.');
       // The Clinical Admin office (no HR access) changes only clinic assistants and clinical admin of its own branch, never doctors or other branches.
-      if (profile.role !== 'super_admin' && !access.includes('hr') && (!CLINICAL_ROSTER_STAFF.test(String(person.designation || '')) || (!access.includes('coo') && person.company !== await clinicalCompany(db, user.id)))) throw fail(403, NOT_AUTHORIZED);
+      if (profile.role !== 'super_admin' && !access.includes('hr') && (!(/\b(DR|DOCTOR)\b/i.test(String(person.designation || '')) ? access.includes('coo') : CLINICAL_ROSTER_STAFF.test(String(person.designation || ''))) || (!access.includes('coo') && person.company !== await clinicalCompany(db, user.id)))) throw fail(403, NOT_AUTHORIZED);
       await assertPayrollOpen(db, employeeId, date);
       if (todayMY() >= `${date.slice(0, 7)}-01`) await keepRosterOriginal(db, user.id, date.slice(0, 7));
       const { data: before, error: beforeError } = await db.from('hr_roster').select('shift').eq('employee_id', employeeId).eq('work_date', date).maybeSingle();
