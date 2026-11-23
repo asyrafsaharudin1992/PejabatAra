@@ -422,9 +422,9 @@ const DIRECTOR_CAN_READ = /^(charts$|headcount$|org_chart$|photo_urls$|payroll_t
 const DIRECTOR_OFFICES = ['ceo', 'coo', 'procurement', 'finance'];
 const COO_CAN_READ = new Set(['roster', 'calendar_projection', 'roster_draft_context', 'roster_rules', 'org_chart']);
 // Clinical Admin may only look at the duty roster (read only).
-const CLINICAL_CAN_READ = new Set(['roster']);
+const CLINICAL_CAN_READ = new Set(['roster', 'roster_people', 'roster_notes']);
 // The Clinical Admin office may also change the roster of clinic assistants and clinical admin (from the calendar view); nothing else of HR.
-const CLINICAL_CAN_WRITE = new Set(['roster_set']);
+const CLINICAL_CAN_WRITE = new Set(['roster_set', 'roster_import', 'roster_notes_save']);
 const CLINICAL_ROSTER_STAFF = /CLINIC ASSISTANT|ADMIN CLINICAL|CLINICAL ADMIN/i;
 // A Clinical Admin account belongs to one branch (its primary branch: Kajang is KJ, Seri Kembangan is SK) and changes only that branch's roster.
 async function clinicalCompany(db: any, userId: string): Promise<string> {
@@ -1806,6 +1806,43 @@ export async function hrHandler(req: any, res: any) {
 
     // Duty roster: one row per person and date. `roster` reads a month; `roster_import` replaces the dates it
     // is given for the people it names (rows: { code, company, date, shift }).
+    // The staff a roster PDF can be matched to (its columns are short names): active staff, with the name they sign in with. A Clinical Admin account gets its own branch's clinic assistants and clinical admin only.
+    if (req.method === 'GET' && action === 'roster_people') {
+      const hrUser = profile.role === 'super_admin' || access.includes('hr');
+      const company = hrUser ? '' : await clinicalCompany(db, user.id);
+      if (!hrUser && !company) throw fail(403, NOT_AUTHORIZED);
+      let query = db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id').eq('status', 'Active').order('full_name').limit(500);
+      if (company) query = query.eq('company', company);
+      const { data, error } = await query;
+      if (error) throw error;
+      const logins = [...new Set((data || []).map((p: any) => p.assessment_staff_id).filter(Boolean))];
+      const { data: staffRows } = logins.length ? await db.from('assessment_staff').select('id,name').in('id', logins) : { data: [] };
+      const shortOf = new Map((staffRows || []).map((row: any) => [row.id, String(row.name || '')]));
+      const people = (data || []).filter((p: any) => hrUser || (CLINICAL_ROSTER_STAFF.test(String(p.designation || '')) && !/\b(DR|DOCTOR)\b/i.test(String(p.designation || ''))));
+      return res.status(200).json({ company, people: people.map((p: any) => ({ id: p.id, company: p.company, code: p.employee_code, name: p.full_name, short: shortOf.get(p.assessment_staff_id) || '', designation: p.designation || '' })) });
+    }
+    // The notes printed beside a month's roster (Request staff and Remarks), one row for each clinic and month. Staff ask for days off before they apply for leave, so these are typed
+    // (or read from the roster PDF) and not taken from Leave. HR may write for both clinics; a Clinical Admin account only for its own.
+    if (action === 'roster_notes' || action === 'roster_notes_save') {
+      const src = action === 'roster_notes' ? req.query : body;
+      const company = text(src.company, 4).toUpperCase(), month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(src.month)) ? String(src.month) : '';
+      if (!['KJ', 'SK'].includes(company) || !month) throw fail(400, 'Choose a clinic and a month.');
+      const hrUser = profile.role === 'super_admin' || access.includes('hr');
+      if (!hrUser && company !== await clinicalCompany(db, user.id)) throw fail(403, NOT_AUTHORIZED);
+      const HR_PRIVATE = 'AraOffice HR Private', KEY = `roster_notes:${company}:${month}`;
+      const branch = await branchId(db, HR_PRIVATE, action === 'roster_notes_save');
+      if (action === 'roster_notes') {
+        const { data, error } = branch ? await db.from('portal_state').select('payload,updated_at').eq('branch_id', branch).eq('state_key', KEY).maybeSingle() : { data: null, error: null };
+        if (error) throw error;
+        return res.status(200).json({ company, month, request: String(data?.payload?.request || ''), remarks: String(data?.payload?.remarks || ''), updatedAt: data?.updated_at || null });
+      }
+      if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
+      const clean = (value: unknown) => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f<>]/g, ' ').replace(/[ \t]+\n/g, '\n').trim().slice(0, 2000);
+      const payload = { request: clean(body.request), remarks: clean(body.remarks) };
+      const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: KEY, payload, updated_by: user.id, updated_at: now }, { onConflict: 'branch_id,state_key' });
+      if (error) throw error;
+      return res.status(200).json({ success: true, ...payload });
+    }
     if (req.method === 'GET' && action === 'roster_draft_context') {
       const month = String(req.query.month || ''), source = String(req.query.source || '');
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isDate(source) || !Number.isFinite(Date.parse(`${source}T00:00:00Z`)) || new Date(`${source}T00:00:00Z`).toISOString().slice(0, 10) !== source) throw fail(400, 'Choose a valid target month and pattern start date.');
@@ -1892,6 +1929,10 @@ export async function hrHandler(req: any, res: any) {
       if (!rows.length) throw fail(400, 'There are no roster rows.');
       const { data: people, error: peopleError } = await db.from('hr_employees').select('id,company,employee_code,designation');
       if (peopleError) throw peopleError;
+      // HR uploads for everyone; a Clinical Admin account only for clinic assistants and clinical admin of its own branch (like roster_set).
+      const isHrUser = profile.role === 'super_admin' || access.includes('hr');
+      const ownCompany = isHrUser ? '' : await clinicalCompany(db, user.id);
+      const personById = new Map((people || []).map((p: any) => [p.id, p]));
       const byCode = new Map((people || []).map((p: any) => [`${p.company}|${String(p.employee_code).toUpperCase()}`, p.id]));
       const doctors = new Set((people || []).filter((p: any) => /\b(DR|DOCTOR)\b/i.test(p.designation || '')).map((p: any) => p.id));
       // SK wrote its clinic assistant shifts differently from KJ; the KJ names are saved (doctors keep AM, PM and OH).
@@ -1904,6 +1945,7 @@ export async function hrHandler(req: any, res: any) {
         const id = byCode.get(`${text(row.company, 4).toUpperCase()}|${text(row.code, 20).toUpperCase()}`);
         if (!date) continue;
         if (!id) { unknown.add(`${row.company}|${row.code}`); continue; }
+        if (!isHrUser) { const who: any = personById.get(id); if (!ownCompany || who?.company !== ownCompany || !CLINICAL_ROSTER_STAFF.test(String(who?.designation || '')) || /\b(DR|DOCTOR)\b/i.test(String(who?.designation || ''))) throw fail(403, NOT_AUTHORIZED); }
         let shift = text(row.shift, 30).toUpperCase().replace(/\s+/g, ' ');
         if (text(row.company, 4).toUpperCase() === 'SK' && !doctors.has(id)) shift = SK_CODES[shift] || shift;
         if (!shift) continue; // a blank cell means no schedule, so the weekly working days apply
@@ -1924,6 +1966,8 @@ export async function hrHandler(req: any, res: any) {
         else if (newCode(before) === newCode(row.shift)) same++;
         else { toSave.push(row); changed.push({ employee_id: row.employee_id, date: row.work_date, from: before, to: row.shift }); }
       }
+      // A Clinical Admin cannot change days that fall in a payroll month already locked (HR can, as before).
+      if (!isHrUser) { const checked = new Set<string>(); for (const row of toSave) { const d = String(row.work_date), key = `${row.employee_id}|${d.slice(0, 7)}|${Number(d.slice(8, 10)) >= 20}`; if (!checked.has(key)) { checked.add(key); await assertPayrollOpen(db, row.employee_id, d); } } }
       if (toSave.length) {
         for (const month of new Set(toSave.map((row: any) => String(row.work_date).slice(0, 7)))) if (todayMY() >= `${month}-01`) await keepRosterOriginal(db, user.id, month);
         const { error } = await db.from('hr_roster').upsert(toSave, { onConflict: 'employee_id,work_date' });
@@ -1933,7 +1977,7 @@ export async function hrHandler(req: any, res: any) {
       const perPerson = new Map<string, Record<string, unknown>>();
       for (const item of changed) perPerson.set(item.employee_id, { ...(perPerson.get(item.employee_id) || {}), [`roster_${item.date}`]: [item.from, item.to] });
       if (perPerson.size) {
-        const { error: auditError } = await db.from('hr_audit').insert([...perPerson].map(([employee_id, days]) => ({ employee_id, action: 'roster', changes: { ...days, roster_reason: ['', 'CSV upload'] }, changed_by: user.id })));
+        const { error: auditError } = await db.from('hr_audit').insert([...perPerson].map(([employee_id, days]) => ({ employee_id, action: 'roster', changes: { ...days, roster_reason: ['', body.source === 'pdf' ? 'PDF upload' : 'CSV upload'] }, changed_by: user.id })));
         if (auditError) throw auditError;
       }
       return res.status(200).json({ success: true, saved: toSave.length, added: toSave.length - changed.length, changed: changed.length, same });

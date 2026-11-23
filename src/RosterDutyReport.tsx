@@ -4,6 +4,7 @@ import { newCode } from './lib/shiftCodes';
 // The Monthly Roster report in HR's usual layout (like the Excel duty rosters for Kajang and Seri Kembangan): the title, a grid with one row for each day and one column for each
 // person (the roster code and the hours of that day), a HOURS/WEEKS row after every Sunday, and on the right the code list, the public holidays, the staff leave requests,
 // resignations and the approved overtime. The codes are AraOffice's codes. One page for each company.
+import { leaveNotInNotes, noteLines } from './lib/rosterNotes';
 export type DutyData = {
   title: string; company: string; monthLabel: string;
   staff: { id: string; name: string }[];
@@ -12,6 +13,7 @@ export type DutyData = {
   notes: Record<string, string>;           // `${id}|${date}` -> note
   holidays: { date: string; name: string }[];
   requests: { name: string; dates: string[] }[];
+  rosterNotes?: { request: string; remarks: string };   // typed (or read from the roster PDF) Request staff and Remarks for this clinic and month
   resigns: { name: string; date: string }[];
   overtime: { name: string; date: string; text: string }[];
   signer: { name: string; title: string };
@@ -78,9 +80,9 @@ export function RosterDutyDocument({ data }: { data: DutyData }) {
         <div className={panel}>{LEGEND.map(([code, text]) => { const fill = fillOf(code); return <div key={code} className="flex border-b border-slate-300 last:border-b-0"><span className="w-12 shrink-0 px-1 text-center font-bold" style={{ background: fill.bg, color: fill.fg }}>{code}</span><span className="flex-1 px-1 text-center">{text}</span></div>; })}</div>
         <ChangesPanel data={data} panel={panel} />
         {data.holidays.length > 0 && <div className={panel}>{head('CUTI UMUM', '#ffe933')}{data.holidays.map((item) => <div key={item.date} className="flex border-t border-slate-300"><span className="w-10 shrink-0 bg-[#ffe933] px-1 text-center font-bold">PH</span><span className="px-1">{dmy(item.date)} - {item.name}</span></div>)}</div>}
-        {data.requests.length > 0 && <div className={panel}>{head(`REQUEST STAFF ${data.monthLabel}`, '#efd3e0')}{data.requests.map((item) => <div key={item.name} className="border-t border-slate-300 px-1"><b>{item.name}</b> : {item.dates.map(short).join(', ')}</div>)}</div>}
+        {(data.requests.length > 0 || noteLines(data.rosterNotes?.request).length > 0) && <div className={panel}>{head(`REQUEST STAFF ${data.monthLabel}`, '#efd3e0')}{noteLines(data.rosterNotes?.request).map((line, index) => <div key={`n${index}`} className="border-t border-slate-300 px-1">{line}</div>)}{leaveNotInNotes(data.requests, data.rosterNotes).map((item) => <div key={item.name} className="border-t border-slate-300 px-1"><b>{item.name}</b> : {item.dates.map(short).join(', ')}</div>)}</div>}
         {/* Spaces HR fills in by hand, kept as in the paper roster. */}
-        {[['STAFF (TRAINING PROBATION)', '#e8c5d8', 2], ['TRAINING', '#7b3fa8', 2], ['LOCUM / PART TIME', '#0f5c6e', 3], ['REMARKS', '#d9d9d9', 2], ['CREDIT HOUR', '#fff', 2]].map(([label, color, count]) => <div key={String(label)} className={panel}><div className="px-1 py-px text-center font-bold" style={{ background: String(color), color: ['#7b3fa8', '#0f5c6e'].includes(String(color)) ? '#fff' : '#000' }}>{label}</div>{Array.from({ length: Number(count) }, (_, index) => <div key={index} className="h-[13px] border-t border-slate-300" />)}</div>)}
+        {[['STAFF (TRAINING PROBATION)', '#e8c5d8', 2], ['TRAINING', '#7b3fa8', 2], ['LOCUM / PART TIME', '#0f5c6e', 3], ['REMARKS', '#d9d9d9', 2], ['CREDIT HOUR', '#fff', 2]].map(([label, color, count]) => <div key={String(label)} className={panel}><div className="px-1 py-px text-center font-bold" style={{ background: String(color), color: ['#7b3fa8', '#0f5c6e'].includes(String(color)) ? '#fff' : '#000' }}>{label}</div>{label === 'REMARKS' && noteLines(data.rosterNotes?.remarks).length > 0 ? noteLines(data.rosterNotes?.remarks).map((line, index) => <div key={index} className="border-t border-slate-300 px-1">{line}</div>) : Array.from({ length: Number(count) }, (_, index) => <div key={index} className="h-[13px] border-t border-slate-300" />)}</div>)}
         {data.resigns.length > 0 && <div className={panel}>{head('REMARKS', '#d9d9d9')}{data.resigns.map((item) => <div key={item.name} className="border-t border-slate-300 px-1"><b>STAFF RESIGN</b> {item.name.toUpperCase()} : {dmy(item.date)}</div>)}</div>}
         {data.overtime.length > 0 && <div className={panel}>{head('OVERTIME (OT)', '#5bc0d8')}{data.overtime.map((item, index) => <div key={index} className="flex border-t border-slate-300"><b className="w-16 shrink-0 px-1">{item.name.split(' ')[0]}</b><span className="px-1">{dmy(item.date)} : {item.text}</span></div>)}</div>}
       </div>
@@ -179,13 +181,13 @@ function RosterAraOfficeDocument({ data }: { data: DutyData }) {
       <div className="flex-1 space-y-1">
         <div className="flex flex-wrap gap-1 text-[7px] font-bold">{LEGEND.filter(([code]) => !['UPL'].includes(code)).map(([code, text]) => { const color = colour(code); return <span key={code} className="rounded px-1.5 py-[1px]" style={{ background: color?.backgroundColor || '#fff', color: color?.textColor || '#14233b', border: '1px solid #e2e8f0' }}>{code} <span className="font-normal">{text}</span></span>; })}</div>
         <div className={panel}>{head('CUTI UMUM', '#ffe933')}{data.holidays.length ? data.holidays.map((item) => <div key={item.date + item.name} className="border-t border-slate-200 px-1.5"><b>{dmy(item.date)}</b> · {item.name}</div>) : blank(2)}</div>
-        <div className={panel}>{head(`REQUEST STAFF ${data.monthLabel}`, '#efd3e0')}{data.requests.length ? data.requests.slice(0, 9).map((item) => <div key={item.name} className="border-t border-slate-200 px-1.5"><b>{item.name}</b> : {item.dates.map(short).join(', ')}</div>) : blank(3)}</div>
+        <div className={panel}>{head(`REQUEST STAFF ${data.monthLabel}`, '#efd3e0')}{noteLines(data.rosterNotes?.request).length + leaveNotInNotes(data.requests, data.rosterNotes).length ? <>{noteLines(data.rosterNotes?.request).map((line, index) => <div key={`n${index}`} className="border-t border-slate-200 px-1.5">{line}</div>)}{leaveNotInNotes(data.requests, data.rosterNotes).slice(0, 9).map((item) => <div key={item.name} className="border-t border-slate-200 px-1.5"><b>{item.name}</b> : {item.dates.map(short).join(', ')}</div>)}</> : blank(3)}</div>
         <div className={panel}>{head('STAFF RESIGN', '#d9d9d9')}{data.resigns.length ? data.resigns.map((item) => <div key={item.name} className="border-t border-slate-200 px-1.5"><b>{item.name.toUpperCase()}</b> · {dmy(item.date)}</div>) : blank(1)}</div>
         <div className={panel}>{head('LOCUM / PART TIME', '#0f5c6e', '#fff')}{blank(3)}</div>
         <div className={panel}>{head('TRAINING', '#7b3fa8', '#fff')}{blank(2)}</div>
         <div className={panel}>{head('CREDIT HOUR', '#e0e7ff')}{blank(2)}</div>
         <div className={panel}>{head('OVERTIME (OT)', '#5bc0d8')}{data.overtime.length ? data.overtime.slice(0, 10).map((item, index) => <div key={index} className="flex border-t border-slate-200 px-1.5"><b className="w-12 shrink-0">{item.name.split(' ')[0]}</b><span>{dmy(item.date)} : {item.text}</span></div>) : blank(3)}</div>
-        <div className={panel}>{head('REMARKS', '#d9d9d9')}{blank(2)}</div>
+        <div className={panel}>{head('REMARKS', '#d9d9d9')}{noteLines(data.rosterNotes?.remarks).length ? noteLines(data.rosterNotes?.remarks).map((line, index) => <div key={index} className="border-t border-slate-200 px-1.5">{line}</div>) : blank(2)}</div>
         {data.version === 'current' && data.changes?.length ? <div className={panel}>{head('CHANGES (with time)', '#cfe8ff')}{data.changes.slice(0, 6).map((item, index) => <div key={index} className="border-t border-slate-200 px-1.5"><b>{item.name.split(' ')[0]}</b> {dmy(item.date)}: {item.from || '-'} → {item.to || '-'}<span className="text-slate-500"> · {stamp(item.at)}</span></div>)}</div> : null}
         <div className="pt-1 text-[8px]"><p>Disediakan Oleh :</p><div className="mt-4 w-44 border-t border-black pt-0.5 font-bold">{data.signer.name}<br /><span className="font-normal">{data.signer.title}</span></div></div>
       </div>

@@ -1,5 +1,9 @@
 import { ChangeEvent, ReactNode, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Upload, Printer } from 'lucide-react';
+import { RosterPdfImport } from './RosterPdfImport';
+import { RosterNotesBox } from './RosterNotesBox';
+import { noteLines, type RosterNotes } from './lib/rosterNotes';
+import { readRosterPdf, type RosterPdfResult } from './lib/rosterPdfRead';
 import { officeFetch } from './lib/officeApi';
 import { card } from './AssessmentStaff';
 import { newCode } from './lib/shiftCodes';
@@ -113,11 +117,22 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
   useEffect(() => { if (!data) return; api(`action=roster_log&month=${month}`).then((result) => setLog(result.log || [])).catch(() => setLog([])); }, [month, data]);
   useEffect(() => { setPersonId(''); setPicked(''); }, [group, company, month]);
 
+  const [notesReload, setNotesReload] = useState(0);
+  const [printNotes, setPrintNotes] = useState<Record<string, RosterNotes>>({});
+  // Printing: the notes of the clinic(s) on screen are read first, so they are printed under the table.
+  const startPrint = async () => {
+    const found: Record<string, RosterNotes> = {};
+    for (const place of company ? [company] : ['KJ', 'SK']) { try { const result = await api(`action=roster_notes&company=${place}&month=${month}`); if (result.request || result.remarks) found[place] = { request: result.request || '', remarks: result.remarks || '' }; } catch { /* no access to the notes of that clinic: print without them */ } }
+    setPrintNotes(found); setPrinting(true);
+  };
+  const [pdfImport, setPdfImport] = useState<{ fileName: string; result: RosterPdfResult } | null>(null);
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
     setNotice('');
     try {
+      // A PDF roster is read and shown for checking first (its columns have short names); a CSV is imported at once.
+      if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') { setPdfImport({ fileName: file.name, result: await readRosterPdf(file) }); return; }
       const rows = parseCsv(await file.text());
       if (!rows.length) throw new Error('No roster rows found. Use the columns: company, code, date, shift.');
       const result = await api('action=roster_import', { rows });
@@ -175,6 +190,10 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     {printing && <PrintPortal margin={8}>{printPages.map((page, index) => <PrintPage key={index}><div className="cv-fit roster-print">
       <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><p>KLINIK ARA 24 JAM · HUMAN RESOURCES</p><h1>Duty Roster · {monthName(month)}</h1><p>{company || 'KJ and SK'} · {group === 'doctors' ? 'Doctors' : 'Staff'} · {codes === 'new' ? 'AraOffice codes' : 'Infotech codes'} · Page {index + 1} of {printPages.length}</p></div></header>
       <table className="no-stack"><colgroup><col style={{ width: '42mm' }} />{dates.map((date) => <col key={date} />)}</colgroup><thead><tr><th>Staff</th>{dates.map((date) => <th key={date}>{WEEKDAY[new Date(`${date}T00:00:00`).getDay()]}<br />{Number(date.slice(8))}</th>)}</tr></thead><tbody>{page.map((person) => <tr key={person.id}><th>{person.name}<small>{person.company} · {person.code}</small></th>{dates.map((date) => { const day = byPerson.get(person.id)?.get(date); return <td key={date} className={cellTone(day && { ...day, shift: shown(day.shift) })}>{day ? shown(day.shift) : '·'}</td>; })}</tr>)}</tbody></table>
+      {index === printPages.length - 1 && Object.keys(printNotes).length > 0 && <div className="roster-notes">{(Object.entries(printNotes) as [string, RosterNotes][]).map(([place, notes]) => <div key={place}>
+        {noteLines(notes.request).length > 0 && <><b>REQUEST STAFF {monthName(month).toUpperCase()}{Object.keys(printNotes).length > 1 ? ` (${place})` : ''}</b>{noteLines(notes.request).map((line, at) => <span key={at}>{line}</span>)}</>}
+        {noteLines(notes.remarks).length > 0 && <><b>REMARKS{Object.keys(printNotes).length > 1 ? ` (${place})` : ''}</b>{noteLines(notes.remarks).map((line, at) => <span key={at}>{line}</span>)}</>}
+      </div>)}</div>}
       <footer>{(codes === 'original' ? OLD_CODES : [...(group === 'doctors' ? DOCTOR_CODES : STAFF_CODES), ...OTHER_CODES]).map(([code, label]) => <span key={`${code}-${label}`}><b>{code}</b>: {label}</span>)}<span>· = No roster</span></footer>
     </div></PrintPage>)}</PrintPortal>}
 
@@ -187,8 +206,8 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
           <button onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month" className={nav}><ChevronRight className="h-4 w-4" /></button>
           {month !== monthOf(new Date()) && <button onClick={() => setMonth(monthOf(new Date()))} className="ml-1 text-sm font-semibold text-[#0b587b] hover:underline">This month</button>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-9 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => setPrinting(true)} className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
-        {!readOnly && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
+        <div className="flex flex-wrap items-center gap-2">{(!readOnly || canDraft) && <button type="button" onClick={() => setDrafting((open) => !open)} className="h-9 rounded-xl border border-[#0b587b]/30 bg-sky-50 px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm">Pattern draft · Trial</button>}<button type="button" disabled={!data || !people.length} onClick={() => void startPrint()} className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-[#0b587b] sm:h-10 sm:px-4 sm:text-sm hover:bg-slate-50 disabled:opacity-50"><Printer className="h-4 w-4" />Print / PDF</button>
+        {(!readOnly || canEdit) && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white hover:bg-[#0a4c6a]"><Upload className="h-4 w-4" />Upload roster (CSV or PDF)<input type="file" accept=".csv,text/csv,.pdf,application/pdf" onChange={(event) => void upload(event)} className="hidden" /></label>}</div>
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-slate-100 pt-3 sm:gap-x-5 sm:gap-y-3 sm:pt-4">
         <Choice label="Who" value={who} onChange={setWho} options={[['ca', 'CA + Admin Klinikal'], ['office', 'Office'], ['doctors', 'Doctors']]} />
@@ -201,6 +220,8 @@ export function HRRoster({ onError, readOnly = false, canEdit = false, defaultVi
     {drafting && <HRRosterDraft key={`${group}:${company}`} initialMonth={month} group={group} company={company} hideCodes={hideCodes} onClose={() => setDrafting(false)} />}
     {warning && <p role="alert" className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700"><span>{warning}</span><button type="button" onClick={() => setWarning('')} className="text-xs underline">Close</button></p>}
     {notice && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
+    {pdfImport && <RosterPdfImport fileName={pdfImport.fileName} result={pdfImport.result} api={api} fixedCompany={readOnly && canEdit ? data?.edit?.company || '' : ''} onClose={() => setPdfImport(null)} onError={onError} onDone={(message) => { setPdfImport(null); setNotice(message); load(); setNotesReload((n) => n + 1); }} />}
+    {!(readOnly && !canEdit) && <RosterNotesBox api={api} month={month} monthLabel={monthName(month)} fixedCompany={readOnly && canEdit ? data?.edit?.company || '' : ''} defaultCompany={company} reload={notesReload} onError={onError} />}
     {group !== 'doctors' && <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500"><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-emerald-500" />Permanent</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-violet-500" />Probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-amber-500" />Extended probation</span><span className="inline-flex items-center gap-1.5"><i className="h-3 w-1 rounded bg-rose-500" />Pending resign</span></p>}
     {group === 'doctors' && <p className="px-1 text-xs text-slate-500">Doctors are shown by shift. Locums are not listed because they are not staff.</p>}
     <section className={`${card} overflow-x-auto`}>

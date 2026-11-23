@@ -285,6 +285,9 @@
 .roster-print header { display: flex; align-items: center; gap: 5mm; margin-bottom: 4mm; border-bottom: 1px solid #0b3d59; padding-bottom: 3mm; }
 .roster-print header img { width: 22mm; height: 22mm; flex-shrink: 0; object-fit: contain; }
 .roster-print header > div { min-width: 0; }
+.roster-print .roster-notes { margin-top: 3mm; border-top: 1px solid #94a3b8; padding-top: 2mm; font-size: 7.5pt; display: flex; flex-wrap: wrap; gap: 6mm; }
+.roster-print .roster-notes > div { display: flex; flex-direction: column; min-width: 60mm; }
+.roster-print .roster-notes b { margin-top: 1mm; }
 .roster-print h1 { font-size: 17pt; font-weight: bold; margin: 1mm 0; }
 .roster-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .roster-print th, .roster-print td { border: 1px solid #b7c5d3; padding: 1.8mm 0.3mm; text-align: center; font-size: 6.5pt; overflow-wrap: anywhere; }
