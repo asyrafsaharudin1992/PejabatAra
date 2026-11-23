@@ -16,7 +16,7 @@ const count = (value: unknown) => { const n = Number(value); return value === ''
 
 export type LocumInterview = {
   id: string; name: string; mmc: string; phone: string; branch: string; workplace: string; interviewer: string; date: string; timeStart: string; timeEnd: string;
-  experience: string; skills: string; strength: string; weakness: string; marks: number | null; outOf: number | null; suggestion: string; savedBy: string; createdAt: string; updatedAt: string;
+  experience: string; skills: string; strength: string; weakness: string; marks: number | null; outOf: number | null; suggestion: string; remarks: string; savedBy: string; createdAt: string; updatedAt: string;
 };
 
 export const canLocumInterview = (staffCode: unknown) => LOCUM_INTERVIEWER_CODES.has(String(staffCode || '').trim().toUpperCase());
@@ -53,7 +53,7 @@ export async function locumInterviewSave(db: any, body: any, by: string, userId?
   const record: LocumInterview = {
     id, name, mmc: clean(body?.mmc, 40), phone: clean(body?.phone, 40), branch: clean(body?.branch, 60), workplace: clean(body?.workplace, 600), interviewer: clean(body?.interviewer, 120),
     date: date(body?.date), timeStart: time(body?.timeStart), timeEnd: time(body?.timeEnd), experience: clean(body?.experience, 3000), skills: clean(body?.skills, 3000), strength: clean(body?.strength, 3000), weakness: clean(body?.weakness, 3000),
-    marks, outOf, suggestion: clean(body?.suggestion, 3000), savedBy: by, createdAt: old?.payload?.createdAt || now, updatedAt: now,
+    marks, outOf, suggestion: clean(body?.suggestion, 3000), remarks: clean(body?.remarks, 3000), savedBy: by, createdAt: old?.payload?.createdAt || now, updatedAt: now,
   };
   const { error } = await db.from('portal_state').upsert({ branch_id: branch, state_key: key, payload: record, updated_by: await ownerProfile(db, userId), updated_at: now }, { onConflict: 'branch_id,state_key' });
   if (error) throw error;
