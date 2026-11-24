@@ -1939,7 +1939,9 @@ export async function hrHandler(req: any, res: any) {
       const { data: fixedPeople } = await db.from('hr_employees').select('id,company,employee_code,full_name,designation,assessment_staff_id,work_days,default_shift,holiday_group').eq('status', 'Active').not('default_shift', 'is', null).neq('default_shift', '').limit(500);
       const fixed = wantOriginal ? [] : (fixedPeople || []).filter((p: any) => Array.isArray(p.work_days) && p.work_days.length && !p.work_days.includes(-1));
       const ids = [...new Set([...(data || []).map((row: any) => row.employee_id), ...fixed.map((p: any) => p.id)])];
-      const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,join_date,confirm_date,resign_date,assessment_staff_id').in('id', ids) : { data: [] };
+      const { data: everyoneWithDays } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation,department,join_date,confirm_date,resign_date,assessment_staff_id').in('id', ids) : { data: [] };
+      // Someone who left before this month is not on its roster (an old leftover day, written before they left, must not bring them back: a resigned doctor next to the locum of the same name).
+      const people = (everyoneWithDays || []).filter((p: any) => !(p.resign_date && String(p.resign_date) < start));
       const stored = new Set((data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
       const fixedIds = fixed.map((p: any) => p.id);
       const [{ data: leaves }, { data: holidays }] = fixedIds.length ? await Promise.all([

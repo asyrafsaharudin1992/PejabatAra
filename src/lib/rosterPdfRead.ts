@@ -64,7 +64,8 @@ export function parseDoctorSheetItems(all: TextItem[]): RosterPdfResult {
   const header = all.find((item) => /^REMARK$/i.test(item.str));
   if (!header) throw new Error('The column titles (AM, PM, OFF, REMARK) were not found.');
   const columnItems = all.filter((item) => Math.abs(item.y - header.y) <= 2.5);
-  const kind = (str: string) => /9-6PM/i.test(str) ? 'OH' : /^AM\*?$/i.test(str) ? 'AM' : /^PM\*?$/i.test(str) ? 'PM' : /^OFF$/i.test(str) ? 'OFF' : /LOCUM/i.test(str) ? 'LOCUM' : /REMARK/i.test(str) ? 'REMARK' : '';
+  // The title of the office-hour column is often split by the PDF into pieces ("9", "-", "6PM OH"), so any piece ending in OH (or the whole 9-6PM) is that column.
+  const kind = (str: string) => /9-[46]PM|\bOH\b/i.test(str) ? 'OH' : /^AM\*?$/i.test(str) ? 'AM' : /^PM\*?$/i.test(str) ? 'PM' : /^OFF$/i.test(str) ? 'OFF' : /LOCUM/i.test(str) ? 'LOCUM' : /REMARK/i.test(str) ? 'REMARK' : '';
   const heads = columnItems.map((item) => ({ code: kind(item.str), x: item.x + (item.w ?? item.str.length * 3) / 2 })).filter((head) => head.code);
   if (!heads.some((head) => head.code === 'AM') || !heads.some((head) => head.code === 'OFF')) throw new Error('The column titles (AM, PM, OFF) were not found.');
   const company = /\bKJ\b|KAJANG/i.test(text) ? 'KJ' : /\bSK\b|KEMBANGAN/i.test(text) ? 'SK' : '';
