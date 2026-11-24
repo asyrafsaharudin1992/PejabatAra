@@ -142,14 +142,22 @@ export function parseRosterItems(items: TextItem[]): RosterPdfResult {
   return { company, month, columns: columns.filter((column) => column.days.length), skipped, notes: readPanelNotes(all, tableRight, firstY, bottomY) };
 }
 
-// Opens the PDF in the browser (pdf.js is loaded only now) and reads its first page.
+// Opens the PDF in the browser (pdf.js is loaded only now) and reads it. A staff sheet is one page; the doctors' sheet (RESIDEN/LOCUM) may run over several pages
+// (a month is more than 40 rows), so every page is read and the days are put together by doctor.
 export async function readRosterPdf(file: File): Promise<RosterPdfResult> {
   const data = new Uint8Array(await file.arrayBuffer());
   const [pdfjs, worker] = await Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.js?url')]);
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
   const pdf = await pdfjs.getDocument({ data, isEvalSupported: false }).promise;
-  const page = await pdf.getPage(1);
-  const content = await page.getTextContent();
-  const items: TextItem[] = (content.items as any[]).filter((item) => typeof item.str === 'string').map((item) => ({ str: item.str, x: item.transform[4], y: item.transform[5], w: item.width }));
-  return parseRosterItems(items);
+  const itemsOf = async (number: number): Promise<TextItem[]> => {
+    const content = await (await pdf.getPage(number)).getTextContent();
+    return (content.items as any[]).filter((item) => typeof item.str === 'string').map((item) => ({ str: item.str, x: item.transform[4], y: item.transform[5], w: item.width }));
+  };
+  const firstItems = await itemsOf(1);
+  const first = parseRosterItems(firstItems);
+  if (!/RESIDEN\/LOCUM/i.test(firstItems.map((item) => item.str).join(' ')) || pdf.numPages < 2) return first;
+  // The pages are laid one under the other as one long sheet (page 2's text is moved below page 1's), so the column titles and the doctors' letters on page 1 apply to every row.
+  const all: TextItem[] = [...firstItems];
+  for (let number = 2; number <= pdf.numPages; number++) all.push(...(await itemsOf(number)).map((item) => ({ ...item, y: item.y - (number - 1) * 100000 })));
+  try { return parseRosterItems(all); } catch { return first; }
 }
