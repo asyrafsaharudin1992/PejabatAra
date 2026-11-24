@@ -5,7 +5,7 @@ import { ceoCharts, headcount } from './_ceo-charts.js';
 import { branchId, officeAccess, errorReply } from './_office-db.js';
 import { CARE_COLUMNS, withPeople } from './_care.js';
 import { LEAVE_TYPES, extraIncentiveCodes, incentiveRateChanges, isoDate, leaveDays, rosterFor, yearAllowance } from './_assessment.js';
-import { assertPayrollOpen, attendanceHrAction } from './_attendance.js';
+import { assertPayrollOpen, attendanceHrAction, ensurePublicHolidayOt } from './_attendance.js';
 import { loadReviewReminders } from './_review.js';
 import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
@@ -316,6 +316,8 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   // Staff who left during or after this pay period are still paid their last month.
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const periodTo = `${year}-${String(month).padStart(2, '0')}-19`;
+  // A public holiday worked in the period is added as approved OT by the system first, so it is in the figures below.
+  await ensurePublicHolidayOt(db, periodFrom, periodTo).catch(() => 0);
   // OT that HR approved in Attendance for this pay period (20th to 19th), as hours at each rate.
   const readOt = (columns: string) => db.from('hr_attendance_ot').select(columns).eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
   let otRead = await readOt('employee_id,work_date,approved_minutes,multiplier,parts');

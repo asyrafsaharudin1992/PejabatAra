@@ -241,6 +241,9 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           // Extra time: before the shift starts and after it ends (doctors have no OT).
           const before = Math.max(0, Math.round((start - clockIn.at) / MIN)), after = Math.max(0, Math.round((clockOut.at - end) / MIN));
           day.ot = noOt ? 0 : before + after;
+          // On a public holiday of the person's group the whole time worked counts as OT (even a rostered shift), not only the time outside the shift. It then shows as OT to apply
+          // for (the staff's OT screen and HR's possible OT), and is paid as the fixed PH amount plus any hours beyond it.
+          if (day.holiday && !noOt) day.ot = day.worked;
           const pol = rules.policyFor(date); day.otCounted = day.ot >= pol.minMinutes ? wholeHours(day.ot, pol) : 0;
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
@@ -260,6 +263,31 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
     }
   }
   return out;
+}
+
+// Public holiday worked: the whole time between the clock in and the clock out is OT, so the system adds it as approved OT by itself (decided by "System (public holiday)"),
+// like Infotech's PH pay. Whole hours, with 1 hour of rest taken off when more than 5 hours were worked, paid as the fixed PH amount (8 h at 2.0) and the hours beyond it at 3.0.
+// An OT row that already exists for the day (approved, rejected or HR's own) is never replaced. Only finished days (before today) with both clocks and no leave are added.
+export async function ensurePublicHolidayOt(db: any, from: string, to: string) {
+  const { data: holidays } = await db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to);
+  const dates = [...new Set<string>((holidays || []).map((row: any) => String(row.holiday_date)))].filter((date) => date < today()).sort();
+  if (!dates.length) return 0;
+  const [rules, peopleRead] = await Promise.all([loadRules(db), db.from('hr_employees').select(PERSON).or(`status.eq.Active,resign_date.gte.${dates[0]}`).limit(600)]);
+  const people = (peopleRead.data || []) as Employee[];
+  const [days, haveRead] = await Promise.all([buildDays(db, people, dates[0], dates[dates.length - 1], rules), db.from('hr_attendance_ot').select('employee_id,work_date').in('work_date', dates).limit(5000)]);
+  const done = new Set<string>((haveRead.data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
+  const rows: any[] = [];
+  for (const person of people) {
+    if (hasNoOt(person) || (person.clock_required || 'full') === 'none') continue;
+    for (const day of days.get(person.id) || []) {
+      if (!dates.includes(day.date) || !day.holiday || done.has(`${person.id}|${day.date}`) || !day.inAt || !day.outAt || day.status === 'leave' || day.status === 'leave-pending') continue;
+      const policy = rules.policyFor(day.date), gross = wholeHours(day.worked, policy), parts = otParts('ph', gross, policy);
+      if (!parts.length) continue;
+      rows.push({ employee_id: person.id, work_date: day.date, captured_minutes: gross, status: 'approved', approved_minutes: netMinutes('ph', gross, policy), multiplier: parts[0].multiplier, parts, note: text(`Public holiday worked, added by the system. ${otSummary('ph', gross, policy)}.`, 300), decided_by: 'System (public holiday)', decided_at: new Date().toISOString() });
+    }
+  }
+  if (rows.length) { const { error } = await db.from('hr_attendance_ot').upsert(rows, { onConflict: 'employee_id,work_date', ignoreDuplicates: true }); if (error) throw error; }
+  return rows.length;
 }
 
 const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '' });
@@ -479,6 +507,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     }
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : today().slice(0, 7);
     if (Number(month.slice(5)) < 1 || Number(month.slice(5)) > 12) throw fail(400, 'Choose a valid month.');
+    await ensurePublicHolidayOt(db, `${month}-01`, monthEnd(month)).catch(() => 0);
     const days = (await buildDays(db, [me], `${month}-01`, monthEnd(month), rules)).get(me.id) || [];
     return res.status(200).json({ month, today: today(), days: days.map(dayView) });
   }
@@ -855,6 +884,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   // OT: every day with extra time, and HR's decision on it.
   if (req.method === 'GET' && action === 'attendance_ot') {
     const month = monthOf(req.query.month);
+    await ensurePublicHolidayOt(db, `${month}-01`, monthEnd(month)).catch(() => 0);
     const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, `${month}-01`, monthEnd(month))]);
     const days = buildDaysFrom(data, people, `${month}-01`, monthEnd(month), rules);
     const rows: any[] = [];
