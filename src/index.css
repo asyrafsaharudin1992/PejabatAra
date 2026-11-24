@@ -296,6 +296,10 @@
 .roster-print.roster-draft-print { font-size: var(--sheet-pt, 10pt); }
 .roster-print.roster-draft-print th, .roster-print.roster-draft-print td, .roster-print.roster-draft-print th:first-child { font-size: var(--sheet-pt, 10pt); padding: 0.8mm 0.6mm; line-height: 1.2; }
 .roster-print.roster-draft-print table { table-layout: auto; }
+/* Doctors' sheet: every column but REMARK keeps its text on one line (LOCUM 6-10, D, A, B), so a day is one row and the month fits one page; only REMARK may wrap, and the title row wraps normally. */
+.roster-print.roster-doctors-print th, .roster-print.roster-doctors-print td { white-space: nowrap; overflow-wrap: normal; }
+.roster-print.roster-doctors-print th[colspan], .roster-print.roster-doctors-print td[colspan], .roster-print.roster-doctors-print tr > :last-child { white-space: normal; overflow-wrap: anywhere; }
+.roster-print.roster-doctors-print td:last-child { width: 100%; }
 .roster-print small { display: block; font-size: 6.5pt; font-weight: normal; color: #526477; }
 .roster-print footer { display: flex; flex-wrap: wrap; gap: 1mm 4mm; font-size: 6.5pt; margin-top: 3mm; }
 @page staff-profile { size: A4 portrait; margin: 14mm; }
