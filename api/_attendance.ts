@@ -948,6 +948,39 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     const requests = await withOtPreview(db, (data || []).map((row: any) => ({ ...requestRow(row, names), company: companyOf.get(row.employee_id) || '' })), data || []);
     return res.status(200).json({ requests: [...requests, ...listed] });
   }
+  // HR removes an approved OT or missed-clock decision made by mistake (a wrong application, a wrong approval). It takes back what the approval did: the OT row Payroll reads
+  // and the clocks the request added, then the request itself. An OT line brought over from Infotech, or added by HR without a request, is listed as "ot-<id>" and removed the same way.
+  // A day in a locked payroll month cannot be changed. The OT the system added for a public holiday is set to rejected instead, so it is not made again on the next look.
+  if (req.method === 'POST' && action === 'attendance_request_delete') {
+    const id = text(body.id, 80);
+    let employeeId = '', date = '', what = '';
+    if (id.startsWith('ot-')) {
+      const { data: row } = await db.from('hr_attendance_ot').select('id,employee_id,work_date,status,decided_by,approved_minutes').eq('id', id.slice(3)).maybeSingle();
+      if (!row || row.status !== 'approved') throw fail(404, 'That OT is not approved, or it has already been removed.');
+      employeeId = row.employee_id; date = String(row.work_date);
+      if (only && !only.has(employeeId)) throw fail(403, 'This staff member is not in your team.');
+      await assertPayrollOpen(db, employeeId, date);
+      if (String(row.decided_by || '').startsWith('System')) { const { error } = await db.from('hr_attendance_ot').update({ status: 'rejected', approved_minutes: 0, parts: [], note: `Removed by ${userLabel || 'HR'}.`, decided_by: userLabel || 'HR', decided_at: new Date().toISOString() }).eq('id', row.id); if (error) throw error; }
+      else { const { error } = await db.from('hr_attendance_ot').delete().eq('id', row.id); if (error) throw error; }
+      what = `OT ${minutesText(Number(row.approved_minutes || 0))}`;
+    } else {
+      const request = await readRequest(db, id);
+      if (request.status !== 'approved') throw fail(409, 'Only an approved request can be deleted here.');
+      employeeId = request.employee_id; date = String(request.work_date);
+      if (only && !only.has(employeeId)) throw fail(403, 'This staff member is not in your team.');
+      await assertPayrollOpen(db, employeeId, date);
+      // The clocks this request added (the same times applyRequest wrote), and nothing else on the day.
+      const stamps: string[] = [];
+      if (request.in_time) stamps.push(new Date(at(date, String(request.in_time))).toISOString());
+      if (request.out_time) { let outAt = at(date, String(request.out_time)); const inAt = request.in_time ? at(date, String(request.in_time)) : null; if (inAt !== null && outAt <= inAt) outAt += 24 * HOUR; stamps.push(new Date(outAt).toISOString()); }
+      if (stamps.length) { const { error } = await db.from('hr_attendance_clocks').delete().eq('employee_id', employeeId).eq('device', `request:${date}`).in('clock_at', stamps); if (error) throw error; }
+      if (!isMissedClock(String(request.reason || ''))) { const { error } = await db.from('hr_attendance_ot').delete().eq('employee_id', employeeId).eq('work_date', date); if (error) throw error; }
+      const { error } = await db.from('hr_attendance_requests').delete().eq('id', id); if (error) throw error;
+      what = isMissedClock(String(request.reason || '')) ? 'missed clock' : 'OT request';
+    }
+    if (userId) await db.from('hr_audit').insert({ employee_id: employeeId, action: 'update', changes: { attendance_deleted: [`${date}`, `${what} removed by ${userLabel || 'HR'}`] }, changed_by: userId });
+    return res.status(200).json({ success: true });
+  }
   if (req.method === 'POST' && action === 'attendance_request_decide') {
     await hrDecide(db, text(body.id, 60), String(body.decision), text(body.note, 300), userLabel || 'HR', Number(body.rate), body.minutes);
     return res.status(200).json({ success: true });
