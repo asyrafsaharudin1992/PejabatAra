@@ -77,7 +77,11 @@ export function parseDoctorSheetItems(all: TextItem[]): RosterPdfResult {
     const [day, month] = dateItem.str.split('/').map(Number);
     const diff = month - sheetMonth, year = diff > 6 ? sheetYear - 1 : diff < -6 ? sheetYear + 1 : sheetYear;
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const row = all.filter((item) => Math.abs(item.y - dateItem.y) <= 2.5 && item.x > dateItem.x + 8);
+    // The whole height of the day's row: a cell can wrap onto two or three lines (D, A, / B; LOCUM 9AM- / 6PM), so the text is taken from halfway to the date above to halfway to the date below, not only on the date's own line.
+    const rowY = dateItems.map((item) => item.y).sort((a, b) => b - a), at = rowY.indexOf(dateItem.y);
+    const above = at > 0 ? rowY[at - 1] : dateItem.y + (rowY[1] !== undefined ? rowY[0] - rowY[1] : 12), below = at < rowY.length - 1 ? rowY[at + 1] : dateItem.y - (rowY.length > 1 ? rowY[rowY.length - 2] - rowY[rowY.length - 1] : 12);
+    const top = (above + dateItem.y) / 2, bottom = (dateItem.y + below) / 2;
+    const row = all.filter((item) => item.y <= top && item.y > bottom && item.x > dateItem.x + 8);
     if (row.some((item) => /\(prev\. month\)/i.test(item.str))) continue;
     const cells = new Map<string, string[]>(); let remark = '';
     for (const item of row.sort((a, b) => a.x - b.x)) {
