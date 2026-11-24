@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { card } from './AssessmentStaff';
 import { PrintMenu } from './PrintMenu';
-import { PrintPortal, PrintPage } from './PrintPortal';
-import { PdfHint, usePrintSheet } from './IncentiveSheet';
+import { printPdfBlob } from './lib/savePdf';
+import { downloadBlob } from './lib/downloadBlob';
+import { holidayMemoPdf } from './lib/holidayMemoPdf';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
 
 // Leave > Public holidays > Create memo: the memo of the year's public holidays for the clinic (the sheet HR sends to staff), made from the holidays keyed in under
@@ -41,10 +42,10 @@ function Table({ title, rows }: { title: string; rows: Holiday[] }) {
 
 function Sheet({ memo, operation, admin }: { memo: Memo; operation: Holiday[]; admin: Holiday[] }) {
   const numbered = (text: string) => <ol className="ml-5 list-decimal space-y-[0.6mm]">{lines(text).map((line) => <li key={line}>{line}</li>)}</ol>;
-  return <div className="bg-white text-black" style={{ width: '210mm', minHeight: '297mm', padding: '10mm 14mm', fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '9pt', lineHeight: 1.35 }}>
+  return <div className="bg-white text-black" style={{ width: '210mm', minHeight: '296.5mm', padding: '0 14mm 10mm', fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '9pt', lineHeight: 1.35 }}>
     <div className="flex items-start justify-between gap-4">
       <div className="flex-1" />
-      <div className="flex items-start gap-3"><img src="/forms/ara-letterhead-badge.png" alt="Klinik ARA 24 Jam" className="h-[30mm] w-[30mm] rounded-b-2xl object-cover" /><div className="max-w-[60mm] pt-3 text-[8pt] leading-[1.35]"><p className="text-[10pt] font-bold">HSO Healthcare Sdn Bhd</p><p>202201004242 (1449939-U)</p><p>TIN: C29715204010</p><p>H-7-1, Jalan PP25, Putra Walk Block H, Taman Pinggiran Putra, Seri Kembangan, Selangor</p>{memo.contact && <p>{memo.contact}</p>}</div></div>
+      <div className="flex items-start gap-3"><img src="/forms/ara-letterhead-memo.png" alt="Klinik ARA 24 Jam" className="h-[38mm] w-[30mm] shrink-0 object-fill" /><div className="max-w-[60mm] pt-3 text-[8pt] leading-[1.4]"><p className="text-[10pt] font-bold">HSO Healthcare Sdn Bhd</p><p>202201004242 (1449939-U)</p><p>TIN: C29715204010</p><p>H-7-1, Jalan PP25, Putra Walk Block H, Taman Pinggiran Putra, Seri Kembangan, Selangor</p>{memo.contact && <p>{memo.contact}</p>}</div></div>
     </div>
     <p className="mt-5 text-center text-[10.5pt] font-bold underline">{memo.title}</p>
     <div className="mt-3 grid grid-cols-2 items-start gap-4"><Table title="Hari Kelepasan Am Jabatan Operasi" rows={operation} /><Table title="Hari Kelepasan Am Jabatan Pengurusan- Admin" rows={admin} /></div>
@@ -64,13 +65,16 @@ export function HolidayMemo({ rows, year, onError }: { rows: Holiday[] | null; y
     const base: Memo = { title: '', doctors: DOCTORS, assistants: ASSISTANTS, contact: '', by: '', byTitle: '', approver: '', approverTitle: '' };
     try { return { ...base, ...JSON.parse(localStorage.getItem(KEY) || '{}'), title: '', doctors: DOCTORS, assistants: ASSISTANTS }; } catch { return base; }
   });
-  const [printing, setPrinting] = useState(false);
   const title = memo.title || `Hari kelepasan Am Klinik Ara 24 Jam bagi tahun ${year}`;
   // Only the names and the contact line are remembered (the explanation always starts from the standard text for the year).
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify({ contact: memo.contact, by: memo.by, byTitle: memo.byTitle, approver: memo.approver, approverTitle: memo.approverTitle })); } catch { /* the browser may not allow it */ } }, [memo.contact, memo.by, memo.byTitle, memo.approver, memo.approverTitle]);
-  usePrintSheet(printing, `Hari kelepasan Am ${year}`, () => setPrinting(false));
   const forYear = useMemo(() => (rows || []).filter((row) => row.date.startsWith(String(year))).sort((a, b) => a.date.localeCompare(b.date)), [rows, year]);
   const operation = forYear.filter((row) => row.group === 'SG-OPS'), admin = forYear.filter((row) => row.group === 'SG-MNG');
+  // Print and Download make the same one-page A4 PDF, drawn with real text and thin lines (not a picture of the screen), so the letterhead badge stays at the very top edge,
+  // the table lines stay fine, and nothing spills onto a second page (the browser's own page margins, about 21 mm in Safari, would otherwise push it down).
+  const makePdf = () => holidayMemoPdf({ ...memo, title }, operation, admin, year);
+  const print = async () => { try { printPdfBlob(await makePdf()); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to print the memo.'); } };
+  const save = async () => { downloadBlob([await makePdf()], `Hari kelepasan Am ${year}.pdf`, 'application/pdf'); };
   const set = (patch: Partial<Memo>) => setMemo((current) => ({ ...current, ...patch }));
   const field = 'mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm';
   const shown = { ...memo, title };
@@ -90,11 +94,10 @@ export function HolidayMemo({ rows, year, onError }: { rows: Holiday[] | null; y
         <label className="block text-xs font-semibold text-slate-500">Title<input value={memo.approverTitle} onChange={(event) => set({ approverTitle: event.target.value })} maxLength={80} className={field} /></label>
       </div>
       <p className="text-xs text-slate-400">The names and the contact line are remembered on this computer only. The signatures are left blank to sign on the printed memo.</p>
-      <div className="flex flex-wrap gap-2"><PrintMenu onPrint={() => setPrinting(true)} pdf={{ scope: '[aria-label="Holiday memo"]', filename: `Hari kelepasan Am ${year}` }} onError={onError} /></div>
+      <div className="flex flex-wrap gap-2"><PrintMenu onPrint={() => void print()} onPdf={save} onError={onError} /></div>
     </section>
     <section className={`${card} overflow-hidden bg-slate-100`}>
       <div aria-label="Holiday memo"><ReportPreviewFrame portrait><Sheet memo={shown} operation={operation} admin={admin} /></ReportPreviewFrame></div>
     </section>
-    {printing && <><PdfHint /><PrintPortal margin={0} portrait><PrintPage><div className="cv-fit"><Sheet memo={shown} operation={operation} admin={admin} /></div></PrintPage></PrintPortal></>}
   </div>;
 }
