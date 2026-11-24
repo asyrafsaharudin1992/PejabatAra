@@ -318,8 +318,8 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   const periodTo = `${year}-${String(month).padStart(2, '0')}-19`;
   // OT that HR approved in Attendance for this pay period (20th to 19th), as hours at each rate.
   const readOt = (columns: string) => db.from('hr_attendance_ot').select(columns).eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
-  let otRead = await readOt('employee_id,approved_minutes,multiplier,parts');
-  if (otRead.error) otRead = await readOt('employee_id,approved_minutes,multiplier'); // before the parts column exists
+  let otRead = await readOt('employee_id,work_date,approved_minutes,multiplier,parts');
+  if (otRead.error) otRead = await readOt('employee_id,work_date,approved_minutes,multiplier'); // before the parts column exists
   const attendanceOt = new Map<string, { ot10: number; ot15: number; ot20: number; ot30: number }>();
   // The fixed amount for a rest day or a public holiday worked (Infotech's Rest/PH Amount), in days: a rest day is paid 1 x ORP a day (half a day for up to 4 hours), a public holiday 2 x ORP.
   const attendanceRestPh = new Map<string, { restDays: number; phDays: number }>();
@@ -340,6 +340,32 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     }
     attendanceOt.set(row.employee_id, sums);
   }
+  // A public holiday worked on a rostered shift is paid one PH day (2 x the daily rate), as Infotech does: checked on the September 2026 report, every operation
+  // staff member rostered to work on 31 Aug or 16 Sep got it, whatever the shift (AM, PM, ASCL); off day, OFF and REST paid nothing. The staff must also have clocked
+  // in that day and not be on approved leave. A day already paid through an approved public holiday OT request is not counted twice.
+  {
+    const { data: holidayRows } = await db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', periodFrom).lte('holiday_date', periodTo);
+    const phOtDays = new Set<string>();
+    for (const row of otRead.error ? [] : otRead.data || []) if (Array.isArray(row.parts) && row.parts.some((part: any) => part.flat === 'ph')) phOtDays.add(`${row.employee_id}|${row.work_date}`);
+    for (const date of [...new Set((holidayRows || []).map((row: any) => String(row.holiday_date)))]) {
+      const groups = new Set((holidayRows || []).filter((row: any) => row.holiday_date === date).map((row: any) => row.group_code));
+      const startUtc = new Date(Date.parse(`${date}T00:00:00Z`) - 8 * 3600000).toISOString(), endUtc = new Date(Date.parse(`${date}T00:00:00Z`) + 16 * 3600000).toISOString();
+      const [{ data: rostered }, { data: clocks }, { data: onLeave }, { data: people }] = await Promise.all([
+        db.from('hr_roster').select('employee_id').eq('work_date', date).eq('works', true).limit(1000),
+        db.from('hr_attendance_clocks').select('employee_id').eq('kind', 'in').gte('clock_at', startUtc).lt('clock_at', endUtc).limit(3000),
+        db.from('hr_leave_requests').select('employee_id').eq('status', 'approved').lte('start_date', date).gte('end_date', date).limit(500),
+        db.from('hr_employees').select('id,holiday_group').limit(1000),
+      ]);
+      const groupOf = new Map((people || []).map((row: any) => [row.id, row.holiday_group]));
+      const clocked = new Set((clocks || []).map((row: any) => row.employee_id)), away = new Set((onLeave || []).map((row: any) => row.employee_id));
+      for (const row of rostered || []) {
+        const id = row.employee_id;
+        if (!groups.has(groupOf.get(id)) || !clocked.has(id) || away.has(id) || phOtDays.has(`${id}|${date}`)) continue;
+        const days = attendanceRestPh.get(id) || { restDays: 0, phDays: 0 };
+        days.phDays += 1; attendanceRestPh.set(id, days);
+      }
+    }
+  }
   // Unpaid leave (UL, ULEL) approved for this pay period, as days: a request that runs over the start or end of the period counts only for the days inside it.
   const attendanceUnpaid = new Map<string, number>();
   {
@@ -351,7 +377,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     }
   }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
-    db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
+    db.from('hr_employees').select('id,company,employee_code,full_name,basic_salary,fixed_allowances,marital_status,spouse_working,children,payroll_settings,join_date,resign_date,status,holiday_group').or(`status.eq.Active,and(status.eq.Inactive,resign_date.gte.${periodFrom})`).order('company').order('employee_code'),
     db.from('hr_payroll_ytd').select('employee_id,as_of,wages,kwsp_relief,pcb_paid,zakat_paid,prev_as_of,prev_wages,prev_kwsp_relief,prev_pcb_paid').eq('year', year),
     db.from('hr_payslips').select('employee_id,month,status,inputs,result').eq('year', year),
     db.from('hr_career_history').select('employee_id,event_date,from_value,to_value').in('kind', ['Increment', 'Salary Adjustment']).gte('event_date', periodFrom).limit(2000),
