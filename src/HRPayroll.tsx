@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SubTabs } from './SubTabs';
 import { HRPayrollAdjustments } from './HRPayrollAdjustments';
+import { HRPayrollSalaryAdjustment } from './HRPayrollSalaryAdjustment';
 import { PayrollCharts } from './PayrollCharts';
 import { Banknote, Check, Circle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { card } from './AssessmentStaff';
@@ -292,7 +293,7 @@ function PayrollFinance({ onError }: { onError: (message: string) => void }) {
   </section>;
 }
 
-export type PayrollTab = 'run' | 'compare' | 'adjustments' | 'payslips' | 'finance' | 'chart' | 'guide';
+export type PayrollTab = 'run' | 'compare' | 'adjustments' | 'salary' | 'payslips' | 'finance' | 'chart' | 'guide';
 export function HRPayroll({ onError = () => {}, start = 'run' }: { onError?: (message: string) => void; start?: PayrollTab }) {
   const [tab, setTab] = useState<PayrollTab>(start);
   return <div className="mx-auto max-w-[1500px] space-y-5">
@@ -301,8 +302,8 @@ export function HRPayroll({ onError = () => {}, start = 'run' }: { onError?: (me
       <h2 className="mt-3 flex items-center gap-3 text-3xl font-semibold tracking-tight"><Banknote className="h-8 w-8 text-[#ffb000]" />Payroll</h2>
       <p className="mt-3 max-w-2xl leading-7 text-[#b9cfdd]">Monthly pay, statutory deductions and payslips, replacing Infotech from the November 2026 pay run. January to October 2026 are shown as Infotech paid them.</p>
     </section>
-    <SubTabs label="Payroll" active={tab} onSelect={setTab} tabs={[{ id: 'run', label: 'Pay run' }, { id: 'compare', label: 'Compare with last month', short: 'Compare' }, { id: 'adjustments', label: 'Adjustments' }, { id: 'payslips', label: 'Payslips' }, { id: 'finance', label: 'Finance use', short: 'Finance' }, { id: 'chart', label: 'Chart' }, { id: 'guide', label: 'Calculation guide', short: 'Guide' }]} />
-    {tab === 'chart' ? <PayrollCharts /> : tab === 'guide' ? <PayrollGuide /> : tab === 'finance' ? <PayrollFinance onError={onError} /> : tab === 'compare' ? <HRPayrollCompare onError={onError} /> : tab === 'adjustments' ? <HRPayrollAdjustments onError={onError} /> : tab === 'payslips' ? <HRPayslips onError={onError} /> : <>
+    <SubTabs label="Payroll" active={tab} onSelect={setTab} tabs={[{ id: 'run', label: 'Pay run' }, { id: 'compare', label: 'Compare with last month', short: 'Compare' }, { id: 'adjustments', label: 'Adjustments' }, { id: 'salary', label: 'Salary adjustment', short: 'Salary' }, { id: 'payslips', label: 'Payslips' }, { id: 'finance', label: 'Finance use', short: 'Finance' }, { id: 'chart', label: 'Chart' }, { id: 'guide', label: 'Calculation guide', short: 'Guide' }]} />
+    {tab === 'chart' ? <PayrollCharts /> : tab === 'guide' ? <PayrollGuide /> : tab === 'finance' ? <PayrollFinance onError={onError} /> : tab === 'compare' ? <HRPayrollCompare onError={onError} /> : tab === 'adjustments' ? <HRPayrollAdjustments onError={onError} /> : tab === 'salary' ? <HRPayrollSalaryAdjustment onError={onError} /> : tab === 'payslips' ? <HRPayslips onError={onError} /> : <>
       <PayRun onError={onError} />
       <div className="grid gap-5 lg:grid-cols-2">
         <List title="Set up first" steps={SETUP} />
