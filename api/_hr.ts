@@ -11,7 +11,7 @@ import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentive
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { payslipLeave } from './_leave-summary.js';
-import { ADJUSTMENT_TYPES, calculatePayslip, NO_INPUTS, type PayInputs } from '../src/lib/payrollRun.js';
+import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
@@ -2302,12 +2302,57 @@ export async function hrHandler(req: any, res: any) {
       const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
       const [{ data: slip, error }, { data: me }] = await Promise.all([
         db.from('hr_payslips').select('year,month,status,result,inputs').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
-        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account,ic_no,tax_no,socso_no,epf_no,join_date,resign_date').eq('id', id).maybeSingle(),
+        db.from('hr_employees').select('full_name,employee_code,company,designation,department,bank_name,bank_account,ic_no,tax_no,socso_no,epf_no,join_date,resign_date,basic_salary').eq('id', id).maybeSingle(),
       ]);
       if (error) throw error;
       if (!slip || !me) throw fail(404, 'That payslip is not available.');
       const r: any = slip.result || {};
-      return res.status(200).json({ status: slip.status, payslip: { year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
+      // Like Infotech's payslip: a raise in the middle of the period shows as "INCREMENT : amount" under the basic pay, and the OT is listed by rate
+      // (before and after the raise when the attendance dates allow it).
+      const period = payPeriod(slip.year, slip.month);
+      const { data: raiseRows } = await db.from('hr_career_history').select('event_date,from_value,to_value').eq('employee_id', id).in('kind', ['Increment', 'Salary Adjustment']).gt('event_date', period.from).lte('event_date', period.to).order('event_date');
+      const raises = (raiseRows || []).filter((row: any) => Number.isFinite(Number(row.from_value))).map((row: any) => ({ date: String(row.event_date), from: Number(row.from_value), to: Number(row.to_value) }));
+      let increment = 0;
+      let otLines: { heading: string; rows: { label: string; hours: number; amount: number }[] }[] = [];
+      if (raises.length && Number(r.basic) > 0) {
+        const latest = Number(raises[raises.length - 1].to) || Number((me as any).basic_salary) || 0;
+        const whole = proratedSalary(latest, slip.year, slip.month, null, null, raises.map((row: any) => ({ date: row.date, from: row.from }))).amount;
+        increment = Math.round((whole - raises[0].from) * 100) / 100;
+      }
+      let typed: Record<string, number> = { ot10: Number(slip.inputs?.ot10) || 0, ot15: Number(slip.inputs?.ot15) || 0, ot20: Number(slip.inputs?.ot20) || 0, ot30: Number(slip.inputs?.ot30) || 0 };
+      const salaryNow = Number((me as any).basic_salary) || Number(r.basic) || 0;
+      const rateRows = (salary: number, hours: Record<string, number>) => ([['ot10', 1], ['ot15', 1.5], ['ot20', 2], ['ot30', 3]] as const).filter(([key]) => (hours[key] || 0) > 0).map(([key, times]) => ({ label: `OT ${times.toFixed(1)}`, hours: Math.round(hours[key] * 100) / 100, amount: Math.round(hourlyRate(salary) * times * hours[key] * 100) / 100 }));
+      if ((Number(r.ot) || 0) > 0) {
+        // The OT hours HR approved in Attendance for the pay period, by day. A month brought over from Infotech has only the OT amount, so these hours stand in for the typed ones.
+        const { data: att } = await db.from('hr_attendance_ot').select('work_date,approved_minutes,multiplier,parts').eq('employee_id', id).eq('status', 'approved').gte('work_date', period.from).lte('work_date', period.to).limit(400);
+        const buckets = new Map<string, Record<string, number>>();
+        const total: Record<string, number> = { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
+        for (const row of att || []) {
+          const parts: any[] = Array.isArray(row.parts) && row.parts.length ? row.parts : [{ minutes: Number(row.approved_minutes || 0), multiplier: Number(row.multiplier) }];
+          for (const part of parts) {
+            if (part.flat) continue;
+            const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, string>)[Number(part.multiplier)];
+            if (!key) continue;
+            const group = raises.length && String(row.work_date) < raises[0].date ? 'before' : 'after';
+            const entry = buckets.get(group) || { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
+            entry[key] += Number(part.minutes || 0) / 60; total[key] += Number(part.minutes || 0) / 60; buckets.set(group, entry);
+          }
+        }
+        const typedNone = Object.values(typed).every((value) => value === 0);
+        const useAttendance = typedNone || Object.keys(typed).every((key) => Math.abs((total[key] || 0) - typed[key]) < 0.01);
+        if (typedNone) typed = total;
+        if (raises.length && useAttendance && Object.values(total).some((value) => value > 0)) {
+          const before = new Date(Date.parse(`${raises[0].date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+          for (const [group, heading, salary] of [['before', `${period.from} TO ${before} BEFORE INCREMENT`, raises[0].from], ['after', `${raises[0].date} TO ${period.to} AFTER INCREMENT`, raises[raises.length - 1].to]] as const) {
+            const entry = buckets.get(group); const rows = entry ? rateRows(salary, entry) : [];
+            if (rows.length) otLines.push({ heading, rows });
+          }
+        }
+        if (!otLines.length) otLines = [{ heading: '', rows: rateRows(raises.length ? raises[raises.length - 1].to : salaryNow, typed) }];
+      }
+      // The listed OT must add up to the OT on the payslip (a month brought over from Infotech, or a salary that changed, may not); if not, it is left out.
+      if (Math.abs(otLines.reduce((sum, block) => sum + block.rows.reduce((inner, row) => inner + row.amount, 0), 0) - (Number(r.ot) || 0)) > 0.05) otLines = [];
+      return res.status(200).json({ status: slip.status, payslip: { increment, otLines, otFrom: period.from, otTo: period.to, year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
         basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
         eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
         bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),

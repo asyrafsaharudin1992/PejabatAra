@@ -24,7 +24,7 @@ async function hrApi(query: string, body?: unknown) {
 const api = hrApi;
 type Source = (query: string) => Promise<any>;
 type Tab = 'today' | 'month' | 'individual' | 'ot' | 'missed' | 'late' | 'credit' | 'import' | 'places' | 'staff' | 'rules';
-type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; creditHours?: number; leave: string };
+type Row = { id: string; company: string; code: string; name: string; doctor: boolean; date: string; shift: string; status: string; startTime: string; endTime: string; inTime: string; outTime: string; late: number; lateCounted: number; otCounted: number; otStatus?: string; creditHours?: number; leave: string };
 type CreditInfo = { uses: { id: string; kind: 'late' | 'early'; hours: number; note: string }[]; usedThisYear: number; balanceMinutes: number | null };
 const hoursText = (minutes: number) => { const m = Math.abs(minutes); return `${minutes < 0 ? '-' : ''}${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
 type MonthRow = { id: string; company: string; code: string; name: string; expected: number; present: number; absent: number; leave: number; missingOut: number; lateDays: number; lateMinutes: number; workedMinutes: number; otApprovedMinutes: number; otWaitingMinutes: number; exempt: number };
@@ -49,6 +49,8 @@ const STATUS: Record<string, [string, string]> = { present: ['Present', 'bg-emer
 // The leave codes as HR knows them (unpaid leave is UPL); the badge says which leave it is, not just "Leave".
 const LEAVE_CODE: Record<string, string> = { AL: 'AL', ML: 'ML', EL: 'EL', UL: 'UPL', ULEL: 'UPL', HOSP: 'HOSP', MATN: 'MATN', MARRG: 'MARRG' };
 const LEAVE_NAME: Record<string, string> = { AL: 'Annual leave', ML: 'Medical leave', EL: 'Emergency leave', UL: 'Unpaid leave', ULEL: 'Unpaid emergency leave', HOSP: 'Hospitalisation leave', MATN: 'Maternity leave', MARRG: 'Marriage leave' };
+// A day clocked on a day off with enough hours to count as overtime, and no OT decision yet, is marked "Possible OT" beside the status.
+const possibleOt = (row: { status: string; otCounted?: number; otStatus?: string }) => row.status === 'extra' && (row.otCounted || 0) > 0 && !row.otStatus ? <span title="Clocked on a day off for long enough to count as OT. Check it and approve it under OT, or ask the staff to apply." className="ml-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">Possible OT</span> : null;
 const badge = (status: string, leave = '') => { const [label, tone] = STATUS[status] || [status, 'bg-slate-100 text-slate-500']; const shownLabel = status === 'leave' && leave ? `Leave · ${LEAVE_CODE[leave] || leave}` : status === 'leave-pending' && leave ? `Leave · ${LEAVE_CODE[leave] || leave} · pending approval` : label; return <span title={(status === 'leave' || status === 'leave-pending') && leave ? LEAVE_NAME[leave] || leave : undefined} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{shownLabel}</span>; };
 const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
 const addDay = (date: string, by: number) => new Date(Date.parse(`${date}T00:00:00Z`) + by * 86400000).toISOString().slice(0, 10);
@@ -103,7 +105,7 @@ function Today({ onError, source }: { onError: (message: string) => void; source
     <div className="grid grid-cols-4 gap-2 sm:grid-cols-7 sm:gap-3">{chips.map(([label, value, tone]) => <div key={label} className={`${card} !p-2.5 text-center sm:!p-4`}><p className={`text-xl font-semibold sm:text-2xl ${tone}`}>{value}</p><p className="mt-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-xs">{label}</p></div>)}</div>
     {noRecordFor.length > 0 && <p className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-600">No record for this date ({noRecordFor.join(' and ')}).</p>}
     {source && rows && <ul className="space-y-2 sm:hidden">{shown.filter((row) => row.status !== 'off').map((row) => <li key={row.id} className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[13px] font-semibold leading-tight text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></div>{badge(row.status, row.leave)}</div>
+      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[13px] font-semibold leading-tight text-slate-800">{row.name}</p><p className="text-[11px] text-slate-400">{row.company} · {row.code}</p></div><span className="flex shrink-0 flex-wrap justify-end gap-y-1">{badge(row.status, row.leave)}{possibleOt(row)}</span></div>
       <div className="mt-2 grid grid-cols-3 gap-1.5 text-center"><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Shift</p><p className="text-[12px] font-bold text-[#0b587b]">{newCode(row.shift) || '—'}</p>{row.startTime && <p className="text-[10px] text-slate-500">{row.startTime}–{row.endTime}</p>}</div><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">In</p><p className="text-[12px] font-semibold">{row.inTime || '—'}</p></div><div className="rounded-lg bg-slate-50 px-1 py-1.5"><p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Out</p><p className="text-[12px] font-semibold">{row.outTime || '—'}</p></div></div>
       {(row.lateCounted > 0 || row.late > 0) && <p className={`mt-1.5 text-[11px] ${row.lateCounted > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>Late {row.lateCounted > 0 ? `${row.lateCounted} min` : `${row.late} min (grace)`}</p>}
     </li>)}{!shown.length && <li className="text-sm text-slate-500">Nobody on this date.</li>}</ul>}
@@ -116,7 +118,7 @@ function Today({ onError, source }: { onError: (message: string) => void; source
             <td className="pr-3"><span className="font-mono text-xs font-bold text-[#0b587b]">{newCode(row.shift)}</span> <span className="text-xs text-slate-500">{row.startTime && `${row.startTime}–${row.endTime}`}</span>{(row.creditHours || 0) > 0 && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Credit {row.creditHours}h</span>}</td>
             <td className="pr-3 font-medium">{row.inTime || '—'}</td><td className="pr-3 font-medium">{row.outTime || '—'}</td>
             <td className="pr-3">{row.lateCounted > 0 ? <span className="font-semibold text-amber-700">{row.lateCounted} min</span> : row.late > 0 ? <span className="text-slate-400">{row.late} min (grace)</span> : '—'}</td>
-            <td className="pr-3">{badge(row.status, row.leave)}</td>
+            <td className="pr-3">{badge(row.status, row.leave)}{possibleOt(row)}</td>
             <td className="text-right">{!source && <button onClick={() => void details(row.id)} className="text-xs font-semibold text-[#0b587b] hover:underline">{open === row.id ? 'Hide' : 'Clocks'}</button>}</td>
           </tr>
           {open === row.id && <tr key={`${row.id}-details`}><td colSpan={7} className="bg-slate-50 px-3 py-3 text-xs text-slate-600">
@@ -250,7 +252,9 @@ function Requests({ onError, kind, sharedQuery }: { onError: (message: string) =
   const places: string[] = [...new Set<string>([...Object.keys(PLACE_NAME), ...(ofKind || []).map((request) => request.company || '').filter(Boolean)])].sort();
   // A payroll month runs from the 20th of the month before to the 19th (Nov payroll: 20 Oct to 19 Nov).
   const payrollRange = (value: string) => { const [year, month] = value.split('-').map(Number); const before = new Date(year, month - 2, 1); return { from: `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-20`, to: `${value}-19` }; };
-  const payrolls: string[] = recent;
+  // From the 20th the days belong to next month's payroll, so that payroll month is on the list too (on 24 Nov, December 2026).
+  const nextPayroll = (() => { const d = new Date(); if (d.getDate() < 20) return ''; d.setDate(1); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+  const payrolls: string[] = nextPayroll ? [nextPayroll, ...recent] : recent;
   const range = payrollFilter ? payrollRange(payrollFilter) : monthFilter ? { from: `${monthFilter}-01`, to: `${monthFilter}-31` } : null;
   const shown = ofKind && ofKind.filter((request) => (!range || (request.date >= range.from && request.date <= range.to)) && (!placeFilter || request.company === placeFilter) && (!statusFilter || request.status === statusFilter) && (!nameQuery.trim() || `${request.name} ${request.code || ''}`.toLowerCase().includes(nameQuery.trim().toLowerCase())));
   const load = () => { setRequests(null); api(`action=attendance_requests&status=${all ? 'all' : 'pending'}${range ? `&from=${range.from}&to=${monthFilter ? monthEndOf(monthFilter) : range.to}` : ''}`).then((result) => { if (result.error) throw new Error(result.error); setRequests(result.requests); }).catch((cause: Error) => { setRequests([]); onError(cause.message); }); };

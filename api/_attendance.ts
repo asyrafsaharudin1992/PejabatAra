@@ -201,7 +201,11 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       if (!shift) {
         // A day off, a public holiday, or a code with no times set. A day worked anyway (a rest day) is captured as OT for HR to decide.
         const same = mine.filter((clock) => clock.workDate ? clock.workDate === date : new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) === date);
-        const first = same.find((clock) => clock.kind === 'in'), last = [...same].reverse().find((clock) => clock.kind === 'out');
+        const first = same.find((clock) => clock.kind === 'in');
+        // The clock out comes after the clock in, and for a night worked on a day off it is the next morning (in Sunday 20:54, out Monday 09:10), so it is looked for after the clock in,
+        // up to 20 hours later and before any other clock in, not only on the same date. A clock out earlier that day is the end of last night's shift, not this day's.
+        const nextIn = first ? mine.find((clock) => clock.kind === 'in' && clock.at > first.at) : undefined;
+        const last = first ? [...mine].reverse().find((clock) => clock.kind === 'out' && clock.at > first.at && clock.at <= first.at + 20 * HOUR && (!nextIn || clock.at < nextIn.at)) : undefined;
         // A lone clock out here is the end of last night's shift, not a day worked.
         const day: Day = { ...blank, status: leaveRow ? 'leave' : first ? 'extra' : code ? 'no-times' : 'off', inAt: first ? new Date(first.at).toISOString() : null, outAt: first && last ? new Date(last.at).toISOString() : null };
         if (!leaveRow && first && last && last.at > first.at && !noOt && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN); day.ot = day.worked; const pol = rules.policyFor(date); day.otCounted = day.worked >= pol.minMinutes ? wholeHours(day.worked, pol) : 0; }
