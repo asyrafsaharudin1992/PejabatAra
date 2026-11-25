@@ -1,5 +1,7 @@
 // The public holiday memo as a PDF drawn with jsPDF (real text and thin lines, one A4 page), not a picture of the screen: the letterhead badge at the very top edge, the title,
 // the two holiday tables (operations on the left, management and admin on the right), the pay explanation and the two signature blocks.
+import { drawLetterhead, drawPattern, loadLetterheadAssets, LETTERHEAD_HEIGHT } from './letterhead';
+
 export type MemoHoliday = { group: string; date: string; name: string };
 export type MemoText = { title: string; doctors: string; assistants: string; contact: string; by: string; byTitle: string; approver: string; approverTitle: string };
 
@@ -10,16 +12,7 @@ const dayOf = (date: string) => MALAY_DAY[new Date(`${date}T00:00:00Z`).getUTCDa
 const clean = (text: string) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/[^\x20-\x7E -ÿ]/g, '');
 const lines = (text: string) => text.split('\n').map((line) => clean(line.trim())).filter(Boolean);
 
-async function imageData(url: string): Promise<{ data: string; ratio: number } | null> {
-  try {
-    const blob = await (await fetch(url)).blob();
-    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
-    const ratio = await new Promise<number>((resolve) => { const image = new Image(); image.onload = () => resolve(image.naturalWidth / Math.max(1, image.naturalHeight)); image.onerror = () => resolve(1); image.src = data; });
-    return { data, ratio };
-  } catch { return null; }
-}
-
-export async function holidayMemoPdf(memo: MemoText, operation: MemoHoliday[], admin: MemoHoliday[], year: number, badgeUrl = '/forms/ara-letterhead-memo.png'): Promise<Blob> {
+export async function holidayMemoPdf(memo: MemoText, operation: MemoHoliday[], admin: MemoHoliday[], year: number): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   const W = 210, H = 297, left = 14, right = W - 14, ink = 0;
@@ -30,21 +23,13 @@ export async function holidayMemoPdf(memo: MemoText, operation: MemoHoliday[], a
     if (options.underline) { const width = doc.getTextWidth(value), start = options.align === 'center' ? x - width / 2 : options.align === 'right' ? x - width : x; doc.setLineWidth(0.2); doc.line(start, y + 0.8, start + width, y + 0.8); }
   };
 
-  // Letterhead: the badge hangs from the top edge, the company details are to its right.
-  const badge = await imageData(badgeUrl);
-  const badgeW = 30, badgeH = badge ? Math.min(40, badgeW / badge.ratio) : 38, badgeX = 118;
-  if (badge) doc.addImage(badge.data, 'PNG', badgeX, 0, badgeW, badgeH, undefined, 'FAST');
-  let y = 12;
-  const tx = badgeX + badgeW + 4, tw = right - tx;
-  text('HSO Healthcare Sdn Bhd', tx, y, { size: 10, bold: true }); y += 4.2;
-  text('202201004242 (1449939-U)', tx, y, { size: 8, bold: true }); y += 3.6;
-  text('TIN: C29715204010', tx, y, { size: 8, bold: true }); y += 4.4;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  for (const part of doc.splitTextToSize('H-7-1, Jalan PP25, Putra Walk Block H, Taman Pinggiran Putra, Seri Kembangan, Selangor', tw) as string[]) { doc.text(part, tx, y); y += 3.5; }
-  if (memo.contact) for (const part of doc.splitTextToSize(clean(memo.contact), tw) as string[]) { doc.text(part, tx, y + 0.6); y += 3.5; }
+  // Letterhead: laid out like the letterhead paper (the details sit inside the height of the badge), with the company's faint pattern behind the page.
+  const assets = await loadLetterheadAssets();
+  drawPattern(doc, assets);
+  drawLetterhead(doc, assets, { email: memo.contact });
+  let y = LETTERHEAD_HEIGHT + 9;
 
   // Title
-  y = Math.max(y, badgeH) + 9;
   text(clean(memo.title || `Hari kelepasan Am Klinik Ara 24 Jam bagi tahun ${year}`), W / 2, y, { size: 10.5, bold: true, align: 'center', underline: true });
   y += 6;
 
