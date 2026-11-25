@@ -268,25 +268,33 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
 // Public holiday worked: the whole time between the clock in and the clock out is OT, so the system adds it as approved OT by itself (decided by "System (public holiday)"),
 // like Infotech's PH pay. Whole hours, with 1 hour of rest taken off when more than 5 hours were worked, paid as the fixed PH amount (8 h at 2.0) and the hours beyond it at 3.0.
 // An OT row that already exists for the day (approved, rejected or HR's own) is never replaced. Only finished days (before today) with both clocks and no leave are added.
-export async function ensurePublicHolidayOt(db: any, from: string, to: string) {
+// The holiday dates are already keyed in, so only who worked (the clocks) has to be read, and only while it can still change: a public holiday is looked at for the 7 days after it
+// (a night shift ends the next morning, a missed clock is corrected a few days later), and then at most once every 6 hours, one day at a time. Opening Attendance, the OT list or Pay run
+// therefore does not read every staff member's clocks again and again (the database's egress is limited). Pay run is different: it looks further back (`daysBack`) and always looks
+// (`force`, no waiting time), because the pay of a month must be the same whenever it is run.
+const phChecked = new Map<string, number>();
+export async function ensurePublicHolidayOt(db: any, from: string, to: string, daysBack = 7, force = false) {
   const { data: holidays } = await db.from('hr_holidays').select('group_code,holiday_date').gte('holiday_date', from).lte('holiday_date', to);
-  const dates = [...new Set<string>((holidays || []).map((row: any) => String(row.holiday_date)))].filter((date) => date < today()).sort();
+  const now = Date.now(), earliest = addDay(today(), -daysBack);
+  const dates = [...new Set<string>((holidays || []).map((row: any) => String(row.holiday_date)))].filter((date) => date < today() && date >= earliest && (force || (phChecked.get(date) || 0) < now - 6 * 3600000)).sort();
   if (!dates.length) return 0;
   const [rules, peopleRead] = await Promise.all([loadRules(db), db.from('hr_employees').select(PERSON).or(`status.eq.Active,resign_date.gte.${dates[0]}`).limit(600)]);
   const people = (peopleRead.data || []) as Employee[];
-  const [days, haveRead] = await Promise.all([buildDays(db, people, dates[0], dates[dates.length - 1], rules), db.from('hr_attendance_ot').select('employee_id,work_date').in('work_date', dates).limit(5000)]);
-  const done = new Set<string>((haveRead.data || []).map((row: any) => `${row.employee_id}|${row.work_date}`));
   const rows: any[] = [];
-  for (const person of people) {
-    if (hasNoOt(person) || (person.clock_required || 'full') === 'none') continue;
-    for (const day of days.get(person.id) || []) {
-      if (!dates.includes(day.date) || !day.holiday || done.has(`${person.id}|${day.date}`) || !day.inAt || !day.outAt || day.status === 'leave' || day.status === 'leave-pending') continue;
+  for (const date of dates) {
+    const [days, haveRead] = await Promise.all([buildDays(db, people, date, date, rules), db.from('hr_attendance_ot').select('employee_id').eq('work_date', date).limit(2000)]);
+    const done = new Set<string>((haveRead.data || []).map((row: any) => String(row.employee_id)));
+    for (const person of people) {
+      if (hasNoOt(person) || (person.clock_required || 'full') === 'none' || done.has(person.id)) continue;
+      const day = (days.get(person.id) || []).find((item) => item.date === date);
+      if (!day || !day.holiday || !day.inAt || !day.outAt || day.status === 'leave' || day.status === 'leave-pending') continue;
       const policy = rules.policyFor(day.date), gross = wholeHours(day.worked, policy), parts = otParts('ph', gross, policy);
       if (!parts.length) continue;
       rows.push({ employee_id: person.id, work_date: day.date, captured_minutes: gross, status: 'approved', approved_minutes: netMinutes('ph', gross, policy), multiplier: parts[0].multiplier, parts, note: text(`Public holiday worked, added by the system. ${otSummary('ph', gross, policy)}.`, 300), decided_by: 'System (public holiday)', decided_at: new Date().toISOString() });
     }
   }
   if (rows.length) { const { error } = await db.from('hr_attendance_ot').upsert(rows, { onConflict: 'employee_id,work_date', ignoreDuplicates: true }); if (error) throw error; }
+  for (const date of dates) phChecked.set(date, now);   // remembered only when the run worked, so a failed run is tried again at once
   return rows.length;
 }
 

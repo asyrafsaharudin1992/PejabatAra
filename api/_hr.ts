@@ -317,7 +317,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   const periodFrom = month === 1 ? `${year - 1}-12-20` : `${year}-${String(month - 1).padStart(2, '0')}-20`;
   const periodTo = `${year}-${String(month).padStart(2, '0')}-19`;
   // A public holiday worked in the period is added as approved OT by the system first, so it is in the figures below.
-  await ensurePublicHolidayOt(db, periodFrom, periodTo).catch(() => 0);
+  await ensurePublicHolidayOt(db, periodFrom, periodTo, 45, true);
   // OT that HR approved in Attendance for this pay period (20th to 19th), as hours at each rate.
   const readOt = (columns: string) => db.from('hr_attendance_ot').select(columns).eq('status', 'approved').gte('work_date', periodFrom).lte('work_date', periodTo).limit(10000);
   let otRead = await readOt('employee_id,work_date,approved_minutes,multiplier,parts');
@@ -1221,6 +1221,23 @@ export async function hrHandler(req: any, res: any) {
       return res.status(200).json({ leave, reviews: reviews + reminderDue, incentive: doctorClaims + claimsToReceive + careToReceive, attendanceMissed: missed, attendanceOt: (requestsWaiting as any[]).length - missed });
     }
     // HR > Miscellaneous: important links, posters and notes that HR keeps for itself (and shares by WhatsApp).
+    // The department letterheads of Create Memo: the e-mail and phone printed beside the company details for each department (HR, Operation, Admin, Finance ...). They are kept here,
+    // not in the code (the repository is public), and every HR officer sees the same list.
+    if (req.method === 'GET' && action === 'memo_letterheads') {
+      const branch = await branchId(db, 'AraOffice HR Private', false);
+      const { data } = branch ? await db.from('portal_state').select('payload').eq('branch_id', branch).eq('state_key', 'memo_letterheads').maybeSingle() : { data: null };
+      return res.status(200).json({ departments: Array.isArray(data?.payload?.departments) ? data.payload.departments : [] });
+    }
+    if (req.method === 'POST' && action === 'memo_letterheads_save') {
+      const list: any[] = Array.isArray(body.departments) ? body.departments.slice(0, 12) : [];
+      const departments = list.map((item, index) => ({ id: text(item?.id, 30).toLowerCase().replace(/[^a-z0-9-]/g, '') || `dept${index + 1}`, label: text(item?.label, 60), email: text(item?.email, 80), phone: text(item?.phone, 60) })).filter((item) => item.label);
+      const branch = await branchId(db, 'AraOffice HR Private', true);
+      const row: any = { branch_id: branch, state_key: 'memo_letterheads', payload: { departments }, updated_at: new Date().toISOString(), updated_by: user.id };
+      const { data: existing } = await db.from('portal_state').select('state_key').eq('branch_id', branch).eq('state_key', 'memo_letterheads').maybeSingle();
+      const { error } = existing ? await db.from('portal_state').update(row).eq('branch_id', branch).eq('state_key', 'memo_letterheads') : await db.from('portal_state').insert(row);
+      if (error) throw error;
+      return res.status(200).json({ success: true, departments });
+    }
     if (req.method === 'GET' && action === 'misc_list') {
       const { data, error } = await db.from('hr_misc_items').select('id,kind,title,url,body,file_name,content_type,size_bytes,created_by,created_at,updated_at,due_on,done').order('created_at', { ascending: false }).limit(500);
       if (error) { if (['42P01', 'PGRST205'].includes(error.code)) return res.status(200).json({ items: [], notSetUp: true }); throw error; }
