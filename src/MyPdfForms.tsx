@@ -36,14 +36,14 @@ export default function MyPdfForms({ onSubmitted }: { onSubmitted: () => void })
   };
   if (open) {
     const left = missing({ title: open.title, roles: open.roles, fields: open.fields.filter((field) => field.source !== 'today') }, open.role, answers).length;
-    return <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f5f5f7] p-3">
+    return <div className="fixed inset-0 z-[60] overflow-y-auto bg-[#f5f5f7] p-3">
       <div className="mx-auto max-w-[800px] space-y-3 pb-28">
         <div className="flex items-center justify-between gap-2"><h2 className="font-semibold">{open.title}</h2><button type="button" onClick={() => { setOpen(null); setNote(''); }} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Close</button></div>
         <div className="inline-flex rounded-xl bg-slate-200 p-1 text-sm font-semibold">{([[false, 'Fill the form'], [true, 'Original form']] as const).map(([value, label]) => <button key={label} type="button" onClick={() => setOriginal(value)} className={`rounded-lg px-4 py-2 ${original === value ? 'bg-white text-[#0b587b]' : 'text-slate-500'}`}>{label}</button>)}</div>
         {original ? <><p className="text-sm text-slate-600">This is how the form will look. Pinch to make the page bigger. You can also tap the boxes here.</p><FormFill pages={open.pages} form={{ title: open.title, roles: open.roles, fields: open.fields }} who={open.role} answers={answers} onChange={setAnswers} /></>
           : <FormSimple form={{ title: open.title, roles: open.roles, fields: open.fields }} who={open.role} answers={answers} onChange={setAnswers} />}
       </div>
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-3">
+      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         <div className="mx-auto max-w-[800px] space-y-1.5">
           {note && <p role="status" className="text-sm font-semibold text-amber-800">{note}</p>}
           <div className="flex gap-2"><button type="button" disabled={Boolean(busy)} onClick={() => void save(false)} className="h-12 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-[#0b587b] disabled:opacity-50">{busy === 'draft' ? 'Saving…' : 'Save draft'}</button><button type="button" disabled={Boolean(busy)} onClick={() => { if (left) { setNote(`${left} still to answer.`); return; } void save(true); }} className="h-12 flex-1 rounded-xl bg-[#0b587b] text-sm font-semibold text-white disabled:opacity-50">{busy === 'submit' ? 'Sending…' : left ? `Submit (${left} left)` : 'Submit'}</button></div>
