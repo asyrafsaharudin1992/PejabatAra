@@ -1,7 +1,7 @@
 // Forms made from a PDF: HR uploads the PDF and places fields on its pages; the answers are drawn on the same pages. Places are fractions of the page
 // (0 to 1), so they stay right at any screen size.
 export type FieldType = 'text' | 'paragraph' | 'check' | 'choice' | 'signature';
-export type Field = { id: string; type: FieldType; page: number; x: number; y: number; w: number; h: number; who: string; label: string; required: boolean; group?: string; value?: string; source?: string };
+export type Field = { id: string; type: FieldType; page: number; x: number; y: number; w: number; h: number; who: string; label: string; required: boolean; group?: string; value?: string; source?: string; hint?: string };
 export type Role = { id: string; label: string };
 export type PdfForm = { title: string; roles: Role[]; fields: Field[] };
 export type Answers = Record<string, string>;
@@ -60,7 +60,7 @@ export function cleanLayout(roles: unknown, fields: unknown): { roles: Role[]; f
   const people = (Array.isArray(roles) ? roles : []).slice(0, 10).map((role: any) => ({ id: short(role?.id, 20).replace(/[^a-z0-9]/gi, ''), label: short(role?.label, 40) })).filter((role) => role.id && role.label);
   const list = (Array.isArray(fields) ? fields : []).slice(0, 400).filter((field: any) => types.includes(field?.type) && people.some((role) => role.id === field.who)).map((field: any) => ({
     id: short(field.id, 20).replace(/[^a-z0-9]/gi, ''), type: field.type as FieldType, page: Math.max(0, Math.min(19, Math.floor(Number(field.page) || 0))), x: number(field.x), y: number(field.y), w: number(field.w), h: number(field.h),
-    who: String(field.who), label: short(field.label, 200), required: Boolean(field.required), ...(field.group ? { group: short(field.group, 20).replace(/[^a-z0-9]/gi, '') } : {}), ...(field.value !== undefined ? { value: short(field.value, 40) } : {}), ...(field.source ? { source: short(field.source, 20) } : {}),
+    who: String(field.who), label: short(field.label, 200), required: Boolean(field.required), ...(field.group ? { group: short(field.group, 20).replace(/[^a-z0-9]/gi, '') } : {}), ...(field.value !== undefined ? { value: short(field.value, 40) } : {}), ...(field.source ? { source: short(field.source, 20) } : {}), ...(field.hint ? { hint: short(field.hint, 120) } : {}),
   })).filter((field) => field.id);
   return { roles: people, fields: list };
 }

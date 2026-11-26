@@ -42,3 +42,13 @@ assert.equal(of('choice')[0].label, 'Beban kerja');
 assert.equal(of('paragraph').length, 1);
 assert.equal(of('signature').length, 1);
 console.log('Automatic box placement checks passed.');
+
+const table = detectFields([
+  w('Sangat', 0.38, 0.16, 0.05), w('Memuaskan', 0.37, 0.172, 0.07), w('Tidak', 0.48, 0.17, 0.05), w('Sila beri pandangan anda mengenai perkara berikut dengan membulatkan nombor yang sesuai', 0.1, 0.14, 0.75),
+  w('Gaji', 0.1, 0.2), w('1', 0.4, 0.2), w('2', 0.5, 0.2), w('3', 0.6, 0.2), w('4', 0.7, 0.2),
+  w('Faedah', 0.1, 0.24), w('1', 0.4, 0.24), w('2', 0.5, 0.24), w('3', 0.6, 0.24), w('4', 0.7, 0.24),
+], 0);
+assert.deepEqual(table.slice(0, 2).map((field) => field.hint), ['Sangat Memuaskan', 'Tidak']);
+assert.equal(table[4].hint, 'Sangat Memuaskan', 'Every row of a table has the same meanings');
+assert.equal(cleanLayout(roles, table).fields[0].hint, 'Sangat Memuaskan');
+console.log('Rating meanings checks passed.');

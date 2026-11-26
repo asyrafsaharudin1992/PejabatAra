@@ -19,6 +19,20 @@ function lines(words: Word[]) {
 
 export function detectFields(words: Word[], page: number, who = 'staff'): Field[] {
   const found: Field[] = [], rows = lines(words);
+  // The heights of the rating rows, so a question takes only the words of its own row (not those of the row above or below).
+  const ratingRows = rows.filter((row) => /(^|\s)1\s.*?2\s.*?3\s.*?4(\s|$)/.test(row.map((word) => word.text).join(' '))).map((row) => row.find((word) => /(^|\s)4(\s|$)/.test(word.text))?.y ?? row[0].y);
+  // The headings of a rating table, kept by where its columns are, so every row of the table gets the same meanings.
+  const tables = new Map<string, string[]>();
+  const headings = (columns: number[], top: number) => {
+    const key = columns.map((x) => x.toFixed(2)).join(' ');
+    if (!tables.has(key)) {
+      const gap = (columns[columns.length - 1] - columns[0]) / Math.max(1, columns.length - 1);
+      // Words the width of one cell, just above the first row; sentences of the instructions are much wider.
+      const above = words.filter((word) => word.y < top - 0.008 && word.y > top - 0.075 && word.w <= gap * 1.15 && !/^\d{1,2}$/.test(word.text.trim())).sort((a, b) => a.y - b.y || a.x - b.x);
+      tables.set(key, columns.map((x) => above.filter((word) => Math.abs(word.x + word.w / 2 - x) < gap / 2).map((word) => word.text.trim()).join(' ').replace(/\s+/g, ' ').trim()));
+    }
+    return tables.get(key)!;
+  };
   const add = (type: FieldType, x: number, y: number, w: number, h: number, label: string, extra: Partial<Field> = {}) => found.push(place({ id: newId(), type, page, x: 0, y: 0, w: Math.min(0.9, w), h, who, label: label.slice(0, 200), required: type !== 'check', ...extra }, x, y));
   rows.forEach((row, index) => {
     const full = row.map((word) => word.text).join(' ').replace(/\s+/g, ' ').trim();
@@ -29,11 +43,13 @@ export function detectFields(words: Word[], page: number, who = 'staff'): Field[
       if (/^\d{1,2}$/.test(token.text) && (token.text === '1' || (run.length && Number(token.text) > Number(run[run.length - 1].text)))) { run = token.text === '1' ? [token] : [...run, token]; if (run.length > best.length) best = run; } else run = [];
     }
     if (best.length >= 4) {
-      const near = rows.slice(Math.max(0, index - 3), index + 4).flat().filter((word) => word.x + word.w < best[0].x - 0.01 && Math.abs(word.y - best[0].y) < 0.022 && !/^\d{1,2}$/.test(word.text.trim()));
+      const reach = Math.min(0.022, ...ratingRows.map((y) => Math.abs(y - best[0].y)).filter((gap) => gap > 0.008).map((gap) => gap * 0.5));
+      const near = rows.slice(Math.max(0, index - 3), index + 4).flat().filter((word) => word.x + word.w < best[0].x - 0.01 && Math.abs(word.y - best[0].y) < reach && !/^\d{1,2}$/.test(word.text.trim()));
       const label = near.map((word) => word.text.trim()).join(' ') || `Question ${found.length + 1}`;
       const centre = (token: typeof tokens[number]) => ({ x: token.x + token.w / 2, y: token.y + token.h / 2 });
+      const meaning = headings(best.map((token) => centre(token).x), best[0].y);
       found.push(...choiceRow({ page, ...centre(best[0]) }, centre(best[best.length - 1]), best.map((token) => token.text), who, label)
-        .map((field, at) => place(field, centre(best[at]).x - field.w / 2, centre(best[at]).y - field.h / 2)));
+        .map((field, at) => ({ ...place(field, centre(best[at]).x - field.w / 2, centre(best[at]).y - field.h / 2), ...(meaning[at] ? { hint: meaning[at] } : {}) })));
       return;
     }
     // YA / TIDAK
@@ -42,7 +58,7 @@ export function detectFields(words: Word[], page: number, who = 'staff'): Field[
       const pair = /^\s*YA\s*\/\s*TIDAK\s*$/i.test(word.text);
       if (pair && yes && no) {
         const group = newId(), question = rows.slice(0, index).reverse().map((items) => items.map((item) => item.text).join(' ')).find((text) => /\?/.test(text)) || 'Ya / Tidak';
-        for (const [match, value] of [[yes, 'YA'], [no, 'TIDAK']] as const) { const at = part(word, match.index, match.index + match[0].length); add('choice', at.x - 0.006, word.y - word.h * 0.35, at.w + 0.012, word.h * 1.7, question.trim(), { group, value }); }
+        for (const [match, value] of [[yes, 'YA'], [no, 'TIDAK']] as const) { const at = part(word, match.index, match.index + match[0].length); add('choice', at.x - 0.006, word.y - word.h * 0.35, at.w + 0.012, word.h * 1.7, question.trim().replace(/^\d+\s+/, ''), { group, value }); }
       }
     }
     for (const word of row) {

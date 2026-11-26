@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { assessmentFetch } from './AssessmentRoom';
 import { FormFill } from './pdfForm/FormFill';
+import { FormSimple } from './pdfForm/FormSimple';
 import { pagesOf } from './pdfForm/loadPdf';
 import { keyOf, missing, type Answers, type Field, type Role } from './pdfForm/model';
 
@@ -14,11 +15,12 @@ export default function MyPdfForms({ onSubmitted }: { onSubmitted: () => void })
   const [answers, setAnswers] = useState<Answers>({});
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState('');
+  const [original, setOriginal] = useState(false);
   const load = () => assessmentFetch('action=pdfform_mine').then((result: { tasks: Task[] }) => setTasks(result.tasks)).catch(() => setTasks([]));
   useEffect(() => { void load(); }, []);
   const show = async (task: Task) => {
     setBusy('open'); setNote('');
-    try { const data = await assessmentFetch(`action=pdfform_open&id=${task.id}&role=${task.role}`); setAnswers(data.answers || {}); setOpen({ ...data, pages: await pagesOf(data.base64) }); }
+    try { const data = await assessmentFetch(`action=pdfform_open&id=${task.id}&role=${task.role}`); setAnswers(data.answers || {}); setOpen({ ...data, pages: await pagesOf(data.base64) }); setOriginal(false); }
     catch (cause) { setNote(cause instanceof Error ? cause.message : 'Unable to open the form.'); }
     setBusy('');
   };
@@ -37,8 +39,9 @@ export default function MyPdfForms({ onSubmitted }: { onSubmitted: () => void })
     return <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f5f5f7] p-3">
       <div className="mx-auto max-w-[800px] space-y-3 pb-28">
         <div className="flex items-center justify-between gap-2"><h2 className="font-semibold">{open.title}</h2><button type="button" onClick={() => { setOpen(null); setNote(''); }} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Close</button></div>
-        <p className="text-sm text-slate-600">Fill the <b className="text-amber-700">yellow</b> boxes. You can pinch to make the page bigger.</p>
-        <FormFill pages={open.pages} form={{ title: open.title, roles: open.roles, fields: open.fields }} who={open.role} answers={answers} onChange={setAnswers} />
+        <div className="inline-flex rounded-xl bg-slate-200 p-1 text-sm font-semibold">{([[false, 'Fill the form'], [true, 'Original form']] as const).map(([value, label]) => <button key={label} type="button" onClick={() => setOriginal(value)} className={`rounded-lg px-4 py-2 ${original === value ? 'bg-white text-[#0b587b]' : 'text-slate-500'}`}>{label}</button>)}</div>
+        {original ? <><p className="text-sm text-slate-600">This is how the form will look. Pinch to make the page bigger. You can also tap the boxes here.</p><FormFill pages={open.pages} form={{ title: open.title, roles: open.roles, fields: open.fields }} who={open.role} answers={answers} onChange={setAnswers} /></>
+          : <FormSimple form={{ title: open.title, roles: open.roles, fields: open.fields }} who={open.role} answers={answers} onChange={setAnswers} />}
       </div>
       <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-3">
         <div className="mx-auto max-w-[800px] space-y-1.5">
