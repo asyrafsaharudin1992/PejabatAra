@@ -11,7 +11,7 @@ import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentive
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { payslipLeave } from './_leave-summary.js';
-import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs } from '../src/lib/payrollRun.js';
+import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, joinedForPay } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
@@ -402,7 +402,9 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   const comparison = month === baseMonth && (ytdRead.data || []).some((row: any) => row.prev_as_of) && !(payslipRead.data || []).some((row: any) => row.month === month && row.status === 'locked');
   if (!viewOnly && (month < baseMonth || (month === baseMonth && !comparison))) throw fail(400, `Pay up to ${MONTHS[baseMonth - 1].toUpperCase()} ${year} is already in the year-to-date totals. Choose a later month.`);
   const payslips = payslipRead.data || [];
-  const staff = (staffRows || []).map((row: any) => {
+  // Not on this month's pay run: staff who start after its pay period (unless a payslip was already saved for them).
+  const onRun = (row: any) => joinedForPay(row.join_date, year, month) || payslips.some((item: any) => item.employee_id === row.id && item.month === month);
+  const staff = (staffRows || []).filter(onRun).map((row: any) => {
     const own = payslips.filter((item: any) => item.employee_id === row.id);
     const earlier = own.filter((item: any) => item.month > baseMonth && item.month < month);
     const start = base.get(row.id);
@@ -410,6 +412,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     let earlierLocked = true;
     for (let m = baseMonth + 1; m < month && !comparison; m++) {
       const slip = earlier.find((item: any) => item.month === m);
+      if (!slip && !joinedForPay(row.join_date, year, m)) continue; // not yet on that month's pay run: nothing to lock
       if (!slip || slip.status !== 'locked') { earlierLocked = false; continue; }
       ytd.wages = Math.round((ytd.wages + Number(slip.result?.gross || 0)) * 100) / 100;
       ytd.kwspRelief = Math.min(4000, Math.round((ytd.kwspRelief + Number(slip.result?.kwspEmployee || 0)) * 100) / 100);

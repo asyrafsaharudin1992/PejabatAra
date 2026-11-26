@@ -118,6 +118,10 @@ export function calculatePayslip(staff: PayStaff, given: PayInputs, ytd: PayYtd,
   };
 }
 
+// A staff member is in a month's pay run only if they had joined by the last day of its pay period (the 19th). Someone who starts after it is first paid
+// the next month, for the days from the date joined.
+export const joinedForPay = (joinDate: string | null | undefined, year: number, month: number) => !joinDate || joinDate <= payPeriod(year, month).to;
+
 // The pay period for a month: from the 20th of the month before to the 19th of the month itself. Management and Operation, the only two
 // pay groups in use, are the same. OT, unpaid leave and late are counted for the days inside it.
 export function payPeriod(year: number, month: number) {
