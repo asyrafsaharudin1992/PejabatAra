@@ -86,7 +86,7 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
     const { data: form, error } = await db.from('hr_pdf_forms').select('*').eq('id', String(req.query.id)).maybeSingle();
     if (error) throw error;
     if (!form) throw fail(404, 'That form was not found.');
-    return res.status(200).json({ id: form.id, title: form.title, roles: form.roles, fields: form.fields, base64: await fileOf(db, form.file_path) });
+    return res.status(200).json({ id: form.id, title: form.title, roles: form.roles, fields: form.fields, version: form.updated_at, base64: await fileOf(db, form.file_path) });
   }
   if (req.method === 'POST' && action === 'pdfform_create') {
     const title = clean(body.title, 120); if (!title) throw fail(400, 'Enter a title.');
@@ -102,9 +102,13 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
   }
   if (req.method === 'POST' && action === 'pdfform_save') {
     const title = clean(body.title, 120); if (!isId(body.id) || !title) throw fail(400, 'Enter a title.');
-    const { error } = await db.from('hr_pdf_forms').update({ title, ...cleanLayout(body.roles, body.fields), updated_at: new Date().toISOString() }).eq('id', String(body.id));
+    // Only the version that was opened may be replaced: an old page (not refreshed) cannot undo a newer change.
+    if (Number.isNaN(Date.parse(String(body.version || '')))) throw fail(409, 'This page is old. Refresh it, open the form again and redo your change.');
+    const version = new Date().toISOString();
+    const { data, error } = await db.from('hr_pdf_forms').update({ title, ...cleanLayout(body.roles, body.fields), updated_at: version }).eq('id', String(body.id)).eq('updated_at', clean(body.version, 40)).select('id');
     if (error) throw error;
-    return res.status(200).json({ success: true });
+    if (!data?.length) throw fail(409, 'This form was changed after you opened it. Refresh the page, open it again and redo your change.');
+    return res.status(200).json({ success: true, version });
   }
   if (req.method === 'POST' && action === 'pdfform_archive') {
     if (!isId(body.id)) throw fail(400, 'Choose a form.');

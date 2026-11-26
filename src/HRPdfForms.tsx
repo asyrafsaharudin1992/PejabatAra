@@ -20,7 +20,7 @@ type Case = { id: string; name: string; code: string; status: string; dueOn: str
 type Staff = { id: string; fullName: string; employeeCode: string; company: string; designation: string; status: string; resignDate?: string | null };
 // Active staff, and those who left in the last 90 days (an exit form is often filled after the last day).
 const assignable = (item: Staff) => item.status === 'Active' || Boolean(item.resignDate && Date.now() - Date.parse(item.resignDate) < 90 * 86400000);
-type Editing = { id: string; base64: string; fileName: string; pages: string[]; form: PdfForm; dirty: boolean };
+type Editing = { version?: string; id: string; base64: string; fileName: string; pages: string[]; form: PdfForm; dirty: boolean };
 type Viewing = { id: string; title: string; roles: Role[]; fields: Field[]; answers: Answers; pages: string[]; parts: Part[]; name: string };
 const call = async (query: string, body?: unknown) => {
   const response = await officeFetch(`/api/status?resource=hr&${query}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
@@ -52,12 +52,13 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
     const pages = await pdfPageImages(file, 2);
     setEditing({ id: '', base64: await readBase64(file), fileName: file.name, pages, form: { title: file.name.replace(/\.pdf$/i, ''), roles: DEFAULT_ROLES, fields: [] }, dirty: true }); setTab('fields'); setChosen([]); setSigners({}); setCases(null);
   });
-  const openForm = (id: string) => run(async () => { const data = await call(`action=pdfform_get&id=${id}`); setEditing({ id, base64: data.base64, fileName: '', pages: await pagesOf(data.base64), form: { title: data.title, roles: data.roles, fields: data.fields }, dirty: false }); setTab('fields'); setChosen([]); setSigners({}); setCases(null); });
+  const openForm = (id: string) => run(async () => { const data = await call(`action=pdfform_get&id=${id}`); setEditing({ id, version: data.version, base64: data.base64, fileName: '', pages: await pagesOf(data.base64), form: { title: data.title, roles: data.roles, fields: data.fields }, dirty: false }); setTab('fields'); setChosen([]); setSigners({}); setCases(null); });
   const save = () => editing && run(async () => {
     const { form } = editing;
-    if (editing.id) await call('action=pdfform_save', { id: editing.id, ...form });
-    else { const result = await call('action=pdfform_create', { ...form, base64: editing.base64, fileName: editing.fileName }); editing.id = result.id; }
-    setEditing({ ...editing, dirty: false }); setNote('Saved.'); await load();
+    let version = editing.version;
+    if (editing.id) version = (await call('action=pdfform_save', { id: editing.id, version, ...form })).version;
+    else { const result = await call('action=pdfform_create', { ...form, base64: editing.base64, fileName: editing.fileName }); editing.id = result.id; version = (await call(`action=pdfform_get&id=${result.id}`)).version; }
+    setEditing({ ...editing, version, dirty: false }); setNote('Saved.'); await load();
   });
   const auto = () => editing && run(async () => {
     if (editing.form.fields.length && !window.confirm('Replace the boxes already on this form?')) return;
