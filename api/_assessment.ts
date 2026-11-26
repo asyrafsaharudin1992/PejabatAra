@@ -1,4 +1,5 @@
 import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
+import { hiddenPayslips, monthKey } from './_payslip-hidden.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -716,14 +717,16 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (action === 'my_payslips') {
       const { data, error } = await db.from('hr_payslips').select('year,month').eq('employee_id', me.id).eq('status', 'locked').order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
       if (error) { if (error.code === '42P01') return res.status(200).json({ payslips: [] }); throw error; }
+      const hidden = await hiddenPayslips(db);
       const { data: incentive } = await db.from('hr_incentive_pay').select('claim_month,amount,paid_on,procedures').eq('employee_id', me.id).order('claim_month', { ascending: false }).limit(36);
-      return res.status(200).json({ payslips: (data || []).map((row: any) => ({ year: row.year, month: row.month })), incentives: (incentive || []).map((row: any) => ({ claimMonth: row.claim_month, amount: Number(row.amount), paidOn: row.paid_on, procedures: Number(row.procedures || 0) })) });
+      return res.status(200).json({ payslips: (data || []).filter((row: any) => !hidden.has(monthKey(row.year, row.month))).map((row: any) => ({ year: row.year, month: row.month })), incentives: (incentive || []).map((row: any) => ({ claimMonth: row.claim_month, amount: Number(row.amount), paidOn: row.paid_on, procedures: Number(row.procedures || 0) })) });
     }
     if (req.method !== 'POST') throw fail(405, 'Method not allowed.');
     const password = String(body.password || '');
     await checkOwnPassword(db, staff.id, password);
     if (action === 'verify_password') return res.status(200).json({ success: true });
     const year = Math.round(Number(body.year)), month = Math.round(Number(body.month));
+    if ((await hiddenPayslips(db)).has(monthKey(year, month))) throw fail(404, 'That payslip is not available.');
     const { data, error } = await db.from('hr_payslips').select('year,month,result,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
     if (error) throw error;
     if (!data) throw fail(404, 'That payslip is not available.');

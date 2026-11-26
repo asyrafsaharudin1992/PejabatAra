@@ -1,4 +1,5 @@
 import { pdfFormWaiting } from './_pdf-forms.js';
+import { hiddenPayslips, monthKey } from './_payslip-hidden.js';
 import { payPeriod } from '../src/lib/payrollRun.js';
 
 // Staff who have left. After the last working day the sign-in stays open for what they still need (their forms and payslips); every other part is closed.
@@ -39,7 +40,8 @@ export async function closeIfFinished(db: any, assessmentStaffId: string, person
     db.from('hr_payslips').select('locked_at').eq('employee_id', person.id).eq('year', year).eq('month', month).eq('status', 'locked').maybeSingle(),
     pdfFormWaiting(db, assessmentStaffId),
   ]);
-  if (forms.error || slip.error || !canClose({ formsCompleted: (forms.data || []).length, formsWaiting: waiting, payslipLockedAt: slip.data?.locked_at || null })) return false;
+  if (forms.error || slip.error || !canClose({ formsCompleted: (forms.data || []).length, formsWaiting: waiting, // a final payslip still held back from staff keeps the sign-in open
+    payslipLockedAt: (await hiddenPayslips(db)).has(monthKey(year, month)) ? null : slip.data?.locked_at || null })) return false;
   const { error } = await db.from('assessment_staff').update({ active: false, updated_at: new Date().toISOString() }).eq('id', assessmentStaffId);
   if (error) return false;
   await db.from('assessment_sessions').delete().eq('staff_id', assessmentStaffId);
