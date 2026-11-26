@@ -18,7 +18,7 @@ const LocumReviewTabs = lazy(() => import('./LocumReviewTabs'));
 // Individual Sign In: staff sign in once with their name, staff code and password, then choose what they
 // need from a grid of icons, like the staff app they already know. Parts that are built open their own
 // screen; the rest are shown as "Soon". The Assessment Room and Incentive Claims share this one session.
-type Me = { staff: { name: string; code?: string; branch: string; preview: boolean; canViewAs?: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; locumInterview?: boolean; ceoOffice?: boolean; hrOffice?: boolean; cpoOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
+type Me = { staff: { leaver?: boolean; name: string; code?: string; branch: string; preview: boolean; canViewAs?: boolean; isDoctor?: boolean; hasPassword?: boolean; rosterCompanies?: string[]; isApprover?: boolean; careApprover?: boolean; locumInterview?: boolean; ceoOffice?: boolean; hrOffice?: boolean; cpoOffice?: boolean; careWaiting?: number; canAssess?: boolean; leaveWaiting?: number; canReview?: boolean; reviewWaiting?: number; announcementsListed?: boolean; announcementsUnread?: number } };
 type View = 'home' | 'coo' | 'ceo' | 'hr' | 'procurement' | 'payslip' | 'toolkit' | 'announcements' | 'leave' | 'roster' | 'attendance' | 'ot' | 'review' | 'profile' | 'settings' | 'password';
 type Profile = { fullName: string; code: string; company: string; branch: string; department: string; position: string; employmentType: string; joinDate: string | null; confirmDate: string | null; email: string; phone: string;
   personal?: { gender: string; dateOfBirth: string | null; nationality: string; religion: string; race: string; maritalStatus: string };
@@ -52,19 +52,23 @@ function forgetMe() { try { localStorage.removeItem(ME_KEY); } catch { /* storag
 // Phone home: a photo of the clinic, a greeting, one line picked at random each visit, and the icons in a white card, with a bar at the bottom.
 const HERO = HERO_PHOTO;
 const QUOTES = ['Every shift matters, every patient counts.', 'Care for your team the way you care for patients.', 'Small acts of kindness every day create a big difference.', 'Together, we make a difference every day.'];
-type PhoneItem = { label: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
+type PhoneItem = { closed?: boolean; label: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
 
 function PhoneTile({ item }: { key?: string; item: PhoneItem }) {
   const body = <>
     <span className={`relative grid h-[50px] w-[50px] place-items-center rounded-[16px] ${item.tone}`}><item.icon className="h-6 w-6" strokeWidth={1.5} />
-      {item.soon && <span className="absolute -right-3 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}
+      {item.soon && !item.closed && <span className="absolute -right-3 -top-2 rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500 shadow">Soon</span>}
       {!!item.badge && <span aria-label={`${item.badge} waiting`} className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow">{item.badge}</span>}{item.locked && <span aria-label="Password protected" className="absolute -bottom-1 -right-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#0b587b] text-white shadow ring-2 ring-white"><Lock className="h-2.5 w-2.5" strokeWidth={2.4} /></span>}</span>
     <strong className="mt-1.5 block w-full min-w-0 text-[12px] font-semibold leading-tight text-[#0b2a4a]">{item.label}</strong>{item.locked && <span className="mt-0.5 block text-[9px] font-semibold leading-none text-[#0b587b]">Password protected</span>}
   </>;
   const base = 'flex min-w-0 flex-col items-center rounded-2xl px-0.5 py-2 text-center transition active:bg-slate-50';
-  if (item.soon) return <div aria-disabled="true" className={`${base} opacity-80`}>{body}</div>;
+  if (item.soon) return <div aria-disabled="true" className={`${base} ${item.closed ? 'opacity-35 grayscale' : 'opacity-80'}`}>{body}</div>;
   return item.href ? <a href={item.href} className={base}>{body}</a> : <button type="button" onClick={item.onClick} className={base}>{body}</button>;
 }
+
+// What someone who has left can still open.
+const LEAVER_ICONS = ['Announcements', 'Payslip', 'Settings'];
+const LEAVER_VIEWS = ['home', 'announcements', 'payslip', 'settings', 'password'];
 
 function PhoneNav({ view, onGo, badges = {} }: { view: string; onGo: (next: View) => void; badges?: Partial<Record<View, number>> }) {
   const tabs: [View, string, typeof Settings, string[]][] = [['home', 'Home', House, ['home']], ['roster', 'Roster', CalendarDays, ['roster']], ['attendance', 'Attendance', Clock3, ['attendance']], ['ot', 'OT request', Timer, ['ot']], ['settings', 'More', MoreHorizontal, ['settings', 'profile']]];
@@ -223,6 +227,8 @@ export default function IndividualHub() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
   const [now, setNow] = useState(() => new Date());
+  // The bottom bar and the bell cannot open a closed page either.
+  useEffect(() => { if (realMe?.staff.leaver && !LEAVER_VIEWS.includes(view)) setView('home'); }, [view, realMe?.staff.leaver]);
   useEffect(() => { if (view !== 'home') return; const clock = setInterval(() => setNow(new Date()), 20000); setNow(new Date()); return () => clearInterval(clock); }, [view]);
 
   useEffect(() => {
@@ -295,7 +301,7 @@ export default function IndividualHub() {
 
   const name = me?.staff.name || '';
   const company = me ? (COMPANY[me.staff.branch] || me.staff.branch) : '';
-  type Item = { label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
+  type Item = { closed?: boolean; label: string; desc: string; icon: typeof Settings; tone: string; href?: string; onClick?: () => void; soon?: boolean; badge?: number; locked?: boolean };
   const items: Item[] = [
     ...(me?.staff.cpoOffice ? [{ label: 'Office - Procurement', desc: 'Open your CPO office', icon: Building2, tone: 'bg-[#fef3c7] text-[#92400e]', onClick: () => setView('procurement') } as Item] : []),
     ...(me?.staff.ceoOffice ? [{ label: 'Office - CEO', desc: 'Open your CEO office', icon: Building2, tone: 'bg-[#e0f2fe] text-[#075985]', onClick: () => setView('ceo') } as Item] : []),
@@ -315,7 +321,10 @@ export default function IndividualHub() {
     ...(me?.staff.isDoctor ? [{ label: 'Medical Toolkit', desc: 'Clinical references and paediatric calculator', icon: BookOpen, tone: 'bg-sky-100 text-[#0b587b]', onClick: () => setView('toolkit') } as Item] : []),
     { label: 'Settings', desc: 'Change your password, sign out', icon: Settings, tone: 'bg-slate-100 text-slate-600', onClick: () => setView('settings') },
   ];
-  const phoneItems: PhoneItem[] = items.map((item) => ({ label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge, locked: item.locked }));
+  // After the last working day every icon stays on the page, but only what is still needed can be pressed.
+  const leaver = Boolean(me?.staff.leaver);
+  if (leaver) items.forEach((item, index) => { if (!LEAVER_ICONS.includes(item.label)) items[index] = { ...item, soon: true, closed: true, badge: 0, href: undefined, onClick: undefined, desc: 'Not available after your last working day' }; });
+  const phoneItems: PhoneItem[] = items.map((item) => ({ closed: item.closed, label: item.label, icon: item.icon, tone: item.tone, href: item.href, onClick: item.onClick, soon: item.soon, badge: item.badge, locked: item.locked }));
   const previewPicker = canViewAs && <section aria-label="System Admin: view as" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs text-[#0b587b]">
     <label className="flex min-w-0 flex-1 items-center gap-2 font-semibold">View as<select aria-label="View as role" value={selectedPreview} onChange={(event) => chooseViewAs(event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-sky-200 bg-white px-2 text-xs"><option value="">Me · Atikah</option>{PREVIEW_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
     {selectedPreview && <button type="button" onClick={() => chooseViewAs('')} className="rounded-lg bg-white px-2 py-1.5 font-semibold">Exit preview</button>}
@@ -379,7 +388,7 @@ export default function IndividualHub() {
             <div className="grid auto-rows-fr gap-3 sm:grid-cols-2">{items.map(item => {
               const body = <><span className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-[14px] ${item.tone}`}><item.icon className="h-5 w-5" strokeWidth={1.6} />{!!item.badge && <span aria-label={`${item.badge} waiting for approval`} className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">{item.badge}</span>}{item.locked && <span aria-label="Password protected" className="absolute -bottom-1 -right-1.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#0b587b] text-white shadow ring-2 ring-white"><Lock className="h-2.5 w-2.5" strokeWidth={2.4} /></span>}</span><span className="min-w-0 flex-1"><strong className="block text-sm font-semibold">{item.label}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{item.desc}</span></span>{item.soon ? <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-400">Soon</span> : <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />}</>;
               const style = 'group flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white p-5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition hover:border-slate-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-[#0b587b]';
-              if (item.soon) return <div key={item.label} aria-disabled="true" className="flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white/70 p-5 text-left">{body}</div>;
+              if (item.soon) return <div key={item.label} aria-disabled="true" className={`flex min-h-[100px] items-center gap-3 rounded-[20px] border border-black/[0.04] bg-white/70 p-5 text-left ${item.closed ? 'opacity-40 grayscale' : ''}`}>{body}</div>;
               return item.href ? <a key={item.label} href={item.href} className={style}>{body}</a> : <button key={item.label} type="button" onClick={item.onClick} className={style}>{body}</button>;
             })}</div>
           </section>

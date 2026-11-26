@@ -17,7 +17,9 @@ import { activeRoles, DEFAULT_ROLES, keyOf, type Answers, type Field, type PdfFo
 type Summary = { id: string; title: string; fileName: string; open: number; completed: number };
 type Part = { id: string; label: string; signer: string; done: { at: string; by: string } | null };
 type Case = { id: string; name: string; code: string; status: string; dueOn: string | null; sentAt: string; parts: Part[] };
-type Staff = { id: string; fullName: string; employeeCode: string; company: string; designation: string; status: string };
+type Staff = { id: string; fullName: string; employeeCode: string; company: string; designation: string; status: string; resignDate?: string | null };
+// Active staff, and those who left in the last 90 days (an exit form is often filled after the last day).
+const assignable = (item: Staff) => item.status === 'Active' || Boolean(item.resignDate && Date.now() - Date.parse(item.resignDate) < 90 * 86400000);
 type Editing = { id: string; base64: string; fileName: string; pages: string[]; form: PdfForm; dirty: boolean };
 type Viewing = { id: string; title: string; roles: Role[]; fields: Field[]; answers: Answers; pages: string[]; parts: Part[]; name: string };
 const call = async (query: string, body?: unknown) => {
@@ -67,7 +69,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
   const loadCases = (id: string) => call(`action=pdfform_cases&formId=${id}`).then((result) => setCases(result.cases)).catch((cause: Error) => { setCases([]); onError(cause.message); });
   const goTo = (next: 'fields' | 'send' | 'answers') => {
     setTab(next); setNote('');
-    if (next === 'send' && !staff.length) void call('action=employees').then((result) => setStaff((result.employees || []).filter((item: Staff) => item.status === 'Active').sort((a: Staff, b: Staff) => a.fullName.localeCompare(b.fullName)))).catch((cause: Error) => onError(cause.message));
+    if (next === 'send' && !staff.length) void call('action=employees').then((result) => setStaff((result.employees || []).filter(assignable).sort((a: Staff, b: Staff) => a.fullName.localeCompare(b.fullName)))).catch((cause: Error) => onError(cause.message));
     if (next === 'answers' && editing) void loadCases(editing.id);
   };
   const send = () => editing && run(async () => {
@@ -111,7 +113,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
         <label className="block max-w-md text-sm font-semibold text-slate-600">Answer by (optional)<input type="date" value={due} onChange={(event) => setDue(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3" /></label>
         <p className="text-sm font-semibold text-slate-600">{signers.staff ? 'Which staff is the form about? Their name and details are filled in.' : 'Assign this form to'}</p>
         <div className="flex flex-wrap items-center gap-2"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, branch (KJ, SK) or position" className="h-10 min-w-[240px] flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => setChosen([...new Set([...chosen, ...shown.map((item) => item.id)])])} className={button}>Tick all shown ({shown.length})</button><button type="button" onClick={() => setChosen([])} className={button}>Clear</button></div>
-        <ul className="max-h-[45vh] divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">{shown.map((item) => <li key={item.id}><label className="flex items-center gap-3 px-3 py-2 text-sm"><input type="checkbox" checked={chosen.includes(item.id)} onChange={(event) => setChosen(event.target.checked ? [...chosen, item.id] : chosen.filter((id) => id !== item.id))} className="h-4 w-4" /><span className="min-w-0 flex-1"><b className="block truncate font-semibold">{item.fullName}</b><span className="text-xs text-slate-500">{item.company} · {item.employeeCode} · {item.designation}</span></span></label></li>)}</ul>
+        <ul className="max-h-[45vh] divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">{shown.map((item) => <li key={item.id}><label className="flex items-center gap-3 px-3 py-2 text-sm"><input type="checkbox" checked={chosen.includes(item.id)} onChange={(event) => setChosen(event.target.checked ? [...chosen, item.id] : chosen.filter((id) => id !== item.id))} className="h-4 w-4" /><span className="min-w-0 flex-1"><b className="block truncate font-semibold">{item.fullName}</b><span className="text-xs text-slate-500">{item.company} · {item.employeeCode} · {item.designation}{item.status !== 'Active' && item.resignDate ? <b className="text-rose-600"> · left {dmy(item.resignDate)}</b> : null}</span></span></label></li>)}</ul>
         <button type="button" disabled={busy || !chosen.length} onClick={() => void send()} className={primary}><Send className="h-4 w-4" />Assign ({chosen.length} staff)</button>
       </section>}
       {tab === 'answers' && <section className={`${card} space-y-2`}>

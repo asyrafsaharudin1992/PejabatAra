@@ -6,6 +6,7 @@ import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { fluFormFor, fluFormSave, fluFormVaccine, fluFormWaiting } from './_staff-forms.js';
 import { pdfFormStaffAction, pdfFormWaiting } from './_pdf-forms.js';
+import { closeIfFinished, LEAVER_ACTIONS, leaverOf } from './_leaver.js';
 import { canLocumInterview, locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
@@ -660,6 +661,12 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   }
 
   const staff = await staffSession(db, req);
+  // After the last working day only the forms and payslips stay open; the sign-in switches off once those are finished.
+  const left = await leaverOf(db, staff.id);
+  if (left) {
+    if (action === 'me' && await closeIfFinished(db, staff.id, left).catch(() => false)) throw fail(401, 'Your sign-in has been closed. Ask HR if you still need something.');
+    if (!LEAVER_ACTIONS.test(action)) throw fail(403, 'Your last working day has passed. Only your forms and payslips are available.');
+  }
   // The COO, the CEO, the CHRO and the CPO open their office from their Individual Sign In without typing the office email and password again, and without
   // the device key: their own sign-in (name, staff code, password) is the proof. Only the person whose job title is COO, CEO or CHRO gets this.
   if (req.method === 'POST' && /^(coo|ceo|hr|procurement)_office_session$/.test(action)) {
@@ -879,7 +886,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);
     return res.status(200).json({
-      staff: { name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, locumInterview: canLocumInterview(staff.staff_code), ceoOffice, hrOffice, cpoOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
+      staff: { leaver: Boolean(left), name: staff.name, code: staff.staff_code, branch: staff.branch, preview: staff.can_preview, canViewAs, hasPassword: Boolean(staff.password_hash), rosterCompanies, isApprover, careApprover, locumInterview: canLocumInterview(staff.staff_code), ceoOffice, hrOffice, cpoOffice, careWaiting, leaveWaiting, reviewWaiting, announcementsListed, announcementsUnread, isDoctor: /\b(DR|DOCTOR)\b/i.test(designation), canReview: REVIEWER_TITLES.test(designation), canAssess: Boolean(staff.can_preview) || /CLINIC ASSISTANT|ADMIN CLINICAL/i.test(designation) },
       quizzes: (quizzes || []).map((quiz: any) => {
         const attempt: any = byQuiz.get(quiz.id);
         return { id: quiz.id, title: quiz.title, description: quiz.description, passMark: quiz.pass_mark, active: quiz.active, questionCount: quiz.questions.length, attempt: attempt ? { score: attempt.score, total: attempt.total, count: attempt.attempt_no, submittedAt: attempt.submitted_at } : null };

@@ -128,9 +128,11 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
       if (!isId(id)) throw fail(400, `Choose who fills the part "${role.label}".`);
       signers[role.id] = id;
     }
-    const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,ic_no,passport_no,designation,department,company,date_of_birth,gender,join_date,resign_date,assessment_staff_id').in('id', [...ids, ...Object.values(signers)]).eq('status', 'Active');
+    const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,ic_no,passport_no,designation,department,company,date_of_birth,gender,join_date,resign_date,assessment_staff_id,status').in('id', [...ids, ...Object.values(signers)]);
     if (peopleError) throw peopleError;
     const byId = new Map<string, any>((people || []).map((p: any) => [p.id, p]));
+    // The form may be about someone who has left; the other people who fill a part must still be working here.
+    for (const [role, id] of Object.entries(signers)) if (role !== 'staff' && byId.get(id)?.status !== 'Active') throw fail(400, `The person chosen for "${roles.find((r: any) => r.id === role)?.label}" is not active.`);
     for (const [role, id] of Object.entries(signers)) if (!byId.get(id)?.assessment_staff_id) throw fail(400, `The person chosen for "${roles.find((r) => r.id === role)?.label}" cannot sign in to Individual Sign In.`);
     const { data: openCases, error: openError } = await db.from('hr_pdf_form_cases').select('employee_id').eq('form_id', form.id).eq('status', 'open');
     if (openError) throw openError;
@@ -171,8 +173,9 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
 // ---- Staff (Individual Sign In) ----
 const partsOf = (row: any, me: string) => (row.parts || []).filter((role: any) => role.id === 'staff' ? (row.signers?.staff || row.employee_id) === me : row.signers?.[role.id] === me);
 async function myEmployee(db: any, assessmentStaffId: string) {
-  const { data } = await db.from('hr_employees').select('id,full_name').eq('assessment_staff_id', assessmentStaffId).eq('status', 'Active').maybeSingle();
-  return data;
+  // Someone who has left still fills the forms sent to them (their sign-in decides whether they get in).
+  const { data } = await db.from('hr_employees').select('id,full_name,status').eq('assessment_staff_id', assessmentStaffId).order('status').limit(1);
+  return data?.[0] || null;
 }
 async function openCasesFor(db: any, me: string) {
   const { data, error } = await db.from('hr_pdf_form_cases').select('id,employee_id,title,due_on,parts,signers,done').eq('status', 'open').limit(500);
