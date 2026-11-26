@@ -23,3 +23,22 @@ assert.deepEqual(saved, { t: 'Ali' }, 'A choice that is not offered and another 
 assert.deepEqual(cleanAnswers(fields, 'dir', { s: 'javascript:alert(1)' }), {});
 assert.equal(cleanLayout(roles, [{ ...text, who: 'nobody' }, text]).fields.length, 1);
 console.log('PDF form sending checks passed.');
+
+import { detectFields } from '../src/pdfForm/detect.ts';
+const w = (text: string, x: number, y: number, width = text.length * 0.008) => ({ text, x, y, w: width, h: 0.012 });
+const found = detectFields([
+  w('Nama : ______________', 0.1, 0.1, 0.3),
+  w('Beban kerja', 0.1, 0.2), w('1', 0.4, 0.2), w('2', 0.5, 0.2), w('3', 0.6, 0.2), w('4', 0.7, 0.2), w('9', 0.8, 0.2),
+  w('Pulangan harta:', 0.1, 0.3), w('◻ Laptop', 0.1, 0.32),
+  w('Adakah anda akan kembali?', 0.1, 0.4), w('YA / TIDAK', 0.15, 0.42),
+  w('Apa pendapat anda?', 0.1, 0.5), w('Tandatangan pekerja:', 0.1, 0.7),
+], 0);
+const of = (type: string) => found.filter((field) => field.type === type);
+assert.deepEqual(of('text').map((field) => [field.label, field.source]), [['Nama', 'name']]);
+assert.equal(of('check').length, 1);
+assert.deepEqual([...new Set(of('choice').map((field) => field.group))].length, 2);
+assert.deepEqual(of('choice').slice(0, 5).map((field) => field.value), ['1', '2', '3', '4', '9']);
+assert.equal(of('choice')[0].label, 'Beban kerja');
+assert.equal(of('paragraph').length, 1);
+assert.equal(of('signature').length, 1);
+console.log('Automatic box placement checks passed.');

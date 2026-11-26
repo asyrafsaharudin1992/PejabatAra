@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Download, FileText, Send, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Download, FileText, Send, Trash2, Upload, Wand2 } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { officeFetch } from './lib/officeApi';
 import { downloadBlob } from './lib/downloadBlob';
@@ -7,7 +7,9 @@ import { pdfPageImages } from './lib/pdfPages';
 import { filledPdf } from './pdfForm/export';
 import { FormBuilder } from './pdfForm/FormBuilder';
 import { FormFill } from './pdfForm/FormFill';
-import { pagesOf, readBase64 } from './pdfForm/loadPdf';
+import { blobOf, pagesOf, readBase64 } from './pdfForm/loadPdf';
+import { detectFields } from './pdfForm/detect';
+import { pdfWords } from './pdfForm/pdfWords';
 import { activeRoles, DEFAULT_ROLES, keyOf, type Answers, type Field, type PdfForm, type Role } from './pdfForm/model';
 
 // Office HR > Miscellaneous > Staff communication: each imported PDF form is a card beside the fixed forms. Import, place the fields, save; then assign it,
@@ -55,6 +57,13 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
     else { const result = await call('action=pdfform_create', { ...form, base64: editing.base64, fileName: editing.fileName }); editing.id = result.id; }
     setEditing({ ...editing, dirty: false }); setNote('Saved.'); await load();
   });
+  const auto = () => editing && run(async () => {
+    if (editing.form.fields.length && !window.confirm('Replace the boxes already on this form?')) return;
+    const fields = (await pdfWords(blobOf(editing.base64))).flatMap((words, page) => detectFields(words, page));
+    if (!fields.length) throw new Error('No place to fill was found (a scanned PDF has no text to read). Place the boxes yourself.');
+    setEditing({ ...editing, dirty: true, form: { ...editing.form, fields } });
+    setNote(`${fields.length} boxes placed. Check each page, move or delete what is wrong, add what is missing, then Save.`);
+  });
   const loadCases = (id: string) => call(`action=pdfform_cases&formId=${id}`).then((result) => setCases(result.cases)).catch((cause: Error) => { setCases([]); onError(cause.message); });
   const goTo = (next: 'fields' | 'send' | 'answers') => {
     setTab(next); setNote('');
@@ -94,6 +103,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
         <button type="button" disabled={busy || !editing.dirty} onClick={() => void save()} className={primary}>{editing.dirty ? 'Save' : 'Saved'}</button>
       </section>
       {note && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{note}</p>}
+      {tab === 'fields' && <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-indigo-50 p-3"><button type="button" disabled={busy} onClick={() => void auto()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50"><Wand2 className="h-4 w-4" />{busy ? 'Reading…' : 'Place boxes for me'}</button><p className="text-sm text-indigo-900">The system finds the lines, tick boxes, number scales and Ya / Tidak. Check the result before saving.</p></div>}
       {tab === 'fields' && <FormBuilder pages={editing.pages} form={editing.form} onChange={(form) => setEditing((current) => current && { ...current, form, dirty: true })} />}
       {tab === 'send' && <section className={`${card} space-y-4`}>
         {activeRoles(editing.form).some((role) => role.id === 'staff') && <label className="block max-w-md text-sm font-semibold text-slate-600">Who fills the form?<select value={signers.staff || ''} onChange={(event) => setSigners({ ...signers, staff: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3"><option value="">Each staff member ticked below (about themselves)</option>{staff.map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.employeeCode}</option>)}</select></label>}
