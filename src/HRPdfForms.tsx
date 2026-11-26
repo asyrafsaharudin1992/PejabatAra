@@ -29,6 +29,9 @@ const call = async (query: string, body?: unknown) => {
 const button = 'inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#0b587b] disabled:opacity-50';
 const primary = 'inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-50';
 const dmy = (date: string) => date.slice(0, 10).split('-').reverse().join('/');
+// The HR officer last chosen is offered again next time (kept on this computer).
+const HR_OFFICER = 'ara-pdfform-hr-officer';
+const lastOfficer = (): Record<string, string> => { try { const id = localStorage.getItem(HR_OFFICER); return id ? { hr: id } : {}; } catch { return {}; } };
 
 export function HRPdfForms({ onError, children }: { onError: (message: string) => void; children?: ReactNode }) {
   const [forms, setForms] = useState<Summary[] | null>(null);
@@ -50,9 +53,9 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
   const importPdf = (file?: File) => file && run(async () => {
     if (file.size > 3 * 1024 * 1024) throw new Error('The PDF must be 3 MB or smaller.');
     const pages = await pdfPageImages(file, 2);
-    setEditing({ id: '', base64: await readBase64(file), fileName: file.name, pages, form: { title: file.name.replace(/\.pdf$/i, ''), roles: DEFAULT_ROLES, fields: [] }, dirty: true }); setTab('fields'); setChosen([]); setSigners({}); setCases(null);
+    setEditing({ id: '', base64: await readBase64(file), fileName: file.name, pages, form: { title: file.name.replace(/\.pdf$/i, ''), roles: DEFAULT_ROLES, fields: [] }, dirty: true }); setTab('fields'); setChosen([]); setSigners(lastOfficer()); setCases(null);
   });
-  const openForm = (id: string) => run(async () => { const data = await call(`action=pdfform_get&id=${id}`); setEditing({ id, version: data.version, base64: data.base64, fileName: '', pages: await pagesOf(data.base64), form: { title: data.title, roles: data.roles, fields: data.fields }, dirty: false }); setTab('fields'); setChosen([]); setSigners({}); setCases(null); });
+  const openForm = (id: string) => run(async () => { const data = await call(`action=pdfform_get&id=${id}`); setEditing({ id, version: data.version, base64: data.base64, fileName: '', pages: await pagesOf(data.base64), form: { title: data.title, roles: data.roles, fields: data.fields }, dirty: false }); setTab('fields'); setChosen([]); setSigners(lastOfficer()); setCases(null); });
   const save = () => editing && run(async () => {
     const { form } = editing;
     let version = editing.version;
@@ -114,6 +117,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
       {tab === 'fields' && <FormBuilder pages={editing.pages} form={editing.form} onChange={(form) => setEditing((current) => current && { ...current, form, dirty: true })} />}
       {tab === 'send' && <section className={`${card} space-y-4`}>
         {activeRoles(editing.form).some((role) => role.id === 'staff') && <label className="block max-w-md text-sm font-semibold text-slate-600">Who fills the form?<select value={signers.staff || ''} onChange={(event) => setSigners({ ...signers, staff: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3"><option value="">Each staff member ticked below (about themselves)</option>{staff.map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.employeeCode}</option>)}</select></label>}
+        {activeRoles(editing.form).some((role) => role.id === 'hr') && <label className="block max-w-md text-sm font-semibold text-slate-600">HR part also goes to (Individual Sign In)<select value={signers.hr || ''} onChange={(event) => { setSigners({ ...signers, hr: event.target.value }); try { localStorage.setItem(HR_OFFICER, event.target.value); } catch { /* storage not available */ } }} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3"><option value="">Office HR only</option>{staff.filter((item) => item.status === 'Active').map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.employeeCode}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-400">After the staff member submits, that person sees it in Announcements. It can still be done here in Office HR.</span></label>}
         {roles.map((role) => <label key={role.id} className="block max-w-md text-sm font-semibold text-slate-600">Who fills “{role.label}”?<select value={signers[role.id] || ''} onChange={(event) => setSigners({ ...signers, [role.id]: event.target.value })} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3"><option value="">Choose…</option>{staff.map((item) => <option key={item.id} value={item.id}>{item.fullName} · {item.employeeCode}</option>)}</select></label>)}
         <label className="block max-w-md text-sm font-semibold text-slate-600">Answer by (optional)<input type="date" value={due} onChange={(event) => setDue(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3" /></label>
         <p className="text-sm font-semibold text-slate-600">{signers.staff ? 'Which staff is the form about? Their name and details are filled in.' : 'Assign this form to'}</p>

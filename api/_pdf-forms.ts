@@ -35,7 +35,7 @@ const signedDates = (fields: Field[], who: string) => Object.fromEntries(fields.
 const caseRow = (row: any, names: Map<string, any>) => ({
   id: row.id, formId: row.form_id, title: row.title, status: row.status, dueOn: row.due_on, sentAt: row.sent_at, employeeId: row.employee_id,
   name: names.get(row.employee_id)?.full_name || '', code: names.get(row.employee_id)?.employee_code || '', done: row.done || {},
-  parts: inOrder<any>(row.parts || []).map((role: any) => ({ id: role.id, label: role.label, signer: role.id === 'staff' ? names.get(row.signers?.staff || row.employee_id)?.full_name || '' : role.id === 'hr' ? 'HR' : names.get(row.signers?.[role.id])?.full_name || '', done: row.done?.[role.id] || null })),
+  parts: inOrder<any>(row.parts || []).map((role: any) => ({ id: role.id, label: role.label, signer: role.id === 'staff' ? names.get(row.signers?.staff || row.employee_id)?.full_name || '' : role.id === 'hr' ? (row.signers?.hr ? `HR (${names.get(row.signers.hr)?.full_name || ''})` : 'HR') : names.get(row.signers?.[role.id])?.full_name || '', done: row.done?.[role.id] || null })),
 });
 async function namesFor(db: any, rows: any[]) {
   const ids = [...new Set(rows.flatMap((row) => [row.employee_id, ...Object.values(row.signers || {})]).filter(Boolean))];
@@ -127,8 +127,9 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
     if (!roles.length) throw fail(400, 'Place at least one field on the form first.');
     const signers: Record<string, string> = {};
     for (const role of roles) {
-      if (role.id === 'hr') continue;
       const id = String(body.signers?.[role.id] || '');
+      // The HR part is filled in Office HR; an HR officer can be named so it also reaches their own Announcements.
+      if (role.id === 'hr' && !id) continue;
       // The staff part is filled by the person it is about, unless HR assigns someone else to it.
       if (role.id === 'staff' && !id) continue;
       if (!isId(id)) throw fail(400, `Choose who fills the part "${role.label}".`);
