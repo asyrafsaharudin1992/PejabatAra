@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, ExternalLink, FileText } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import FluForm from './FluForm';
+import MyPdfForms from './MyPdfForms';
 
 // Announcements inside Individual Sign In: each clinic assistant and Clinical Admin sees the announcements here, opens
 // the memo each one refers to, then records that they have read it. The Clinical Assistants office only shows who has.
@@ -22,7 +23,7 @@ export default function MyAnnouncements({ onChange }: { onChange: (unread: numbe
   };
   if (!data) return error ? <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</p> : <p className="text-sm text-slate-500">Loading…</p>;
   // HR's influenza form sits above the announcements; answering it takes one off the red number.
-  const flu = <FluForm onAnswered={() => onChange(data.items.filter((item) => !item.readAt).length)} />;
+  const flu = <><MyPdfForms onSubmitted={() => onChange(data.items.filter((item) => !item.readAt).length)} /><FluForm onAnswered={() => onChange(data.items.filter((item) => !item.readAt).length)} /></>;
   if (!data.items.length) return <div className="space-y-4">{flu}<p className="rounded-2xl bg-white p-5 text-sm text-slate-600 shadow-sm">No announcements yet.</p></div>;
   const unread = data.listed ? data.items.filter((item) => !item.readAt).length : 0;
   const audienceOf = (value: string) => /^semua staf$/i.test(value.trim()) ? 'All staff' : value;

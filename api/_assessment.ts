@@ -5,6 +5,7 @@ import { careAction, careWaitingCount, isCooTitle } from './_care.js';
 import { attendanceStaffAction } from './_attendance.js';
 import { announcementsFor, recordRead } from './_announcements.js';
 import { fluFormFor, fluFormSave, fluFormVaccine, fluFormWaiting } from './_staff-forms.js';
+import { pdfFormStaffAction, pdfFormWaiting } from './_pdf-forms.js';
 import { canLocumInterview, locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { REQUEST_SELECT, changesFrom } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
@@ -808,6 +809,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (req.method === 'POST' && action === 'locum_interview_save') return res.status(200).json({ item: await locumInterviewSave(db, body, staff.name) });
     if (req.method === 'POST' && action === 'locum_interview_delete') { await locumInterviewDelete(db, text(body?.id)); return res.status(200).json({ ok: true }); }
   }
+  if (action.startsWith('pdfform_')) return await pdfFormStaffAction(req, res, db, staff.id, action, body);
   if (req.method === 'GET' && action === 'flu_form') return res.status(200).json(await fluFormFor(db, staff.id));
   if (req.method === 'POST' && action === 'flu_form_vaccine') return res.status(200).json(await fluFormVaccine(db, staff.id, body));
   if (req.method === 'POST' && action === 'flu_form_save') return res.status(200).json(await fluFormSave(db, staff.id, body));
@@ -865,12 +867,14 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const cpoOffice = /\bCPO\b/i.test(String(designation || ''));
     // The red number on the Announcements icon (only for the staff who must read them).
     // Both are looked up together, so the form adds no waiting.
-    const [announced, fluWaiting] = await Promise.all([
+    const [announced, fluWaiting, formsWaiting] = await Promise.all([
       announcementsFor(db, staff.id, false).catch(() => null),   // announcements not set up yet
       fluFormWaiting(db, staff.id).catch(() => false),          // the form is not set up yet
+      pdfFormWaiting(db, staff.id).catch(() => 0),
     ]);
     if (announced) { announcementsListed = announced.listed; announcementsUnread = announced.items.filter((item) => !item.readAt).length; }
     if (fluWaiting) announcementsUnread += 1;
+    announcementsUnread += formsWaiting;
     // Staff see their latest try; its attempt_no is how many tries they have made.
     const byQuiz = new Map<string, any>();
     for (const row of attempts || []) if (!byQuiz.has(row.quiz_id) || row.attempt_no > byQuiz.get(row.quiz_id).attempt_no) byQuiz.set(row.quiz_id, row);

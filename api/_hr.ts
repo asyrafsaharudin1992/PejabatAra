@@ -14,6 +14,7 @@ import { payslipLeave } from './_leave-summary.js';
 import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, joinedForPay } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
+import { pdfFormHrAction } from './_pdf-forms.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
@@ -599,6 +600,11 @@ export async function hrHandler(req: any, res: any) {
     }
     if (req.method === 'GET' && action === 'photo_source') return res.status(200).json({ url: await sourceLink(db, text(req.query.employeeId, 60)) });
     if ((action === 'flu_form_hr' || action === 'flu_form_open') && profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+    // Forms made from a PDF: HR only (they hold staff answers and signatures).
+    if (action.startsWith('pdfform_')) {
+      if (profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
+      return await pdfFormHrAction(req, res, db, action, body, text((profile as any).full_name || (user as any)?.email, 120));
+    }
     // Locum interview form: HR fills it in itself (nobody assigns it) and sees every interview, including Dr Atikah's.
     if (action.startsWith('locum_interview') && profile.role !== 'super_admin' && !access.includes('hr')) throw fail(403, 'Access restricted.');
     if (req.method === 'GET' && action === 'locum_interviews') return res.status(200).json({ items: await locumInterviewList(db) });

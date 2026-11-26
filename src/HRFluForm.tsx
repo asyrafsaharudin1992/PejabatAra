@@ -6,6 +6,7 @@ import { csvCell } from './lib/hrReportExport';
 import { officeFetch } from './lib/officeApi';
 import { fluFormPdf } from './lib/fluFormPdf';
 import { pdfPageImages } from './lib/pdfPages';
+import { HRPdfForms } from './HRPdfForms';
 
 // Office HR > Miscellaneous > Staff communication: the influenza vaccine form. HR opens it, every staff member answers it in Individual Sign In > Announcements,
 // and this page shows who agreed, who refused and who has not answered. Health details are private to HR.
@@ -22,16 +23,13 @@ export function HRStaffComms({ onError }: { onError: (message: string) => void }
     <button onClick={() => setForm('')} className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b] hover:underline"><ArrowLeft className="h-4 w-4" />Staff communication</button>
     <HRFluForm onError={onError} />
   </>;
-  return <section className={`${card} space-y-4`}>
-    <div><h3 className="text-xl font-semibold">Staff communication</h3><p className="text-sm text-slate-500">Forms HR asks every staff member to answer. Choose a form to open it to staff, see the answers and print them.</p></div>
-    <div className="grid gap-4 sm:grid-cols-2">
-      <button onClick={() => setForm('flu')} className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
-        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-teal-50 text-teal-600"><Syringe className="h-5 w-5" /></span>
-        <span className="mt-4 text-base font-semibold">Influenza vaccine</span><span className="mt-1 text-sm text-slate-500">Consent or refusal form for the influenza vaccine, for every staff member.</span>
-        <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
-      </button>
-    </div>
-  </section>;
+  return <HRPdfForms onError={onError}>
+    <button onClick={() => setForm('flu')} className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(11,88,123,0.12)]">
+      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-teal-50 text-teal-600"><Syringe className="h-5 w-5" /></span>
+      <span className="mt-4 text-base font-semibold">Influenza vaccine</span><span className="mt-1 text-sm text-slate-500">Consent or refusal form for the influenza vaccine, for every staff member.</span>
+      <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+    </button>
+  </HRPdfForms>;
 }
 
 export function HRFluForm({ onError }: { onError: (message: string) => void }) {
