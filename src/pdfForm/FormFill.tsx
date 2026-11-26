@@ -9,7 +9,7 @@ export function FormFill({ pages, form, who, answers, onChange }: { pages: strin
   return <div className="space-y-4">
     {pages.map((picture, page) => <div key={picture} className="relative overflow-hidden rounded-xl bg-white shadow">
       <img src={picture} alt={`Page ${page + 1}`} draggable={false} className="block w-full" />
-      {form.fields.filter((field) => field.page === page).map((field) => {
+      {form.fields.filter((field) => field.page === page && field.type !== 'info').map((field) => {
         const mine = field.who === who, key = keyOf(field), value = answers[key] || '';
         const style = { left: `${field.x * 100}%`, top: `${field.y * 100}%`, width: `${field.w * 100}%`, height: `${field.h * 100}%` };
         const tone = mine ? (value || field.type === 'check' ? 'border-sky-500 bg-sky-200/20' : 'border-amber-500 bg-amber-200/40') : 'border-transparent';

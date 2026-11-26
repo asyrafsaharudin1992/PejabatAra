@@ -11,7 +11,7 @@ export async function filledPdf(pages: string[], form: PdfForm, answers: Answers
     const context = canvas.getContext('2d'); if (!context) throw new Error('This browser cannot make the PDF.');
     context.drawImage(picture, 0, 0);
     context.fillStyle = context.strokeStyle = '#0b2a6f';
-    for (const field of form.fields.filter((item) => item.page === number)) {
+    for (const field of form.fields.filter((item) => item.page === number && item.type !== 'info')) {
       const answer = answers[keyOf(field)] || '';
       const x = field.x * canvas.width, y = field.y * canvas.height, w = field.w * canvas.width, h = field.h * canvas.height;
       context.lineWidth = Math.max(2, canvas.width / 450);

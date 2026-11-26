@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { choiceRow, newId, place, SIZE, SOURCES, TYPE_NAME, type Field, type FieldType, type PdfForm } from './model';
 
 type Tool = FieldType | 'row' | 'move';
-const TOOLS: [Tool, string][] = [['move', 'Select / move'], ['text', 'Short text'], ['paragraph', 'Long text'], ['check', 'Tick box'], ['row', 'Scale / Yes-No'], ['signature', 'Signature']];
+const TOOLS: [Tool, string][] = [['move', 'Select / move'], ['text', 'Short text'], ['paragraph', 'Long text'], ['check', 'Tick box'], ['row', 'Scale / Yes-No'], ['signature', 'Signature'], ['info', 'Text to read']];
 const box = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
 
 // HR places the fields on the pages of the uploaded PDF.
@@ -29,7 +29,7 @@ export function FormBuilder({ pages, form, onChange }: { pages: string[]; form: 
       set([...form.fields, ...row]); setFirst(null); setQuestion(''); setSelected(row[0].id); return;
     }
     const [w, h] = SIZE[tool];
-    const added = place({ id: newId(), type: tool, page, x: 0, y: 0, w, h, who, label: TYPE_NAME[tool], required: tool !== 'check' }, point.x - (tool === 'check' ? w / 2 : 0), point.y - h / 2);
+    const added = place({ id: newId(), type: tool, page, x: 0, y: 0, w, h, who, label: TYPE_NAME[tool], required: tool !== 'check' && tool !== 'info' && tool !== 'signature' }, point.x - (tool === 'check' ? w / 2 : 0), point.y - h / 2);
     set([...form.fields, added]); setSelected(added.id);
   };
   const grab = (event: ReactPointerEvent, item: Field, resize: boolean) => {
@@ -70,10 +70,10 @@ export function FormBuilder({ pages, form, onChange }: { pages: string[]; form: 
       </div> : <p className="text-xs text-slate-500">{tool === 'move' ? 'Drag a box to move it. Drag its dot to resize.' : 'Tap on the page where it goes.'}</p>}
       {field && <div className="space-y-2 border-t border-slate-100 pt-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Selected: {TYPE_NAME[field.type]}</p>
-        <label className="block text-xs font-semibold text-slate-500">Question or name<input value={field.label} onChange={(event) => update({ label: event.target.value })} className={`${box} mt-1`} /></label>
+        {field.type === 'info' ? <label className="block text-xs font-semibold text-slate-500">Wording the person reads (first line is the heading)<textarea rows={6} maxLength={3000} value={field.label} onChange={(event) => update({ label: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 p-2 text-sm" /></label> : <label className="block text-xs font-semibold text-slate-500">Question or name<input value={field.label} onChange={(event) => update({ label: event.target.value })} className={`${box} mt-1`} /></label>}
         <label className="block text-xs font-semibold text-slate-500">Filled by<select value={field.who} onChange={(event) => update({ who: event.target.value })} className={`${box} mt-1`}>{form.roles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}</select></label>
         {field.type === 'text' && <label className="block text-xs font-semibold text-slate-500">Fill by itself from the profile<select value={field.source || ''} onChange={(event) => update({ source: event.target.value, label: SOURCES.find(([id]) => id === event.target.value)?.[1] || field.label })} className={`${box} mt-1`}>{SOURCES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}
-        {field.type !== 'check' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={field.required} onChange={(event) => update({ required: event.target.checked })} />Must be answered</label>}
+        {field.type !== 'check' && field.type !== 'info' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={field.required} onChange={(event) => update({ required: event.target.checked })} />Must be answered</label>}
         <div className="flex gap-1.5">{([['←', -0.003, 0], ['→', 0.003, 0], ['↑', 0, -0.002], ['↓', 0, 0.002]] as const).map(([label, dx, dy]) => <button key={label} type="button" onClick={() => nudge(dx, dy)} className="h-9 flex-1 rounded-lg border border-slate-200 text-sm">{label}</button>)}</div>
         <div className="flex gap-2"><button type="button" onClick={duplicate} className="h-10 flex-1 rounded-xl border border-slate-200 text-sm font-semibold text-[#0b587b]">Copy below</button><button type="button" onClick={remove} className="h-10 flex-1 rounded-xl border border-rose-200 text-sm font-semibold text-rose-700">Delete</button></div>
       </div>}

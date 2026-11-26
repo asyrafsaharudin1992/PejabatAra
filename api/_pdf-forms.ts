@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { activeRoles, allDone, cleanAnswers, cleanLayout, keyOf, missing, type Answers, type Done, type Field } from '../src/pdfForm/model.js';
+import { activeRoles, allDone, cleanAnswers, cleanLayout, inOrder, keyOf, missing, reopened, waitingFor, type Answers, type Done, type Field } from '../src/pdfForm/model.js';
 
 // Forms made from an imported PDF (Staff communication). HR keeps the forms, sends one about a staff member and follows the answers; the staff member and
 // the other people chosen fill their own part in Individual Sign In > Announcements. Whoever has a part in a case sees that whole form.
@@ -35,7 +35,7 @@ const signedDates = (fields: Field[], who: string) => Object.fromEntries(fields.
 const caseRow = (row: any, names: Map<string, any>) => ({
   id: row.id, formId: row.form_id, title: row.title, status: row.status, dueOn: row.due_on, sentAt: row.sent_at, employeeId: row.employee_id,
   name: names.get(row.employee_id)?.full_name || '', code: names.get(row.employee_id)?.employee_code || '', done: row.done || {},
-  parts: (row.parts || []).map((role: any) => ({ id: role.id, label: role.label, signer: role.id === 'staff' ? names.get(row.signers?.staff || row.employee_id)?.full_name || '' : role.id === 'hr' ? 'HR' : names.get(row.signers?.[role.id])?.full_name || '', done: row.done?.[role.id] || null })),
+  parts: inOrder<any>(row.parts || []).map((role: any) => ({ id: role.id, label: role.label, signer: role.id === 'staff' ? names.get(row.signers?.staff || row.employee_id)?.full_name || '' : role.id === 'hr' ? 'HR' : names.get(row.signers?.[role.id])?.full_name || '', done: row.done?.[role.id] || null })),
 });
 async function namesFor(db: any, rows: any[]) {
   const ids = [...new Set(rows.flatMap((row) => [row.employee_id, ...Object.values(row.signers || {})]).filter(Boolean))];
@@ -47,6 +47,8 @@ async function namesFor(db: any, rows: any[]) {
 async function savePart(db: any, row: any, who: string, body: any, by: string) {
   if (row.status !== 'open') throw fail(409, 'This form is closed.');
   if (row.done?.[who]) throw fail(409, 'This part was already submitted. HR can send it back if it must change.');
+  const before = waitingFor<any>(row.parts || [], row.done || {}, who);
+  if (before) throw fail(409, `This form is still waiting for ${before.id === 'staff' ? 'the staff member' : before.label}. Your part opens after that.`);
   const submit = body.submit === true;
   const answers: Answers = { ...row.answers, ...cleanAnswers(row.fields, who, body.answers || {}), ...(submit ? signedDates(row.fields, who) : {}) };
   if (submit) {
@@ -75,9 +77,9 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
     const { data, error } = await db.from('hr_pdf_forms').select('id,title,file_name,updated_at').eq('archived', false).order('title').limit(200);
     if (notReady(error)) return res.status(200).json({ forms: [], notSetUp: true });
     if (error) throw error;
-    const { data: cases, error: caseError } = await db.from('hr_pdf_form_cases').select('form_id,status').neq('status', 'cancelled').limit(2000);
+    const { data: cases, error: caseError } = await db.from('hr_pdf_form_cases').select('form_id,status,parts,done').neq('status', 'cancelled').limit(2000);
     if (caseError) throw caseError;
-    return res.status(200).json({ forms: (data || []).map((form: any) => ({ id: form.id, title: form.title, fileName: form.file_name, updatedAt: form.updated_at, open: (cases || []).filter((c: any) => c.form_id === form.id && c.status === 'open').length, completed: (cases || []).filter((c: any) => c.form_id === form.id && c.status === 'completed').length })) });
+    return res.status(200).json({ forms: (data || []).map((form: any) => ({ id: form.id, title: form.title, fileName: form.file_name, updatedAt: form.updated_at, open: (cases || []).filter((c: any) => c.form_id === form.id && c.status === 'open').length, completed: (cases || []).filter((c: any) => c.form_id === form.id && c.status === 'completed').length, forHr: (cases || []).filter((c: any) => c.form_id === form.id && c.status === 'open' && (c.parts || []).some((part: any) => part.id === 'hr') && !c.done?.hr && !waitingFor(c.parts || [], c.done || {}, 'hr')).length })) });
   }
   if (req.method === 'GET' && action === 'pdfform_get') {
     if (!isId(req.query.id)) throw fail(400, 'Choose a form.');
@@ -162,7 +164,7 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
   if (req.method === 'POST' && (action === 'pdfform_return' || action === 'pdfform_cancel')) {
     const row = await readCase(db, body.id);
     if (row.status === 'cancelled') throw fail(409, 'This form was cancelled.');
-    const done = { ...row.done }; if (action === 'pdfform_return') delete done[clean(body.role, 20)];
+    const done = action === 'pdfform_return' ? reopened(row.parts || [], row.done || {}, clean(body.role, 20)) : row.done;
     const { error } = await db.from('hr_pdf_form_cases').update({ done, status: action === 'pdfform_cancel' ? 'cancelled' : 'open', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (error) throw error.code === '23505' ? fail(409, 'Another copy of this form is already open for this person.') : error;
     return res.status(200).json({ success: true });
@@ -181,7 +183,7 @@ async function openCasesFor(db: any, me: string) {
   const { data, error } = await db.from('hr_pdf_form_cases').select('id,employee_id,title,due_on,parts,signers,done').eq('status', 'open').limit(500);
   if (notReady(error)) return [];
   if (error) throw error;
-  return (data || []).flatMap((row: any) => partsOf(row, me).filter((role: any) => !row.done?.[role.id]).map((role: any) => ({ row, role })));
+  return (data || []).flatMap((row: any) => partsOf(row, me).filter((role: any) => !row.done?.[role.id] && !waitingFor(row.parts || [], row.done || {}, role.id)).map((role: any) => ({ row, role })));
 }
 export async function pdfFormWaiting(db: any, assessmentStaffId: string) {
   const me = await myEmployee(db, assessmentStaffId);

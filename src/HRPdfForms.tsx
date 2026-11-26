@@ -14,7 +14,7 @@ import { activeRoles, DEFAULT_ROLES, keyOf, type Answers, type Field, type PdfFo
 
 // Office HR > Miscellaneous > Staff communication: each imported PDF form is a card beside the fixed forms. Import, place the fields, save; then assign it,
 // follow the answers and download. `children` are the fixed forms' cards, shown first.
-type Summary = { id: string; title: string; fileName: string; open: number; completed: number };
+type Summary = { id: string; title: string; fileName: string; open: number; completed: number; forHr?: number };
 type Part = { id: string; label: string; signer: string; done: { at: string; by: string } | null };
 type Case = { id: string; name: string; code: string; status: string; dueOn: string | null; sentAt: string; parts: Part[] };
 type Staff = { id: string; fullName: string; employeeCode: string; company: string; designation: string; status: string; resignDate?: string | null };
@@ -85,12 +85,16 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
   const change = (action: 'pdfform_return' | 'pdfform_cancel', id: string, role?: string) => editing && run(async () => { await call(`action=${action}`, { id, role }); await loadCases(editing.id); await load(); });
 
   if (viewing) {
-    const hrOpen = viewing.parts.some((part) => part.id === 'hr' && !part.done);
+    // HR's turn comes after the staff member has submitted.
+    const pending = viewing.parts.find((part) => !part.done), hrOpen = pending?.id === 'hr';
+    const waitingNote = !hrOpen && pending && viewing.parts.some((part) => part.id === 'hr' && !part.done) ? `Waiting for ${pending.signer || pending.label} to fill and submit. Your part opens after that.` : '';
     return <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => setViewing(null)} className={button}><ArrowLeft className="h-4 w-4" />Back</button><h3 className="mr-auto font-semibold">{viewing.title} · {viewing.name}</h3>
         {hrOpen && <><button type="button" disabled={busy} onClick={() => void hrPart(false)} className={button}>Save HR part</button><button type="button" disabled={busy} onClick={() => void hrPart(true)} className={primary}>Submit HR part</button></>}
         <button type="button" disabled={busy} onClick={() => void download()} className={button}><Download className="h-4 w-4" />Download PDF</button></div>
       {note && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{note}</p>}
+      {waitingNote && <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">{waitingNote}</p>}
+      {hrOpen && <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Check what was filled, then tap your own <b className="text-amber-700">yellow</b> boxes and press <b>Submit HR part</b>. If something is wrong, go back and press <b>Send back</b>.</p>}
       <div className="mx-auto max-w-[800px]"><FormFill pages={viewing.pages} form={{ title: viewing.title, roles: viewing.roles, fields: viewing.fields }} who={hrOpen ? 'hr' : ''} answers={viewing.answers} onChange={(answers) => setViewing({ ...viewing, answers })} /></div>
     </div>;
   }
@@ -118,7 +122,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
       </section>}
       {tab === 'answers' && <section className={`${card} space-y-2`}>
         {!cases ? <p className="text-sm text-slate-500">Loading…</p> : !cases.length ? <p className="text-sm text-slate-500">Not assigned to anyone yet.</p> : cases.map((item) => <div key={item.id} className="rounded-xl border border-slate-100 p-3">
-          <div className="flex flex-wrap items-center gap-2"><p className="mr-auto text-sm font-semibold">{item.name} <span className="font-normal text-slate-400">{item.code} · sent {dmy(item.sentAt)}{item.dueOn ? ` · by ${dmy(item.dueOn)}` : ''}</span></p><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${item.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{item.status === 'completed' ? 'Completed' : 'Waiting'}</span><button type="button" disabled={busy} onClick={() => void view(item.id)} className={button}>Open</button><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Cancel this form for ${item.name}?`)) void change('pdfform_cancel', item.id); }} className="h-10 rounded-xl px-3 text-sm font-semibold text-rose-700">Cancel</button></div>
+          <div className="flex flex-wrap items-center gap-2"><p className="mr-auto text-sm font-semibold">{item.name} <span className="font-normal text-slate-400">{item.code} · sent {dmy(item.sentAt)}{item.dueOn ? ` · by ${dmy(item.dueOn)}` : ''}</span></p><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${item.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{item.status === 'completed' ? 'Completed' : (() => { const next = item.parts.find((part) => !part.done); return next?.id === 'hr' ? 'For HR to check' : `Waiting for ${next?.id === 'staff' ? 'staff' : next?.label || ''}`; })()}</span><button type="button" disabled={busy} onClick={() => void view(item.id)} className={button}>Open</button><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Cancel this form for ${item.name}?`)) void change('pdfform_cancel', item.id); }} className="h-10 rounded-xl px-3 text-sm font-semibold text-rose-700">Cancel</button></div>
           <ul className="mt-1.5 flex flex-wrap gap-2">{item.parts.map((part) => <li key={part.id} className={`rounded-lg px-2.5 py-1 text-xs ${part.done ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-50 text-slate-600'}`}>{part.done ? '✓' : '…'} {part.label}: {part.signer || '—'}{part.done && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Send the part "${part.label}" back to be changed?`)) void change('pdfform_return', item.id, part.id); }} className="ml-2 font-semibold text-[#0b587b] underline">Send back</button>}</li>)}</ul>
         </div>)}
       </section>}
@@ -134,7 +138,7 @@ export function HRPdfForms({ onError, children }: { onError: (message: string) =
       {(forms || []).map((form) => <div key={form.id} className="relative">
         <button type="button" disabled={busy} onClick={() => void openForm(form.id)} className={`${tile} h-full w-full`}>
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileText className="h-5 w-5" /></span>
-          <span className="mt-4 text-base font-semibold">{form.title}</span><span className="mt-1 text-sm text-slate-500">{form.open || form.completed ? `${form.open} waiting · ${form.completed} completed` : 'Not assigned yet'}</span>
+          <span className="mt-4 text-base font-semibold">{form.title}</span><span className="mt-1 text-sm text-slate-500">{form.open || form.completed ? `${form.open} waiting · ${form.completed} completed` : 'Not assigned yet'}</span>{Boolean(form.forHr) && <span className="mt-2 self-start rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white">{form.forHr} for HR to check</span>}
           <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0b587b]">Open<ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
         </button>
         <button type="button" aria-label={`Remove ${form.title}`} disabled={busy} onClick={() => { if (window.confirm(`Remove "${form.title}" from this page? Forms already assigned are kept.`)) void run(async () => { await call('action=pdfform_archive', { id: form.id }); await load(); }); }} className="absolute right-3 top-3 rounded-lg p-2 text-slate-300 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>

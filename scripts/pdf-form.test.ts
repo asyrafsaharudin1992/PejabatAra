@@ -52,3 +52,27 @@ assert.deepEqual(table.slice(0, 2).map((field) => field.hint), ['Sangat Memuaska
 assert.equal(table[4].hint, 'Sangat Memuaskan', 'Every row of a table has the same meanings');
 assert.equal(cleanLayout(roles, table).fields[0].hint, 'Sangat Memuaskan');
 console.log('Rating meanings checks passed.');
+
+const nda = detectFields([
+  w('PERJANJIAN KERAHSIAAN', 0.1, 0.5), w('Dengan ini saya berjanji:', 0.1, 0.52),
+  w('a) Memberi perlindungan', 0.15, 0.54), w('maklumat syarikat.', 0.18, 0.555), w('b) Tidak mendedahkan.', 0.15, 0.575),
+  w('Tandatangan pekerja:', 0.1, 0.68),
+  w('Pulangan harta:', 0.1, 0.2), w('◻ Laptop', 0.1, 0.22),
+], 0);
+const reading = nda.filter((field) => field.type === 'info').map((field) => field.label);
+assert.deepEqual(reading, ['Pulangan harta:', 'PERJANJIAN KERAHSIAAN\nDengan ini saya berjanji:\na) Memberi perlindungan maklumat syarikat.\nb) Tidak mendedahkan.']);
+assert.equal(activeRoles({ roles, fields: [{ ...text, type: 'info', who: 'dir' }] }).length, 0, 'Wording alone gives nobody a part');
+console.log('Wording to read checks passed.');
+
+assert.ok(nda.filter((field) => field.type === 'signature').every((field) => !field.required), 'Signatures start as optional');
+console.log('Optional signature check passed.');
+
+import { inOrder, reopened, waitingFor } from '../src/pdfForm/model.ts';
+const parts = [{ id: 'dir' }, { id: 'hr' }, { id: 'staff' }, { id: 'doc' }], stamp = { at: '', by: '' };
+assert.deepEqual(inOrder(parts).map((part) => part.id), ['staff', 'hr', 'dir', 'doc']);
+assert.equal(waitingFor(parts, {}, 'staff'), null);
+assert.equal(waitingFor(parts, {}, 'hr')?.id, 'staff', 'HR cannot sign before the staff member');
+assert.equal(waitingFor(parts, { staff: stamp }, 'hr'), null);
+assert.equal(waitingFor(parts, { staff: stamp }, 'dir')?.id, 'hr');
+assert.deepEqual(Object.keys(reopened(parts, { staff: stamp, hr: stamp, dir: stamp }, 'hr')), ['staff']);
+console.log('Filling order checks passed.');

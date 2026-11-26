@@ -33,7 +33,7 @@ export function detectFields(words: Word[], page: number, who = 'staff'): Field[
     }
     return tables.get(key)!;
   };
-  const add = (type: FieldType, x: number, y: number, w: number, h: number, label: string, extra: Partial<Field> = {}) => found.push(place({ id: newId(), type, page, x: 0, y: 0, w: Math.min(0.9, w), h, who, label: label.slice(0, 200), required: type !== 'check', ...extra }, x, y));
+  const add = (type: FieldType, x: number, y: number, w: number, h: number, label: string, extra: Partial<Field> = {}) => found.push(place({ id: newId(), type, page, x: 0, y: 0, w: Math.min(0.9, w), h, who, label: label.slice(0, type === 'info' ? 3000 : 200), required: type !== 'check', ...extra }, x, y));
   rows.forEach((row, index) => {
     const full = row.map((word) => word.text).join(' ').replace(/\s+/g, ' ').trim();
     // A row of rating numbers: 1, 2, 3 ... going up, with nothing but numbers from the first to the last.
@@ -74,10 +74,24 @@ export function detectFields(words: Word[], page: number, who = 'staff'): Field[
         if (!following.test(after) || /^bahagian/i.test(label)) continue;
         // "Company property:" that only introduces the tick boxes or the list under it is not a line to write on.
         const below = rows[index + 1]?.map((item) => item.text).join(' ').trim() || '';
-        if (!after.trim() && !TICK.test(word.text) && (TICK.test(below) || /^[a-z]\)/i.test(below))) continue;
+        if (!after.trim() && !TICK.test(word.text) && (TICK.test(below) || /^[a-z]\)/i.test(below))) {
+          // The heading itself is kept as wording to read, and so is a whole lettered list (an agreement) with the title above it.
+          const read = [word.text.trim()];
+          if (/^[a-z]\)/i.test(below)) {
+            const title = rows[index - 1]?.map((item) => item.text).join(' ').replace(/\s+/g, ' ').trim() || '';
+            if (title && title === title.toUpperCase()) read.unshift(title);
+            for (let next = index + 1; rows[next]; next++) {
+              const text = rows[next].map((item) => item.text).join(' ').replace(/\s+/g, ' ').trim();
+              if (rows[next][0].y - rows[next - 1][0].y > 0.03 || /tandatangan/i.test(text)) break;
+              if (/^[a-z]\)/i.test(text)) read.push(text); else read[read.length - 1] += ` ${text}`;
+            }
+          }
+          add('info', word.x, word.y, Math.max(0.1, word.w), word.h, read.join('\n'), { required: false });
+          continue;
+        }
         const start = part(word, 0, match.index! + match[0].length);
         let from = start.x + start.w + 0.004;
-        if (/tandatangan/i.test(label)) { add('signature', word.x, word.y + word.h + 0.008, SIZE.signature[0], SIZE.signature[1], label); continue; }
+        if (/tandatangan/i.test(label)) { add('signature', word.x, word.y + word.h + 0.008, SIZE.signature[0], SIZE.signature[1], label, { required: false }); continue; }
         // up to the next words on the line (underscores and units do not count as the next words)
         const inside = /[A-Za-z][A-Za-z.\/ -]{1,34}?\s*:/.exec(after);
         let to = inside ? part(word, 0, match.index! + match[0].length + inside.index).x + part(word, 0, match.index! + match[0].length + inside.index).w : 0;
