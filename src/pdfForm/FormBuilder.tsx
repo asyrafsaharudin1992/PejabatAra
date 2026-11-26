@@ -1,12 +1,14 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { choiceRow, newId, place, SIZE, SOURCES, TYPE_NAME, type Field, type FieldType, type PdfForm } from './model';
+import { choiceRow, newId, place, PRESET, PRESET_ROLE, SIZE, SOURCES, TYPE_NAME, type Field, type FieldType, type PdfForm } from './model';
 
 type Tool = FieldType | 'row' | 'move';
 const TOOLS: [Tool, string][] = [['move', 'Select / move'], ['text', 'Short text'], ['paragraph', 'Long text'], ['check', 'Tick box'], ['row', 'Scale / Yes-No'], ['signature', 'Signature'], ['info', 'Text to read']];
 const box = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
 
 // HR places the fields on the pages of the uploaded PDF.
-export function FormBuilder({ pages, form, onChange }: { pages: string[]; form: PdfForm; onChange: (form: PdfForm) => void }) {
+export function FormBuilder({ pages, form: given, onChange }: { pages: string[]; form: PdfForm; onChange: (form: PdfForm) => void }) {
+  // Older forms get the "HR chooses when assigning" person too.
+  const form = given.roles.some((role) => role.id === PRESET) ? given : { ...given, roles: [...given.roles, PRESET_ROLE] };
   const [tool, setTool] = useState<Tool>('text');
   const [who, setWho] = useState('staff');
   const [selected, setSelected] = useState('');

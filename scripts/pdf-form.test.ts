@@ -76,3 +76,11 @@ assert.equal(waitingFor(parts, { staff: stamp }, 'hr'), null);
 assert.equal(waitingFor(parts, { staff: stamp }, 'dir')?.id, 'hr');
 assert.deepEqual(Object.keys(reopened(parts, { staff: stamp, hr: stamp, dir: stamp }, 'hr')), ['staff']);
 console.log('Filling order checks passed.');
+
+import { PRESET, presetQuestions } from '../src/pdfForm/model.ts';
+const ended = ['BERSARA', 'LETAK JAWATAN', 'DITAMATKAN'].map((value, index) => ({ ...text, id: `e${index}`, type: 'choice' as const, group: 'end', value, who: PRESET, label: 'Jenis berhenti', mark: 'tick' as const }));
+assert.deepEqual(presetQuestions([...ended, text]), [{ key: 'end', label: 'Jenis berhenti', options: ['BERSARA', 'LETAK JAWATAN', 'DITAMATKAN'] }]);
+assert.deepEqual(activeRoles({ roles: DEFAULT_ROLES, fields: [...ended, text] }).map((role) => role.id), ['staff'], 'Choosing at assign time gives nobody a part to submit');
+assert.deepEqual(cleanAnswers([...ended, text], 'staff', { end: 'BERSARA' }), {}, 'The staff member cannot change it');
+assert.equal(cleanLayout(DEFAULT_ROLES, ended).fields[0].mark, 'tick');
+console.log('Chosen when assigning checks passed.');

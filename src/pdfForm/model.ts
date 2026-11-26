@@ -2,12 +2,23 @@
 // (0 to 1), so they stay right at any screen size.
 // `info` is wording from the form that the person must read (a heading or an agreement): shown in the staff view, nothing is filled in.
 export type FieldType = 'text' | 'paragraph' | 'check' | 'choice' | 'signature' | 'info';
-export type Field = { id: string; type: FieldType; page: number; x: number; y: number; w: number; h: number; who: string; label: string; required: boolean; group?: string; value?: string; source?: string; hint?: string };
+export type Field = { id: string; type: FieldType; page: number; x: number; y: number; w: number; h: number; who: string; label: string; required: boolean; group?: string; value?: string; source?: string; hint?: string; mark?: 'tick' };
 export type Role = { id: string; label: string };
 export type PdfForm = { title: string; roles: Role[]; fields: Field[] };
 export type Answers = Record<string, string>;
 
-export const DEFAULT_ROLES: Role[] = [{ id: 'staff', label: 'Staff' }, { id: 'hr', label: 'HR' }];
+// Boxes given to this role are chosen by HR on the Assign page, before the form is sent: nobody fills them afterwards.
+export const PRESET = 'preset';
+export const PRESET_ROLE: Role = { id: PRESET, label: 'HR chooses when assigning' };
+export const DEFAULT_ROLES: Role[] = [{ id: 'staff', label: 'Staff' }, { id: 'hr', label: 'HR' }, PRESET_ROLE];
+// The questions HR answers when assigning: one for each row of choices (or single tick box) given to that role.
+export function presetQuestions(fields: Field[]) {
+  const seen = new Set<string>();
+  return fields.filter((field) => field.who === PRESET && (field.type === 'choice' || field.type === 'check')).flatMap((field) => {
+    const key = keyOf(field); if (seen.has(key)) return []; seen.add(key);
+    return [{ key, label: field.label, options: field.type === 'check' ? ['yes'] : fields.filter((item) => item.who === PRESET && keyOf(item) === key).map((item) => item.value || '') }];
+  });
+}
 // Details that can be filled in by themselves from the staff profile.
 export const SOURCES: [string, string][] = [['', 'Typed by the person'], ['name', 'Name'], ['code', 'Staff number'], ['ic', 'IC number'], ['position', 'Position'], ['department', 'Department'], ['company', 'Company'], ['age', 'Age'], ['gender', 'Gender'], ['service', 'Years of service'], ['resignDate', 'Last day of work'], ['today', 'Date signed']];
 export const TYPE_NAME: Record<FieldType, string> = { text: 'Short text', paragraph: 'Long text', check: 'Tick box', choice: 'Choose one', signature: 'Signature', info: 'Text to read' };
@@ -39,7 +50,7 @@ export function missing(form: PdfForm, who: string, answers: Answers): Field[] {
 // ---- Sending a form (used by the server and the pages) ----
 export type Done = Record<string, { at: string; by: string }>;
 // The people who have a part in a form: every role that has at least one field.
-export const activeRoles = (form: { roles: Role[]; fields: Field[] }) => form.roles.filter((role) => form.fields.some((field) => field.who === role.id && field.type !== 'info'));
+export const activeRoles = (form: { roles: Role[]; fields: Field[] }) => form.roles.filter((role) => role.id !== PRESET && form.fields.some((field) => field.who === role.id && field.type !== 'info'));
 export const allDone = (form: { roles: Role[]; fields: Field[] }, done: Done) => activeRoles(form).every((role) => Boolean(done[role.id]));
 // The parts are filled one after another: the staff member first, then HR (who checks it), then anyone else in the order they were added.
 const rank = (id: string) => id === 'staff' ? 0 : id === 'hr' ? 1 : 2;
@@ -68,7 +79,7 @@ export function cleanLayout(roles: unknown, fields: unknown): { roles: Role[]; f
   const people = (Array.isArray(roles) ? roles : []).slice(0, 10).map((role: any) => ({ id: short(role?.id, 20).replace(/[^a-z0-9]/gi, ''), label: short(role?.label, 40) })).filter((role) => role.id && role.label);
   const list = (Array.isArray(fields) ? fields : []).slice(0, 400).filter((field: any) => types.includes(field?.type) && people.some((role) => role.id === field.who)).map((field: any) => ({
     id: short(field.id, 20).replace(/[^a-z0-9]/gi, ''), type: field.type as FieldType, page: Math.max(0, Math.min(19, Math.floor(Number(field.page) || 0))), x: number(field.x), y: number(field.y), w: number(field.w), h: number(field.h),
-    who: String(field.who), label: short(field.label, field.type === 'info' ? 3000 : 200), required: Boolean(field.required), ...(field.group ? { group: short(field.group, 20).replace(/[^a-z0-9]/gi, '') } : {}), ...(field.value !== undefined ? { value: short(field.value, 40) } : {}), ...(field.source ? { source: short(field.source, 20) } : {}), ...(field.hint ? { hint: short(field.hint, 120) } : {}),
+    who: String(field.who), label: short(field.label, field.type === 'info' ? 3000 : 200), required: Boolean(field.required), ...(field.group ? { group: short(field.group, 20).replace(/[^a-z0-9]/gi, '') } : {}), ...(field.value !== undefined ? { value: short(field.value, 40) } : {}), ...(field.source ? { source: short(field.source, 20) } : {}), ...(field.hint ? { hint: short(field.hint, 120) } : {}), ...(field.mark === 'tick' ? { mark: 'tick' as const } : {}),
   })).filter((field) => field.id);
   return { roles: people, fields: list };
 }

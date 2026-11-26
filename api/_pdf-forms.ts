@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { activeRoles, allDone, cleanAnswers, cleanLayout, inOrder, keyOf, missing, reopened, waitingFor, type Answers, type Done, type Field } from '../src/pdfForm/model.js';
+import { activeRoles, allDone, cleanAnswers, cleanLayout, inOrder, keyOf, missing, presetQuestions, reopened, waitingFor, type Answers, type Done, type Field } from '../src/pdfForm/model.js';
 
 // Forms made from an imported PDF (Staff communication). HR keeps the forms, sends one about a staff member and follows the answers; the staff member and
 // the other people chosen fill their own part in Individual Sign In > Announcements. Whoever has a part in a case sees that whole form.
@@ -135,6 +135,14 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
       if (!isId(id)) throw fail(400, `Choose who fills the part "${role.label}".`);
       signers[role.id] = id;
     }
+    // What HR chooses before sending (for example how the employment ended) goes on every form sent now.
+    const preset: Answers = {};
+    for (const question of presetQuestions(form.fields)) {
+      const value = String(body.preset?.[question.key] || '');
+      if (value && !question.options.includes(value)) throw fail(400, `Choose "${question.label}" from the list.`);
+      if (!value && question.options.length > 1) throw fail(400, `Choose: ${question.label}.`);
+      if (value) preset[question.key] = value;
+    }
     const { data: people, error: peopleError } = await db.from('hr_employees').select('id,full_name,employee_code,ic_no,passport_no,designation,department,company,date_of_birth,gender,join_date,resign_date,assessment_staff_id,status').in('id', [...ids, ...Object.values(signers)]);
     if (peopleError) throw peopleError;
     const byId = new Map<string, any>((people || []).map((p: any) => [p.id, p]));
@@ -145,10 +153,11 @@ export async function pdfFormHrAction(req: any, res: any, db: any, action: strin
     if (openError) throw openError;
     const already = new Set((openCases || []).map((c: any) => c.employee_id));
     const due = /^\d{4}-\d{2}-\d{2}$/.test(String(body.dueOn || '')) ? body.dueOn : null;
-    const rows = ids.filter((id) => byId.has(id) && !already.has(id)).map((id) => ({ form_id: form.id, employee_id: id, title: form.title, roles: form.roles, fields: form.fields, parts: roles, file_path: form.file_path, signers, answers: profileAnswers(form.fields, byId.get(id)), due_on: due, sent_by: userLabel }));
+    const rows = ids.filter((id) => byId.has(id) && !already.has(id)).map((id) => ({ form_id: form.id, employee_id: id, title: form.title, roles: form.roles, fields: form.fields, parts: roles, file_path: form.file_path, signers, answers: { ...profileAnswers(form.fields, byId.get(id)), ...preset }, due_on: due, sent_by: userLabel }));
     if (rows.length) { const { error: insertError } = await db.from('hr_pdf_form_cases').insert(rows); if (insertError) throw insertError; }
     const noLogin = rows.filter((row) => !signers.staff && !byId.get(row.employee_id)?.assessment_staff_id && roles.some((role) => role.id === 'staff')).map((row) => byId.get(row.employee_id).full_name);
-    return res.status(200).json({ sent: rows.length, skipped: ids.length - rows.length, noLogin });
+    const noLastDay = form.fields.some((field: Field) => field.source === 'resignDate') ? rows.filter((row) => !byId.get(row.employee_id)?.resign_date).map((row) => byId.get(row.employee_id).full_name) : [];
+    return res.status(200).json({ sent: rows.length, skipped: ids.length - rows.length, noLogin, noLastDay });
   }
   if (req.method === 'GET' && action === 'pdfform_cases') {
     if (!isId(req.query.formId)) throw fail(400, 'Choose a form.');

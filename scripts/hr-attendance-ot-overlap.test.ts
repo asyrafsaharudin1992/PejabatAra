@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { amPm, likelyPm, needsOtHours } from '../src/lib/attendanceRequests.ts';
-import { awayBetween, awayMinutes, ownClocks, shiftArrival, daySessions, missedClash, newClocks, stillOpen } from '../api/_attendance.ts';
+import { awayBetween, awayMinutes, ownClocks, shiftArrival, daySessions, missedClash, newClocks, shiftEndFor, stillOpen } from '../api/_attendance.ts';
 
 const at = (day: string, time: string) => Date.parse(`2026-11-${day}T${time}:00+08:00`);
 const clock = (kind: string, day: string, time: string) => ({ kind, at: at(day, time) });
@@ -82,3 +82,12 @@ console.log('Late arrival checks passed.');
 // Left before the shift and the only later clock in is another day's: not this shift's arrival.
 assert.equal(shiftArrival([clock('in', '14', '08:51'), clock('out', '14', '11:00'), clock('in', '15', '12:00')], at('14', '08:51'), at('14', '12:00')), at('14', '08:51'));
 console.log('Other day clock in check passed.');
+
+// A shift that ended more than two hours ago asks too, even within 14 hours.
+const morning = { kind: 'in', clock_at: new Date(at('10', '09:00')).toISOString() };
+const days = [{ start: new Date(at('10', '09:00')).toISOString(), end: new Date(at('10', '18:00')).toISOString() }];
+assert.equal(shiftEndFor(days, at('10', '08:55')), at('10', '18:00'));
+assert.equal(shiftEndFor(days, at('10', '20:00')), null, 'A clock in after the shift ended belongs to no shift');
+assert.equal(stillOpen(morning, at('10', '19:30'), at('10', '18:00')), false, 'An ordinary late clock out is not asked about');
+assert.equal(stillOpen(morning, at('10', '21:00'), at('10', '18:00')), true);
+console.log('Past shift end question checks passed.');

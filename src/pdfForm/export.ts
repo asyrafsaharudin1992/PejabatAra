@@ -16,6 +16,7 @@ export async function filledPdf(pages: string[], form: PdfForm, answers: Answers
       const x = field.x * canvas.width, y = field.y * canvas.height, w = field.w * canvas.width, h = field.h * canvas.height;
       context.lineWidth = Math.max(2, canvas.width / 450);
       if (field.type === 'check') { if (answer === 'yes') { context.beginPath(); context.moveTo(x + w * 0.15, y + h * 0.55); context.lineTo(x + w * 0.4, y + h * 0.85); context.lineTo(x + w * 0.9, y + h * 0.1); context.stroke(); } }
+      else if (field.type === 'choice' && field.mark === 'tick') { if (answer === field.value) { context.beginPath(); context.moveTo(x + w * 0.18, y + h * 0.55); context.lineTo(x + w * 0.42, y + h * 0.82); context.lineTo(x + w * 0.85, y + h * 0.18); context.stroke(); } }
       else if (field.type === 'choice') { if (answer === field.value) { context.beginPath(); context.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); context.stroke(); } }
       else if (field.type === 'signature') { if (answer) { const ink = await load(answer), scale = Math.min(w / ink.width, h / ink.height); context.drawImage(ink, x, y + h - ink.height * scale, ink.width * scale, ink.height * scale); } }
       else if (answer) {

@@ -540,7 +540,18 @@ function creditNeed(days: Day[], nextKind: 'in' | 'out', nowMs: number) {
 // A clock in left open this long may be a forgotten clock out or work that carries on, so the person is asked which. Up to the first figure the next
 // clock is simply a clock out; after the second it is simply a new clock in.
 export const ASK_AFTER = 14 * HOUR, ASK_UNTIL = 30 * HOUR;
-export const stillOpen = (last: { kind: string; clock_at: string } | undefined, nowMs: number) => Boolean(last && last.kind === 'in' && nowMs - Date.parse(last.clock_at) > ASK_AFTER && nowMs - Date.parse(last.clock_at) <= ASK_UNTIL);
+// The question also comes sooner when the shift that was clocked into ended more than two hours ago: the person should have clocked out by now.
+export const ASK_PAST_END = 2 * HOUR;
+export function stillOpen(last: { kind: string; clock_at: string } | undefined, nowMs: number, shiftEnd: number | null = null) {
+  if (!last || last.kind !== 'in') return false;
+  const age = nowMs - Date.parse(last.clock_at);
+  return age <= ASK_UNTIL && (age > ASK_AFTER || (shiftEnd !== null && nowMs > shiftEnd + ASK_PAST_END));
+}
+// The end of the shift a clock in belongs to: the latest shift it came before the end of (a clock in made after a shift has ended belongs to none).
+export function shiftEndFor(days: { start: string; end: string }[], clockMs: number) {
+  const day = [...days].reverse().find((item) => item.start && item.end && clockMs >= Date.parse(item.start) - 5 * HOUR && clockMs < Date.parse(item.end));
+  return day ? Date.parse(day.end) : null;
+}
 
 // When the person arrived for the shift. Someone who came earlier on the same day, clocked out before the shift started and came back more than 30 minutes
 // later is judged late (or not) by that return, not by the earlier visit.
@@ -638,7 +649,8 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const last = (recent || [])[0];
     const nextKind = last && last.kind === 'in' && Date.now() - Date.parse(last.clock_at) < 20 * HOUR ? 'out' : 'in';
     const mine = days.get(me.id) || [];
-    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), openSince: stillOpen(last, Date.now()) ? last.clock_at : '', creditBasisIn: stillOpen(last, Date.now()) ? creditBasis(mine, 'in') : null, shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0, creditBasis: creditBasis(mine, nextKind) };
+    const open = stillOpen(last, Date.now(), last ? shiftEndFor(mine, Date.parse(last.clock_at)) : null);
+    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), openSince: open ? last.clock_at : '', creditBasisIn: open ? creditBasis(mine, 'in') : null, shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0, creditBasis: creditBasis(mine, nextKind) };
   };
 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
@@ -681,7 +693,8 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const prev = last?.[0];
     if (prev && Date.now() - Date.parse(prev.clock_at) < 60000) throw fail(429, 'You just clocked. Wait a minute before clocking again.');
     // When the last clock in is still open after a long time, the person says what this clock is (an older page that does not ask keeps the 20 hour rule).
-    const ask = stillOpen(prev, Date.now()), choice = ask && (body.choice === 'in' || body.choice === 'out') ? String(body.choice) : '';
+    const openDays = prev?.kind === 'in' ? (await buildDays(db, [me], addDay(today(), -1), today(), rules)).get(me.id) || [] : [];
+    const ask = stillOpen(prev, Date.now(), prev ? shiftEndFor(openDays, Date.parse(prev.clock_at)) : null), choice = ask && (body.choice === 'in' || body.choice === 'out') ? String(body.choice) : '';
     const kind = (choice || (prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in')) as 'in' | 'out';
     // The staff member chose to cover a late arrival or an early leave with their credit hours: checked before the clock is saved.
     let credit: { kind: 'late' | 'early'; date: string; hours: number } | null = null;
