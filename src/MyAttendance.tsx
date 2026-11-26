@@ -1,4 +1,4 @@
-import { isMissedClock, MISSED_REASONS, missedClockDates, OT_REASONS, unclaimedOtDays } from './lib/attendanceRequests';
+import { amPm, isMissedClock, likelyPm, MISSED_REASONS, missedClockDates, needsOtHours, OT_REASONS, unclaimedOtDays } from './lib/attendanceRequests';
 import { useEffect, useRef, useState } from 'react';
 import { OtPolicy } from './OtPolicy';
 import { newCode } from './lib/shiftCodes';
@@ -9,9 +9,9 @@ import { ClockLocationError, requestClockLocation } from './lib/clockLocation';
 // My attendance inside Individual Sign In: one button to clock in or out at a permitted workplace,
 // today's shift, the month so far, and a request to correct a forgotten clock. A supervisor
 // sees the requests waiting for them here.
-type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; otApproved?: number; holiday?: boolean; otNote?: string; leave: string };
-type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; creditMinutes?: number; creditBasis?: { kind: 'late' | 'early'; date: string; at: string } | null; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
-type Req = { id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; otPreview?: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr'; source?: string };
+type Day = { date: string; code: string; startTime: string; endTime: string; inTime: string; outTime: string; outNextDay?: boolean; status: string; late: number; lateCounted: number; worked: number; otCounted: number; otStatus: string; otApproved?: number; holiday?: boolean; otNote?: string; leave: string };
+type State = { today: string; name: string; mode: 'places' | 'anywhere'; places: { name: string }[]; nextKind: 'in' | 'out'; recent: { kind: 'in' | 'out'; at: string }[]; openSince?: string; creditBasisIn?: State['creditBasis']; creditMinutes?: number; creditBasis?: { kind: 'late' | 'early'; date: string; at: string } | null; shift: Day; yesterday: Day; required: 'full' | 'in_only' | 'none' };
+type Req = { clockPairs?: string[]; id: string; name: string; date: string; inTime: string; outTime: string; otMinutes: number; otText: string; reason: string; remarks: string; otPreview?: string; status: 'draft' | 'pending' | 'supervisor_approved' | 'approved' | 'rejected' | 'cancelled'; note: string; supervisorNote: string; stage?: 'supervisor' | 'hr'; source?: string };
 const REQ_LABEL: Record<string, string> = { draft: 'Draft', pending: 'Waiting for supervisor', supervisor_approved: 'Waiting for HR', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
 const reqDetail = (request: Req) => [request.inTime && `in ${request.inTime}`, request.outTime && `out ${request.outTime}`, request.otMinutes > 0 && `OT ${Math.floor(request.otMinutes / 60)} h ${request.otMinutes % 60} m`].filter(Boolean).join(' · ');
@@ -92,7 +92,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   const [remark, setRemark] = useState('');
   const [creditHours, setCreditHours] = useState(0);
   // The question asked when clocking in late or out early with credit hours in hand: use them, or not.
-  const [ask, setAsk] = useState<null | { kind: 'late' | 'early'; minutes: number; options: number[]; pick: number; step: 'ask' | 'pick' }>(null);
+  const [ask, setAsk] = useState<null | { kind: 'late' | 'early'; minutes: number; options: number[]; pick: number; step: 'ask' | 'pick'; choice?: 'in' }>(null);
   const [tickAt, setTickAt] = useState(() => Date.now()); // so the late or early minutes follow the clock while the page stays open
   useEffect(() => { const timer = setInterval(() => setTickAt(Date.now()), 60000); return () => clearInterval(timer); }, []);
   const [confirmId, setConfirmId] = useState('');
@@ -118,7 +118,9 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
   useEffect(loadMonthDays, []);
 
   // `chosen`: the hours of credit decided in the question (0 = none); without it the dropdown's choice is used.
-  const clock = async (chosen?: number) => {
+  // "Clock out now" after a long stretch: the hours are shown and confirmed before anything is saved.
+  const [confirmLong, setConfirmLong] = useState(false);
+  const clock = async (chosen?: number, choice?: 'in' | 'out') => {
     if (!state || busy) return;
     setBusy(true); setError(''); setMessage(''); setHelpOpen(false);
     const controller = new AbortController();
@@ -128,13 +130,13 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       if (controller.signal.aborted) return;
       setLocating(false);
       setBlocked(false);
-      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim(), creditHours: creditOptions(state, Date.now()).includes(chosen ?? creditHours) ? (chosen ?? creditHours) : 0 }) });
+      const result = await assessmentFetch('action=attendance_clock', { method: 'POST', body: JSON.stringify({ choice, deviceId: deviceId(), lat: place?.lat ?? null, lng: place?.lng ?? null, accuracy: place?.accuracy ?? null, remarks: remark.trim(), creditHours: creditOptions(choice === 'in' ? { ...state, nextKind: 'in', creditBasis: state.creditBasisIn } : state, Date.now()).includes(chosen ?? creditHours) ? (chosen ?? creditHours) : 0 }) });
       setRemark(''); setCreditHours(0);
       setState(result);
       setMessage(`Clocked ${result.kind === 'in' ? 'in' : 'out'} at ${timeOf(new Date().toISOString())}.${result.creditNote ? ` ${result.creditNote}` : ''}`);
       // On an iPhone the phone asks each time unless the website setting is Allow: say so once.
       try { if (phoneKind() === 'ios' && !homeScreenApp() && !localStorage.getItem('ara_location_tip')) setTip(true); } catch { /* storage not available */ }
-      loadDays();
+      loadDays(); loadMonthDays(); // the second one clears a "Forgot to clock" mark this clock has just answered
     } catch (cause) {
       if (controller.signal.aborted) return;
       const text = cause instanceof Error ? cause.message : 'Unable to clock.';
@@ -154,6 +156,18 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
     }
     void clock();
   };
+  // "Clock in new day": a late arrival is asked about credit hours too, the same question as an ordinary clock in.
+  const startNewDay = () => {
+    if (!state || busy) return;
+    const asIn: State = { ...state, nextKind: 'in', creditBasis: state.creditBasisIn };
+    const need = creditNeedNow(asIn, Date.now()), options = creditOptions(asIn, Date.now());
+    if (need && options.length) {
+      const cover = options.find((hours) => hours * 60 >= need.minutes) ?? options[options.length - 1];
+      setAsk({ kind: need.kind, minutes: need.minutes, options, pick: cover, step: 'ask', choice: 'in' });
+      return;
+    }
+    void clock(0, 'in');
+  };
   const send = async (draft = false) => {
     if (!form) return;
     setBusy(true); setError(''); setMessage('');
@@ -161,7 +175,10 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       // The Reason box shows the first choice when the saved reason does not belong to this screen (for example a "Forgot to clock out" reason carried over from the Forgot to clock form into the OT form). Send what the box shows, not the hidden leftover, or an OT request is filed as a missed clock.
       const allowed = mode === 'ot' ? OT_REASONS : MISSED_REASONS;
       const reason = allowed.includes(form.reason) ? form.reason : allowed[0];
-      await assessmentFetch(form.id ? 'action=attendance_request_update' : 'action=attendance_request_create', { method: 'POST', body: JSON.stringify({ ...form, reason, draft }) });
+      if (!draft && needsOtHours(reason) && !form.otTime) { setError('Choose the OT hours. Without them no OT can be paid.'); setBusy(false); return; }
+      // A time already recorded that day is sent as recorded (its box is locked).
+      const recorded = isMissedClock(reason) ? monthDays?.find((item) => item.date === form.date) : undefined;
+      await assessmentFetch(form.id ? 'action=attendance_request_update' : 'action=attendance_request_create', { method: 'POST', body: JSON.stringify({ ...form, inTime: recorded?.inTime || form.inTime, outTime: recorded?.outTime || form.outTime, reason, draft }) });
       setForm(null); setMessage(draft ? 'Saved as a draft. Send it when you are ready.' : 'Your request was sent. Your supervisor approves first, then HR confirms.'); loadRequests();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to send the request.'); } finally { setBusy(false); }
   };
@@ -216,11 +233,14 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
     const reasons = missed ? MISSED_REASONS : OT_REASONS;
     const mineHere = mine.filter((request) => isMissedClock(request.reason) === missed);
     const waitingHere = waiting.filter((request) => isMissedClock(request.reason) === missed);
+    const recordedDay = missed && form ? monthDays?.find((item) => item.date === form.date) : undefined;
+    const lockedIn = recordedDay?.inTime || '', lockedOut = recordedDay?.outTime || '';
     const approveBox = (waitingHere.length > 0 || isApprover) && <section className={`${card} space-y-3`}>
       <h3 className="flex flex-wrap items-center gap-2 font-semibold">{waitingHere.length > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">{waitingHere.length}</span>}{missed ? 'Forgot to clock' : 'Approve OT'} <span className="text-xs font-normal text-slate-400">· {missed ? 'for your approval' : 'waiting for your approval'}</span></h3>
       {!waitingHere.length && <p className="text-sm text-slate-500">Nothing is waiting for your approval.</p>}
       <ul className="divide-y divide-slate-100">{waitingHere.map((request) => <li key={request.id} className="py-3 text-sm">
         <p className="font-semibold">{request.name}</p><p className="text-xs text-slate-500">{dayName(request.date)} · {reqDetail(request)}</p><p className="mt-0.5 text-xs text-slate-400">{request.reason}{request.remarks && ` · ${request.remarks}`}</p>
+        {request.clockPairs && <div className="mt-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900"><b>Clocks that day</b> (more than one stretch){request.clockPairs.map((pair) => <span key={pair} className="block">{pair}</span>)}</div>}
         {request.stage === 'hr' && <p className="mt-1 inline-block rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700">Supervisor approved · waiting for HR</p>}
         {request.otPreview && <p className="mt-1 text-xs font-semibold text-[#0b587b]">Pay: {request.otPreview}</p>}
         {confirmId === request.id ? <div className="mt-2 rounded-xl border border-[#0b587b]/20 bg-sky-50/60 p-3"><p className="text-sm font-semibold text-slate-800">Do you want to confirm this {missed ? 'missed clock' : 'OT'}?</p><p className="mt-0.5 text-xs font-semibold text-rose-700">This is final. Payroll will use it.</p><div className="mt-2 flex gap-2"><button onClick={() => { setConfirmId(''); void decide(request.id, 'approved'); }} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">Yes, confirm</button><button onClick={() => setConfirmId('')} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600">Cancel</button></div></div> : <div className="mt-2 flex gap-2"><button onClick={() => request.stage === 'hr' ? setConfirmId(request.id) : void decide(request.id, 'approved')} disabled={busy} className="h-10 rounded-xl bg-[#0b587b] px-4 text-sm font-semibold text-white disabled:opacity-60">{request.stage === 'hr' ? 'Confirm' : 'Approve'}</button><button onClick={() => void decide(request.id, 'rejected')} disabled={busy} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 disabled:opacity-60">Reject</button></div>}
@@ -257,7 +277,16 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
               </button>; })}</div>;
           })()}
         </div>
-        <div className={`grid gap-3 ${missed ? 'grid-cols-2' : 'grid-cols-3'}`}><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in</span><input type="time" value={form.inTime} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={field} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out</span><input type="time" value={form.outTime} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={field} /></label>{!missed && <div className="block text-sm"><span className="mb-1 block text-slate-500">OT hours</span><select aria-label="OT hours" value={form.otTime ? String(Math.floor((Number(form.otTime.slice(0, 2)) * 60 + Number(form.otTime.slice(3, 5))) / 60)) : ''} onChange={(event) => setForm({ ...form, otTime: event.target.value === '' || event.target.value === '0' ? '' : `${event.target.value.padStart(2, '0')}:00` })} className={field}><option value="">Select</option>{Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{hour} h</option>)}</select></div>}</div>
+        <div className={`grid gap-3 ${missed ? 'grid-cols-2' : 'grid-cols-3'}`}><label className="block text-sm"><span className="mb-1 block text-slate-500">Time in{lockedIn ? ' (recorded)' : ''}</span><input type="time" value={lockedIn || form.inTime} disabled={Boolean(lockedIn)} onChange={(event) => setForm({ ...form, inTime: event.target.value })} className={`${field} disabled:bg-slate-100 disabled:text-slate-500`} /></label><label className="block text-sm"><span className="mb-1 block text-slate-500">Time out{lockedOut ? ' (recorded)' : ''}</span><input type="time" value={lockedOut || form.outTime} disabled={Boolean(lockedOut)} onChange={(event) => setForm({ ...form, outTime: event.target.value })} className={`${field} disabled:bg-slate-100 disabled:text-slate-500`} /></label>{!missed && <div className="block text-sm"><span className="mb-1 block text-slate-500">OT hours</span><select aria-label="OT hours" value={form.otTime ? String(Math.floor((Number(form.otTime.slice(0, 2)) * 60 + Number(form.otTime.slice(3, 5))) / 60)) : ''} onChange={(event) => setForm({ ...form, otTime: event.target.value === '' || event.target.value === '0' ? '' : `${event.target.value.padStart(2, '0')}:00` })} className={field}><option value="">Select</option>{Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{hour} h</option>)}</select></div>}</div>
+        {(() => {
+          const day = monthDays?.find((item) => item.date === form.date), from = lockedIn || form.inTime, to = lockedOut || form.outTime;
+          if (!from && !to) return null;
+          const pm = lockedOut ? '' : likelyPm(from, to, day?.startTime, day?.endTime);
+          return <div className="space-y-2">
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">{from && <>Time in <b>{amPm(from)}</b></>}{from && to && ' · '}{to && <>Time out <b>{amPm(to)}</b>{from && to <= from && <b className="text-[#b45309]"> (next day)</b>}</>}</p>
+            {pm && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Time out <b>{amPm(to)}</b> is on the next day. Did you mean <b>{amPm(pm)}</b>?<button type="button" onClick={() => setForm({ ...form, outTime: pm })} className="mt-2 block h-10 rounded-xl bg-amber-500 px-4 text-sm font-semibold text-white">Yes, use {amPm(pm)}</button></div>}
+          </div>;
+        })()}
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Reason</span><select value={reasons.includes(form.reason) ? form.reason : reasons[0]} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={field}>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
         <label className="block text-sm"><span className="mb-1 block text-slate-500">Remarks (optional)</span><input value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} maxLength={500} className={field} /></label>
         {!missed && noClock && <p className="text-xs text-amber-700">No clock record for this day, so type the times or the OT hours yourself.</p>}
@@ -280,11 +309,24 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
       {state.recent.length > 0 && <p className="relative mt-1 text-sm text-white/75">Last clock: {state.recent[0].kind === 'in' ? 'in' : 'out'} at {timeOf(state.recent[0].at)}</p>}
       {state.required === 'none' && <p className="relative mt-4 rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/85">Clocking is optional for you. Your working days count even if you do not clock.</p>}{(() => {
         const need = creditNeedNow(state, tickAt), options = creditOptions(state, tickAt);
-        if (!need || !options.length) return null;
+        if (state.openSince || !need || !options.length) return null;
         const text = (hours: number) => hours < 1 ? `${hours * 60} minutes` : hours === 1 ? '1 hour' : `${hours} hours`;
         return <label className="relative mt-4 block rounded-2xl bg-white/10 p-3 text-sm leading-6 text-white/90"><span className="block"><strong>Use credit hours?</strong> You are {need.minutes} min {need.kind === 'late' ? 'late' : 'leaving early'}. You have {Math.floor((state.creditMinutes || 0) / 60)} h{(state.creditMinutes || 0) % 60 ? ` ${(state.creditMinutes || 0) % 60} min` : ''}. Please make sure your supervisor has been informed.</span>
           <select aria-label="Credit hours to use" value={options.includes(creditHours) ? creditHours : 0} onChange={(event) => setCreditHours(Number(event.target.value))} className="mt-2 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white"><option value={0} className="text-slate-800">Do not use credit hours</option>{options.map((hours) => <option key={hours} value={hours} className="text-slate-800">{`Use ${text(hours)}`}</option>)}</select></label>;
-      })()}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" />{/(use|guna|gunakan|kredit|credit|kreadit)\b.{0,20}(hour|hours|hr|hrs|jam)|\b(kredit|credit)\s*(hours?|jam)\b/i.test(remark) && creditHours === 0 && <p role="alert" className="relative mt-2 rounded-xl bg-amber-300/20 p-3 text-xs leading-5 text-amber-100"><strong>To use credit hours, choose "Use credit hours?" above, not the Remark.</strong> The Remark is only a note; your credit hours will not be deducted. If you do not see the choice, you are not late or leaving early, or you have no balance. <span className="mt-1 block"><strong>Untuk guna kredit jam, pilih "Use credit hours?" di atas, bukan dalam Remark.</strong> Remark hanya catatan; baki kredit jam tidak ditolak.</span></p>}<button onClick={startClock} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>
+      })()}<input value={remark} onChange={(event) => setRemark(event.target.value)} maxLength={200} aria-label="Remark for this clock" placeholder="Remark (optional), for example working at the bank" className="relative mt-4 h-11 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/50" />{/(use|guna|gunakan|kredit|credit|kreadit)\b.{0,20}(hour|hours|hr|hrs|jam)|\b(kredit|credit)\s*(hours?|jam)\b/i.test(remark) && creditHours === 0 && <p role="alert" className="relative mt-2 rounded-xl bg-amber-300/20 p-3 text-xs leading-5 text-amber-100"><strong>To use credit hours, choose "Use credit hours?" above, not the Remark.</strong> The Remark is only a note; your credit hours will not be deducted. If you do not see the choice, you are not late or leaving early, or you have no balance. <span className="mt-1 block"><strong>Untuk guna kredit jam, pilih "Use credit hours?" di atas, bukan dalam Remark.</strong> Remark hanya catatan; baki kredit jam tidak ditolak.</span></p>}{state.openSince ? confirmLong ? (() => {
+        const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(state.openSince)) / 60000)), when = (iso: string) => `${dayName(new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(0, 10))} ${timeOf(iso)}`;
+        return <div className="relative mt-3 space-y-2 rounded-2xl bg-white/10 p-3">
+          <p className="text-lg font-semibold">This records {Math.floor(minutes / 60)} h{minutes % 60 ? ` ${minutes % 60} min` : ''} of work</p>
+          <p className="text-sm leading-6">{when(state.openSince)} → {when(new Date().toISOString())}<span className="block">Were you working the whole time?</span></p>
+          <button onClick={() => void clock(0, 'out')} disabled={busy} className="flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-amber-300 text-lg font-semibold text-amber-950 shadow-lg hover:bg-amber-200 disabled:opacity-60"><LogOut className="h-6 w-6" />{busy ? locating ? 'Checking GPS…' : 'Saving…' : 'Yes, clock out'}</button>
+          <button onClick={() => setConfirmLong(false)} disabled={busy} className="h-11 w-full rounded-2xl border border-white/30 text-sm font-semibold text-white disabled:opacity-60">Back</button>
+        </div>;
+      })() : <div className="relative mt-3 space-y-2 rounded-2xl bg-white/10 p-3">
+        <p className="text-sm leading-6">You clocked in on <strong>{dayName(new Date(Date.parse(state.openSince) + 8 * 3600000).toISOString().slice(0, 10))} at {timeOf(state.openSince)}</strong> and have not clocked out since then. What would you like to do now?</p>
+        <button onClick={() => setConfirmLong(true)} disabled={busy} className="flex min-h-16 w-full items-center gap-3 rounded-2xl bg-amber-300 px-4 py-2 text-left text-amber-950 shadow-lg hover:bg-amber-200 disabled:opacity-60"><LogOut className="h-6 w-6 shrink-0" /><span><span className="block text-lg font-semibold">Clock out now</span><span className="block text-xs">I am still working since that clock in</span></span></button>
+        <button onClick={startNewDay} disabled={busy} className="flex min-h-16 w-full items-center gap-3 rounded-2xl bg-emerald-400 px-4 py-2 text-left text-emerald-950 shadow-lg hover:bg-emerald-300 disabled:opacity-60"><LogIn className="h-6 w-6 shrink-0" /><span><span className="block text-lg font-semibold">Clock in new day</span><span className="block text-xs">I forgot to clock out. I'll send "Forgot to clock" for that date afterwards.</span></span></button>
+        {busy && <p className="text-center text-xs text-white/80">{locating ? 'Checking GPS…' : 'Saving…'}</p>}
+      </div> : <button onClick={startClock} disabled={busy} className={`relative mt-3 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-semibold shadow-lg transition disabled:opacity-60 ${next === 'in' ? 'bg-emerald-400 text-emerald-950 hover:bg-emerald-300' : 'bg-amber-300 text-amber-950 hover:bg-amber-200'}`}>{next === 'in' ? <LogIn className="h-6 w-6" /> : <LogOut className="h-6 w-6" />}{busy ? locating ? 'Checking GPS…' : 'Saving…' : next === 'in' ? 'Clock in' : 'Clock out'}</button>}
       <p className="relative mt-3 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{state.mode === 'anywhere' ? 'You can clock from anywhere. Your location is still recorded.' : state.places.length ? `You can clock at: ${state.places.map((place) => place.name).join(', ')}.` : 'No clock place is set for you yet. Ask HR.'}</p>
     </section>
     {helpOpen && blocked && state.mode === 'places' && <LocationHelp onClose={() => setHelpOpen(false)} onRetry={() => { setHelpOpen(false); void clock(); }} />}
@@ -297,8 +339,8 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
         <div className="mt-5 grid gap-2">
           {ask.step === 'ask'
             ? <><button type="button" onClick={() => setAsk({ ...ask, step: 'pick' })} className="h-12 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Yes, use my credit hours</button>
-              <button type="button" onClick={() => { setAsk(null); setCreditHours(0); void clock(0); }} className="h-12 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-700">No, clock without credit hours</button></>
-            : <><button type="button" onClick={() => { const hours = ask.pick; setAsk(null); setCreditHours(hours); void clock(hours); }} className="h-12 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Use credit hours and clock {ask.kind === 'early' ? 'out' : 'in'}</button>
+              <button type="button" onClick={() => { const choice = ask.choice; setAsk(null); setCreditHours(0); void clock(0, choice); }} className="h-12 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-700">No, clock without credit hours</button></>
+            : <><button type="button" onClick={() => { const hours = ask.pick, choice = ask.choice; setAsk(null); setCreditHours(hours); void clock(hours, choice); }} className="h-12 rounded-2xl bg-[#1f6feb] text-sm font-semibold text-white">Use credit hours and clock {ask.kind === 'early' ? 'out' : 'in'}</button>
               <button type="button" onClick={() => setAsk({ ...ask, step: 'ask' })} className="h-12 rounded-2xl border border-slate-200 text-sm font-semibold text-slate-700">Back</button></>}
           <button type="button" onClick={() => setAsk(null)} className="h-10 text-sm font-semibold text-slate-500">Cancel, do not clock yet</button>
         </div>
@@ -322,7 +364,7 @@ export default function MyAttendance({ mode = 'clock', isApprover = false, onApp
         {days.filter((day) => (!['off', 'upcoming', 'no-record'].includes(day.status) || day.date === state.today) && day.status !== 'no-record').map((day) => <li key={day.date} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-sm">
           <span className="w-24 shrink-0 font-medium">{dayName(day.date)}</span>
           <span className="w-14 shrink-0 font-mono text-xs font-bold text-[#0b587b]">{day.code ? newCode(day.code) : '—'}</span>
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-slate-600"><Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-300" />{day.inTime || '—'} → {day.outTime || '—'}{day.worked > 0 && <span className="text-slate-400"> · {hours(day.worked)}</span>}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-slate-600"><Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-300" />{day.inTime || '—'} → {day.outTime || '—'}{day.outNextDay && <b className="font-semibold text-[#b45309]" title="Clock out on the next day">(+1 day)</b>}{day.worked > 0 && <span className="text-slate-400"> · {hours(day.worked)}</span>}</span>
           {day.lateCounted > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Late {day.lateCounted} min</span>}
           {badge(day.status, day.leave)}
           {day.holiday && day.otStatus === 'approved' && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">OT (PH) · {otHours(day.otApproved || 0)}</span>}

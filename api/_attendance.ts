@@ -2,7 +2,7 @@ import { attendanceFollowUps, emptyFollowUp } from '../src/lib/attendanceFollowU
 import { createHash } from 'node:crypto';
 import { NEW_CODE } from '../src/lib/shiftCodes.js';
 import { branchId } from './_office-db.js';
-import { isMissedClock } from '../src/lib/attendanceRequests.js';
+import { isMissedClock, needsOtHours } from '../src/lib/attendanceRequests.js';
 import { classifyDay, cleanPolicy, DEFAULT_OT_POLICY, netMinutes, otParts, otSummary, parseVersions, paySummary, pickPolicy, wholeHours, type DayKind, type OtPart, type OtPolicy, type OtPolicyVersion } from './_ot-rules.js';
 
 // Attendance. Staff clock in and out on their own phone (Individual Sign In); HR sets where clocking is allowed and sees
@@ -148,7 +148,8 @@ export async function buildDays(db: any, people: Employee[], from: string, to: s
 export const RECORDS_FROM = '2026-01-01';
 export const recordsFromFor = (_company?: string | null) => RECORDS_FROM;
 
-export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules) {
+// `sessionsOut`, when given, receives each person's in and out pairs by date (for display; the days themselves are the same with or without it).
+export function buildDaysFrom(data: Data, people: Employee[], from: string, to: string, rules: Rules, sessionsOut?: Map<string, Map<string, Session[]>>) {
   const out = new Map<string, Day[]>(people.map((person) => [person.id, []]));
   const { roster, clocks, leave, waiting, holidays, ot: otRows } = data;
   const creditOf = new Map<string, number>((data.credit || []).map((row: any) => [`${row.employee_id}|${row.work_date}|${row.kind}`, Number(row.hours)]));
@@ -167,8 +168,12 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
     if (inAt !== null) assign(request.employee_id, 'in', inAt, request.work_date);
     if (request.out_time) { let outAt = at(request.work_date, request.out_time); if (inAt !== null && outAt <= inAt) outAt += 24 * HOUR; assign(request.employee_id, 'out', outAt, request.work_date); }
   }
-  const clocksOf = new Map<string, { at: number; kind: string; workDate?: string }[]>();
-  for (const row of clocks || []) { const list = clocksOf.get(row.employee_id) || [], ms = Date.parse(row.clock_at); const tagged = /^(?:hr|request|infotech):(\d{4}-\d{2}-\d{2})$/.exec(String(row.device || ''))?.[1]; list.push({ at: ms, kind: row.kind, workDate: tagged || approvedDates.get(`${row.employee_id}|${row.kind}|${ms}`) || undefined }); clocksOf.set(row.employee_id, list); }
+  // `added` is a clock that may fall outside the usual hours: written by an approved request or an HR correction, or a phone clock out the person confirmed
+  // as the end of work that carried on from the day before (`long:`).
+  const clocksOf = new Map<string, { at: number; kind: string; workDate?: string; added?: boolean; asked?: boolean }[]>();
+  // Dates with an approved "Forgot to clock" request: there the request's time is the correction itself, not a copy of an OT application.
+  const corrected = new Set((data.clockRequests || []).filter((request) => request.status === 'approved' && isMissedClock(request.reason)).map((request) => `${request.employee_id}|${request.work_date}`));
+  for (const row of clocks || []) { const list = clocksOf.get(row.employee_id) || [], ms = Date.parse(row.clock_at); const tagged = /^(?:(?:hr|request|infotech):(\d{4}-\d{2}-\d{2})$|long:(\d{4}-\d{2}-\d{2}):)/.exec(String(row.device || ''))?.slice(1).find(Boolean); list.push({ at: ms, kind: row.kind, workDate: tagged || approvedDates.get(`${row.employee_id}|${row.kind}|${ms}`) || undefined, added: /^(hr|request|long)\b/.test(String(row.device || '')), asked: /^request\b/.test(String(row.device || '')) && !corrected.has(`${row.employee_id}|${tagged || approvedDates.get(`${row.employee_id}|${row.kind}|${ms}`)}`) }); clocksOf.set(row.employee_id, list); }
   for (const list of clocksOf.values()) list.sort((a, b) => a.at - b.at);
   const now = Date.now();
 
@@ -204,11 +209,12 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
         const first = same.find((clock) => clock.kind === 'in');
         // The clock out comes after the clock in, and for a night worked on a day off it is the next morning (in Sunday 20:54, out Monday 09:10), so it is looked for after the clock in,
         // up to 20 hours later and before any other clock in, not only on the same date. A clock out earlier that day is the end of last night's shift, not this day's.
-        const nextIn = first ? mine.find((clock) => clock.kind === 'in' && clock.at > first.at) : undefined;
-        const last = first ? [...mine].reverse().find((clock) => clock.kind === 'out' && clock.at > first.at && clock.at <= first.at + 20 * HOUR && (!nextIn || clock.at < nextIn.at)) : undefined;
+        // A later clock in on the same date is a second stretch of this day (the time away is taken off below); one on a later date starts a new day.
+        const nextIn = first ? mine.find((clock) => clock.kind === 'in' && clock.at > first.at + 30 * MIN && !(clock.added && clock.workDate === date) && new Date(clock.at + 8 * HOUR).toISOString().slice(0, 10) > date) : undefined;
+        const last = first ? [...mine].reverse().find((clock) => clock.kind === 'out' && clock.at > first.at && clock.at <= first.at + (clock.added && clock.workDate === date ? 30 : 20) * HOUR && (!nextIn || clock.at < nextIn.at)) : undefined;
         // A lone clock out here is the end of last night's shift, not a day worked.
         const day: Day = { ...blank, status: leaveRow ? 'leave' : first ? 'extra' : code ? 'no-times' : 'off', inAt: first ? new Date(first.at).toISOString() : null, outAt: first && last ? new Date(last.at).toISOString() : null };
-        if (!leaveRow && first && last && last.at > first.at && !noOt && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN); day.ot = day.worked; const pol = rules.policyFor(date); day.otCounted = day.worked >= pol.minMinutes ? wholeHours(day.worked, pol) : 0; }
+        if (!leaveRow && first && last && last.at > first.at && !noOt && required !== 'none') { day.worked = Math.round((last.at - first.at) / MIN) - awayMinutes(ownClocks(mine, date), first.at, last.at); day.ot = day.worked; const pol = rules.policyFor(date); day.otCounted = day.worked >= pol.minMinutes ? wholeHours(day.worked, pol) : 0; }
         push(day); continue;
       }
       // Annual leave credit used in hours moves the start (late arrival) or the end (early leave), so those hours are not counted late or early.
@@ -220,7 +226,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       // request belongs to its specified work date, even when work began earlier
       // than that window. A clock assigned to another shift date is never reused.
       const clockIn = mine.find((clock) => clock.kind === 'in' && (clock.workDate ? clock.workDate === date && clock.at >= at(date, '00:00') : clock.at >= start - 5 * HOUR) && clock.at <= Math.min(start + 10 * HOUR, end - 30 * MIN));
-      const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR)) : undefined;
+      const clockOut = clockIn ? [...mine].reverse().find((clock) => clock.kind === 'out' && (!clock.workDate || clock.workDate === date) && clock.at > clockIn.at && clock.at <= (clock.added && clock.workDate === date ? clockIn.at + 30 * HOUR : Math.min(end + 8 * HOUR, clockIn.at + 30 * HOUR))) : undefined;
       if (clockIn) day.inAt = new Date(clockIn.at).toISOString();
       if (clockOut) day.outAt = new Date(clockOut.at).toISOString();
       // A day of approved leave is not odd. If the person clocked in and then took the leave (no clock out), it is still a leave day, not a missing clock out.
@@ -232,7 +238,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
         push({ ...day, status: 'exempt' }); continue;
       }
       if (clockIn) {
-        day.late = Math.max(0, Math.round((clockIn.at - start) / MIN));
+        day.late = Math.max(0, Math.round((shiftArrival(ownClocks(mine, date), clockIn.at, start) - start) / MIN));
         day.lateCounted = day.late > rules.lateGrace ? day.late : 0;
         if (clockOut) {
           day.worked = Math.round((clockOut.at - clockIn.at) / MIN);
@@ -240,10 +246,11 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
           day.earlyCounted = rules.countEarly && day.early > rules.earlyGrace ? day.early : 0;
           // Extra time: before the shift starts and after it ends (doctors have no OT).
           const before = Math.max(0, Math.round((start - clockIn.at) / MIN)), after = Math.max(0, Math.round((clockOut.at - end) / MIN));
-          day.ot = noOt ? 0 : before + after;
+          // Time away (clocked out, then in again more than 30 minutes later) is not extra time.
+          day.ot = noOt ? 0 : Math.max(0, before + after - awayBetween(ownClocks(mine, date), clockIn.at, clockOut.at, [[clockIn.at, start], [end, clockOut.at]]));
           // On a public holiday of the person's group the whole time worked counts as OT (even a rostered shift), not only the time outside the shift. It then shows as OT to apply
           // for (the staff's OT screen and HR's possible OT), and is paid as the fixed PH amount plus any hours beyond it.
-          if (day.holiday && !noOt) day.ot = day.worked;
+          if (day.holiday && !noOt) day.ot = Math.max(0, day.worked - awayMinutes(ownClocks(mine, date), clockIn.at, clockOut.at));
           const pol = rules.policyFor(date); day.otCounted = day.ot >= pol.minMinutes ? wholeHours(day.ot, pol) : 0;
           day.status = 'present';
         } else if (required === 'in_only') day.status = 'present';
@@ -261,6 +268,7 @@ export function buildDaysFrom(data: Data, people: Employee[], from: string, to: 
       if (Math.abs(Number(next.captured_minutes) - day.otCounted) > 30) continue;
       day.otStatus = 'covered'; day.otNote = `Already decided on ${nextDate.split('-').reverse().join('/')} (${next.decided_by || 'HR'}).`;
     }
+    if (sessionsOut) sessionsOut.set(person.id, daySessions(mine, personDays));
   }
   return out;
 }
@@ -298,7 +306,7 @@ export async function ensurePublicHolidayOt(db: any, from: string, to: string, d
   return rows.length;
 }
 
-const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '' });
+const dayView = (day: Day) => ({ ...day, startTime: day.start ? hhmm(Date.parse(day.start)) : '', endTime: day.end ? hhmm(Date.parse(day.end)) : '', inTime: day.inAt ? hhmm(Date.parse(day.inAt)) : '', outTime: day.outAt ? hhmm(Date.parse(day.outAt)) : '', outNextDay: Boolean(day.outAt && new Date(Date.parse(day.outAt) + 8 * HOUR).toISOString().slice(0, 10) > day.date) });
 const PERSON = 'id,company,employee_code,full_name,designation,work_days,holiday_group,default_shift,clock_required,join_date,resign_date';
 const minutesText = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 const requestRow = (row: any, names: Map<string, string>) => ({ id: row.id, employeeId: row.employee_id, name: names.get(row.employee_id) || '', date: row.work_date, inTime: row.in_time ? String(row.in_time).slice(0, 5) : '', outTime: row.out_time ? String(row.out_time).slice(0, 5) : '', otMinutes: Number(row.ot_minutes || 0), otText: minutesText(Number(row.ot_minutes || 0)), reason: row.reason, remarks: row.remarks || '', status: row.status, supervisorDecidedBy: row.supervisor_decided_by || '', supervisorNote: row.supervisor_note || '', decidedBy: row.decided_by, decidedAt: row.decided_at, note: row.decision_note, rate: row.ot_multiplier === null || row.ot_multiplier === undefined ? null : Number(row.ot_multiplier), createdAt: row.created_at });
@@ -347,7 +355,7 @@ type OtLine = { key: string; employee_id: string; work_date: string; asked: numb
 // Hours (as minutes) at each of the four rates, from the parts of a day's OT.
 const ratesOf = (parts: OtPart[]) => { const out: Record<string, number> = { '1': 0, '1.5': 0, '2': 0, '3': 0 }; for (const part of parts) { const key = String(Number(part.multiplier)); if (key in out) out[key] += Number(part.minutes || 0); } return out; };
 async function otDetails(db: any, lines: OtLine[]) {
-  const result = new Map<string, { clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; otMinutes?: number; kind?: DayKind; late?: number; early?: number; original?: Record<string, number>; requested?: Record<string, number>; pay: string }>();
+  const result = new Map<string, { clockPairs?: string[]; clockIn?: string; clockOut?: string; shiftCode?: string; shiftStart?: string; shiftEnd?: string; otMinutes?: number; kind?: DayKind; late?: number; early?: number; original?: Record<string, number>; requested?: Record<string, number>; pay: string }>();
   if (!lines.length) return result;
   const ids = [...new Set(lines.map((line) => line.employee_id))];
   const { data: people } = await db.from('hr_employees').select(PERSON).in('id', ids);
@@ -355,7 +363,7 @@ async function otDetails(db: any, lines: OtLine[]) {
   const dates = lines.map((line) => line.work_date).sort();
   const from = dates[0], to = dates[dates.length - 1];
   const data = await fetchData(db, addDay(from, -7), addDay(to, 7), ids);
-  const days = buildDaysFrom(data, people || [], from, to, rules);
+  const pairs = new Map<string, Map<string, Session[]>>(), days = buildDaysFrom(data, people || [], from, to, rules, pairs);
   const rosterOf = new Map<string, any>((data.roster || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
   const holidayOn = new Set<string>((data.holidays || []).map((row: any) => `${row.group_code}|${row.holiday_date}`));
   const decided = new Map<string, any>((data.ot || []).map((row: any) => [`${row.employee_id}|${row.work_date}`, row]));
@@ -392,7 +400,10 @@ async function otDetails(db: any, lines: OtLine[]) {
       const counted = capped ? shown : line.asked;
       pay = capped ? (counted < policy.minMinutes ? `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show less than ${hoursMinutesText(policy.minMinutes)} of extra time: no OT can be confirmed` : `Asked ${hoursMinutesText(line.asked)}, but the clocks and roster show ${hoursMinutesText(shown)}. ${otSummary(kind, counted, policy)}`) : otSummary(kind, counted, policy);
     }
-    result.set(line.key, { ...(day && day.inAt ? { clockIn: hhmm(Date.parse(day.inAt)), clockOut: day.outAt ? hhmm(Date.parse(day.outAt)) : '' } : {}), ...(day ? { shiftCode: day.code || '', shiftStart: day.start ? hhmm(Date.parse(day.start)) : '', shiftEnd: day.end ? hhmm(Date.parse(day.end)) : '' } : {}), ...(otMinutes !== undefined ? { otMinutes } : {}), kind, ...(day ? { late: day.late, early: day.early, original: ratesOf(otParts(kind, kind === 'ph' ? Math.max(day.otCounted, wholeHours(day.worked, policy)) : day.otCounted, policy)) } : {}), requested: ratesOf(otParts(kind, line.asked, policy)), pay });
+    // A day with more than one stretch of work shows each of them, so "first in, last out" is not read as one long stay.
+    const stretches = pairs.get(person.id)?.get(line.work_date) || [], cell = (ms: number | undefined) => ms === undefined ? '—' : `${hhmm(ms)}${pairCell(ms, line.work_date).next ? ' (+1)' : ''}`;
+    const clockPairs = stretches.length > 1 ? stretches.map((stretch) => `in ${cell(stretch.in)} → out ${cell(stretch.out)}`) : undefined;
+    result.set(line.key, { ...(clockPairs ? { clockPairs } : {}), ...(day && day.inAt ? { clockIn: hhmm(Date.parse(day.inAt)), clockOut: day.outAt ? hhmm(Date.parse(day.outAt)) : '' } : {}), ...(day ? { shiftCode: day.code || '', shiftStart: day.start ? hhmm(Date.parse(day.start)) : '', shiftEnd: day.end ? hhmm(Date.parse(day.end)) : '' } : {}), ...(otMinutes !== undefined ? { otMinutes } : {}), kind, ...(day ? { late: day.late, early: day.early, original: ratesOf(otParts(kind, kind === 'ph' ? Math.max(day.otCounted, wholeHours(day.worked, policy)) : day.otCounted, policy)) } : {}), requested: ratesOf(otParts(kind, line.asked, policy)), pay });
   }
   return result;
 }
@@ -400,7 +411,26 @@ async function otDetails(db: any, lines: OtLine[]) {
 async function withOtPreview(db: any, rows: any[], requests: any[]) {
   const otRequests = requests.filter((row: any) => !isMissedClock(row.reason) && (Number(row.ot_minutes) > 0 || /^(overtime|worked on rest day)/i.test(String(row.reason || ''))));
   const details = await otDetails(db, otRequests.map((row: any) => ({ key: row.id, employee_id: row.employee_id, work_date: String(row.work_date), asked: Number(row.ot_minutes), state: ['pending', 'supervisor_approved'].includes(row.status) ? 'open' : row.status === 'approved' ? 'approved' : 'closed' } as OtLine)));
-  return rows.map((row: any) => { const detail = details.get(row.id); return { ...row, otPreview: detail?.pay || '', ...(detail?.clockIn !== undefined ? { clockIn: detail.clockIn, clockOut: detail.clockOut } : {}), ...(detail?.shiftCode !== undefined ? { shiftCode: detail.shiftCode, shiftStart: detail.shiftStart, shiftEnd: detail.shiftEnd } : {}), ...(detail?.otMinutes !== undefined ? { otShown: detail.otMinutes } : {}) }; });
+  return rows.map((row: any) => { const detail = details.get(row.id); return { ...row, otPreview: detail?.pay || '', ...(detail?.clockIn !== undefined ? { clockIn: detail.clockIn, clockOut: detail.clockOut } : {}), ...(detail?.shiftCode !== undefined ? { shiftCode: detail.shiftCode, shiftStart: detail.shiftStart, shiftEnd: detail.shiftEnd } : {}), ...(detail?.otMinutes !== undefined ? { otShown: detail.otMinutes } : {}), ...(detail?.clockPairs ? { clockPairs: detail.clockPairs } : {}) }; });
+}
+// Which of a request's clocks are new. Not added: the same kind of clock within 30 minutes, and a clock in while the person is already clocked in on that
+// day, or just as that day's work ended (OT that carries on from the shift).
+export function newClocks(existing: { kind: string; at: number }[], rows: any[], dayStart: number) {
+  const near = 30 * MIN, sameDay = (ms: number) => ms >= dayStart && ms < dayStart + 24 * HOUR;
+  return rows.filter((row) => {
+    const ms = Date.parse(row.clock_at);
+    if (existing.some((clock) => clock.kind === row.kind && Math.abs(clock.at - ms) <= near)) return false;
+    if (row.kind !== 'in') return true;
+    const opened = [...existing].reverse().find((clock) => clock.kind === 'in' && clock.at < ms && sameDay(clock.at));
+    if (!opened) return true;
+    const closed = existing.find((clock) => clock.kind === 'out' && clock.at > opened.at);
+    return Boolean(closed && closed.at < ms - near);
+  });
+}
+// A "Forgot to clock" request may only fill what is missing. Returns the first time it asks for that differs from a clock already recorded.
+export function missedClash(recorded: { in: string; out: string }, request: { in: string; out: string }) {
+  for (const kind of ['in', 'out'] as const) if (request[kind] && recorded[kind] && request[kind] !== recorded[kind]) return { kind, at: recorded[kind], asked: request[kind] };
+  return null;
 }
 async function applyRequest(db: any, request: any) {
   const rows: any[] = [];
@@ -411,7 +441,22 @@ async function applyRequest(db: any, request: any) {
     if (inAt !== null && outAt <= inAt) outAt += 24 * HOUR;
     rows.push({ employee_id: request.employee_id, kind: 'out', clock_at: new Date(outAt).toISOString(), within_place: null, device: `request:${request.work_date}` });
   }
-  if (rows.length) { const { error } = await db.from('hr_attendance_clocks').insert(rows); if (error) throw error; }
+  // An OT request must not repeat or overlap what the person already clocked: only the times that are really missing are added.
+  const add = !rows.length ? rows : isMissedClock(String(request.reason || '')) ? await withoutRepeat(db, request, rows) : await withoutOverlap(db, request, rows);
+  if (add.length) { const { error } = await db.from('hr_attendance_clocks').insert(add); if (error) throw error; }
+}
+// A forgotten clock request carries the clock the person already has as well as the missing one: only the missing one is added.
+async function withoutRepeat(db: any, request: any, rows: any[]) {
+  const start = at(request.work_date, '00:00');
+  const { data, error } = await db.from('hr_attendance_clocks').select('kind,clock_at').eq('employee_id', request.employee_id).gte('clock_at', new Date(start - 24 * HOUR).toISOString()).lte('clock_at', new Date(start + 48 * HOUR).toISOString());
+  if (error) throw error;
+  return rows.filter((row) => !(data || []).some((clock: any) => clock.kind === row.kind && Math.abs(Date.parse(clock.clock_at) - Date.parse(row.clock_at)) < MIN));
+}
+async function withoutOverlap(db: any, request: any, rows: any[]) {
+  const start = at(request.work_date, '00:00');
+  const { data, error } = await db.from('hr_attendance_clocks').select('kind,clock_at').eq('employee_id', request.employee_id).gte('clock_at', new Date(start - 24 * HOUR).toISOString()).lte('clock_at', new Date(start + 48 * HOUR).toISOString()).order('clock_at');
+  if (error) throw error;
+  return newClocks((data || []).map((row: any) => ({ kind: row.kind, at: Date.parse(row.clock_at) })), rows, start);
 }
 // Infotech's way: the supervisor approves first, then HR confirms. Only HR's confirmation adds the clocks and the OT.
 async function readRequest(db: any, id: string) {
@@ -436,6 +481,14 @@ async function hrDecide(db: any, id: string, decision: string, note: string, by:
   if (!['pending', 'supervisor_approved'].includes(request.status)) throw fail(409, 'This request has already been decided.');
   const requested = Number(request.ot_minutes || 0);
   const rules = await loadRules(db), policy = rules.policyFor(request.work_date);
+  if (decision === 'approved' && requested <= 0 && needsOtHours(String(request.reason || ''))) throw fail(400, 'This OT request has no OT hours, so approving it would pay nothing. Reject it and ask the staff member to send it again with the hours.');
+  // The person may have clocked after sending the request: HR then chooses which time is right, so there are never two.
+  if (decision === 'approved' && isMissedClock(String(request.reason || ''))) {
+    const { data: one } = await db.from('hr_employees').select(PERSON).eq('id', request.employee_id).maybeSingle();
+    const day = one ? ((await buildDays(db, [one], request.work_date, request.work_date, rules)).get(request.employee_id) || [])[0] : undefined;
+    const clash = day && missedClash({ in: day.inAt ? hhmm(Date.parse(day.inAt)) : '', out: day.outAt ? hhmm(Date.parse(day.outAt)) : '' }, { in: String(request.in_time || '').slice(0, 5), out: String(request.out_time || '').slice(0, 5) });
+    if (clash) throw fail(409, `${one.full_name} already has a clock ${clash.kind} at ${clash.at} on ${String(request.work_date).split('-').reverse().join('/')}. If ${clash.asked} is correct, delete the ${clash.at} clock first, then approve. Otherwise reject this request.`);
+  }
   // The hours the person applied for (in whole blocks). The rate and the rest are worked out from the kind of day, not chosen.
   const gross = decision === 'approved' && requested > 0 ? wholeHours(Math.min(requested, Math.round(Number(minutes ?? requested))), policy) : 0;
   if (decision === 'approved' && requested > 0 && gross < policy.minMinutes) throw fail(400, `OT is counted in whole hours, at least ${hoursMinutesText(policy.minMinutes)}.`);
@@ -484,6 +537,90 @@ function creditNeed(days: Day[], nextKind: 'in' | 'out', nowMs: number) {
   return minutes > 0 ? { ...basis, minutes } : null;
 }
 
+// A clock in left open this long may be a forgotten clock out or work that carries on, so the person is asked which. Up to the first figure the next
+// clock is simply a clock out; after the second it is simply a new clock in.
+export const ASK_AFTER = 14 * HOUR, ASK_UNTIL = 30 * HOUR;
+export const stillOpen = (last: { kind: string; clock_at: string } | undefined, nowMs: number) => Boolean(last && last.kind === 'in' && nowMs - Date.parse(last.clock_at) > ASK_AFTER && nowMs - Date.parse(last.clock_at) <= ASK_UNTIL);
+
+// When the person arrived for the shift. Someone who came earlier on the same day, clocked out before the shift started and came back more than 30 minutes
+// later is judged late (or not) by that return, not by the earlier visit.
+export function shiftArrival(clocks: { at: number; kind: string }[], firstIn: number, start: number) {
+  let arrival = firstIn;
+  for (const out of clocks.filter((clock) => clock.kind === 'out').sort((a, b) => a.at - b.at)) {
+    if (out.at <= arrival || out.at >= start) continue;
+    // The return must still belong to this shift (a clock in is read up to 10 hours after the start).
+    const back = clocks.filter((clock) => clock.kind === 'in' && clock.at - out.at > 30 * MIN && clock.at <= start + 10 * HOUR).sort((a, b) => a.at - b.at)[0];
+    if (back) arrival = back.at;
+  }
+  return arrival;
+}
+
+// ---- Time away ----
+// The stretches between a clock out and the next clock in that are longer than 30 minutes: the person went home and came back. A shorter gap is work that
+// carried on. `from` and `to` limit it to the part that is being counted.
+export const AWAY_MIN = 30 * MIN;
+// A clock written for another work date (the next morning's request) says nothing about this day's time away.
+export const ownClocks = <T extends { workDate?: string }>(clocks: T[], date: string) => clocks.filter((clock) => !clock.workDate || clock.workDate === date);
+export function awayMinutes(clocks: { at: number; kind: string }[], from: number, to: number) {
+  const inside = clocks.filter((clock) => clock.at >= from && clock.at <= to).sort((a, b) => a.at - b.at);
+  let away = 0;
+  for (let index = 1; index < inside.length; index++) {
+    const out = inside[index - 1], back = inside[index];
+    if (out.kind === 'out' && back.kind === 'in' && back.at - out.at > AWAY_MIN) away += back.at - out.at;
+  }
+  return Math.round(away / MIN);
+}
+export function awayBetween(clocks: { at: number; kind: string }[], first: number, last: number, windows: [number, number][]) {
+  const inside = clocks.filter((clock) => clock.at >= first && clock.at <= last).sort((a, b) => a.at - b.at);
+  let away = 0;
+  for (let index = 1; index < inside.length; index++) {
+    const out = inside[index - 1], back = inside[index];
+    if (out.kind !== 'out' || back.kind !== 'in' || back.at - out.at <= AWAY_MIN) continue;
+    for (const [from, to] of windows) away += Math.max(0, Math.min(back.at, to) - Math.max(out.at, from));
+  }
+  return Math.round(away / MIN);
+}
+
+// ---- Sessions (display only) ----
+// The clocks of each day as in and out pairs, for the In 1 / Out 1 / In 2 / Out 2 columns. Nothing here changes how hours, late or OT are worked out.
+export type SessionClock = { at: number; kind: string; workDate?: string; added?: boolean; asked?: boolean };
+export type Session = { in?: number; out?: number };
+export function daySessions(clocks: SessionClock[], days: { date: string; inAt: string | null; outAt: string | null }[]) {
+  const dayOf = (ms: number) => new Date(ms + 8 * HOUR).toISOString().slice(0, 10), mine = new Map<string, SessionClock[]>();
+  const spans = days.filter((day) => day.inAt).map((day) => ({ date: day.date, from: Date.parse(day.inAt!), to: day.outAt ? Date.parse(day.outAt) : null }));
+  // Each clock belongs to one day: the date it was written for; else the day whose in and out surround it; else, for a clock out, the day whose clock in
+  // was at most 20 hours before; else its own date.
+  for (const clock of [...clocks].sort((a, b) => a.at - b.at)) {
+    const around = [...spans].reverse().find((span) => span.to !== null && clock.at >= span.from && clock.at <= span.to);
+    const before = clock.kind === 'out' ? [...spans].reverse().find((span) => span.from < clock.at && clock.at - span.from <= 20 * HOUR) : undefined;
+    const date = clock.workDate || around?.date || before?.date || dayOf(clock.at);
+    mine.set(date, [...(mine.get(date) || []), clock]);
+  }
+  const result = new Map<string, Session[]>();
+  for (const [date, list] of mine) {
+    // The same clock twice (within 30 minutes): the first clock in and the last clock out are shown.
+    const kept: SessionClock[] = [];
+    for (const clock of list) {
+      const at = kept.findIndex((item) => item.kind === clock.kind && clock.at - item.at <= 30 * MIN);
+      if (at < 0) kept.push(clock); else if (clock.kind === 'out') kept[at] = clock;
+    }
+    kept.sort((a, b) => a.at - b.at);
+    // A clock out written by an OT request, followed by the person's own clock out with no clock in between, is the same stay: the real clock is shown.
+    const real = kept.filter((clock, index) => { const next = kept[index + 1]; return !(clock.kind === 'out' && clock.asked && next && next.kind === 'out' && !next.added); });
+    const sessions: Session[] = [];
+    for (const clock of real) {
+      if (clock.kind === 'in') { sessions.push({ in: clock.at }); continue; }
+      const open = sessions.find((item) => item.out === undefined && item.in !== undefined && item.in < clock.at);
+      if (open) open.out = clock.at; else sessions.push({ out: clock.at });
+    }
+    result.set(date, sessions);
+  }
+  return result;
+}
+
+// The pairs of a day as shown: the time (hh:mm) of each in and out, and whether it is on the next day.
+const pairCell = (ms: number | undefined, date: string) => ms === undefined ? { time: '', next: false } : { time: hhmm(ms), next: new Date(ms + 8 * HOUR).toISOString().slice(0, 10) > date };
+
 // ---- Staff side (Individual Sign In) ----
 export async function attendanceStaffAction(req: any, res: any, db: any, staff: { id: string }, action: string, body: any) {
   const [{ data: me, error }, rules] = await Promise.all([db.from('hr_employees').select(`${PERSON},status,clock_mode,clock_place_ids,leave_approver_id,final_approver_id`).eq('assessment_staff_id', staff.id).maybeSingle(), loadRules(db)]);
@@ -501,7 +638,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const last = (recent || [])[0];
     const nextKind = last && last.kind === 'in' && Date.now() - Date.parse(last.clock_at) < 20 * HOUR ? 'out' : 'in';
     const mine = days.get(me.id) || [];
-    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0, creditBasis: creditBasis(mine, nextKind) };
+    return { today: day, name: me.full_name, mode: me.clock_mode, places: places.map((place: any) => ({ name: place.name })), nextKind, recent: (recent || []).map((row: any) => ({ kind: row.kind, at: row.clock_at })), openSince: stillOpen(last, Date.now()) ? last.clock_at : '', creditBasisIn: stillOpen(last, Date.now()) ? creditBasis(mine, 'in') : null, shift: dayView(mine.find((item) => item.date === day) || { date: day } as Day), yesterday: dayView(mine.find((item) => item.date === addDay(day, -1)) || { date: addDay(day, -1) } as Day), required: me.clock_required || 'full', creditMinutes: (await creditMinutes(db, [me.id])).totals.get(me.id) || 0, creditBasis: creditBasis(mine, nextKind) };
   };
 
   if (req.method === 'GET' && action === 'attendance_today') return res.status(200).json(await state());
@@ -543,7 +680,9 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     const { data: last } = await db.from('hr_attendance_clocks').select('kind,clock_at').eq('employee_id', me.id).order('clock_at', { ascending: false }).limit(1);
     const prev = last?.[0];
     if (prev && Date.now() - Date.parse(prev.clock_at) < 60000) throw fail(429, 'You just clocked. Wait a minute before clocking again.');
-    const kind = prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in';
+    // When the last clock in is still open after a long time, the person says what this clock is (an older page that does not ask keeps the 20 hour rule).
+    const ask = stillOpen(prev, Date.now()), choice = ask && (body.choice === 'in' || body.choice === 'out') ? String(body.choice) : '';
+    const kind = (choice || (prev && prev.kind === 'in' && Date.now() - Date.parse(prev.clock_at) < 20 * HOUR ? 'out' : 'in')) as 'in' | 'out';
     // The staff member chose to cover a late arrival or an early leave with their credit hours: checked before the clock is saved.
     let credit: { kind: 'late' | 'early'; date: string; hours: number } | null = null;
     const chosen = Number(body.creditHours); // 30 minutes (0.5), then 1, 2, 3 ... 12 hours
@@ -559,7 +698,7 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
       if (already) throw fail(409, 'Credit hours are already used for this. Clock again without it.');
       credit = { kind: need.kind, date: need.date, hours: chosen };
     }
-    const base = { employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: hash.slice(0, 12) };
+    const base = { employee_id: me.id, kind, latitude: hasLocation ? lat : null, longitude: hasLocation ? lng : null, accuracy_m: Number.isFinite(accuracy) ? accuracy : null, place_id: place?.id || null, distance_m: distance, within_place: within, device: choice === 'out' ? `long:${new Date(Date.parse(prev.clock_at) + 8 * HOUR).toISOString().slice(0, 10)}:${hash.slice(0, 12)}` : hash.slice(0, 12) };
     const remarks = text(body.remarks, 200);
     const address = me.clock_mode === 'anywhere' && hasLocation ? await addressOf(db, lat, lng) : '';
     let { error: insertError } = await db.from('hr_attendance_clocks').insert({ ...base, remarks, address });
@@ -624,12 +763,17 @@ export async function attendanceStaffAction(req: any, res: any, db: any, staff: 
     if (!inTime && !outTime && !otMinutes) throw fail(400, 'Enter the time you clocked in or out, the OT hours, or both.');
     if ((inTime && !isTime(inTime)) || (outTime && !isTime(outTime))) throw fail(400, 'Enter the times as hh:mm.');
     if (!reason) throw fail(400, 'Choose or write the reason.');
+    // Without the hours an approved OT request pays nothing, so it cannot be sent that way (a draft may still be saved).
+    if (!draft && needsOtHours(reason) && !otMinutes) throw fail(400, 'Choose the OT hours. Without them no OT can be paid.');
     // A forgotten clock can only be asked for when that clock is really missing on the day (the clocks the person made, or ones already added).
-    if (/forgot to clock/i.test(reason) && !(action === 'attendance_request_update')) {
+    // Checked when it is sent and again when it is edited. A time already recorded cannot be changed: only the missing one can be asked for.
+    if (/forgot to clock/i.test(reason)) {
       const day = ((await buildDays(db, [me], date, date, rules)).get(me.id) || [])[0];
       if (day?.inAt && day?.outAt) throw fail(400, 'You already have both a clock in and a clock out on that date, so there is nothing to correct. If you worked extra hours, use OT request.');
       if (inTime && !outTime && day?.inAt) throw fail(400, 'You already have a clock in on that date. Ask for the clock out you missed.');
       if (outTime && !inTime && day?.outAt) throw fail(400, 'You already have a clock out on that date. Ask for the clock in you missed.');
+      const clash = missedClash({ in: day?.inAt ? hhmm(Date.parse(day.inAt)) : '', out: day?.outAt ? hhmm(Date.parse(day.outAt)) : '' }, { in: inTime.slice(0, 5), out: outTime.slice(0, 5) });
+      if (clash) throw fail(400, `Your clock ${clash.kind} on that date is already recorded at ${clash.at} and cannot be changed. If it is wrong, tell your supervisor or HR.`);
     }
     if (otMinutes > 0 && hasNoOt(me)) throw fail(400, 'Your hours are flexible or you are a doctor, so there is no OT to apply for.');
     // OT cannot be more than the clocks and roster show for that day (when both clocks are there).
@@ -726,8 +870,10 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   if (req.method === 'GET' && action === 'attendance_daily') {
     const date = isDate(req.query.date) ? String(req.query.date) : today();
     const before = addDay(date, -1);
-    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, before, date)]);
-    const days = buildDaysFrom(data, people, before, date, rules);
+    // The day after is read too, so its clocks are not shown as pairs of this day.
+    const after = addDay(date, 1);
+    const [people, rules, data] = await Promise.all([active(), loadRules(db), fetchData(db, before, after)]);
+    const pairs = new Map<string, Map<string, Session[]>>(), days = buildDaysFrom(data, people, before, after, rules, pairs);
     return res.status(200).json({ date, today: today(), rows: people.map((p) => {
       const list = days.get(p.id) || [];
       let day = list.find((item) => item.date === date) || { date } as Day;
@@ -735,7 +881,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
       const last = list.find((item) => item.date === before);
       if (last?.outAt && new Date(Date.parse(last.outAt) + 8 * 3600000).toISOString().slice(0, 10) === date && (day.status === 'off' || day.status === 'no-times')) day = { ...day, status: 'post-call', outAt: last.outAt, start: last.start, end: last.end, code: last.code };
       const { code: shift, ...rest } = dayView(day);
-      return { ...person(p), ...rest, shift };
+      return { ...person(p), ...rest, shift, sessions: (pairs.get(p.id)?.get(date) || []).map((session) => ({ in: pairCell(session.in, date), out: pairCell(session.out, date) })) };
     }).sort((a, b) => a.company.localeCompare(b.company) || a.name.localeCompare(b.name)) });
   }
 
@@ -773,7 +919,7 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
     if (creditUses.error) throw creditUses.error;
     // (the follow-ups are made below, once the days are known: a day whose OT was decided on the next day counts as decided)
     const chosen = one ? people.filter((p) => p.id === one) : people;
-    const days = buildDaysFrom(data, chosen, wideFrom, wideTo, rules);
+    const pairs = new Map<string, Map<string, Session[]>>(), days = buildDaysFrom(data, chosen, wideFrom, wideTo, rules, pairs);
     const coveredOt = [...days.entries()].flatMap(([employee_id, list]) => list.filter((day) => day.otStatus === 'covered').map((day) => ({ employee_id, work_date: day.date, status: 'covered' })));
     const followUps = attendanceFollowUps(requests.data, creditUses.data, [...(data.ot || []), ...coveredOt]);
     // The odd days: absent, a clock in with no clock out, a clock on a day off, a very long day, a very short day. Late and early out are shown too but are not "odd".
@@ -816,7 +962,10 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
         } else if (day.otCounted > 0 && (!decision || decision.status === 'pending')) {
           for (const part of otParts(kindOf(day.date), day.ot, rules.policyFor(day.date))) waiting[String(part.multiplier)] = (waiting[String(part.multiplier)] || 0) + part.minutes;
         }
-        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft, followUp: followUps.get(`${p.id}|${day.date}`) || emptyFollowUp() };
+        return { date: day.date, shift: day.code, startTime: v.startTime, endTime: v.endTime, inTime: v.inTime, outTime: v.outTime, status: day.status, leave: day.leave, holiday: Boolean(day.holiday), kind: kindOf(day.date), clocks: (rawClocks.get(day.date) || []).map((clock) => ({ id: clock.id, kind: clock.kind, time: hhmm(clock.ms) })), sessions: (pairs.get(p.id)?.get(day.date) || []).map((session) => {
+          const cell = (ms: number | undefined, kind: string) => ms === undefined ? { time: '', id: '', next: false } : { time: hhmm(ms), id: allClocks.find((clock) => clock.ms === ms && clock.kind === kind)?.id || '', next: new Date(ms + 8 * HOUR).toISOString().slice(0, 10) > day.date };
+          return { in: cell(session.in, 'in'), out: cell(session.out, 'out') };
+        }), inId: day.inAt ? allClocks.find((clock) => clock.ms === Date.parse(day.inAt!))?.id || '' : '', outId: day.outAt ? allClocks.find((clock) => clock.ms === Date.parse(day.outAt!))?.id || '' : '', late: day.lateCounted, early: day.earlyCounted, worked: day.worked, ot: day.otCounted, otByRate: byRate, otWaiting: waiting, credit: day.creditHours, odd: f.odd, soft: f.soft, followUp: followUps.get(`${p.id}|${day.date}`) || emptyFollowUp() };
       });
       return { person: { ...person(p), designation: p.designation }, days: list };
     });
@@ -1355,11 +1504,11 @@ export async function attendanceHrAction(req: any, res: any, db: any, action: st
   }
   if (req.method === 'GET' && action === 'attendance_rules') {
     const rules = await loadRules(db);
-    return res.status(200).json({ lateGrace: rules.lateGrace, earlyGrace: rules.earlyGrace, otMin: rules.otMin, times: [...rules.times.entries()].map(([key, value]) => ({ kind: key.split('|')[0], code: key.split('|')[1], start: value.start, end: value.end })).sort((a, b) => a.kind.localeCompare(b.kind) || a.start.localeCompare(b.start) || a.code.localeCompare(b.code)) });
+    return res.status(200).json({ lateGrace: rules.lateGrace, earlyGrace: rules.earlyGrace, countEarly: rules.countEarly, otMin: rules.otMin, times: [...rules.times.entries()].map(([key, value]) => ({ kind: key.split('|')[0], code: key.split('|')[1], start: value.start, end: value.end })).sort((a, b) => a.kind.localeCompare(b.kind) || a.start.localeCompare(b.start) || a.code.localeCompare(b.code)) });
   }
   if (req.method === 'POST' && action === 'attendance_rules_save') {
     const minutes = (value: unknown, label: string) => { const number = Math.round(Number(value)); if (!Number.isFinite(number) || number < 0 || number > 240) throw fail(400, `${label} must be between 0 and 240 minutes.`); return number; };
-    const { error } = await db.from('hr_attendance_settings').upsert({ id: 1, late_grace_min: minutes(body.lateGrace, 'Late grace'), early_grace_min: minutes(body.earlyGrace, 'Early-out grace'), ot_min_minutes: minutes(body.otMin, 'Smallest extra time') });
+    const { error } = await db.from('hr_attendance_settings').upsert({ id: 1, late_grace_min: minutes(body.lateGrace, 'Late grace'), early_grace_min: minutes(body.earlyGrace, 'Early-out grace'), ot_min_minutes: minutes(body.otMin, 'Smallest extra time'), ...(typeof body.countEarly === 'boolean' ? { count_early_out: body.countEarly } : {}) });
     if (error) throw error;
     const rows = (Array.isArray(body.times) ? body.times : []).slice(0, 80).map((item: any) => {
       const code = text(item?.code, 20).toUpperCase(), kind = item?.kind === 'doctor' ? 'doctor' : 'staff';

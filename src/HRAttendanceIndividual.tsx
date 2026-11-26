@@ -14,7 +14,8 @@ import { usePrintSheet } from './IncentiveSheet';
 
 // Office HR > Attendance > Individual: Infotech's "Individual Attendance Report With Monthly Allowance", one block for each person with every day: the clocks, the shift,
 // Normal / Late / EarlyOut / Actual, OT at each rate and the reason. A last Check column marks the odd days, and "Odd days" lists who has the most, for Admin.
-type Day = { date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[]; followUp?: AttendanceFollowUp };
+type Cell = { time: string; id: string; next: boolean };
+type Day = { sessions?: { in: Cell; out: Cell }[]; date: string; shift: string; startTime: string; endTime: string; inTime: string; outTime: string; status: string; leave: string; holiday: boolean; kind: string; clocks: { id: string; kind: string; time: string }[]; inId: string; outId: string; late: number; early: number; worked: number; ot: number; otByRate: Record<string, number>; otWaiting: Record<string, number>; credit: number; odd: string[]; soft: string[]; followUp?: AttendanceFollowUp };
 type Person = { id: string; company: string; code: string; name: string; designation: string };
 type Block = { person: Person; days: Day[] };
 
@@ -89,9 +90,14 @@ const shiftMinutes = (day: Day) => { if (!day.startTime || !day.endTime) return 
 const RATES = ['1', '1.5', '2', '3'];
 const nowText = () => { const d = new Date(), p = (x: number) => String(x).padStart(2, '0'); return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
 // The report is drawn as Infotech's own: the same columns in the same order and the same header groups. Only the Check shading (screen only) and the logo are ours.
-const WIDTHS = [150, 116, 72, 72, 65, 115, 70, 95, 85, 75, 75, 75, 80, 67, 68, 70, 42, 53, 75, 75, 81, 239];
+const WIDTHS = [150, 116, 72, 72, 72, 72, 65, 115, 70, 95, 85, 75, 75, 75, 80, 67, 68, 70, 42, 53, 75, 75, 81, 239];
 const GRID = { display: 'grid', gridTemplateColumns: WIDTHS.map((width) => `${width}fr`).join(' '), alignItems: 'center', textAlign: 'center' } as const;
 const dark = 'font-bold text-[#8b1a1a]';
+// In 1, Out 1, In 2, Out 2: the day's first two sessions. More than two (rare) is marked, and every clock stays in Clk1N to Clk4N.
+const NONE: Cell = { time: '', id: '', next: false };
+const SLOTS = ['In 1', 'Out 1', 'In 2', 'Out 2'];
+const slotsOf = (day: Day) => [0, 1].flatMap((index) => { const session = day.sessions?.[index]; return [{ ...(session?.in || NONE), kind: 'in' as const }, { ...(session?.out || NONE), kind: 'out' as const }]; });
+const slotText = (cell: Cell) => cell.time ? `${clock(cell.time)}${cell.next ? ' +1' : ''}` : '';
 const otMinutes = (day: Day, rate: string) => day.otByRate[rate] || 0;
 // OT that has no decision yet: what the OT policy would pay, shown in grey italics and not added to the totals.
 const otWaiting = (day: Day, rate: string) => day.otByRate[rate] ? 0 : day.otWaiting?.[rate] || 0;
@@ -105,12 +111,12 @@ const sumBlocks = (blocks: Block[], pick: (day: Day) => number) => blocks.reduce
 function Totals({ labels, allowance, values, caption }: { labels: string[]; allowance: string[]; values: string[]; caption: string }) {
   return <div className="mt-0">
     <div className="border-t border-slate-700" style={{ ...GRID, paddingTop: 2 }}>
-      <span /><span /><span /><span /><span />
+      <span /><span /><span /><span /><span /><span /><span />
       {labels.map((label) => <span key={label} className={dark}>{label}</span>)}
       <span className="col-span-7 border-x border-t border-slate-700 text-center" style={{ gridColumn: 'span 7' }}><span className={dark}>Allowance</span></span><span />
     </div>
-    <div style={GRID}><span /><span /><span /><span /><span />{labels.map((label) => <span key={label} />)}<span className="col-span-7" style={{ gridColumn: 'span 7' }}><span className="grid grid-cols-7 border-x border-slate-700">{allowance.map((label) => <span key={label} className={`${dark} min-w-0 overflow-hidden px-px text-center text-[8px] leading-[10px] [overflow-wrap:anywhere]`}>{label.replace('AllowanceOther', 'Allowance\u200bOther')}</span>)}</span></span><span /></div>
-    <div className="mt-0.5 border-y border-slate-700 py-1 font-bold tabular-nums" style={GRID}><span className="col-span-5 text-center" style={{ gridColumn: 'span 5' }}>{caption}</span>{values.map((value, index) => <span key={index}>{value}</span>)}{Array.from({ length: 7 }, (_, index) => money(index))}<span /></div>
+    <div style={GRID}><span /><span /><span /><span /><span /><span /><span />{labels.map((label) => <span key={label} />)}<span className="col-span-7" style={{ gridColumn: 'span 7' }}><span className="grid grid-cols-7 border-x border-slate-700">{allowance.map((label) => <span key={label} className={`${dark} min-w-0 overflow-hidden px-px text-center text-[8px] leading-[10px] [overflow-wrap:anywhere]`}>{label.replace('AllowanceOther', 'Allowance\u200bOther')}</span>)}</span></span><span /></div>
+    <div className="mt-0.5 border-y border-slate-700 py-1 font-bold tabular-nums" style={GRID}><span className="col-span-7 text-center" style={{ gridColumn: 'span 7' }}>{caption}</span>{values.map((value, index) => <span key={index}>{value}</span>)}{Array.from({ length: 7 }, (_, index) => money(index))}<span /></div>
   </div>;
 }
 
@@ -125,9 +131,9 @@ function Sheet({ block, period, at, page, pages, grand }: { key?: string; block:
     <header className="text-center"><p className="text-[22px] font-bold leading-tight text-[#7a1010]">{COMPANY[person.company] || person.company}</p><p className="mt-1 text-[15px] font-bold text-[#3b82c4]">Individual Attendance Report With Monthly Allowance</p></header>
     <div className="mt-3 grid grid-cols-[1fr_auto_1fr] border-y border-slate-500 py-1.5 text-[11px] font-bold"><span>Date : &nbsp;&nbsp;&nbsp;{at}</span><span>Period : &nbsp;&nbsp;<span className="text-[#8b1a1a]">{dmy(period.from)} To {dmy(period.to)}</span></span><span className="text-right">Page : {page} of {pages}</span></div>
     <div className="mt-2 border-t border-slate-700">
-      <div style={GRID}><span /><span /><span className={`${edge} col-span-2 ${dark}`} style={{ gridColumn: 'span 2' }}>Time</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 5' }}>Shift Details</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 5' }}>OverTime</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 7' }}>Allowance</span><span className={edge} /></div>
+      <div style={GRID}><span /><span /><span className={`${edge} col-span-4 ${dark}`} style={{ gridColumn: 'span 4' }}>Time</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 5' }}>Shift Details</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 5' }}>OverTime</span><span className={`${edge} ${dark}`} style={{ gridColumn: 'span 7' }}>Allowance</span><span className={edge} /></div>
       <div className="border-b border-slate-700 pb-0.5" style={GRID}>
-        <span className={`${dark} text-left`}>Date</span><span className={dark}>Day</span><span className={`${edge} ${dark}`}>In</span><span className={dark}>Out</span>
+        <span className={`${dark} text-left`}>Date</span><span className={dark}>Day</span>{SLOTS.map((label, index) => <span key={label} className={`${index ? '' : edge} ${dark}`}>{label}</span>)}
         <span className={`${edge} ${dark}`}>Shift</span><span className={dark}>Normal</span><span className={dark}>Late</span><span className={dark}>EarlyOut</span><span className={dark}>Actual</span>
         <span className={`${edge} ${dark}`}>1.0</span><span className={dark}>1.5</span><span className={dark}>2.0</span><span className={dark}>3.0</span><span className={dark}>Flat</span>
         <span className={`${edge} ${dark}`}>Attd</span><span className={dark}>Shift</span><span className={dark}>Meal</span><span className={dark}>Tran</span><span className={`${dark} text-[9px] leading-3`}>Allowa nceOth</span><span className={`${dark} text-[9px] leading-3`}>Allowa nceOth</span><span className={dark}>Health</span>
@@ -136,7 +142,7 @@ function Sheet({ block, period, at, page, pages, grand }: { key?: string; block:
     </div>
     <p className="mt-1.5 font-bold"><span className="text-[#8b1a1a]">Emp Code</span> &nbsp;&nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.code}</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span className="text-[#8b1a1a]">Name :</span> &nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.name}</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span className="text-[#8b1a1a]">Designation :</span> &nbsp;&nbsp;&nbsp;<span className="text-emerald-700">{person.designation}</span></p>
     {days.map((day) => <div key={day.date} className={`tabular-nums ${day.odd.length ? 'bg-rose-50 print:bg-transparent' : ''}`} title={[...day.odd, ...day.soft].join(', ')} style={{ ...GRID, minHeight: 15 }}>
-      <span className="text-left">{dmy(day.date)}</span><span>{dayName(day.date)}</span><span>{clock(day.inTime)}</span><span>{clock(day.outTime)}</span><span>{shiftCell(day)}</span><span>{hmDot(shiftMinutes(day))}</span><span>{hmDot(day.late)}</span><span>{hmDot(day.early)}</span><span>{hmDot(day.worked)}</span>
+      <span className="text-left">{dmy(day.date)}</span><span>{dayName(day.date)}</span>{slotsOf(day).map((cell, index) => <span key={index}>{index < 2 || cell.time ? slotText(cell) || '0.00' : ''}</span>)}<span>{shiftCell(day)}</span><span>{hmDot(shiftMinutes(day))}</span><span>{hmDot(day.late)}</span><span>{hmDot(day.early)}</span><span>{hmDot(day.worked)}</span>
       {RATES.map((rate) => otWaiting(day, rate) ? <span key={rate} className="italic text-slate-400" title="OT waiting for approval">{hmDot(otWaiting(day, rate))}</span> : <span key={rate}>{hmDot(otMinutes(day, rate))}</span>)}<span>0.00</span>{Array.from({ length: 7 }, (_, index) => money(index))}<span>{reasonOf(day)}</span>
     </div>)}
     <div className="mt-0.5 border-t border-slate-700" />
@@ -167,7 +173,7 @@ function TimeCell({ value, onSave, tone }: { key?: string | number; value: strin
   const commit = () => { const next = normal(text); if (next === null) { setText(clock(value)); return; } if (next !== value) onSave(next); else setText(clock(value)); };
   return <input value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} inputMode="decimal" aria-label="Time (hh.mm)" className={`h-6 w-full min-w-[46px] border-0 px-1 text-center tabular-nums outline-none focus:bg-white focus:ring-1 focus:ring-[#0b587b] ${tone}`} />;
 }
-const HEAD = ['#', 'Date', 'Day', 'Clk1N', 'Clk2N', 'Clk3N', 'Clk4N', 'In', 'Out', 'Shift', 'Reason', 'NRM', 'Actual', 'Under', 'Lateness', 'OT10', 'OT15', 'OT20', 'OT30', 'Flat', 'Attd', 'Shift', 'Meal', 'Tran', 'Health', 'Oth1', 'Oth2'];
+const HEAD = ['#', 'Date', 'Day', 'Clk1N', 'Clk2N', 'Clk3N', 'Clk4N', 'In 1', 'Out 1', 'In 2', 'Out 2', 'Shift', 'Reason', 'NRM', 'Actual', 'Under', 'Lateness', 'OT10', 'OT15', 'OT20', 'OT30', 'Flat', 'Attd', 'Shift', 'Meal', 'Tran', 'Health', 'Oth1', 'Oth2'];
 const isInsufficient = (day: Day) => day.status === 'missing-out' || (day.clocks.length % 2 === 1 && day.status !== 'off') || (Boolean(day.inTime) !== Boolean(day.outTime));
 
 type RunWork = (work: () => Promise<unknown>, done: string) => unknown;
@@ -191,7 +197,15 @@ function clockSavers(staffId: string, name: string, run: RunWork, onChanged: () 
     if (day.outId) void run(() => post('attendance_clock_update', { clockId: day.outId, time: value, note: 'Out changed in Update by individual' }), 'Out changed.');
     else void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: 'out', time: value, nextDay: Boolean(day.inTime) && value < day.inTime, note: 'Out added in Update by individual' }), 'Out added.');
   };
-  return { saveClock, saveIn, saveOut };
+  // An In 1 to Out 2 cell changes the clock it shows, or adds one. A clock out earlier in the day than its clock in is for the next day.
+  const saveSlot = (day: Day, at: number, value: string) => {
+    if (!value) { onChanged(); return; }
+    const slots = slotsOf(day), slot = slots[at], label = SLOTS[at];
+    if (slot.id) { void run(() => post('attendance_clock_update', { clockId: slot.id, time: value, note: `${label} changed in Update by individual` }), `${label} changed.`); return; }
+    const opened = slot.kind === 'out' ? slots[at - 1].time : slots[0].time;
+    void run(() => post('attendance_clock_add', { id: staffId, date: day.date, kind: slot.kind, time: value, nextDay: slot.kind === 'out' && Boolean(opened) && value < opened, note: `${label} added in Update by individual` }), `${label} added.`);
+  };
+  return { saveClock, saveIn, saveOut, saveSlot };
 }
 function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onChanged, onError, onPreview, staffList, onStaff }: { block: Block; staffId: string; filters: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }; setFilters: (value: { late: boolean; under: boolean; absent: boolean; insufficient: boolean }) => void; notice: string; setNotice: (value: string) => void; onChanged: () => void; onError: (message: string) => void; onPreview: () => void; staffList: { id: string; fullName: string }[]; onStaff: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
@@ -203,7 +217,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
     try { const result = await work() as { duplicate?: boolean } | undefined; setNotice(result?.duplicate ? 'That clock already exists. Nothing was added.' : done); onChanged(); } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to save.'); onChanged(); }
     finally { setBusy(false); }
   };
-  const { saveClock, saveIn, saveOut } = clockSavers(staffId, person.name, run, onChanged);
+  const { saveClock, saveSlot } = clockSavers(staffId, person.name, run, onChanged);
   const index = staffList.findIndex((item) => item.id === staffId);
   const step = (by: number) => { const next = staffList[index + by]; if (next) onStaff(next.id); };
   const cell = 'border border-slate-200 px-1 py-0 text-center tabular-nums whitespace-nowrap';
@@ -219,7 +233,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
     <div className="flex flex-wrap items-center gap-4">{box(filters.late, 'Late', 'late')}{box(filters.under, 'Under', 'under')}{box(filters.absent, 'Absent', 'absent')}{box(filters.insufficient, 'Insufficient clocking', 'insufficient')}
       <span className="ml-auto flex flex-wrap items-center gap-4">{legend('#e3e1f7', 'Clock / In / Out (editable)')}{legend('#f7c8f0', 'Over time')}{legend('#f3c9c4', 'Lateness and Under')}{legend('#fbe3df', 'Allowance')}</span></div>
     {notice && <p role="status" className="rounded-xl bg-emerald-50 p-2.5 text-sm font-semibold text-emerald-700">{notice}</p>}
-    <p className="text-xs text-slate-500">Type a time (for example 8.52 or 20.50) in a Clk, In or Out cell and press Enter. A new time on an empty cell adds a clock; clearing a Clk cell removes it. Every change is written to the audit record.</p>
+    <p className="text-xs text-slate-500">Type a time (for example 8.52 or 20.50) in a Clk, In or Out cell and press Enter. In 1 to Out 2 show the day in pairs; +1 means the next day. A new time on an empty cell adds a clock; clearing a Clk cell removes it. Every change is written to the audit record.</p>
     <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1500px] border-collapse text-[11px]">
       <thead className="sticky top-0 z-10 bg-slate-100"><tr>{HEAD.map((label, i) => <th key={i} className="border border-slate-200 px-1 py-1 text-center font-semibold text-slate-600">{label}</th>)}</tr></thead>
       <tbody>{rows.map(({ day, number }) => {
@@ -229,8 +243,7 @@ function EditGrid({ block, staffId, filters, setFilters, notice, setNotice, onCh
           <td className={`${cell} bg-[#fdf8b0] ${odd ? 'font-semibold text-rose-700' : ''}`}>{dmy(day.date)}</td>
           <td className={`${cell} bg-[#fdf8b0]`}>{new Date(`${day.date}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })}</td>
           {[0, 1, 2, 3].map((slot) => <td key={slot} className={`${cell} bg-[#e3e1f7] p-0`}><TimeCell key={`${day.date}-${slot}-${day.clocks[slot]?.id || ''}`} value={day.clocks[slot]?.time || ''} tone="bg-transparent" onSave={(value) => saveClock(day, slot, value)} /></td>)}
-          <td className={`${cell} bg-[#cfc8f5] p-0`}><TimeCell value={day.inTime} tone="bg-transparent" onSave={(value) => saveIn(day, value)} /></td>
-          <td className={`${cell} bg-[#cfc8f5] p-0`}><TimeCell value={day.outTime} tone="bg-transparent" onSave={(value) => saveOut(day, value)} /></td>
+          {slotsOf(day).map((slot, at) => <td key={at} className={`${cell} bg-[#cfc8f5] p-0`} title={slot.next ? 'Next day' : undefined}><div className="flex items-center"><TimeCell key={`${day.date}-${at}-${slot.id}`} value={slot.time} tone="bg-transparent" onSave={(value) => saveSlot(day, at, value)} />{slot.next && <b className="pr-0.5 text-[9px] text-[#b45309]">+1</b>}</div></td>)}
           <td className={cell}>{shiftCell(day)}</td><td className={`${cell} ${odd ? 'font-semibold text-rose-700' : ''}`}>{reasonOf(day)}</td>
           <td className={cell}>{worked ? colon(shiftMinutes(day)) : '0:00'}</td><td className={cell}>{colon(day.worked)}</td>
           <td className={`${cell} ${day.early ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.early)}</td><td className={`${cell} ${day.late ? 'bg-[#f3c9c4]' : ''}`}>{colon(day.late)}</td>
@@ -279,8 +292,8 @@ export function HRAttendanceIndividual({ onError, followUp = true }: { onError: 
   usePrintSheet(printing, `Individual Attendance - ${period?.label || ''}`, () => setPrinting(false));
   const shown = (blocks || []).filter((block) => !company || block.person.company === company);
   const csv = () => {
-    const head = ['Company', 'Code', 'Name', 'Date', 'Day', 'In', 'Out', 'Shift', 'Normal', 'Late', 'Early out', 'Actual', 'OT 1.0', 'OT 1.5', 'OT 2.0', 'OT 3.0', 'Reason', 'Check'];
-    const lines = shown.flatMap(({ person, days }) => days.map((day) => [person.company, person.code, person.name, dmy(day.date), dayName(day.date), clock(day.inTime), clock(day.outTime), shiftCell(day), hmDot(shiftMinutes(day)), hmDot(day.late), hmDot(day.early), hmDot(day.worked), ...RATES.map((rate) => hmDot(otMinutes(day, rate))), reasonOf(day), [...day.odd, ...day.soft].join(', ')]));
+    const head = ['Company', 'Code', 'Name', 'Date', 'Day', ...SLOTS, 'Shift', 'Normal', 'Late', 'Early out', 'Actual', 'OT 1.0', 'OT 1.5', 'OT 2.0', 'OT 3.0', 'Reason', 'Check'];
+    const lines = shown.flatMap(({ person, days }) => days.map((day) => [person.company, person.code, person.name, dmy(day.date), dayName(day.date), ...slotsOf(day).map(slotText), shiftCell(day), hmDot(shiftMinutes(day)), hmDot(day.late), hmDot(day.early), hmDot(day.worked), ...RATES.map((rate) => hmDot(otMinutes(day, rate))), reasonOf(day), [...day.odd, ...day.soft].join(', ')]));
     downloadBlob([[head, ...lines].map((line) => line.map(csvCell).join(',')).join('\n')], `individual-attendance-${period?.from}-to-${period?.to}.csv`, 'text/csv');
   };
   // The odd days, worked out from the same days: strangest first.

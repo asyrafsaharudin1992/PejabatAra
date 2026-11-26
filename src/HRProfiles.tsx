@@ -316,7 +316,7 @@ function ProfileDocuments({ employeeId, onError }: { employeeId: string; onError
     canRemove={() => true} /></section>;
 }
 
-// Employment history (joining, job title and department changes, increments, salary adjustments), from Infotech. HR only: staff never
+// Employment history (joining, job title and department changes, increments, salary adjustments), from Infotech, and since the move written by AraOffice. HR only: staff never
 // see it. Pay figures stay hidden until "Show private details" is pressed, like the rest of the profile.
 export type CareerEntry = { id: string; date: string | null; kind: string; detail: string; from: string; to: string; amount: number | null };
 const PAY_KINDS = /increment|salary|hourly|bonus/i;

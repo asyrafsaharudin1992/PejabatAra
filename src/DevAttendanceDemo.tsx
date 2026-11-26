@@ -11,7 +11,22 @@ const requests = [
   { id: 'r2', name: 'Demo Staff', date: addDay(today, -5), inTime: '08:55', outTime: '', otMinutes: 0, otText: '', reason: 'Forgot to clock in', remarks: '', status: 'supervisor_approved', note: '', supervisorNote: '' },
   { id: 'r3', name: 'Demo Staff', date: addDay(today, -9), inTime: '', outTime: '', otMinutes: 180, otText: '03:00', reason: 'Overtime', remarks: 'Covered a colleague', status: 'approved', note: '', supervisorNote: '' },
 ];
+// ?attendanceDemo=long shows the question for a clock in that is still open after more than 14 hours ("Clock in new day" is 30 minutes late, with credit hours).
+let openSince = new URLSearchParams(window.location.search).get('attendanceDemo') === 'long' ? `${addDay(today, -1)}T12:00:00+08:00` : '';
+// What the demo buttons did, so the history below changes the way the real page would (kept until the page is refreshed).
+const long = Boolean(openSince);
+let outNow = '', inNow = '';
+const clockText = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kuala_Lumpur' });
 function answer(action: string, body: unknown) {
+  if (long && action === 'attendance_history') return { days: [0, 1, 2, 3, 4].map((back) => blankDay(addDay(today, -back), back === 1 ? { startTime: '12:00', code: 'AM-12', inTime: '12:00', outTime: outNow, outNextDay: Boolean(outNow), worked: outNow ? 720 + Number(outNow.slice(0, 2)) * 60 + Number(outNow.slice(3)) : 0, status: outNow ? 'present' : 'missing-out' } : back === 0 ? { inTime: inNow, status: inNow ? 'working' : '' } : { inTime: '08:58', outTime: '21:01', status: 'present', worked: 720 })) };
+  if (openSince && (action === 'attendance_today' || action === 'attendance_clock')) {
+    const choice = action === 'attendance_clock' ? (JSON.parse(String(body)) as { choice?: 'in' | 'out' }).choice : undefined;
+    const base = { today, name: 'Demo Staff', mode: 'anywhere', places: [], creditMinutes: 90, creditBasisIn: { kind: 'late', date: today, at: new Date(Date.now() - 30 * 60000).toISOString() }, shift: blankDay(today), yesterday: blankDay(addDay(today, -1), { inTime: '12:00' }), required: 'full' };
+    if (!choice) return { ...base, nextKind: 'in', openSince, recent: [{ kind: 'in', at: openSince }] };
+    openSince = '';
+    if (choice === 'out') outNow = clockText(); else inNow = clockText();
+    return { ...base, success: true, kind: choice, nextKind: choice === 'in' ? 'out' : 'in', recent: [{ kind: choice, at: new Date().toISOString() }] };
+  }
   if (action === 'attendance_today') return { today, name: 'Demo Staff', mode: 'places', places: [{ name: 'Klinik Demo' }], nextKind: 'in', recent: [], creditMinutes: 90, shift: blankDay(today), yesterday: blankDay(addDay(today, -1), { inTime: '09:02', outTime: '', status: 'missing-out' }), required: 'full' };
   if (action === 'attendance_history') return { days: [0, 1, 2, 3, 4].map((back) => blankDay(addDay(today, -back), back === 1 ? { inTime: '09:02', outTime: '', status: 'missing-out' } : back === 0 ? {} : { inTime: '08:58', outTime: '21:01', status: 'present', worked: 720 })) };
   if (action === 'attendance_requests') return { requests };
