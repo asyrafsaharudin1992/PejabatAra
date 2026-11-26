@@ -15,6 +15,7 @@ import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, p
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { pdfFormHrAction } from './_pdf-forms.js';
+import { changeLines, joinLine, type CareerLine } from '../src/lib/careerAuto.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
 import { addDocument, documentLink, listDocuments, ownedDocument, removeDocument } from './_documents.js';
@@ -560,6 +561,11 @@ async function incentiveSummaryData(db: any, month: string) {
   return { month, rows, sotmUnmatched: sotm.unmatched };
 }
 
+// Writes the employment history lines of a profile change. The profile is already saved, so a problem here never fails the save.
+async function keepHistory(db: any, employeeId: string, lines: CareerLine[]) {
+  if (!lines.length) return;
+  try { await db.from('hr_career_history').insert(lines.map((entry) => ({ ...entry, employee_id: employeeId }))); } catch { /* the history table may not be set up */ }
+}
 export async function hrHandler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
   try {
@@ -737,8 +743,10 @@ export async function hrHandler(req: any, res: any) {
     if (req.method === 'POST' && action === 'set_resign_date') {
       const id = text(body.id, 60);
       if (!isDate(body.resignDate)) throw fail(400, 'Enter the last working day.');
+      const { data: before } = await db.from('hr_employees').select('resign_date').eq('id', id).maybeSingle();
       const { error } = await db.from('hr_employees').update({ resign_date: body.resignDate, updated_at: now, updated_by: user.id }).eq('id', id);
       if (error) throw error;
+      if (before) await keepHistory(db, id, changeLines(before, { resign_date: body.resignDate }, new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)));
       await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes: { resign_date: body.resignDate }, changed_by: user.id });
       return res.status(200).json({ success: true });
     }
@@ -2945,6 +2953,12 @@ export async function hrHandler(req: any, res: any) {
         if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
         if (error) throw error;
         if (Object.keys(changes).length) await db.from('hr_audit').insert({ employee_id: id, action: 'update', changes, changed_by: user.id });
+        await keepHistory(db, id, changeLines(before, savedRow, new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)));
+        // A corrected date joined moves the "Join Date" line AraOffice wrote (an Infotech line is left as it came).
+        if (before.join_date !== data.join_date && data.join_date) {
+          const { data: moved } = await db.from('hr_career_history').update({ event_date: data.join_date }).eq('employee_id', id).eq('kind', 'Join Date').eq('source', 'AraOffice').select('id');
+          if (!moved?.length) { const { data: any } = await db.from('hr_career_history').select('id').eq('employee_id', id).eq('kind', 'Join Date').limit(1); if (!any?.length) await keepHistory(db, id, joinLine(data)); }
+        }
         return res.status(200).json({ employee: decode(data) });
       }
       const malaysian = !String(row.nationality || '').trim() || /malaysia/i.test(String(row.nationality));
@@ -2952,6 +2966,7 @@ export async function hrHandler(req: any, res: any) {
       if (error?.code === '23505') throw fail(409, `Employee code ${row.employee_code} is already used in ${row.company}.`);
       if (error) throw error;
       await db.from('hr_audit').insert({ employee_id: data.id, action: 'create', changes: {}, changed_by: user.id });
+      await keepHistory(db, data.id, joinLine(data));
       // A new staff member gets their leave straight away, as the company policy says. HR can still change the category later.
       let leaveSetup: { track: string; changed: number } | { error: string } | null = null;
       if (data.join_date && data.status === 'Active') {
