@@ -1,5 +1,5 @@
 import { branchId, officeAccess, errorReply, serviceDb } from './_office-db.js';
-import { buildReviewReminders, validReminderDate, malaysiaToday } from '../src/lib/reviewReminders.js';
+import { buildReviewReminders, validReminderDate, malaysiaToday, isCaReviewPerson, probationEvaluationDates, probationAssessmentAllowed } from '../src/lib/reviewReminders.js';
 import { ASSISTANT_ITEMS, ASSISTANT_OUTCOMES, assistantTotal, isValidTerm, outcomeLabel, type AssistantKind } from '../src/lib/assistantReview.js';
 import { customScore, gradeFor, resolveAnswers, templateMax, validateTemplate, type ReviewTemplate } from '../src/lib/reviewTemplate.js';
 import { defaultReviewSettings, normalizeReviewSettings } from '../src/lib/reviewSettings.js';
@@ -182,7 +182,10 @@ export async function loadReviewReminders(db: any) {
     if ((customResult.data || []).length > readLimit) throw fail(422, 'More than 500 staff reminders match. Please contact the system administrator to paginate reminders.');
     const custom = (customResult.data || []).map((r: any) => ({ id: r.id, employeeId: r.employee_id, periodLabel: r.period_label, dueOn: r.due_on, notes: r.notes, completedAt: r.completed_at, cancelledAt: r.cancelled_at }));
     const candidates = buildReviewReminders(people, [], custom, today, settings);
-    const dates = [...new Set(candidates.map((item) => item.dueOn))];
+    // With no reviews read yet, only the first open stage of each person is listed above. The later probation stages are searched too, or a review already
+    // assigned for one of them is not found and its reminder keeps asking HR to assign it again. Only stages that can be listed (staff still on probation).
+    const stages = people.filter((person: any) => person.joinDate && isCaReviewPerson(person.designation)).flatMap((person: any) => probationEvaluationDates(person.joinDate).filter((date) => probationAssessmentAllowed(person, person.probationStatus, date, today)));
+    const dates = [...new Set([...candidates.map((item) => item.dueOn), ...stages])];
     // Undated legacy reviews still participate in matching, as before.
     const reviewsResult = dates.length
       ? await db.from('hr_reviews').select('id,employee_id,employee_code,staff_name,period_label,period_end,status,submitted_at,form_type').or(`period_end.in.(${dates.join(',')}),period_end.is.null`).order('created_at', { ascending: false }).limit(readLimit + 1)
