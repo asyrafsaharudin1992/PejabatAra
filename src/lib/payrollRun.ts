@@ -15,7 +15,9 @@ export type PayStaff = {
   joinDate?: string | null;     // YYYY-MM-DD; the first month is paid for the days from here
   resignDate?: string | null;   // YYYY-MM-DD; the last month is paid up to here
   salaryChanges?: { date: string; from: number }[];   // a raise from this date (YYYY-MM-DD); `from` is the salary before it, basicSalary is the latest
+  workDays?: WorkDay[];   // approved OT, rest day and public holiday work and unpaid leave by date, so that days before a raise use the salary of that day
 };
+export type WorkDay = { date: string; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number };
 export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakatPaid: number };
 // What HR enters for the month. OT is entered as hours at each rate (the rate HR chose when approving it in Attendance), rest days and public
 // holidays worked as a count of days; the amounts are worked out from the salary. `ot` and `restPh` are for an amount that does not fit those.
@@ -75,17 +77,44 @@ export function childrenForRelief(children: PayChild[], year: number) {
   return children.filter((child) => child.studying || (child.dateOfBirth && Number(child.dateOfBirth.slice(0, 4)) > year - 18)).length;
 }
 
+// The salary on a date: before the first raise dated after it, the salary that raise started from.
+function salaryOn(salary: number, changes: { date: string; from: number }[], date: string) {
+  return [...changes].sort((a, b) => a.date.localeCompare(b.date)).find((item) => date < item.date)?.from ?? salary;
+}
+// OT, rest day, public holiday and unpaid leave amounts when there is a raise: the hours and days dated before the raise use the old salary.
+// HR's typed totals stay the figure used; whatever is not matched to an earlier date uses the latest salary.
+function workPay(staff: PayStaff, inputs: PayInputs) {
+  const earlier = [...(staff.workDays || [])].sort((a, b) => a.date.localeCompare(b.date))
+    .map((day) => ({ day, salary: salaryOn(staff.basicSalary, staff.salaryChanges || [], day.date) })).filter((item) => item.salary !== staff.basicSalary);
+  const split = (key: Exclude<keyof WorkDay, 'date'>, rate: (salary: number) => number) => {
+    let left = inputs[key] || 0, amount = 0;
+    for (const { day, salary } of earlier) {
+      const part = Math.min(left, day[key] || 0);
+      amount += rate(salary) * part; left -= part;
+    }
+    return amount + rate(staff.basicSalary) * left;
+  };
+  const ot10 = split('ot10', hourlyRate), ot15 = split('ot15', hourlyRate) * 1.5, ot20 = split('ot20', hourlyRate) * 2, ot30 = split('ot30', hourlyRate) * 3;
+  return {
+    ot: money(ot10 + ot15 + ot20 + ot30),
+    otByRate: { ot10: money(ot10), ot15: money(ot15), ot20: money(ot20), ot30: money(ot30) },
+    restPh: money(split('restDays', dailyRate) + split('phDays', dailyRate) * 2),
+    unpaid: split('unpaidDays', unpaidDayRate),
+  };
+}
+
 export function calculatePayslip(staff: PayStaff, given: PayInputs, ytd: PayYtd, year: number, month: number) {
   const extra = adjustmentTotals(given.adjustments);
   const inputs: PayInputs = { ...given, otherAllowance: money(given.otherAllowance + extra.add), otherDeduction: money(given.otherDeduction + extra.less) };
   const s = staff.settings;
-  const unpaid = money(inputs.unpaidLeave + unpaidDayRate(staff.basicSalary) * (inputs.unpaidDays || 0));
+  const work = workPay(staff, inputs);
+  const unpaid = money(inputs.unpaidLeave + work.unpaid);
   const earned = proratedSalary(staff.basicSalary, year, month, staff.joinDate, staff.resignDate, staff.salaryChanges).amount;
   const basic = Math.max(0, earned - unpaid);
   const allowances = staff.fixedAllowances.map((item) => ({ ...item, type: allowanceType(item.name) }));
   const allowanceTotal = allowances.reduce((sum, item) => sum + item.amount, 0);
-  const otAmount = money(inputs.ot + overtimePay(staff.basicSalary, inputs));
-  const restPh = money(inputs.restPh + restPhPay(staff.basicSalary, inputs.restDays || 0, inputs.phDays || 0));
+  const otAmount = money(inputs.ot + work.ot);
+  const restPh = money(inputs.restPh + work.restPh);
   const gross = money(basic + allowanceTotal + otAmount + restPh + inputs.shiftAllowance + inputs.otherAllowance);
   // KWSP counts salary, rest-day and shift pay and any allowance flagged for it; OT and other allowances do not count.
   const leaveCut = inputs.annualLeaveDeduction || 0;
@@ -112,7 +141,7 @@ export function calculatePayslip(staff: PayStaff, given: PayInputs, ytd: PayYtd,
   }
   const deductions = money(kwspEmployee + socsoEmployee + eisEmployee + skbbkEmployee + pcb + inputs.otherDeduction + leaveCut);
   return {
-    ot: otAmount, restPh, basic: money(basic), noPay: money(earned - basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
+    ot: otAmount, otByRate: work.otByRate, restPh, basic: money(basic), noPay: money(earned - basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
     kwspEmployee, kwspEmployer, socsoEmployee, socsoEmployer, eisEmployee, eisEmployer, skbbk: skbbkEmployee, hrdf: hrdfEmployer, pcb, chargeable, deductions, net: money(gross - deductions),
     ytdAfter: { wages: money(ytd.wages + gross), kwspRelief: money(Math.min(4000, ytd.kwspRelief + kwspEmployee)), pcbPaid: money(ytd.pcbPaid + pcb), zakatPaid: ytd.zakatPaid },
   };

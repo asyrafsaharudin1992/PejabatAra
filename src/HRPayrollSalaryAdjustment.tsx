@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
 import { officeFetch } from './lib/officeApi';
-import { ADJUSTMENT_TYPES, NO_INPUTS, adjustmentTotals, calculatePayslip, hourlyRate, payPeriod, proratedSalary, unpaidDayRate, type Adjustment, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
+import { ADJUSTMENT_TYPES, NO_INPUTS, adjustmentTotals, calculatePayslip, payPeriod, proratedSalary, type Adjustment, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 import { card } from './AssessmentStaff';
 
 // Payroll > Salary adjustment: one person's pay for one month on a single screen, laid out like Infotech's Monthly Activity > Salary Adjustment
@@ -83,10 +83,13 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
   const wholePeriod = person && earned ? proratedSalary(person.basicSalary, year, month, null, null, person.salaryChanges).amount : 0;
   const increment = raises.length ? Math.round((wholePeriod - startSalary) * 100) / 100 : 0;
   const partial = earned ? Math.round((earned.amount - startSalary - increment) * 100) / 100 : 0;
-  const rate = person ? hourlyRate(person.basicSalary) : 0;
+  // The amounts as the pay run works them out (days before a raise use the old salary). A locked slip saved without them was worked out at the latest salary.
+  const saved = locked ? person?.payslip?.result as { otByRate?: Record<string, number>; noPay?: number } | undefined : undefined;
+  const worked = person ? calculatePayslip(locked ? { ...person, salaryChanges: [], workDays: [] } : person, inputs, person.ytd, year, month) : null;
+  const otAmounts: Record<string, number> = saved?.otByRate || worked?.otByRate || {};
   const extra = adjustmentTotals(lines.map((item) => ({ ...item, amount: Number(item.amount) || 0 })));
-  const unpaid = person ? Math.round((inputs.unpaidLeave + unpaidDayRate(person.basicSalary) * (inputs.unpaidDays || 0)) * 100) / 100 : 0;
-  const otRows: [keyof PayInputs, string, number][] = [['ot10', '1.0', 1], ['ot15', '1.5', 1.5], ['ot20', '2.0', 2], ['ot30', '3.0', 3]];
+  const unpaid = saved?.noPay ?? worked?.noPay ?? 0;
+  const otRows: [keyof PayInputs, string][] = [['ot10', '1.0'], ['ot15', '1.5'], ['ot20', '2.0'], ['ot30', '3.0']];
   const ro = locked || !show;
 
   return <section className={`${card} space-y-4`}>
@@ -129,7 +132,7 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
         </Box>
         <Box title="Overtime details">
           <div className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400"><span /><span className="text-right">Hours</span><span className="text-right">Amount</span></div>
-          {otRows.map(([key, label, times]) => <div key={key} className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 py-1 text-sm"><span className="font-semibold text-slate-600">{label}</span><input aria-label={`OT ${label} hours`} disabled={ro} type="number" step="0.25" min="0" value={show ? Number(inputs[key]) || '' : ''} placeholder={show ? '0' : '••••'} onChange={num(key)} className={`${field} text-right`} /><span className="text-right tabular-nums">{cash(Math.round(rate * times * (Number(inputs[key]) || 0) * 100) / 100)}</span></div>)}
+          {otRows.map(([key, label]) => <div key={key} className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 py-1 text-sm"><span className="font-semibold text-slate-600">{label}</span><input aria-label={`OT ${label} hours`} disabled={ro} type="number" step="0.25" min="0" value={show ? Number(inputs[key]) || '' : ''} placeholder={show ? '0' : '••••'} onChange={num(key)} className={`${field} text-right`} /><span className="text-right tabular-nums">{cash(otAmounts[key] || 0)}</span></div>)}
           <div className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 py-1 text-sm"><span className="font-semibold text-slate-600">RM</span><span className="text-right text-xs text-slate-400">typed amount</span><input aria-label="OT amount typed" disabled={ro} type="number" step="0.01" min="0" value={show ? inputs.ot || '' : ''} placeholder={show ? '0.00' : '••••'} onChange={num('ot')} className={`${field} text-right`} /></div>
           <Row label="Total OT amount" strong>{cash(out.ot)}</Row>
           <div className="mt-3 border-t border-slate-100 pt-2">

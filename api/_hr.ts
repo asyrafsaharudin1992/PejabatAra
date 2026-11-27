@@ -11,7 +11,7 @@ import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentive
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { payslipLeave } from './_leave-summary.js';
-import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, joinedForPay } from '../src/lib/payrollRun.js';
+import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, type WorkDay, joinedForPay } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { pdfFormHrAction } from './_pdf-forms.js';
@@ -328,6 +328,9 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
   const attendanceOt = new Map<string, { ot10: number; ot15: number; ot20: number; ot30: number }>();
   // The fixed amount for a rest day or a public holiday worked (Infotech's Rest/PH Amount), in days: a rest day is paid 1 x ORP a day (half a day for up to 4 hours), a public holiday 2 x ORP.
   const attendanceRestPh = new Map<string, { restDays: number; phDays: number }>();
+  // The same figures by date, used for staff with a raise: work before it is paid at the old salary.
+  const workDays = new Map<string, WorkDay[]>();
+  const addWork = (id: string, day: WorkDay) => workDays.set(id, [...(workDays.get(id) || []), day]);
   for (const row of otRead.error ? [] : otRead.data || []) {
     const sums = attendanceOt.get(row.employee_id) || { ot10: 0, ot15: 0, ot20: 0, ot30: 0 };
     // A day can be paid in parts at different rates (a rest day, a public holiday); older rows have one rate for the whole approved time.
@@ -337,11 +340,12 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
         const orp = (Number(part.minutes || 0) / 60) * Number(part.multiplier) / 8; // the day's pay in days of ORP
         const days = attendanceRestPh.get(row.employee_id) || { restDays: 0, phDays: 0 };
         if (part.flat === 'rest') days.restDays += orp; else days.phDays += orp / 2;
+        addWork(row.employee_id, part.flat === 'rest' ? { date: row.work_date, restDays: orp } : { date: row.work_date, phDays: orp / 2 });
         attendanceRestPh.set(row.employee_id, days);
         continue;
       }
       const key = ({ 1: 'ot10', 1.5: 'ot15', 2: 'ot20', 3: 'ot30' } as Record<number, 'ot10' | 'ot15' | 'ot20' | 'ot30'>)[Number(part.multiplier)];
-      if (key) sums[key] += Number(part.minutes || 0) / 60;
+      if (key) { sums[key] += Number(part.minutes || 0) / 60; addWork(row.employee_id, { date: row.work_date, [key]: Number(part.minutes || 0) / 60 }); }
     }
     attendanceOt.set(row.employee_id, sums);
   }
@@ -368,6 +372,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
         if (!groups.has(groupOf.get(id)) || !clocked.has(id) || away.has(id) || phOtDays.has(`${id}|${date}`)) continue;
         const days = attendanceRestPh.get(id) || { restDays: 0, phDays: 0 };
         days.phDays += 1; attendanceRestPh.set(id, days);
+        addWork(id, { date: String(date), phDays: 1 });
       }
     }
   }
@@ -379,6 +384,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     for (const row of unpaidError ? [] : unpaid || []) {
       const whole = day(row.end_date) - day(row.start_date) + 1, inside = Math.min(day(row.end_date), day(periodTo)) - Math.max(day(row.start_date), day(periodFrom)) + 1;
       if (whole > 0 && inside > 0) attendanceUnpaid.set(row.employee_id, (attendanceUnpaid.get(row.employee_id) || 0) + Number(row.days || 0) * Math.min(1, inside / whole));
+      for (let at = Math.max(day(row.start_date), day(periodFrom)); whole > 0 && at <= Math.min(day(row.end_date), day(periodTo)); at++) addWork(row.employee_id, { date: new Date(at * 86400000).toISOString().slice(0, 10), unpaidDays: Number(row.days || 0) / whole });
     }
   }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([
@@ -423,7 +429,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
     }
     const slip = own.find((item: any) => item.month === month);
     return {
-      id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [], salaryChanges: raises.get(row.id) || [],
+      id: row.id, company: row.company, employeeCode: row.employee_code, fullName: row.full_name, basicSalary: Number(row.basic_salary || 0), fixedAllowances: row.fixed_allowances || [], salaryChanges: raises.get(row.id) || [], workDays: raises.has(row.id) ? workDays.get(row.id) || [] : undefined,
       maritalStatus: row.marital_status || '', spouseWorking: row.spouse_working, children: (row.children || []).map((child: any) => ({ dateOfBirth: child.dateOfBirth || null, studying: Boolean(child.studying) })),
       attendanceRestPh: { restDays: Math.round((attendanceRestPh.get(row.id)?.restDays || 0) * 100) / 100, phDays: Math.round((attendanceRestPh.get(row.id)?.phDays || 0) * 100) / 100 }, attendanceUnpaid: Math.round((attendanceUnpaid.get(row.id) || 0) * 100) / 100, attendanceOt: Object.fromEntries(Object.entries(attendanceOt.get(row.id) || {}).map(([key, value]) => [key, Math.round(Number(value) * 100) / 100])), settings: row.payroll_settings || {}, joinDate: row.join_date || null, resignDate: row.resign_date || null, status: row.status, ytd, hasYtd: Boolean(start), earlierLocked, payslip: slip ? { status: slip.status, inputs: slip.inputs, result: slip.result } : null,
     };
@@ -2317,7 +2323,7 @@ export async function hrHandler(req: any, res: any) {
         if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
         const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
         const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays), annualLeaveDeduction: num(item.inputs?.annualLeaveDeduction), adjustments: cleanAdjustments(item.inputs?.adjustments) };
-        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate, salaryChanges: member.salaryChanges }, inputs, member.ytd, year, month);
+        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate, salaryChanges: member.salaryChanges, workDays: member.workDays }, inputs, member.ytd, year, month);
         // Locking keeps the leave summary of that moment on the payslip, so the balance shown later is the one at the end of the pay period.
         const saved: any = lock ? { ...result, leave: await payslipLeave(db, member.id, year, month) } : result;
         rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result: saved, locked_at: lock ? now : null, updated_at: now });
