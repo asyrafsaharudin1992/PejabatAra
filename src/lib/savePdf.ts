@@ -16,6 +16,13 @@ function fixPayslipBaseline(page: HTMLElement) {
   return () => style.remove();
 }
 
+// One page drawn as a picture, as the PDF holds it.
+export async function pageToCanvas(page: HTMLElement, draw?: typeof import('html2canvas').default) {
+  const html2canvas = draw || (await import('html2canvas')).default;
+  const restore = fixPayslipBaseline(page);
+  return html2canvas(page, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, onclone: (_document, element) => { element.style.transform = 'none'; element.style.left = '0'; element.style.top = '0'; fixUnsupportedColors(element); if (element.querySelector('.hrslip-sheet')) spacePayslipWords(_document); } }).finally(restore);
+}
+
 // "Save PDF" for a report that is already drawn on screen: every element marked data-pdf-page inside the container is one page. Each is drawn at its own size
 // (any scaling the preview applied to fit the window is removed), then put on an A4 page, so what is saved is the report as it was previewed, not a screenshot of the window.
 // html2canvas and jsPDF are loaded only when Save is pressed.
@@ -25,8 +32,7 @@ export async function pagesToPdfBlob(pages: HTMLElement[], landscape: boolean, e
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait', compress: true, ...(encryption ? { encryption } : {}) });
   const width = landscape ? 297 : 210, height = landscape ? 210 : 297;
   for (let index = 0; index < pages.length; index++) {
-    const restore = fixPayslipBaseline(pages[index]);
-    const canvas = await html2canvas(pages[index], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, onclone: (_document, element) => { element.style.transform = 'none'; element.style.left = '0'; element.style.top = '0'; fixUnsupportedColors(element); if (element.querySelector('.hrslip-sheet')) spacePayslipWords(_document); } }).finally(restore);
+    const canvas = await pageToCanvas(pages[index], html2canvas);
     // The picture is fitted to the page width; a taller one (several sheets in one block) continues on the next pages, a slice of one page each.
     const sliceHeight = Math.floor(canvas.width * height / width), count = Math.max(1, Math.ceil(canvas.height / sliceHeight - 0.08));
     for (let part = 0; part < count; part++) {

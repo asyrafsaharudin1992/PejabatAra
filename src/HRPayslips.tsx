@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Eye, EyeOff, Printer, X } from 'lucide-react';
+import { Eye, EyeOff, Mail, Printer, X } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { PeriodPicker } from './PeriodPicker';
 import { officeFetch } from './lib/officeApi';
@@ -11,6 +11,7 @@ import { HRPayslipSheet, useSlipPrint, type HRSlip } from './HRPayslipSheet';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
 import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
 import { downloadBlob } from './lib/downloadBlob';
+import { HRPayslipEmail } from './HRPayslipEmail';
 
 // Payroll > Payslips: the payslips of any past payroll month for everyone paid in it (HR and Finance), with a Preview of each as the staff member sees it.
 // October 2026 and before are what Infotech paid; November 2026 on is what was run in AraOffice. Amounts in the list stay hidden until Show amounts is pressed.
@@ -48,6 +49,7 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
   const [place, setPlace] = useState('');
   const [query, setQuery] = useState('');
   const [show, setShow] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const [view, setView] = useState<{ slip: HRSlip; status: string; infotech: string } | null>(null);
   const [opening, setOpening] = useState('');
   const [year, month] = pick.split('-').map(Number);
@@ -75,7 +77,9 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
       <select aria-label="Company" value={place} onChange={(event) => setPlace(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">KJ and SK</option><option value="KJ">KJ</option><option value="SK">SK</option></select>
       <input aria-label="Search staff" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or code" className="h-10 w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm" />
       <button type="button" onClick={() => setShow(!show)} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600">{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{show ? 'Hide amounts' : 'Show amounts'}</button>
+      <button type="button" aria-pressed={emailing} onClick={() => setEmailing(!emailing)} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 text-sm font-semibold text-white"><Mail className="h-4 w-4" />Email payslips</button>
     </div>
+    {emailing && <HRPayslipEmail key={pick} year={year} month={month} lines={shown} />}
     {!lines ? <p className="text-sm text-slate-500">Reading the payslips…</p> : !shown.length ? <p className="text-sm text-slate-500">No payslips for this payroll month{query || place ? ' with these filters' : ''}.</p> : <>
       <p className="text-sm text-slate-500">{shown.length} staff{lines.some((line) => line.status === 'draft') ? ' · a draft is a month not locked yet' : ''}</p>
       <div className="overflow-x-auto"><table className="no-stack w-full min-w-[620px] text-left text-sm">
