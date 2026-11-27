@@ -78,17 +78,25 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
   const period = payPeriod(year, month);
   const earned = person ? proratedSalary(person.basicSalary, year, month, person.joinDate, person.resignDate, person.salaryChanges) : null;
   // Infotech shows the salary before a raise as Basic and the by-the-day share of the raise as Increment; a joiner or leaver's missing days are a separate line.
-  const raises = person ? (person.salaryChanges || []).filter((item) => item.date > period.from && item.date <= period.to).sort((a, b) => a.date.localeCompare(b.date)) : [];
+  // A raise on the first day of the period counts too (the whole raise is the increment).
+  const raises = person ? (person.salaryChanges || []).filter((item) => item.date >= period.from && item.date <= period.to).sort((a, b) => a.date.localeCompare(b.date)) : [];
   const startSalary = person ? (raises.length ? raises[0].from : person.basicSalary) : 0;
   const wholePeriod = person && earned ? proratedSalary(person.basicSalary, year, month, null, null, person.salaryChanges).amount : 0;
-  const increment = raises.length ? Math.round((wholePeriod - startSalary) * 100) / 100 : 0;
-  const partial = earned ? Math.round((earned.amount - startSalary - increment) * 100) / 100 : 0;
   // The amounts as the pay run works them out (days before a raise use the old salary). A locked slip saved without them was worked out at the latest salary.
   const saved = locked ? person?.payslip?.result as { otByRate?: Record<string, number>; noPay?: number } | undefined : undefined;
   const worked = person ? calculatePayslip(locked ? { ...person, salaryChanges: [], workDays: [] } : person, inputs, person.ytd, year, month) : null;
   const otAmounts: Record<string, number> = saved?.otByRate || worked?.otByRate || {};
   const extra = adjustmentTotals(lines.map((item) => ({ ...item, amount: Number(item.amount) || 0 })));
   const unpaid = saved?.noPay ?? worked?.noPay ?? 0;
+  // A locked month shows the basic pay that was actually paid (the saved slip), and the increment as what was paid above the salary before the raise; a draft
+  // shows what the pay run will pay. November 2026 only: where the whole new salary was paid for a raise dated inside the period, it shows as basic salary with no increment.
+  const savedBasic = locked ? Number(person?.payslip?.result?.basic) || 0 : 0;
+  const totalSalary = savedBasic ? Math.round((savedBasic + unpaid) * 100) / 100 : earned?.amount || 0;
+  const wholeMonth = !!earned && earned.worked >= earned.total;
+  const paidInFull = year === 2026 && month === 11 && !!savedBasic && wholeMonth && raises.some((item) => item.date > period.from) && totalSalary >= (person?.basicSalary || 0) - 0.005;
+  const basicShown = paidInFull ? totalSalary : startSalary;
+  const increment = !raises.length || paidInFull ? 0 : Math.round(((savedBasic && wholeMonth ? totalSalary : wholePeriod) - startSalary) * 100) / 100;
+  const partial = earned ? Math.round((totalSalary - basicShown - increment) * 100) / 100 : 0;
   const otRows: [keyof PayInputs, string][] = [['ot10', '1.0'], ['ot15', '1.5'], ['ot20', '2.0'], ['ot30', '3.0']];
   const ro = locked || !show;
 
@@ -151,10 +159,10 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
           <Row label="Shift allowance (RM)"><input aria-label="Shift allowance" disabled={ro} type="number" step="0.01" min="0" value={show ? inputs.shiftAllowance || '' : ''} placeholder={show ? '0.00' : '••••'} onChange={num('shiftAllowance')} className={`${field} w-28 text-right`} /></Row>
         </Box>
         <Box title="Salary details">
-          <Row label="Basic salary">{cash(startSalary)}</Row>
+          <Row label="Basic salary">{cash(basicShown)}</Row>
           <Row label="Increment">{cash(increment)}</Row>
           {partial !== 0 && <Row label={`Part month (${earned.worked} of ${earned.total} days)`}>{cash(partial)}</Row>}
-          <Row label="Total salary" strong>{cash(earned.amount)}</Row>
+          <Row label={locked ? 'Total salary paid' : 'Total salary'} strong>{cash(totalSalary)}</Row>
         </Box>
         <Box title="Total wages details">
           <Row label="Allowance additions">{cash(extra.add + out.allowances.reduce((sum, item) => sum + item.amount, 0))}</Row>

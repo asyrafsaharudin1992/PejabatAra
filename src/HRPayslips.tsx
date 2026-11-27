@@ -22,8 +22,8 @@ const OPTIONS = (() => { const out: { year: number; month: number }[] = []; for 
 
 // The payslip in the Infotech layout (A4), with a Print button. The IC, tax, SOCSO, EPF and bank numbers stay hidden until HR chooses to show them (and print as shown).
 function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: string; infotech: string; onClose: () => void }) {
-  // January to October 2026 have two versions: the original Infotech payslip and the AraOffice layout.
-  const [version, setVersion] = useState<'infotech' | 'araoffice'>(infotech ? 'infotech' : 'araoffice');
+  // January to October 2026 have two versions: the AraOffice layout (what the staff member sees) and the original Infotech payslip.
+  const [version, setVersion] = useState<'infotech' | 'araoffice'>('araoffice');
   const original = version === 'infotech';
   const [printing, setPrinting] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -32,7 +32,7 @@ function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: st
     {printing && createPortal(<div className="hrslip-print"><HRPayslipSheet slip={slip} reveal={reveal} /></div>, document.body)}
     <div role="dialog" aria-label="Payslip" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">{slip.name} <span className="text-xs font-normal text-slate-400">· {MONTHS[slip.month - 1]} {slip.year}{status === 'draft' ? ' · draft, not locked' : ''}</span></h3>
-        {infotech && <div role="group" aria-label="Payslip version" className="flex rounded-xl border border-slate-200 p-0.5">{(['infotech', 'araoffice'] as const).map((item) => <button key={item} type="button" aria-pressed={version === item} onClick={() => setVersion(item)} className={`h-8 rounded-lg px-3 text-sm font-semibold ${version === item ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{item === 'infotech' ? 'Infotech' : 'AraOffice'}</button>)}</div>}
+        {infotech && <div role="group" aria-label="Payslip version" className="flex rounded-xl border border-slate-200 p-0.5">{(['araoffice', 'infotech'] as const).map((item) => <button key={item} type="button" aria-pressed={version === item} onClick={() => setVersion(item)} className={`h-8 rounded-lg px-3 text-sm font-semibold ${version === item ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{item === 'infotech' ? 'Infotech' : 'AraOffice'}</button>)}</div>}
         {!original && <button type="button" onClick={() => setReveal(!reveal)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC, tax and bank numbers' : 'Show IC, tax and bank numbers'}</button>}
         {original ? <PrintMenu onPrint={() => void printInfotech(infotech)} onPdf={() => downloadBlob([infotechBytes(infotech)], `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code} Infotech.pdf`, 'application/pdf')} className="h-9 px-3" />
           : <PrintMenu onPrint={() => setPrinting(true)} pdf={{ scope: '[aria-label="Payslip"]', filename: `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code}` }} className="h-9 px-3" />}

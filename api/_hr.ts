@@ -10,7 +10,7 @@ import { loadReviewReminders } from './_review.js';
 import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentiveCodes.js';
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
-import { payslipLeave } from './_leave-summary.js';
+import { payslipLeave, unpaidByDate } from './_leave-summary.js';
 import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, type WorkDay, joinedForPay, taxableGross } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
@@ -372,15 +372,13 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
       }
     }
   }
-  // Unpaid leave (UL, ULEL) approved for this pay period, as days: a request that runs over the start or end of the period counts only for the days inside it.
+  // Unpaid leave (UL, ULEL) approved for this pay period, as days: each leave day counts in the period its date falls in (rest days get none).
   const attendanceUnpaid = new Map<string, number>();
   {
     const { data: unpaid, error: unpaidError } = await db.from('hr_leave_requests').select('employee_id,start_date,end_date,days').in('leave_type', ['UL', 'ULEL']).eq('status', 'approved').lte('start_date', periodTo).gte('end_date', periodFrom).limit(2000);
-    const day = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86400000;
-    for (const row of unpaidError ? [] : unpaid || []) {
-      const whole = day(row.end_date) - day(row.start_date) + 1, inside = Math.min(day(row.end_date), day(periodTo)) - Math.max(day(row.start_date), day(periodFrom)) + 1;
-      if (whole > 0 && inside > 0) attendanceUnpaid.set(row.employee_id, (attendanceUnpaid.get(row.employee_id) || 0) + Number(row.days || 0) * Math.min(1, inside / whole));
-      for (let at = Math.max(day(row.start_date), day(periodFrom)); whole > 0 && at <= Math.min(day(row.end_date), day(periodTo)); at++) addWork(row.employee_id, { date: new Date(at * 86400000).toISOString().slice(0, 10), unpaidDays: Number(row.days || 0) / whole });
+    for (const item of await unpaidByDate(db, unpaidError ? [] : unpaid || [], periodFrom, periodTo)) {
+      attendanceUnpaid.set(item.employee_id, Math.round(((attendanceUnpaid.get(item.employee_id) || 0) + item.days) * 100) / 100);
+      addWork(item.employee_id, { date: item.date, unpaidDays: item.days });
     }
   }
   const [{ data: staffRows, error }, ytdRead, payslipRead, raiseRead] = await Promise.all([

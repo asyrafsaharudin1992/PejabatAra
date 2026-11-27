@@ -4,7 +4,7 @@ import { slipPeriod, infotechRemark } from './lib/payrollRun';
 
 // The payslip, laid out like the Infotech Employee Payslip Report (A4), the same for HR and for the staff member: the clinic and address, the staff member's details, Earnings and Deductions side by side
 // with the totals, then the employer's share, the nett wages and the bank. The identity and bank numbers show only when HR has chosen to (`reveal`).
-export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave; increment?: number; otLines?: { heading: string; rows: { label: string; hours: number; amount: number }[] }[]; otFrom?: string; otTo?: string };
+export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave; printedRows?: { earnings: [string, number | null][]; deductions: [string, number | null][] }; increment?: number; otLines?: { heading: string; rows: { label: string; hours: number; amount: number }[] }[]; otFrom?: string; otTo?: string };
 // Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
 export function useSlipPrint(active: boolean, title: string, onDone: () => void) {
   useEffect(() => {
@@ -62,6 +62,10 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
   const listed = sum(deductions.map(([, value]) => value));
   if (slip.deductions - listed > 0.005) deductions.unshift([slip.annualLeaveDeduction > 0 ? 'OTHER DEDUCTION' : 'ANNUAL LEAVE / OTHER DEDUCTION', Math.round((slip.deductions - listed) * 100) / 100]);
   const shown: [string, number | null][] = [...(noPay > 0 ? [['TOTAL NO PAY', noPay], [`[${period.from} TO ${period.to} CURRENT]`, null], ...(slip.noPayLines?.length ? slip.noPayLines.map((item) => [` - ${item.kind} - ${item.qty.toFixed(2)} ${item.unit} =${two(item.amount)}`, null]) : slip.unpaidDays ? [[` - UnPaid Leaves - ${slip.unpaidDays.toFixed(2)} Days =${two(noPay)}`, null]] : [])] as [string, number | null][] : []), ...deductions];
+  // A month brought over from Infotech prints the lines exactly as Infotech did (sub-lines set in, as there).
+  const asPrinted = (lines: [string, number | null][]) => lines.map(([name, value]): [string, number | null] => [`${name.startsWith('-') ? '   ' : /^(\[|OT Period|INCREMENT\])/.test(name) ? '  ' : ''}${name}`, value]);
+  const earningLines = slip.printedRows ? asPrinted(slip.printedRows.earnings) : earnings;
+  const deductionLines = slip.printedRows ? asPrinted(slip.printedRows.deductions) : shown;
   const label = 'text-[#555]';
   const info = (name: string, value: string) => <div className="flex gap-1.5"><span className={`w-[24mm] shrink-0 ${label}`}>{name}</span><span>:</span><span className="font-medium">{value || ''}</span></div>;
   const pair = (name: string, value: number) => <div className="flex"><span className="w-[30mm]">{name}</span><span className="w-[4mm]">:</span><span className="w-[24mm] text-right tabular-nums">{two(value)}</span></div>;
@@ -69,7 +73,7 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
     <div className="flex items-start gap-3">
       <img src="/ara-logo.png" alt="" className="h-[17mm] w-[17mm] shrink-0 object-contain" />
       <div className="min-w-0 flex-1"><p className="text-[10.5pt] font-bold">{company.name.replace('Sdn Bhd', 'SDN. BHD.').toUpperCase().replace('SDN. BHD..', 'SDN. BHD.')}</p><p className="text-[8.5pt]">{company.address.toUpperCase()}</p></div>
-      <p className="mt-6 text-right text-[8.6pt]">Payment Date : <span className="font-medium">{`26-${String(slip.month).padStart(2, '0')}-${slip.year}`}</span></p>
+      <p className="mt-6 text-right text-[8.6pt]">Payment Date : <span className="font-medium">{slip.printedRows ? '' : `26-${String(slip.month).padStart(2, '0')}-${slip.year}`}</span></p>
     </div>
     <div className="mt-1 border-b border-black" />
     <div className="mt-1.5 grid grid-cols-[1.25fr_1fr_1.1fr] gap-x-4 gap-y-1">
@@ -84,10 +88,10 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
       <div className="grid min-h-[88mm] grid-cols-[1fr_28mm_1fr_28mm]">
         <div className="relative col-span-2">
           <div className="absolute inset-y-0 right-[28mm] border-l border-black" />
-          {earnings.map(([name, value], at) => { const indent = name.match(/^ */)?.[0].length || 0; return <div key={at} className="grid grid-cols-[1fr_28mm]"><p className="py-0.5 pr-1" style={{ paddingLeft: `${1 + indent * 1.3}mm` }}>{name.trimStart()}</p><p className="px-1 py-0.5 text-right tabular-nums">{value === null ? '\u00a0' : two(value)}</p></div>; })}
+          {earningLines.map(([name, value], at) => { const indent = name.match(/^ */)?.[0].length || 0; return <div key={at} className="grid grid-cols-[1fr_28mm]"><p className="py-0.5 pr-1" style={{ paddingLeft: `${1 + indent * 1.3}mm` }}>{name.trimStart()}</p><p className="px-1 py-0.5 text-right tabular-nums">{value === null ? '\u00a0' : two(value)}</p></div>; })}
         </div>
-        <div className="border-l border-black px-1 py-0.5">{shown.map(([name]) => <p key={name} className="min-h-[1.9em] py-0.5" style={{ paddingLeft: `${(name.match(/^ */)?.[0].length || 0) * 1.3}mm` }}>{name.trimStart()}</p>)}</div>
-        <div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{shown.map(([name, value]) => <p key={name} className="min-h-[1.9em] py-0.5">{value === null ? '\u00a0' : two(value)}</p>)}</div>
+        <div className="border-l border-black px-1 py-0.5">{deductionLines.map(([name], at) => <p key={at} className="min-h-[1.9em] py-0.5" style={{ paddingLeft: `${(name.match(/^ */)?.[0].length || 0) * 1.3}mm` }}>{name.trimStart()}</p>)}</div>
+        <div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{deductionLines.map(([, value], at) => <p key={at} className="min-h-[1.9em] py-0.5">{value === null ? '\u00a0' : two(value)}</p>)}</div>
       </div>
       <div className="grid grid-cols-[1fr_28mm_1fr_28mm] border-t border-black">
         <div className="px-1 py-0.5 text-right">Total Earnings</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.gross, noPay, outside]))}</div><div className="border-l border-black px-1 py-0.5 text-right">Total Deductions</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.deductions, noPay]))}</div>

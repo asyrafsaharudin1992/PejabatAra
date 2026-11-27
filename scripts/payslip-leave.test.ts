@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { payslipLeave } from '../api/_leave-summary.ts';
+import { payslipLeave, unpaidByDate } from '../api/_leave-summary.ts';
 
 // A made-up database: each table returns its rows, filtered by the date conditions the code asks for.
 const fake = (tables: Record<string, any[]>) => ({ from: (name: string) => {
@@ -33,4 +33,11 @@ assert.equal((await run(weekend, 2027, 3, { ...office, ...roster })).al.period, 
 assert.equal((await run(weekend, 2027, 4, { ...office, ...roster })).al.period, 1);
 // Ordinary leave inside one period, with a half day.
 assert.deepEqual((await run([leave('2026-11-02', '2026-11-02', 0.5), leave('2026-10-05', '2026-10-06', 2)], 2026, 11)).al, { period: 0.5, ytd: 2.5, balance: null });
+// Unpaid leave for payroll: 18 to 22 December 2026 for Monday to Friday work is one day in December (Friday) and two in January (Monday, Tuesday).
+const unpaid = [{ employee_id: 'x', start_date: '2026-12-18', end_date: '2026-12-22', days: 3 }];
+const staffDb = fake({ hr_employees: [{ id: 'x', work_days: [1, 2, 3, 4, 5], holiday_group: '' }] });
+assert.deepEqual(await unpaidByDate(staffDb, unpaid, '2026-11-20', '2026-12-19'), [{ employee_id: 'x', date: '2026-12-18', days: 1 }]);
+assert.deepEqual((await unpaidByDate(staffDb, unpaid, '2026-12-20', '2027-01-19')).map((item) => [item.date, item.days]), [['2026-12-21', 1], ['2026-12-22', 1]]);
+// A single date, whole or half, is taken as it is.
+assert.deepEqual(await unpaidByDate(staffDb, [{ employee_id: 'x', start_date: '2026-12-20', end_date: '2026-12-20', days: 0.5 }], '2026-12-20', '2027-01-19'), [{ employee_id: 'x', date: '2026-12-20', days: 0.5 }]);
 console.log('Payslip leave checks passed.');

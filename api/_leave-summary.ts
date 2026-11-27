@@ -57,3 +57,26 @@ export async function payslipLeave(db: any, employeeId: string, year: number, mo
   };
   return { al: line('al'), ml: line('ml') };
 }
+
+// Unpaid leave of a pay period, date by date, as Infotech links it to payroll: each day goes to the period its date falls in, and a rest day or holiday inside
+// a request gets none (the same calendar as the leave on the payslip). Leave of a single date needs no calendar.
+export async function unpaidByDate(db: any, requests: { employee_id: string; start_date: string; end_date?: string | null; days: unknown }[], from: string, to: string) {
+  const longer = requests.filter((item) => (item.end_date || item.start_date) > item.start_date);
+  const people = new Map<string, any>();
+  if (longer.length) {
+    const { data, error } = await db.from('hr_employees').select('id,work_days,holiday_group').in('id', [...new Set(longer.map((item) => item.employee_id))]).limit(1000);
+    if (error) throw error;
+    for (const person of data || []) people.set(person.id, person);
+  }
+  const out: { employee_id: string; date: string; days: number }[] = [];
+  for (const item of requests) {
+    const end = item.end_date || item.start_date, person = people.get(item.employee_id);
+    const workDays: number[] = Array.isArray(person?.work_days) && person.work_days.length ? person.work_days : [1, 2, 3, 4, 5];
+    const calendar = end > item.start_date ? await rosterFor(db, item.employee_id, item.start_date, end, person?.holiday_group || '') : {};
+    for (let date = item.start_date > from ? item.start_date : from; date <= end && date <= to; date = shift(date, 1)) {
+      const days = round(daysUpTo(item, date, workDays, calendar) - daysUpTo(item, shift(date, -1), workDays, calendar));
+      if (days) out.push({ employee_id: item.employee_id, date, days });
+    }
+  }
+  return out;
+}

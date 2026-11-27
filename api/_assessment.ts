@@ -1,7 +1,6 @@
 import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { hiddenPayslips, monthKey } from './_payslip-hidden.js';
 import { PAYSLIP_STAFF, payslipSheet } from './_payslip-sheet.js';
-import { infotechSlip } from './_payslip-infotech.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -730,8 +729,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     const { data, error } = await db.from('hr_payslips').select('year,month,result,inputs,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
     if (error) throw error;
     if (!data) throw fail(404, 'That payslip is not available.');
-    // The same payslip HR previews. January to October 2026 were paid in Infotech: the staff member sees that original (this one only if it is missing).
-    return res.status(200).json({ payslip: await payslipSheet(db, me.id, data, me), infotech: await infotechSlip(db, me.id, data.year, data.month) });
+    // The same payslip HR previews. January to October 2026 (paid in Infotech) print the lines Infotech printed, kept on the slip.
+    return res.status(200).json({ payslip: await payslipSheet(db, me.id, data, me) });
   }
 
   // The staff member's own photo (a link that works for an hour); nobody else's photo can be asked for here.

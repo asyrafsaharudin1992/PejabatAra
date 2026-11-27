@@ -13,17 +13,25 @@ export function cleanAdjustments(value: unknown) {
 // `slip` is the row of hr_payslips (year, month, result, inputs); `me` the person's HR record (PAYSLIP_STAFF).
 export async function payslipSheet(db: any, id: string, slip: any, me: any) {
   const r: any = slip.result || {};
+  // A month brought over from Infotech keeps what was printed then: the designation, the bank and every earning and deduction line.
+  const printed: any = r.printed;
   // Like Infotech's payslip: a raise in the middle of the period shows as "INCREMENT : amount" under the basic pay, and the OT is listed by rate
   // (before and after the raise when the attendance dates allow it).
   const period = payPeriod(slip.year, slip.month);
-  const { data: raiseRows } = await db.from('hr_career_history').select('event_date,from_value,to_value').eq('employee_id', id).in('kind', ['Increment', 'Salary Adjustment']).gt('event_date', period.from).lte('event_date', period.to).order('event_date');
-  const raises = (raiseRows || []).filter((row: any) => Number.isFinite(Number(row.from_value))).map((row: any) => ({ date: String(row.event_date), from: Number(row.from_value), to: Number(row.to_value) }));
+  const { data: raiseRows } = await db.from('hr_career_history').select('event_date,from_value,to_value').eq('employee_id', id).in('kind', ['Increment', 'Salary Adjustment']).gte('event_date', period.from).lte('event_date', period.to).order('event_date');
+  const changes = (raiseRows || []).filter((row: any) => Number.isFinite(Number(row.from_value))).map((row: any) => ({ date: String(row.event_date), from: Number(row.from_value), to: Number(row.to_value) }));
+  const raises = changes.filter((row: any) => row.date > period.from); // a raise inside the period splits the OT; one on its first day does not
+  const less = await noPayOf(db, id, slip, Number(me.basic_salary) || 0);
+  // INCREMENT is what this slip actually paid above the salary before the raise. For someone who joined or left inside the period the by-the-day share is worked
+  // out. November 2026 only: the slips that paid the whole new salary for a raise dated inside the period (a fault since put right) have no INCREMENT line.
   let increment = 0;
   let otLines: { heading: string; rows: { label: string; hours: number; amount: number }[] }[] = [];
-  if (raises.length && Number(r.basic) > 0) {
-    const latest = Number(raises[raises.length - 1].to) || Number((me as any).basic_salary) || 0;
-    const whole = proratedSalary(latest, slip.year, slip.month, null, null, raises.map((row: any) => ({ date: row.date, from: row.from }))).amount;
-    increment = Math.round((whole - raises[0].from) * 100) / 100;
+  if (changes.length && Number(r.basic) > 0) {
+    const partMonth = (me.join_date && me.join_date > period.from) || (me.resign_date && me.resign_date < period.to);
+    const latest = Number(changes[changes.length - 1].to) || Number(me.basic_salary) || 0;
+    const paid = partMonth ? proratedSalary(latest, slip.year, slip.month, null, null, changes.map((row: any) => ({ date: row.date, from: row.from }))).amount : Number(r.basic) + (Number(less.noPay) || 0);
+    const paidInFull = slip.year === 2026 && slip.month === 11 && raises.length > 0 && paid >= latest - 0.005;
+    increment = paidInFull ? 0 : Math.max(0, Math.round((paid - changes[0].from) * 100) / 100);
   }
   let typed: Record<string, number> = { ot10: Number(slip.inputs?.ot10) || 0, ot15: Number(slip.inputs?.ot15) || 0, ot20: Number(slip.inputs?.ot20) || 0, ot30: Number(slip.inputs?.ot30) || 0 };
   const salaryNow = Number((me as any).basic_salary) || Number(r.basic) || 0;
@@ -58,11 +66,12 @@ export async function payslipSheet(db: any, id: string, slip: any, me: any) {
   }
   // The listed OT must add up to the OT on the payslip (a month brought over from Infotech, or a salary that changed, may not); if not, it is left out.
   if (Math.abs(otLines.reduce((sum, block) => sum + block.rows.reduce((inner, row) => inner + row.amount, 0), 0) - (Number(r.ot) || 0)) > 0.05) otLines = [];
-  return { increment, otLines, otFrom: period.from, otTo: period.to, year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
+  return { increment, otLines, otFrom: period.from, otTo: period.to, year: slip.year, month: slip.month, name: me.full_name, code: me.employee_code, company: me.company, designation: printed?.designation || me.designation, department: me.department,
     basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
     eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
-    bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),
+    bankName: printed?.bankName || me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),
     // For HR's A4 payslip (the Infotech layout): the identity and bank numbers (shown only when HR chooses), the join date and what HR typed that month.
-    ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', resignDate: me.resign_date || '', bankAccount: me.bank_account || '',
-    ...(await noPayOf(db, id, slip, Number((me as any).basic_salary) || 0)), annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) };
+    ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', resignDate: me.resign_date || '', bankAccount: printed?.account || me.bank_account || '',
+    ...(printed ? { printedRows: { earnings: printed.earnings, deductions: printed.deductions } } : {}),
+    ...less, annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) };
 }
