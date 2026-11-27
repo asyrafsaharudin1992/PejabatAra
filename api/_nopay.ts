@@ -4,7 +4,7 @@ import { payPeriod, unpaidDayRate } from '../src/lib/payrollRun.js';
 // earlier one it is worked out from what HR typed, at the salary of that month (the salary before the first raise dated after its pay period).
 export async function noPayOf(db: any, employeeId: string, slip: { year: number; month: number; result?: any; inputs?: any }, salaryNow: number) {
   // Lines an Infotech slip prints that its saved figures do not hold: an incentive paid outside the nett wages, and a named deduction.
-  const printed = { ...(slip.result?.infotechIncentive ? { infotechIncentive: slip.result.infotechIncentive as number } : {}), ...(slip.result?.deductionLines ? { deductionLines: slip.result.deductionLines as { name: string; amount: number }[] } : {}) };
+  const printed = { ...(slip.result?.infotechIncentive ? { infotechIncentive: slip.result.infotechIncentive as number } : {}), ...(slip.result?.deductionLines ? { deductionLines: slip.result.deductionLines as { name: string; amount: number }[] } : {}), ...(slip.result?.printedOt ? { printedOt: slip.result.printedOt as string[] } : {}), ...(slip.result?.printedRestPh ? { printedRestPh: slip.result.printedRestPh as string[] } : {}) };
   return { ...printed, ...(await amountOf(db, employeeId, slip, salaryNow)) };
 }
 async function amountOf(db: any, employeeId: string, slip: { year: number; month: number; result?: any; inputs?: any }, salaryNow: number) {

@@ -1,5 +1,5 @@
 import { COMPANY, fmt, leaveText, MONTHS, type Slip, type SlipLeave } from './MyPayslips';
-import { slipPeriod } from './lib/payrollRun';
+import { slipPeriod, infotechRemark } from './lib/payrollRun';
 
 // HR's payslip, laid out like the Infotech Employee Payslip Report (A4): the clinic and address, the staff member's details, Earnings and Deductions side by side
 // with the totals, then the employer's share, the nett wages and the bank. The identity and bank numbers show only when HR has chosen to (`reveal`).
@@ -19,12 +19,15 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
   if (slip.ot > 0) {
     // Infotech's layout: TOTAL OVER TIME with the amount, then the period and, for each block, its rates and hours.
     earnings.push(['TOTAL OVER TIME', slip.ot]);
-    if (slip.otLines?.length && slip.otFrom && slip.otTo) {
+    // A slip brought over from Infotech carries the OT lines exactly as Infotech printed them.
+    if (slip.printedOt?.length) for (const line of slip.printedOt) earnings.push([`${line.startsWith('-') ? '   ' : '  '}${line}`, null]);
+    else if (slip.otLines?.length && slip.otFrom && slip.otTo) {
       earnings.push([`  OT Period(s) ${dmy(slip.otFrom)} to ${dmy(slip.otTo)}`, null]);
       for (const block of slip.otLines) { if (block.heading) earnings.push([`  [${block.heading}]`, null]); for (const row of block.rows) earnings.push([`   - [${row.label}] ${row.hours.toFixed(2)} Hrs = ${two(row.amount)}`, null]); }
     }
   }
-  if (slip.restPh > 0) earnings.push(['REST DAY / PUBLIC HOLIDAY', slip.restPh]);
+  if (slip.restPh > 0) earnings.push([slip.printedRestPh?.length ? 'TOTAL REST & PH' : 'REST DAY / PUBLIC HOLIDAY', slip.restPh]);
+  if (slip.restPh > 0) for (const line of slip.printedRestPh || []) earnings.push([`${line.startsWith('-') ? '   ' : '  '}${line}`, null]);
   for (const item of (slip.adjustments || []).filter((line) => line.amount > 0)) earnings.push([`${item.type}${item.note ? ` - ${item.note}` : ''}`.toUpperCase(), item.amount]);
   const known = sum(earnings.map(([, value]) => value ?? 0));
   if (slip.gross + noPay - known > 0.005) earnings.push(['SHIFT / OTHER ALLOWANCE', Math.round((slip.gross + noPay - known) * 100) / 100]);
@@ -83,6 +86,7 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
       </div>
       <div className="grid grid-cols-2 border-t border-black text-[8pt]"><p className="px-1.5 py-1">This commission/allowance is not part of the regular salary.</p><p className="border-l border-black px-1.5 py-1">It is subject to change and may not be recurring.</p></div>
     </div>
+    {infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0) && <p className="mt-2 text-[8pt]">{infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)}</p>}
     <p className="mt-2 text-[7.5pt] text-[#777]">{MONTHS[slip.month - 1]} {slip.year}</p>
   </div>;
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
-import { slipPeriod } from './lib/payrollRun';
+import { slipPeriod, infotechRemark } from './lib/payrollRun';
 import { downloadBlob } from './lib/downloadBlob';
 import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
 import { lockInfotechPdf } from './lib/lockInfotechPdf';
@@ -11,7 +11,7 @@ import { lockInfotechPdf } from './lib/lockInfotechPdf';
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
-export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; noPayLines?: { kind: string; qty: number; unit: string; amount: number }[]; infotechIncentive?: number; deductionLines?: { name: string; amount: number }[]; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
+export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; noPayLines?: { kind: string; qty: number; unit: string; amount: number }[]; infotechIncentive?: number; deductionLines?: { name: string; amount: number }[]; printedOt?: string[]; printedRestPh?: string[]; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
 // The leave summary under the pay: days taken in the pay period / balance at the end of it / days taken so far this year. Annual Leave includes Emergency Leave.
 export type SlipLeave = { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } };
 export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`;
@@ -139,7 +139,7 @@ export default function MyPayslips() {
       {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
       <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
       {asking && asking.kind !== 'open' && <PasswordPrompt title={asking.kind === 'print' ? 'Enter your password to print' : 'Enter your password to get the PDF'} note={asking.kind === 'pdf' ? 'The PDF is locked with this same password, so anyone you send it to (for example on WhatsApp) needs it to open the file.' : undefined} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
-      {original ? <InfotechSlip pdf={original} /> : <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
+      {original ? <InfotechSlip pdf={original} remark={infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)} /> : <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
         <div className="mb-4 flex items-start gap-3 border-b border-slate-100 pb-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-12 w-12 shrink-0 object-contain" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#14233b]">{company.name}</p><p className="text-[11px] leading-4 text-slate-500">{company.address}</p></div></div>
         <h2 className="text-base font-semibold text-[#3b5da8]">{slip.name} ({slip.code})</h2>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">

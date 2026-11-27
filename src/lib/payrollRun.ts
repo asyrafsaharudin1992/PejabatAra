@@ -36,6 +36,11 @@ export function taxableGross(result: { gross?: number; nonTaxable?: number; sour
     : result?.source === 'Infotech' ? (result.allowances || []).reduce((sum, item) => sum + (/^(incentives?|allowance care coordinat(o|e)r)$/i.test(String(item.name || '').trim()) ? Number(item.amount) || 0 : 0), 0) : 0;
   return money(gross - untaxed);
 }
+// January to October 2026 were paid in Infotech: the remark shown with those payslips.
+export function infotechRemark(year: number, month: number, workedExtra: boolean) {
+  if (year !== 2026 || month > 10) return '';
+  return `Remarks: record taken from Infotech.${workedExtra ? ' OT, rest day and public holiday figures are as paid in Infotech.' : ''}`;
+}
 export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0, unpaidDays: 0, annualLeaveDeduction: 0 };
 
 const money = (value: number) => Math.round(value * 100) / 100;

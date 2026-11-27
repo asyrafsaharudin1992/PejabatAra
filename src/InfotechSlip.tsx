@@ -8,7 +8,7 @@ export async function printInfotech(pdf: string) {
   const url = URL.createObjectURL(new Blob([infotechBytes(pdf)], { type: 'application/pdf' }));
   try { await printPdfAsImages(url); } finally { URL.revokeObjectURL(url); }
 }
-export function InfotechSlip({ pdf }: { pdf: string }) {
+export function InfotechSlip({ pdf, remark }: { pdf: string; remark?: string }) {
   const [pages, setPages] = useState<string[] | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -18,5 +18,5 @@ export function InfotechSlip({ pdf }: { pdf: string }) {
   }, [pdf]);
   if (failed) return <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">This browser cannot show the payslip. Use Download.</p>;
   if (!pages) return <p role="status" className="p-3 text-sm text-slate-500">Opening the payslip…</p>;
-  return <div className="space-y-3">{pages.map((url, at) => <img key={url} src={url} alt={`Infotech payslip, page ${at + 1}`} className="mx-auto block w-full max-w-[820px] bg-white shadow" />)}</div>;
+  return <div className="space-y-3">{remark && <p className="mx-auto max-w-[820px] rounded-xl bg-sky-50 p-3 text-xs text-sky-900">{remark}</p>}{pages.map((url, at) => <img key={url} src={url} alt={`Infotech payslip, page ${at + 1}`} className="mx-auto block w-full max-w-[820px] bg-white shadow" />)}</div>;
 }

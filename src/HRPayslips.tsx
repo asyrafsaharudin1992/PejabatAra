@@ -4,7 +4,7 @@ import { Eye, EyeOff, Printer, X } from 'lucide-react';
 import { card } from './AssessmentStaff';
 import { PeriodPicker } from './PeriodPicker';
 import { officeFetch } from './lib/officeApi';
-import { payPeriod } from './lib/payrollRun';
+import { infotechRemark, payPeriod } from './lib/payrollRun';
 import { fmt, longDate, MONTHS } from './MyPayslips';
 import { PrintMenu } from './PrintMenu';
 import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
@@ -51,7 +51,7 @@ function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: st
         {original ? <PrintMenu onPrint={() => void printInfotech(infotech)} onPdf={() => downloadBlob([infotechBytes(infotech)], `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code} Infotech.pdf`, 'application/pdf')} className="h-9 px-3" />
           : <PrintMenu onPrint={() => setPrinting(true)} pdf={{ scope: '[aria-label="Payslip"]', filename: `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code}` }} className="h-9 px-3" />}
         <button type="button" onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200"><X className="h-4 w-4" /></button></div>
-      <div className="flex-1 overflow-auto bg-slate-100 p-3 sm:p-5">{original ? <InfotechSlip pdf={infotech} /> : <ReportPreviewFrame portrait><HRPayslipSheet slip={slip} reveal={reveal} /></ReportPreviewFrame>}</div>
+      <div className="flex-1 overflow-auto bg-slate-100 p-3 sm:p-5">{original ? <InfotechSlip pdf={infotech} remark={infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)} /> : <ReportPreviewFrame portrait><HRPayslipSheet slip={slip} reveal={reveal} /></ReportPreviewFrame>}</div>
     </div>
   </div>;
 }

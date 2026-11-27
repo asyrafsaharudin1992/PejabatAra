@@ -1,7 +1,8 @@
 // Makes the January-October 2026 slips already in AraOffice show the same lines as the Infotech payslips, read from the payslip text:
 //   - TOTAL NO PAY (full basic pay, with unpaid leave or absence under deductions);
 //   - an incentive Infotech lists under earnings but pays outside the nett wages;
-//   - a notice-pay claim, shown as a deduction instead of two offsetting lines.
+//   - a notice-pay claim, shown as a deduction instead of two offsetting lines;
+//   - the overtime and rest day / public holiday lines (period, rates, hours) as printed.
 // No money figure is changed (basic, gross, deductions, net, tax stay). Run from the project folder:
 //   npx tsx scripts/align-infotech-slips.mts <pages.json>          check only
 //   npx tsx scripts/align-infotech-slips.mts <pages.json> save     back up the slips, then save
@@ -12,7 +13,7 @@ const { createClient } = createRequire(import.meta.url)('@supabase/supabase-js')
 const env: any = Object.fromEntries(fs.readFileSync('.env.local', 'utf8').split('\n').filter((line) => /^[A-Z_]+=/.test(line)).map((line) => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1).replace(/^["']|["']$/g, '')]; }));
 const db = createClient(env.SUPABASE_URL || env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY, { auth: { persistSession: false }, realtime: { transport: class {} } });
 const save = process.argv[3] === 'save';
-const pages: any[] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).filter((page: any) => /TOTAL NO PAY|INCENTIVES|TUNTUTAN GANTI NOTIS/.test(page.text));
+const pages: any[] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).filter((page: any) => /TOTAL NO PAY|INCENTIVES|TUNTUTAN GANTI NOTIS|TOTAL OVER TIME|TOTAL REST/.test(page.text));
 const round = (value: number) => Math.round(value * 100) / 100, number = (text: string) => Number(text.replace(/,/g, ''));
 const { data: staff } = await db.from('hr_employees').select('id,employee_code').limit(2000);
 const ids = new Map(staff.map((row: any) => [row.employee_code, row.id]));
@@ -49,6 +50,19 @@ for (const page of pages) {
     ok = ok && Boolean(offset) && printed.has(round(-notice.amount)) && printed.has(deductions);
     if (offset) { result.allowances = r.allowances.filter((item: any) => item !== notice && item !== offset); result.deductionLines = [{ name: 'TUNTUTAN GANTI NOTIS', amount: round(-notice.amount) }]; changes.push(`notice claim ${-notice.amount}`); }
   }
+  // Overtime and rest day / public holiday lines, in the order printed. A [period] heading belongs to the lines after it.
+  const printedOt: string[] = [], printedRestPh: string[] = []; let otTotal = 0, restTotal = 0, waiting: string[] = [];
+  for (const [line] of page.text.matchAll(/OT Period\(s\) [\d-]+ to [\d-]+|\[\d{4}-\d\d-\d\d TO \d{4}-\d\d-\d\d [A-Z ]+\]|- [^\n]*?= ?[\d,]+\.\d\d/g)) {
+    const amount = number(line.match(/([\d,]+\.\d\d)$/)?.[1] || '0');
+    if (line.startsWith('OT Period')) waiting.push(line);
+    else if (line.startsWith('[')) waiting.push(line);
+    else if (/^- \[OT/.test(line)) { printedOt.push(...waiting, line); waiting = []; otTotal = round(otTotal + amount); }
+    else if (/^- (Rest|PH|Public)/i.test(line)) { printedRestPh.push(...waiting.filter((item) => item.startsWith('[')), line); waiting = waiting.filter((item) => !item.startsWith('[')); restTotal = round(restTotal + amount); }
+    else waiting = waiting.filter((item) => !item.startsWith('['));
+  }
+  // The lines are copied as Infotech printed them, even where Infotech's own lines do not add up to its total; those are listed for HR.
+  if (r.ot > 0 && r.printedOt === undefined && printedOt.length) { result.printedOt = printedOt; changes.push('OT lines'); if (Math.abs(otTotal - r.ot) >= 0.05) console.log('note', code, `month ${month}`, 'Infotech OT lines add to', otTotal, 'but its total is', r.ot); }
+  if (r.restPh > 0 && r.printedRestPh === undefined && printedRestPh.length) { if (Math.abs(restTotal - r.restPh) < 0.05) { result.printedRestPh = printedRestPh; changes.push('rest/PH lines'); } else console.log('skip', code, `month ${month}`, 'rest/PH lines add to', restTotal, 'slip', r.restPh); }
   if (!ok) { failed++; console.log('NO  ', code, `month ${month}`); }
   else if (changes.length) {
     console.log('ok  ', code, `month ${month}`, changes.join(', '));

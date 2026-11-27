@@ -57,6 +57,7 @@ export function OtClaims({ onError }: { onError: (message: string) => void }) {
       <span className="ml-auto flex flex-wrap gap-2"><button onClick={() => setPrinting('pdf')} disabled={!total} className={solid}><Printer className="h-4 w-4" />Print / Save PDF</button><button onClick={exportCsv} disabled={!total} className={ghost}><Download className="h-4 w-4" />Download CSV</button></span>
     </div>
     <p className="text-sm text-slate-500">The same layout as the Infotech Attendance Request Status Report: for each OT claim, the original clocks and OT counted by the system, what the staff asked for, and what HR approved, at each rate (1.0, 1.5, 2.0, 3.0). A fixed day pay on a rest day or public holiday is shown as the hours it equals. Times are written 8.59 and hours as decimals (3.02), as in Infotech.</p>
+    {range.from < '2026-10-20' && <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Remarks: claims dated before 20 October 2026 were taken from Infotech (approved hours only). The hours paid are on the payslip and may differ, as HR may adjust OT in payroll.</p>}
     {!staff ? <p className="text-sm text-slate-500">Loading…</p> : !total ? <p className="text-sm text-slate-500">No OT claims for this selection.</p> : <>
       <p className="text-xs font-semibold text-slate-500">{shown.length} staff · {total} claims</p>
       <div className="overflow-x-auto"><style>{SUMMARY_CSS}</style><Summary staff={shown} /></div>
