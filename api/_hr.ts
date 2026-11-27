@@ -15,7 +15,7 @@ import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, p
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { pdfFormHrAction } from './_pdf-forms.js';
-import { PAYSLIP_STAFF, cleanAdjustments, payslipSheet } from './_payslip-sheet.js';
+import { PAYSLIP_STAFF, cleanAdjustments, payslipSheet, recalculatedSheet } from './_payslip-sheet.js';
 import { infotechSlip } from './_payslip-infotech.js';
 import { payslipEmailAction } from './_payslip-email.js';
 import { hiddenPayslips } from './_payslip-hidden.js';
@@ -2363,7 +2363,7 @@ export async function hrHandler(req: any, res: any) {
       const ids = (slips || []).map((row: any) => row.employee_id);
       const { data: people } = ids.length ? await db.from('hr_employees').select('id,company,employee_code,full_name,designation').in('id', ids) : { data: [] as any[] };
       const byId = new Map((people || []).map((p: any) => [p.id, p]));
-      return res.status(200).json({ year, month, staff: (slips || []).map((row: any) => { const p: any = byId.get(row.employee_id) || {}; return { id: row.employee_id, code: p.employee_code || '', name: p.full_name || '', company: p.company || '', designation: p.designation || '', status: row.status, net: Number(row.result?.net) || 0 }; }).sort((a: any, b: any) => a.company.localeCompare(b.company) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true })) });
+      return res.status(200).json({ year, month, staff: (slips || []).map((row: any) => { const p: any = byId.get(row.employee_id) || {}; return { id: row.employee_id, code: p.employee_code || '', name: p.full_name || '', company: p.company || '', designation: p.designation || '', status: row.status, net: Number(row.result?.net) || 0, flag: row.result?.recalculated ? (Number(row.result.net) >= Number(row.result.recalculated.net) ? 'over' : 'under') : '' }; }).sort((a: any, b: any) => a.company.localeCompare(b.company) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true })) });
     }
     // Email payslips: each staff member their own, in a locked PDF (HR sends; Finance may look).
     if (action.startsWith('payslip_email_')) return await payslipEmailAction(req, res, db, user, action, body, await branchId(db, 'AraOffice HR Private', true), await hiddenPayslips(db));
@@ -2382,7 +2382,7 @@ export async function hrHandler(req: any, res: any) {
       ]);
       if (error) throw error;
       if (!slip || !me) throw fail(404, 'That payslip is not available.');
-      return res.status(200).json({ status: slip.status, payslip: await payslipSheet(db, id, slip, me) });
+      return res.status(200).json({ status: slip.status, payslip: await payslipSheet(db, id, slip, me), recalculated: await recalculatedSheet(db, id, slip, me) });
     }
 
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).

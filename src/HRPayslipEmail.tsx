@@ -5,11 +5,12 @@ import { officeFetch } from './lib/officeApi';
 import { pageToCanvas } from './lib/savePdf';
 import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
 import { MONTHS } from './MyPayslips';
+import { PayFlag, type PayFlagKind } from './PayFlag';
 
 // Email payslips (Payroll > Payslips): the ticked staff of a locked month are sent their payslip one after another from this computer, so the page must stay
 // open until it finishes. Each payslip is drawn here as it is previewed (identity and bank numbers hidden) and locked and sent by the server.
 const API = '/api/status?resource=hr';
-type Line = { id: string; code: string; name: string; company: string; status: 'draft' | 'locked' };
+type Line = { id: string; code: string; name: string; company: string; status: 'draft' | 'locked'; flag?: PayFlagKind };
 type Status = { configured: boolean; hidden: boolean; sender: string; testTo: string; sent: Record<string, { at: string; by: string }>; people: Record<string, { email: string; problem: string }> };
 
 const call = async (query: string, options?: RequestInit) => {
@@ -48,8 +49,9 @@ export function HRPayslipEmail({ year, month, lines }: { key?: string; year: num
   const blocked = !status || !status.configured || status.hidden || !!progress;
   const send = async (line: Line, test: boolean) => {
     const view = await call(`action=payslip_view&employeeId=${line.id}&year=${year}&month=${month}`);
-    const image = await slipPicture(view.payslip);
-    await call('action=payslip_email_send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employeeId: line.id, year, month, image, test, again: !!status?.sent[line.id] }) });
+    // A month worked out again goes as a second page of the same file.
+    const images = [await slipPicture(view.payslip), ...(view.recalculated ? [await slipPicture(view.recalculated)] : [])];
+    await call('action=payslip_email_send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employeeId: line.id, year, month, images, test, again: !!status?.sent[line.id] }) });
   };
   const run = async (list: Line[], test: boolean) => {
     stop.current = false; setConfirming(false); setMessage(''); setFailed({});
@@ -78,7 +80,7 @@ export function HRPayslipEmail({ year, month, lines }: { key?: string; year: num
       </div>
       {progress && <p role="status" className="text-sm text-[#0b587b]">{progress} Keep this page open.</p>}
       {message && <p role="status" className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">{message}</p>}
-      <ul className="max-h-80 divide-y divide-slate-200 overflow-auto rounded-xl border border-slate-200 bg-white">{locked.map((line) => { const person = status?.people[line.id], sent = status?.sent[line.id]; return <li key={line.id}><label className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm"><input type="checkbox" disabled={!ready(line) || !!progress} checked={picked.has(line.id)} onChange={() => setPicked((current) => { const next = new Set(current); if (!next.delete(line.id)) next.add(line.id); return next; })} /><span className="font-semibold">{line.name}</span><span className="text-xs text-slate-400">{line.code}</span><span className="mr-auto text-xs text-slate-500">{person?.email}</span>
+      <ul className="max-h-80 divide-y divide-slate-200 overflow-auto rounded-xl border border-slate-200 bg-white">{locked.map((line) => { const person = status?.people[line.id], sent = status?.sent[line.id]; return <li key={line.id}><label className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm"><input type="checkbox" disabled={!ready(line) || !!progress} checked={picked.has(line.id)} onChange={() => setPicked((current) => { const next = new Set(current); if (!next.delete(line.id)) next.add(line.id); return next; })} /><span className="font-semibold">{line.name}<PayFlag kind={line.flag} /></span><span className="text-xs text-slate-400">{line.code}</span><span className="mr-auto text-xs text-slate-500">{person?.email}</span>
         {failed[line.id] ? <span className="text-xs text-rose-700">{failed[line.id]}</span> : person?.problem ? <span className="text-xs text-amber-700">{person.problem}</span> : sent ? <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Sent {new Date(sent.at).toLocaleDateString('en-GB')}</span> : null}</label></li>; })}</ul>
     </>}
   </div>;

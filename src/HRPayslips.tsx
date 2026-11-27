@@ -12,17 +12,21 @@ import { ReportPreviewFrame } from './ReportPreviewFrame';
 import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
 import { downloadBlob } from './lib/downloadBlob';
 import { HRPayslipEmail } from './HRPayslipEmail';
+import { PayFlag, type PayFlagKind } from './PayFlag';
 
 // Payroll > Payslips: the payslips of any past payroll month for everyone paid in it (HR and Finance), with a Preview of each as the staff member sees it.
 // October 2026 and before are what Infotech paid; November 2026 on is what was run in AraOffice. Amounts in the list stay hidden until Show amounts is pressed.
 const API = '/api/status?resource=hr';
-type Line = { id: string; code: string; name: string; company: string; designation: string; status: 'draft' | 'locked'; net: number };
+type Line = { id: string; code: string; name: string; company: string; designation: string; status: 'draft' | 'locked'; net: number; flag?: PayFlagKind };
 const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
 // Payroll months from January 2026 to a few months ahead.
 const OPTIONS = (() => { const out: { year: number; month: number }[] = []; for (let y = 2026; y <= 2027; y++) for (let m = 1; m <= 12; m++) out.push({ year: y, month: m }); return out.filter((item) => monthKey(item.year, item.month) <= '2027-06'); })();
 
 // The payslip in the Infotech layout (A4), with a Print button. The IC, tax, SOCSO, EPF and bank numbers stay hidden until HR chooses to show them (and print as shown).
-function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: string; infotech: string; onClose: () => void }) {
+function Preview({ slip: paid, again, status, infotech, onClose }: { slip: HRSlip; again: HRSlip | null; status: string; infotech: string; onClose: () => void }) {
+  // Payslip 1 is what was paid; payslip 2, where there is one, the month worked out again.
+  const [second, setSecond] = useState(false);
+  const slip = second && again ? again : paid;
   // January to October 2026 have two versions: the AraOffice layout (what the staff member sees) and the original Infotech payslip.
   const [version, setVersion] = useState<'infotech' | 'araoffice'>('araoffice');
   const original = version === 'infotech';
@@ -33,6 +37,7 @@ function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: st
     {printing && createPortal(<div className="hrslip-print"><HRPayslipSheet slip={slip} reveal={reveal} /></div>, document.body)}
     <div role="dialog" aria-label="Payslip" onClick={(event) => event.stopPropagation()} className="mx-auto flex h-full w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3"><h3 className="mr-auto font-semibold">{slip.name} <span className="text-xs font-normal text-slate-400">· {MONTHS[slip.month - 1]} {slip.year}{status === 'draft' ? ' · draft, not locked' : ''}</span></h3>
+        {again && <div role="group" aria-label="Payslip 1 or 2" className="flex rounded-xl border border-slate-200 p-0.5">{([false, true] as const).map((item) => <button key={String(item)} type="button" aria-pressed={second === item} onClick={() => setSecond(item)} className={`h-8 rounded-lg px-3 text-sm font-semibold ${second === item ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{item ? '2 · Pengiraan semula' : '1 · Dibayar'}</button>)}</div>}
         {infotech && <div role="group" aria-label="Payslip version" className="flex rounded-xl border border-slate-200 p-0.5">{(['araoffice', 'infotech'] as const).map((item) => <button key={item} type="button" aria-pressed={version === item} onClick={() => setVersion(item)} className={`h-8 rounded-lg px-3 text-sm font-semibold ${version === item ? 'bg-[#0b587b] text-white' : 'text-slate-600'}`}>{item === 'infotech' ? 'Infotech' : 'AraOffice'}</button>)}</div>}
         {!original && <button type="button" onClick={() => setReveal(!reveal)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC, tax and bank numbers' : 'Show IC, tax and bank numbers'}</button>}
         {original ? <PrintMenu onPrint={() => void printInfotech(infotech)} onPdf={() => downloadBlob([infotechBytes(infotech)], `Payslip ${MONTHS[slip.month - 1]} ${slip.year} ${slip.code} Infotech.pdf`, 'application/pdf')} className="h-9 px-3" />
@@ -50,7 +55,7 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
   const [query, setQuery] = useState('');
   const [show, setShow] = useState(false);
   const [emailing, setEmailing] = useState(false);
-  const [view, setView] = useState<{ slip: HRSlip; status: string; infotech: string } | null>(null);
+  const [view, setView] = useState<{ slip: HRSlip; again: HRSlip | null; status: string; infotech: string } | null>(null);
   const [opening, setOpening] = useState('');
   const [year, month] = pick.split('-').map(Number);
   useEffect(() => {
@@ -66,7 +71,7 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
       if (!response.ok || result.error) throw new Error(result.error || 'Unable to open the payslip.');
       // The original Infotech payslip, when there is one for this month; without it only the AraOffice layout is shown.
       const original = await officeFetch(`${API}&action=payslip_infotech&employeeId=${line.id}&year=${year}&month=${month}`).then((reply) => reply.json()).catch(() => ({}));
-      setView({ slip: result.payslip, status: result.status, infotech: original.pdf || '' });
+      setView({ slip: result.payslip, again: result.recalculated || null, status: result.status, infotech: original.pdf || '' });
     } catch (cause) { onError(cause instanceof Error ? cause.message : 'Unable to open the payslip.'); }
     setOpening('');
   };
@@ -84,11 +89,11 @@ export function HRPayslips({ onError }: { onError: (message: string) => void }) 
       <p className="text-sm text-slate-500">{shown.length} staff{lines.some((line) => line.status === 'draft') ? ' · a draft is a month not locked yet' : ''}</p>
       <div className="overflow-x-auto"><table className="no-stack w-full min-w-[620px] text-left text-sm">
         <thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-3">Staff</th><th className="pr-3">Designation</th><th className="pr-3">Status</th><th className="pr-3 text-right">Net pay</th><th /></tr></thead>
-        <tbody>{shown.map((line) => <tr key={line.id} className="border-t border-slate-100"><td className="py-2 pr-3"><span className="font-semibold">{line.name}</span><span className="block text-xs text-slate-400">{line.code} · {line.company}</span></td><td className="pr-3 text-xs text-slate-500">{line.designation}</td>
+        <tbody>{shown.map((line) => <tr key={line.id} className="border-t border-slate-100"><td className="py-2 pr-3"><span className="font-semibold">{line.name}</span><PayFlag kind={line.flag} /><span className="block text-xs text-slate-400">{line.code} · {line.company}</span></td><td className="pr-3 text-xs text-slate-500">{line.designation}</td>
           <td className="pr-3">{line.status === 'locked' ? <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Locked</span> : <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Draft</span>}</td>
           <td className="pr-3 text-right tabular-nums">{show ? fmt(line.net) : '••••'}</td>
           <td className="text-right"><button type="button" disabled={opening === line.id} onClick={() => void open(line)} className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-bold text-[#0b587b] hover:bg-slate-50 disabled:opacity-50">{opening === line.id ? 'Opening…' : 'Preview'}</button></td></tr>)}</tbody></table></div>
     </>}
-    {view && <Preview slip={view.slip} status={view.status} infotech={view.infotech} onClose={() => setView(null)} />}
+    {view && <Preview slip={view.slip} again={view.again} status={view.status} infotech={view.infotech} onClose={() => setView(null)} />}
   </section>;
 }

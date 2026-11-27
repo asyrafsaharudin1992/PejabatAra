@@ -19,18 +19,18 @@ export function payslipPassword(person: { ic_no?: string | null; passport_no?: s
   return null;
 }
 
-export function lockedPayslipPdf(jpeg: Buffer, password: string, title: string): Promise<Buffer> {
+export function lockedPayslipPdf(pages: Buffer[], password: string, title: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 0, pdfVersion: '1.7ext3', userPassword: password, ownerPassword: randomBytes(24).toString('hex'), permissions: { printing: 'highResolution' }, info: { Title: title } });
     const parts: Buffer[] = [];
     doc.on('data', (part: Buffer) => parts.push(part)); doc.on('end', () => resolve(Buffer.concat(parts))); doc.on('error', reject);
-    try { doc.image(jpeg, 0, 0, { fit: [595.28, 841.89], align: 'center' }); doc.end(); } catch (error) { reject(error); }
+    try { pages.forEach((page, at) => { if (at) doc.addPage(); doc.image(page, 0, 0, { fit: [595.28, 841.89], align: 'center' }); }); doc.end(); } catch (error) { reject(error); }
   });
 }
 
-export function payslipMessage(name: string, month: number, year: number, hint: string) {
+export function payslipMessage(name: string, month: number, year: number, hint: string, recalculated = false) {
   const period = `${MONTHS[month - 1]} ${year}`;
-  return { subject: `Payslip of the Month - ${period}`, text: `Hi ${name},\n\nThis is your payslip for ${period}. To open the attached file, enter ${hint}.\n\nPlease keep this file private.\n\nRegards,\nHR` };
+  return { subject: `Payslip of the Month - ${period}`, text: `Hi ${name},\n\nThis is your payslip for ${period}. To open the attached file, enter ${hint}.\n\n${recalculated ? 'The file has two pages: page 1 is your payslip as paid; page 2 is the same month worked out again (Pengiraan Semula), for reference, showing the difference in nett pay.\n\n' : ''}Please keep this file private.\n\nRegards,\nHR` };
 }
 
 export async function sendThroughBrevo(key: string, to: { email: string; name: string }, message: { subject: string; text: string }, file: { name: string; content: Buffer }, send: typeof fetch = fetch) {
@@ -67,21 +67,24 @@ export async function payslipEmailAction(req: any, res: any, db: any, user: any,
   if (hidden.has(period)) throw fail(400, 'This month is hidden from staff, so its payslips cannot be emailed.');
   const id = String(body.employeeId || ''), test = body.test === true;
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw fail(400, 'Choose a staff member.');
-  const image = typeof body.image === 'string' && body.image.length < 3_000_000 ? Buffer.from(body.image.replace(/^data:image\/jpeg;base64,/, ''), 'base64') : Buffer.alloc(0);
-  if (image.length < 1000 || image[0] !== 0xff || image[1] !== 0xd8) throw fail(400, 'The payslip picture did not arrive. Try again.');
+  const images = (Array.isArray(body.images) ? body.images : []).slice(0, 2).map((item: unknown) => typeof item === 'string' && item.length < 2_000_000 ? Buffer.from(item.replace(/^data:image\/jpeg;base64,/, ''), 'base64') : Buffer.alloc(0));
+  if (!images.length || images.some((image: Buffer) => image.length < 1000 || image[0] !== 0xff || image[1] !== 0xd8)) throw fail(400, 'The payslip picture did not arrive. Try again.');
   const [{ data: slip, error }, { data: person, error: personError }] = await Promise.all([
-    db.from('hr_payslips').select('status').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
+    db.from('hr_payslips').select('status,recalculated:result->recalculated->net').eq('employee_id', id).eq('year', year).eq('month', month).maybeSingle(),
     db.from('hr_employees').select('full_name,employee_code,email,ic_no,passport_no').eq('id', id).maybeSingle(),
   ]);
   if (error || personError) throw error || personError;
   if (!person || slip?.status !== 'locked') throw fail(400, 'Only a locked payslip can be emailed.');
+  // A month with a payslip 2 must carry both pages (an old page still open in the browser would send only the first).
+  const two = slip.recalculated !== null && slip.recalculated !== undefined;
+  if (images.length !== (two ? 2 : 1)) throw fail(400, 'Refresh the page, then send again.');
   const lock = payslipPassword(person);
   if (!lock) throw fail(400, 'No IC or passport number in the profile.');
   if (!test && !validEmail(person.email)) throw fail(400, 'No email address in the profile.');
   const before = await sentList(db, branchId);
   if (!test && before.sent[period]?.[id] && body.again !== true) throw fail(409, 'Already emailed for this month.');
-  const message = payslipMessage(person.full_name, month, year, lock.hint);
-  const pdf = await lockedPayslipPdf(image, lock.password, message.subject);
+  const message = payslipMessage(person.full_name, month, year, lock.hint, two);
+  const pdf = await lockedPayslipPdf(images, lock.password, message.subject);
   await sendThroughBrevo(key, test ? tester : { email: String(person.email).trim(), name: person.full_name }, test ? { ...message, subject: `[TEST ${person.employee_code}] ${message.subject}` } : message, { name: `Payslip_${person.employee_code}_${period}.pdf`, content: pdf });
   if (test) return res.status(200).json({ sent: true, test: true, to: tester.email });
   const by = String(user?.email || '').slice(0, 120), at = new Date().toISOString();

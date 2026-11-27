@@ -4,7 +4,7 @@ import { slipPeriod, infotechRemark } from './lib/payrollRun';
 
 // The payslip, laid out like the Infotech Employee Payslip Report (A4), the same for HR and for the staff member: the clinic and address, the staff member's details, Earnings and Deductions side by side
 // with the totals, then the employer's share, the nett wages and the bank. The identity and bank numbers show only when HR has chosen to (`reveal`).
-export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave; printedRows?: { earnings: [string, number | null][]; deductions: [string, number | null][] }; increment?: number; otLines?: { heading: string; rows: { label: string; hours: number; amount: number }[] }[]; otFrom?: string; otTo?: string };
+export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave; recalculation?: { paidNet: number; correctNet: number; difference: number }; printedRows?: { earnings: [string, number | null][]; deductions: [string, number | null][] }; increment?: number; otLines?: { heading: string; rows: { label: string; hours: number; amount: number }[] }[]; otFrom?: string; otTo?: string };
 // Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
 export function useSlipPrint(active: boolean, title: string, onDone: () => void) {
   useEffect(() => {
@@ -70,6 +70,7 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
   const info = (name: string, value: string) => <div className="flex gap-1.5"><span className={`w-[24mm] shrink-0 ${label}`}>{name}</span><span>:</span><span className="font-medium">{value || ''}</span></div>;
   const pair = (name: string, value: number) => <div className="flex"><span className="w-[30mm]">{name}</span><span className="w-[4mm]">:</span><span className="w-[24mm] text-right tabular-nums">{two(value)}</span></div>;
   return <div className="hrslip-sheet bg-white p-[9mm] text-[8.6pt] leading-[1.35] text-black" style={{ width: '210mm', minHeight: '270mm', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+    {slip.recalculation && <p className="mb-2 border-2 border-[#b00020] px-2 py-1 text-center text-[11pt] font-bold text-[#b00020]">PENGIRAAN SEMULA · UNTUK RUJUKAN, BUKAN REKOD BAYARAN</p>}
     <div className="flex items-start gap-3">
       <img src="/ara-logo.png" alt="" className="h-[17mm] w-[17mm] shrink-0 object-contain" />
       <div className="min-w-0 flex-1"><p className="text-[10.5pt] font-bold">{company.name.replace('Sdn Bhd', 'SDN. BHD.').toUpperCase().replace('SDN. BHD..', 'SDN. BHD.')}</p><p className="text-[8.5pt]">{company.address.toUpperCase()}</p></div>
@@ -105,6 +106,11 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
       </div>
       <div className="grid grid-cols-2 border-t border-black text-[8pt]"><p className="px-1.5 py-1">This commission/allowance is not part of the regular salary.</p><p className="border-l border-black px-1.5 py-1">It is subject to change and may not be recurring.</p></div>
     </div>
+    {slip.recalculation && <div className="mt-2 border-2 border-[#b00020] px-3 py-2 text-[9.5pt]">
+      <div className="flex justify-between"><span>Gaji bersih yang telah dibayar</span><span className="tabular-nums">{two(slip.recalculation.paidNet)}</span></div>
+      <div className="flex justify-between"><span>Gaji bersih yang sepatutnya (pengiraan semula)</span><span className="tabular-nums">{two(slip.recalculation.correctNet)}</span></div>
+      <div className="mt-1 flex justify-between border-t border-black pt-1 font-bold"><span>{slip.recalculation.difference >= 0 ? 'LEBIHAN BAYARAN' : 'KEKURANGAN BAYARAN'}</span><span className="tabular-nums">RM {two(Math.abs(slip.recalculation.difference))}</span></div>
+    </div>}
     {infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0) && <p className="mt-2 text-[8pt]">{infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)}</p>}
     <p className="mt-2 text-[7.5pt] text-[#777]">{MONTHS[slip.month - 1]} {slip.year}</p>
   </div>;

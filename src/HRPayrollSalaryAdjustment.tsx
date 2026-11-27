@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, Trash2 } from 'lucide-rea
 import { officeFetch } from './lib/officeApi';
 import { ADJUSTMENT_TYPES, NO_INPUTS, adjustmentTotals, calculatePayslip, payPeriod, proratedSalary, type Adjustment, type PayInputs, type PayStaff, type PayYtd } from './lib/payrollRun';
 import { card } from './AssessmentStaff';
+import { PayFlag, payFlagOf } from './PayFlag';
 
 // Payroll > Salary adjustment: one person's pay for one month on a single screen, laid out like Infotech's Monthly Activity > Salary Adjustment
 // (salary, additions and deductions, OT, unpaid, shift, rest day and public holiday, total wages, contributions). Everything is worked out live
@@ -89,14 +90,16 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
   const extra = adjustmentTotals(lines.map((item) => ({ ...item, amount: Number(item.amount) || 0 })));
   const unpaid = saved?.noPay ?? worked?.noPay ?? 0;
   // A locked month shows the basic pay that was actually paid (the saved slip), and the increment as what was paid above the salary before the raise; a draft
-  // shows what the pay run will pay. November 2026 only: where the whole new salary was paid for a raise dated inside the period, it shows as basic salary with no increment.
+  // shows what the pay run will pay.
   const savedBasic = locked ? Number(person?.payslip?.result?.basic) || 0 : 0;
   const totalSalary = savedBasic ? Math.round((savedBasic + unpaid) * 100) / 100 : earned?.amount || 0;
   const wholeMonth = !!earned && earned.worked >= earned.total;
-  const paidInFull = year === 2026 && month === 11 && !!savedBasic && wholeMonth && raises.some((item) => item.date > period.from) && totalSalary >= (person?.basicSalary || 0) - 0.005;
-  const basicShown = paidInFull ? totalSalary : startSalary;
-  const increment = !raises.length || paidInFull ? 0 : Math.round(((savedBasic && wholeMonth ? totalSalary : wholePeriod) - startSalary) * 100) / 100;
-  const partial = earned ? Math.round((totalSalary - basicShown - increment) * 100) / 100 : 0;
+  const increment = !raises.length ? 0 : Math.round(((savedBasic && wholeMonth ? totalSalary : wholePeriod) - startSalary) * 100) / 100;
+  const partial = earned ? Math.round((totalSalary - startSalary - increment) * 100) / 100 : 0;
+  // Where the month was worked out again (payslip 2), Salary details shows the correct figures, with what was paid underneath.
+  const again = locked ? person?.payslip?.result?.recalculated as { basic?: number; noPay?: number; net?: number } | undefined : undefined;
+  const correctTotal = again ? Math.round(((Number(again.basic) || 0) + (Number(again.noPay) || 0)) * 100) / 100 : 0;
+  const netDifference = again ? Math.round(((Number(person?.payslip?.result?.net) || 0) - (Number(again.net) || 0)) * 100) / 100 : 0;
   const otRows: [keyof PayInputs, string][] = [['ot10', '1.0'], ['ot15', '1.5'], ['ot20', '2.0'], ['ot30', '3.0']];
   const ro = locked || !show;
 
@@ -110,12 +113,12 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
       <button type="button" aria-label="Previous" onClick={() => step(-1)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-[#0b587b]"><ChevronLeft className="h-4 w-4" /></button>
       <button type="button" aria-label="Next" onClick={() => step(1)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-[#0b587b]"><ChevronRight className="h-4 w-4" /></button>
       <input aria-label="Search staff" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or code" className={`${field} h-10 w-48`} />
-      <select aria-label="Staff" value={id} onChange={(event) => choose((staff || []).find((item) => item.id === event.target.value))} className={`${field} h-10 min-w-[260px] flex-1`}>{list.map((item) => <option key={item.id} value={item.id}>{item.employeeCode} · {item.fullName}</option>)}</select>
+      <select aria-label="Staff" value={id} onChange={(event) => choose((staff || []).find((item) => item.id === event.target.value))} className={`${field} h-10 min-w-[260px] flex-1`}>{list.map((item) => <option key={item.id} value={item.id}>{payFlagOf(item.payslip?.result) ? '⚑ ' : ''}{item.employeeCode} · {item.fullName}</option>)}</select>
     </div>
     {note && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{note}</p>}
     {!staff ? <p className="text-sm text-slate-500">Loading…</p> : !person || !out || !earned ? <p className="text-sm text-slate-500">No staff found for this month.</p> : <>
       <div className="rounded-2xl bg-[#f4fafd] p-4">
-        <p className="text-lg font-bold text-[#14233b]">{person.employeeCode} : {person.fullName} <span className="ml-2 text-xs font-semibold text-emerald-600">{person.status || 'Active'}{locked ? ' · locked' : ''}</span></p>
+        <p className="text-lg font-bold text-[#14233b]">{person.employeeCode} : {person.fullName} <span className="ml-2 text-xs font-semibold text-emerald-600">{person.status || 'Active'}{locked ? ' · locked' : ''}</span><PayFlag kind={payFlagOf(person.payslip?.result)} /></p>
         <div className="mt-2 grid gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2">
           <span>Company: <b>{person.company}</b></span>
           <span>Join date: <b>{person.joinDate ? dmy(person.joinDate) : '—'}</b>{person.resignDate && <> · Last day: <b>{dmy(person.resignDate)}</b></>}</span>
@@ -159,10 +162,24 @@ export function HRPayrollSalaryAdjustment({ onError }: { onError: (message: stri
           <Row label="Shift allowance (RM)"><input aria-label="Shift allowance" disabled={ro} type="number" step="0.01" min="0" value={show ? inputs.shiftAllowance || '' : ''} placeholder={show ? '0.00' : '••••'} onChange={num('shiftAllowance')} className={`${field} w-28 text-right`} /></Row>
         </Box>
         <Box title="Salary details">
-          <Row label="Basic salary">{cash(basicShown)}</Row>
-          <Row label="Increment">{cash(increment)}</Row>
-          {partial !== 0 && <Row label={`Part month (${earned.worked} of ${earned.total} days)`}>{cash(partial)}</Row>}
-          <Row label={locked ? 'Total salary paid' : 'Total salary'} strong>{cash(totalSalary)}</Row>
+          {again ? <>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-emerald-700">Correct (raise paid by the day)</p>
+            <Row label="Basic salary">{cash(startSalary)}</Row>
+            <Row label="Increment">{cash(Math.round((correctTotal - startSalary) * 100) / 100)}</Row>
+            <Row label="Total salary" strong>{cash(correctTotal)}</Row>
+            <Row label="Nett wages">{cash(Number(again.net) || 0)}</Row>
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">What was paid</p>
+              <Row label="Total salary paid">{cash(totalSalary)}</Row>
+              <Row label="Nett wages paid">{cash(Number(person.payslip?.result?.net) || 0)}</Row>
+              <Row label={netDifference >= 0 ? 'Overpaid (nett)' : 'Underpaid (nett)'} strong>{cash(Math.abs(netDifference))}</Row>
+            </div>
+          </> : <>
+            <Row label="Basic salary">{cash(startSalary)}</Row>
+            <Row label="Increment">{cash(increment)}</Row>
+            {partial !== 0 && <Row label={`Part month (${earned.worked} of ${earned.total} days)`}>{cash(partial)}</Row>}
+            <Row label={locked ? 'Total salary paid' : 'Total salary'} strong>{cash(totalSalary)}</Row>
+          </>}
         </Box>
         <Box title="Total wages details">
           <Row label="Allowance additions">{cash(extra.add + out.allowances.reduce((sum, item) => sum + item.amount, 0))}</Row>

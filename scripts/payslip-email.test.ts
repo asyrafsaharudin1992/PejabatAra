@@ -6,7 +6,7 @@ assert.equal(payslipPassword({ ic_no: '', passport_no: 'a 1234567' })!.password,
 assert.equal(payslipPassword({ ic_no: '1234', passport_no: '' }), null);
 // The smallest JPEG picture there is, to make a locked file of.
 const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
-const pdf = (await lockedPayslipPdf(jpeg, '900101101234', 'Test')).toString('latin1');
+const pdf = (await lockedPayslipPdf([jpeg, jpeg], '900101101234', 'Test')).toString('latin1');
 assert.match(pdf, /\/Encrypt/); assert.match(pdf, /\/CFM \/AESV3/); assert.match(pdf, /\/V 5/);
 assert.ok(!pdf.includes('900101101234'));
 const message = payslipMessage('TEST PERSON', 11, 2026, payslipPassword({ ic_no: '900101101234' })!.hint);

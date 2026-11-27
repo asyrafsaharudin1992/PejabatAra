@@ -23,15 +23,14 @@ export async function payslipSheet(db: any, id: string, slip: any, me: any) {
   const raises = changes.filter((row: any) => row.date > period.from); // a raise inside the period splits the OT; one on its first day does not
   const less = await noPayOf(db, id, slip, Number(me.basic_salary) || 0);
   // INCREMENT is what this slip actually paid above the salary before the raise. For someone who joined or left inside the period the by-the-day share is worked
-  // out. November 2026 only: the slips that paid the whole new salary for a raise dated inside the period (a fault since put right) have no INCREMENT line.
+  // out.
   let increment = 0;
   let otLines: { heading: string; rows: { label: string; hours: number; amount: number }[] }[] = [];
   if (changes.length && Number(r.basic) > 0) {
     const partMonth = (me.join_date && me.join_date > period.from) || (me.resign_date && me.resign_date < period.to);
     const latest = Number(changes[changes.length - 1].to) || Number(me.basic_salary) || 0;
     const paid = partMonth ? proratedSalary(latest, slip.year, slip.month, null, null, changes.map((row: any) => ({ date: row.date, from: row.from }))).amount : Number(r.basic) + (Number(less.noPay) || 0);
-    const paidInFull = slip.year === 2026 && slip.month === 11 && raises.length > 0 && paid >= latest - 0.005;
-    increment = paidInFull ? 0 : Math.max(0, Math.round((paid - changes[0].from) * 100) / 100);
+    increment = Math.max(0, Math.round((paid - changes[0].from) * 100) / 100);
   }
   let typed: Record<string, number> = { ot10: Number(slip.inputs?.ot10) || 0, ot15: Number(slip.inputs?.ot15) || 0, ot20: Number(slip.inputs?.ot20) || 0, ot30: Number(slip.inputs?.ot30) || 0 };
   const salaryNow = Number((me as any).basic_salary) || Number(r.basic) || 0;
@@ -74,4 +73,14 @@ export async function payslipSheet(db: any, id: string, slip: any, me: any) {
     ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', resignDate: me.resign_date || '', bankAccount: printed?.account || me.bank_account || '',
     ...(printed ? { printedRows: { earnings: printed.earnings, deductions: printed.deductions } } : {}),
     ...less, annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) };
+}
+
+// Payslip 2 (November 2026, where a raise had not been paid by the day): the same month worked out again, kept on the slip beside what was paid. It is drawn
+// as a payslip marked "PENGIRAAN SEMULA" with the difference in nett pay; the figures actually paid stay the slip's own. Null when there is none.
+export async function recalculatedSheet(db: any, id: string, slip: any, me: any) {
+  const again = slip.result?.recalculated;
+  if (!again) return null;
+  const sheet: any = await payslipSheet(db, id, { ...slip, result: { ...slip.result, ...again, recalculated: undefined } }, me);
+  const paid = Number(slip.result.net) || 0, correct = Number(again.net) || 0;
+  return { ...sheet, recalculation: { paidNet: paid, correctNet: correct, difference: Math.round((paid - correct) * 100) / 100 } };
 }
