@@ -1,5 +1,6 @@
 import { buildDaysFrom, fetchData, loadRules, recordsFromFor, type Employee } from './_attendance.js';
 import { approvedTotal, claimTotal } from '../src/lib/incentiveCodes.js';
+import { taxableGross } from '../src/lib/payrollRun.js';
 import { locationGroup } from '../src/lib/staffGroup.js';
 import { branchId } from './_office-db.js';
 
@@ -151,7 +152,7 @@ async function computeCharts(db: any, kept: Kept = {}) {
   // --- Tax by year: the Borang EA for the years brought over, and this year added up from the payslips so far.
   const tax = new Map<number, { gross: number; pcb: number; kwsp: number; partial: boolean }>();
   for (const row of ea) { const year = Number(row.year), item = tax.get(year) || { gross: 0, pcb: 0, kwsp: 0, partial: false }; item.gross += Number(row.gross_wages) + Number(row.fees_bonus) + Number(row.allowances); item.pcb += Number(row.mtd); item.kwsp += Number(row.kwsp); tax.set(year, item); }
-  for (const slip of slips) { const year = Number(slip.year); if (ea.some((row: any) => Number(row.year) === year)) continue; const item = tax.get(year) || { gross: 0, pcb: 0, kwsp: 0, partial: true }; item.gross += Number(slip.result?.gross || 0); item.pcb += Number(slip.result?.pcb || 0); item.kwsp += Number(slip.result?.kwspEmployee || 0); tax.set(year, item); }
+  for (const slip of slips) { const year = Number(slip.year); if (ea.some((row: any) => Number(row.year) === year)) continue; const item = tax.get(year) || { gross: 0, pcb: 0, kwsp: 0, partial: true }; item.gross += taxableGross(slip.result); item.pcb += Number(slip.result?.pcb || 0); item.kwsp += Number(slip.result?.kwspEmployee || 0); tax.set(year, item); }
   const years = [...tax.keys()].sort();
 
   // --- Performance reviews given each month: how many are done and how many are still waiting.

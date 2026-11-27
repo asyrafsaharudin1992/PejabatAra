@@ -11,11 +11,12 @@ import { codesOf, INCENTIVE_CODES, INCENTIVE_GROUPS } from '../src/lib/incentive
 import { hrCalendarAction } from './_hr-calendar.js';
 import { newCode } from '../src/lib/shiftCodes.js';
 import { payslipLeave } from './_leave-summary.js';
-import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, type WorkDay, joinedForPay } from '../src/lib/payrollRun.js';
+import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, proratedSalary, type PayInputs, type WorkDay, joinedForPay, taxableGross } from '../src/lib/payrollRun.js';
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { pdfFormHrAction } from './_pdf-forms.js';
 import { noPayOf } from './_nopay.js';
+import { infotechSlip } from './_payslip-infotech.js';
 import { changeLines, joinLine, type CareerLine } from '../src/lib/careerAuto.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
@@ -423,7 +424,7 @@ async function payrollContext(db: any, year: number, month: number, viewOnly = f
       const slip = earlier.find((item: any) => item.month === m);
       if (!slip && !joinedForPay(row.join_date, year, m)) continue; // not yet on that month's pay run: nothing to lock
       if (!slip || slip.status !== 'locked') { earlierLocked = false; continue; }
-      ytd.wages = Math.round((ytd.wages + Number(slip.result?.gross || 0)) * 100) / 100;
+      ytd.wages = Math.round((ytd.wages + taxableGross(slip.result)) * 100) / 100;
       ytd.kwspRelief = Math.min(4000, Math.round((ytd.kwspRelief + Number(slip.result?.kwspEmployee || 0)) * 100) / 100);
       ytd.pcbPaid = Math.round((ytd.pcbPaid + Number(slip.result?.pcb || 0)) * 100) / 100;
     }
@@ -2369,6 +2370,13 @@ export async function hrHandler(req: any, res: any) {
       const byId = new Map((people || []).map((p: any) => [p.id, p]));
       return res.status(200).json({ year, month, staff: (slips || []).map((row: any) => { const p: any = byId.get(row.employee_id) || {}; return { id: row.employee_id, code: p.employee_code || '', name: p.full_name || '', company: p.company || '', designation: p.designation || '', status: row.status, net: Number(row.result?.net) || 0 }; }).sort((a: any, b: any) => a.company.localeCompare(b.company) || String(a.code).localeCompare(String(b.code), undefined, { numeric: true })) });
     }
+    // The original Infotech payslip of January to October 2026, for HR and Finance.
+    if (req.method === 'GET' && action === 'payslip_infotech') {
+      const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
+      if (!/^[0-9a-f-]{36}$/i.test(id)) throw fail(400, 'Choose a staff member.');
+      const pdf = await infotechSlip(db, id, year, month);
+      return res.status(200).json({ pdf });
+    }
     if (req.method === 'GET' && action === 'payslip_view') {
       const id = text(req.query.employeeId, 60), year = Math.round(Number(req.query.year)), month = Math.round(Number(req.query.month));
       const [{ data: slip, error }, { data: me }] = await Promise.all([
@@ -2586,7 +2594,7 @@ export async function hrHandler(req: any, res: any) {
         const mine = slips.filter((row: any) => row.employee_id === person.id && Number(row.year) === wanted);
         if (!mine.length) continue;
         const add = (key: string) => Math.round(mine.reduce((sum: number, row: any) => sum + Number(row.result?.[key] || 0), 0) * 100) / 100;
-        rows.push({ ...base, gross: add('gross'), fees: 0, pcb: add('pcb'), kwsp: add('kwspEmployee'), socso: add('socsoEmployee'), eis: add('eisEmployee'), childRelief: 0, source: `${mine.length} payslip${mine.length === 1 ? '' : 's'}`, partial: true });
+        rows.push({ ...base, gross: Math.round(mine.reduce((sum: number, row: any) => sum + taxableGross(row.result), 0) * 100) / 100, fees: 0, pcb: add('pcb'), kwsp: add('kwspEmployee'), socso: add('socsoEmployee'), eis: add('eisEmployee'), childRelief: 0, source: `${mine.length} payslip${mine.length === 1 ? '' : 's'}`, partial: true });
       }
       rows.sort((a, b) => a.company.localeCompare(b.company) || a.code.localeCompare(b.code));
       return res.status(200).json({ year: wanted, years, rows, notSetUp });

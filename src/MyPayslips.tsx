@@ -4,12 +4,14 @@ import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
 import { slipPeriod } from './lib/payrollRun';
 import { downloadBlob } from './lib/downloadBlob';
+import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
+import { lockInfotechPdf } from './lib/lockInfotechPdf';
 
 // My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
-export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
+export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; noPayLines?: { kind: string; qty: number; unit: string; amount: number }[]; infotechIncentive?: number; deductionLines?: { name: string; amount: number }[]; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
 // The leave summary under the pay: days taken in the pay period / balance at the end of it / days taken so far this year. Annual Leave includes Emergency Leave.
 export type SlipLeave = { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } };
 export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`;
@@ -96,6 +98,7 @@ export default function MyPayslips() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [incentives, setIncentives] = useState<Incentive[]>([]);
   const [slip, setSlip] = useState<Slip | null>(null);
+  const [original, setOriginal] = useState(''); // the Infotech payslip (base64 PDF) of the open month, when there is one
   const [error, setError] = useState('');
   const [asking, setAsking] = useState<null | { kind: 'open'; item: Item } | { kind: 'print' } | { kind: 'pdf' }>(null);
   const [busy, setBusy] = useState(false);
@@ -107,12 +110,20 @@ export default function MyPayslips() {
     if (!asking) return;
     setBusy(true); setError('');
     try {
-      if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setSlip(result.payslip); setAsking(null); }
-      else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); setPrinting(true); }
+      if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setSlip(result.payslip); setOriginal(result.infotech || ''); setAsking(null); }
+      else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); if (original) await printInfotech(original); else setPrinting(true); }
       else if (slip) {
         // The PDF is locked with the same password. On a phone the share sheet offers WhatsApp; elsewhere the file is downloaded.
-        const result = await post('my_payslip_pdf', { year: slip.year, month: slip.month, password });
-        const bytes = Uint8Array.from(atob(result.pdf), (char) => char.charCodeAt(0));
+        // For an Infotech month the locked copy is made here from the original, once the password is confirmed; otherwise the server makes the locked PDF.
+        let result: { file: string }, bytes: Uint8Array;
+        if (original) {
+          await post('verify_password', { password });
+          result = { file: `Payslip_${slip.code}_${slip.year}-${String(slip.month).padStart(2, '0')}.pdf` };
+          bytes = await lockInfotechPdf(new Blob([infotechBytes(original)], { type: 'application/pdf' }), password, slip.code);
+        } else {
+          const made = await post('my_payslip_pdf', { year: slip.year, month: slip.month, password });
+          result = made; bytes = infotechBytes(made.pdf);
+        }
         const file = new File([bytes], result.file, { type: 'application/pdf' });
         setAsking(null);
         if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` }); } catch { /* the share sheet was closed */ } }
@@ -128,7 +139,7 @@ export default function MyPayslips() {
       {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
       <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
       {asking && asking.kind !== 'open' && <PasswordPrompt title={asking.kind === 'print' ? 'Enter your password to print' : 'Enter your password to get the PDF'} note={asking.kind === 'pdf' ? 'The PDF is locked with this same password, so anyone you send it to (for example on WhatsApp) needs it to open the file.' : undefined} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
-      <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
+      {original ? <InfotechSlip pdf={original} /> : <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
         <div className="mb-4 flex items-start gap-3 border-b border-slate-100 pb-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-12 w-12 shrink-0 object-contain" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#14233b]">{company.name}</p><p className="text-[11px] leading-4 text-slate-500">{company.address}</p></div></div>
         <h2 className="text-base font-semibold text-[#3b5da8]">{slip.name} ({slip.code})</h2>
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
@@ -160,7 +171,7 @@ export default function MyPayslips() {
           <p className="flex gap-3"><span className="w-36 text-slate-500">Paid on</span><span className="font-semibold text-[#3b5da8]">: 26 {MONTHS[slip.month - 1]} {slip.year}</span></p>
         </div>
         <p className="mt-4 text-center text-[11px] text-slate-400">This is a system generated payslip and does not require signature.</p>
-      </article>
+      </article>}
     </div>;
   }
   if (items === null) return <p className="text-sm text-slate-500">Loading…</p>;

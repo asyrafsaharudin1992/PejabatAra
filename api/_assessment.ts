@@ -1,6 +1,7 @@
 import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { hiddenPayslips, monthKey } from './_payslip-hidden.js';
 import { noPayOf } from './_nopay.js';
+import { infotechSlip } from './_payslip-infotech.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -736,7 +737,8 @@ async function staffAction(req: any, res: any, action: string, body: any) {
       ...(await noPayOf(db, me.id, data, Number(me.basic_salary) || 0)), basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
       eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
       bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4), resignDate: me.resign_date || '', leave: r.leave || await payslipLeave(db, me.id, data.year, data.month) };
-    if (action === 'my_payslip') return res.status(200).json({ payslip });
+    // January to October 2026 were paid in Infotech: the staff member sees that original payslip (the AraOffice layout only if it is missing).
+    if (action === 'my_payslip') return res.status(200).json({ payslip, infotech: await infotechSlip(db, me.id, data.year, data.month) });
     // The PDF is locked with the same password, so a copy sent on WhatsApp or by e-mail cannot be opened without it.
     const pdf = payslipPdf(payslip as any, password);
     return res.status(200).json({ file: `Payslip_${me.employee_code}_${year}-${String(month).padStart(2, '0')}.pdf`, pdf: pdf.toString('base64') });

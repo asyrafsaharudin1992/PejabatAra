@@ -23,10 +23,19 @@ export type PayYtd = { wages: number; kwspRelief: number; pcbPaid: number; zakat
 // holidays worked as a count of days; the amounts are worked out from the salary. `ot` and `restPh` are for an amount that does not fit those.
 export type PayInputs = { ot: number; restPh: number; shiftAllowance: number; unpaidLeave: number; otherAllowance: number; otherDeduction: number; ot10?: number; ot15?: number; ot20?: number; ot30?: number; restDays?: number; phDays?: number; unpaidDays?: number; annualLeaveDeduction?: number; adjustments?: Adjustment[] };
 // A line HR adds for one person in a month (Payroll > Adjustments): a positive amount is added to the pay, a negative one is taken off.
-// Like "other allowance" it counts in the gross and the PCB, and not in KWSP or PERKESO.
+// Like "other allowance" it counts in the gross and the PCB, and not in KWSP or PERKESO. An incentive is the exception: it is paid and in the gross,
+// but is not taxed (as in Infotech, whose year-to-date wages leave it out).
 export type Adjustment = { type: string; amount: number; note: string; source?: 'incentive' };
 export const ADJUSTMENT_TYPES = ['Advance', 'Director fee', 'Incentive', 'Bonus', 'Back pay', 'Other'];
 export const adjustmentTotals = (list?: Adjustment[]) => ({ add: money((list || []).reduce((sum, item) => sum + (item.amount > 0 ? item.amount : 0), 0)), less: money((list || []).reduce((sum, item) => sum + (item.amount < 0 ? -item.amount : 0), 0)) });
+export const incentivePay = (list?: Adjustment[]) => money((list || []).reduce((sum, item) => sum + (item.amount > 0 && (item.type === 'Incentive' || item.source === 'incentive') ? item.amount : 0), 0));
+// A saved payslip's gross for tax (yearly figures): without the incentive. On a slip brought over from Infotech it is the "Incentives" line (or the care coordinator allowance, which is an incentive) counted in its gross.
+export function taxableGross(result: { gross?: number; nonTaxable?: number; source?: string; allowances?: { name?: string; amount?: number }[] } | null | undefined) {
+  const gross = Number(result?.gross || 0);
+  const untaxed = typeof result?.nonTaxable === 'number' ? result.nonTaxable
+    : result?.source === 'Infotech' ? (result.allowances || []).reduce((sum, item) => sum + (/^(incentives?|allowance care coordinat(o|e)r)$/i.test(String(item.name || '').trim()) ? Number(item.amount) || 0 : 0), 0) : 0;
+  return money(gross - untaxed);
+}
 export const NO_INPUTS: PayInputs = { ot: 0, restPh: 0, shiftAllowance: 0, unpaidLeave: 0, otherAllowance: 0, otherDeduction: 0, ot10: 0, ot15: 0, ot20: 0, ot30: 0, restDays: 0, phDays: 0, unpaidDays: 0, annualLeaveDeduction: 0 };
 
 const money = (value: number) => Math.round(value * 100) / 100;
@@ -130,20 +139,22 @@ export function calculatePayslip(staff: PayStaff, given: PayInputs, ytd: PayYtd,
   const skbbkEmployee = flag(s, 'skbbk', false) ? ringgit(skbbk(socsoWage)) : 0;
   const hrdfEmployer = flag(s, 'hrdf', false) ? ringgit(hrdf(basic)) : 0;
 
+  // Not taxed: incentives, and any monthly allowance Infotech does not count for PCB (such as Care Coordinator).
+  const nonTaxable = money(incentivePay(given.adjustments) + allowances.filter((item) => item.type && !item.type.pcb).reduce((sum, item) => sum + item.amount, 0)), taxable = money(gross - nonTaxable);
   let pcb = 0, chargeable = 0;
   if (flag(s, 'pcbApplied', true) && flag(s, 'taxResident', true)) {
     const married = staff.maritalStatus === 'Married';
     const result = pcbNormal({
-      earnedBefore: ytd.wages, kwspBefore: ytd.kwspRelief, thisMonth: gross, kwspThisMonth: kwspEmployee, nextMonth: gross, kwspNextMonth: kwspEmployee,
+      earnedBefore: ytd.wages, kwspBefore: ytd.kwspRelief, thisMonth: taxable, kwspThisMonth: kwspEmployee, nextMonth: taxable, kwspNextMonth: kwspEmployee,
       monthsLeft: 12 - month, spouse: married && staff.spouseWorking === false ? 4000 : 0, children: childrenForRelief(staff.children, year), pcbPaidBefore: ytd.pcbPaid, zakatBefore: ytd.zakatPaid,
     });
     pcb = money(result.pcb); chargeable = money(result.chargeable);
   }
   const deductions = money(kwspEmployee + socsoEmployee + eisEmployee + skbbkEmployee + pcb + inputs.otherDeduction + leaveCut);
   return {
-    ot: otAmount, otByRate: work.otByRate, restPh, basic: money(basic), noPay: money(earned - basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
+    ot: otAmount, otByRate: work.otByRate, restPh, basic: money(basic), noPay: money(earned - basic), allowances: allowances.map((item) => ({ name: item.name, amount: item.amount })), gross, nonTaxable, kwspWage: money(kwspWage), socsoWage: money(socsoWage),
     kwspEmployee, kwspEmployer, socsoEmployee, socsoEmployer, eisEmployee, eisEmployer, skbbk: skbbkEmployee, hrdf: hrdfEmployer, pcb, chargeable, deductions, net: money(gross - deductions),
-    ytdAfter: { wages: money(ytd.wages + gross), kwspRelief: money(Math.min(4000, ytd.kwspRelief + kwspEmployee)), pcbPaid: money(ytd.pcbPaid + pcb), zakatPaid: ytd.zakatPaid },
+    ytdAfter: { wages: money(ytd.wages + taxable), kwspRelief: money(Math.min(4000, ytd.kwspRelief + kwspEmployee)), pcbPaid: money(ytd.pcbPaid + pcb), zakatPaid: ytd.zakatPaid },
   };
 }
 

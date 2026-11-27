@@ -28,6 +28,9 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
   for (const item of (slip.adjustments || []).filter((line) => line.amount > 0)) earnings.push([`${item.type}${item.note ? ` - ${item.note}` : ''}`.toUpperCase(), item.amount]);
   const known = sum(earnings.map(([, value]) => value ?? 0));
   if (slip.gross + noPay - known > 0.005) earnings.push(['SHIFT / OTHER ALLOWANCE', Math.round((slip.gross + noPay - known) * 100) / 100]);
+  // An incentive Infotech lists under earnings but pays outside the nett wages (January and February 2026): shown and added to Total Earnings only.
+  const outside = slip.infotechIncentive || 0;
+  if (outside > 0) earnings.push(['INCENTIVES', outside]);
   // Deductions: the leave and other deductions HR typed, then the statutory ones; anything left over (a slip brought over from Infotech) is shown as one line.
   const deductions: [string, number][] = [];
   if (slip.annualLeaveDeduction > 0) deductions.push(['ANNUAL LEAVE DEDUCTION', slip.annualLeaveDeduction]);
@@ -37,9 +40,10 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
   deductions.push(['EMPLOYEE EPF', slip.kwspEmployee], ['EMPLOYEE EIS', slip.eisEmployee], ['EMPLOYEE SOCSO', slip.socsoEmployee]);
   if (slip.skbbk > 0) deductions.push(['SKBBK', slip.skbbk]);
   if (slip.pcb > 0) deductions.push(['MTD/PCB', slip.pcb]);
+  for (const item of slip.deductionLines || []) deductions.unshift([item.name, item.amount]);
   const listed = sum(deductions.map(([, value]) => value));
   if (slip.deductions - listed > 0.005) deductions.unshift([slip.annualLeaveDeduction > 0 ? 'OTHER DEDUCTION' : 'ANNUAL LEAVE / OTHER DEDUCTION', Math.round((slip.deductions - listed) * 100) / 100]);
-  const shown: [string, number | null][] = [...(noPay > 0 ? [['TOTAL NO PAY', noPay], [`[${period.from} TO ${period.to} CURRENT]`, null], ...(slip.unpaidDays ? [[` - UnPaid Leaves - ${slip.unpaidDays.toFixed(2)} Days =${two(noPay)}`, null]] : [])] as [string, number | null][] : []), ...deductions];
+  const shown: [string, number | null][] = [...(noPay > 0 ? [['TOTAL NO PAY', noPay], [`[${period.from} TO ${period.to} CURRENT]`, null], ...(slip.noPayLines?.length ? slip.noPayLines.map((item) => [` - ${item.kind} - ${item.qty.toFixed(2)} ${item.unit} =${two(item.amount)}`, null]) : slip.unpaidDays ? [[` - UnPaid Leaves - ${slip.unpaidDays.toFixed(2)} Days =${two(noPay)}`, null]] : [])] as [string, number | null][] : []), ...deductions];
   const label = 'text-[#555]';
   const info = (name: string, value: string) => <div className="flex gap-1.5"><span className={`w-[24mm] shrink-0 ${label}`}>{name}</span><span>:</span><span className="font-medium">{value || ''}</span></div>;
   const pair = (name: string, value: number) => <div className="flex"><span className="w-[30mm]">{name}</span><span className="w-[4mm]">:</span><span className="w-[24mm] text-right tabular-nums">{two(value)}</span></div>;
@@ -68,7 +72,7 @@ export function HRPayslipSheet({ slip, reveal }: { slip: HRSlip; reveal: boolean
         <div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{shown.map(([name, value]) => <p key={name} className="min-h-[1.9em] py-0.5">{value === null ? '\u00a0' : two(value)}</p>)}</div>
       </div>
       <div className="grid grid-cols-[1fr_28mm_1fr_28mm] border-t border-black">
-        <div className="px-1 py-0.5 text-right">Total Earnings</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.gross, noPay]))}</div><div className="border-l border-black px-1 py-0.5 text-right">Total Deductions</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.deductions, noPay]))}</div>
+        <div className="px-1 py-0.5 text-right">Total Earnings</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.gross, noPay, outside]))}</div><div className="border-l border-black px-1 py-0.5 text-right">Total Deductions</div><div className="border-l border-black px-1 py-0.5 text-right tabular-nums">{two(sum([slip.deductions, noPay]))}</div>
       </div>
       <div className="grid grid-cols-2 border-t border-black">
         <div>
