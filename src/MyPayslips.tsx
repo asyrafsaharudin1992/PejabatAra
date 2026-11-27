@@ -1,20 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, Lock, Printer, Share2 } from 'lucide-react';
+import { ChevronLeft, Eye, EyeOff, Lock, Printer, Share2 } from 'lucide-react';
 import { assessmentFetch } from './AssessmentRoom';
-import { slipPeriod, infotechRemark } from './lib/payrollRun';
+import { infotechRemark } from './lib/payrollRun';
 import { downloadBlob } from './lib/downloadBlob';
 import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
 import { lockInfotechPdf } from './lib/lockInfotechPdf';
+import { pagesToPdfBlob } from './lib/savePdf';
+import { ReportPreviewFrame } from './ReportPreviewFrame';
+import { HRPayslipSheet, useSlipPrint, type HRSlip } from './HRPayslipSheet';
 
-// My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, laid out like the Infotech payslip.
+// My payslips inside Individual Sign In: the months HR has locked, newest first, and one payslip at a time, the same payslip HR previews.
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
 export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; noPayLines?: { kind: string; qty: number; unit: string; amount: number }[]; infotechIncentive?: number; deductionLines?: { name: string; amount: number }[]; printedOt?: string[]; printedRestPh?: string[]; leaveShown?: { al: string; ml: string }; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
 // The leave summary under the pay: days taken in the pay period / balance at the end of it / days taken so far this year. Annual Leave includes Emergency Leave.
 export type SlipLeave = { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } };
-export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`;
+export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)}`;
 
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const COMPANY: Record<string, { name: string; address: string }> = {
@@ -23,63 +26,6 @@ export const COMPANY: Record<string, { name: string; address: string }> = {
 };
 export const fmt = (value: number) => (value || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const longDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-export function Row({ label, value, minus }: { key?: string; label: string; value: number; minus?: boolean }) {
-  return <div className="flex justify-between gap-3 py-1.5 text-sm"><span className="text-slate-600">{label}</span><strong className="tabular-nums text-[#3b5da8]">{minus ? '-' : ''}{fmt(value)}</strong></div>;
-}
-export function Field({ label, value }: { label: string; value: string }) {
-  return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{value || '—'}</p></div>;
-}
-export function Pair({ label, value }: { label: string; value: number }) {
-  return <div><p className="text-sm text-slate-500">{label}</p><p className="text-sm font-semibold text-[#3b5da8]">{fmt(value)}</p></div>;
-}
-
-// Printing uses a separate A4 document (like the staff profile print) so the app's header and navigation never reach the paper, and it
-// always fits one page. The page margin is zero in the print rules; the white border is padding inside the document.
-export function usePayslipPrint(active: boolean, title: string, onDone: () => void) {
-  useEffect(() => {
-    if (!active) return;
-    const previous = document.title;
-    document.title = title;
-    document.body.classList.add('payslip-printing');
-    const done = () => { document.body.classList.remove('payslip-printing'); document.title = previous; onDone(); };
-    window.addEventListener('afterprint', done, { once: true });
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.payslip-doc img'), (image) => image.decode().catch(() => undefined))]).then(() => { if (!cancelled) window.print(); });
-    }, 80);
-    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('payslip-printing'); document.title = previous; };
-  }, [active]);
-}
-
-export const noPayLabel = (slip: { unpaidDays?: number }) => `TOTAL NO PAY${slip.unpaidDays ? ` (UNPAID LEAVE ${slip.unpaidDays.toFixed(2)} DAYS)` : ''}`;
-
-export function PayslipDocument({ slip }: { slip: Slip }) {
-  const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-  const period = slipPeriod(slip.year, slip.month, slip.resignDate);
-  const line = (label: string, value: number, minus = false, bold = false) => <div key={label} className={`payslip-line${bold ? ' payslip-bold' : ''}`}><span>{label}</span><span>{minus ? '-' : ''}{fmt(value)}</span></div>;
-  return <div className="payslip-doc">
-    <header><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" /><div><strong>{company.name}</strong><small>{company.address}</small></div></header>
-    <h1>Payslip · {MONTHS[slip.month - 1]} {slip.year}</h1>
-    <p className="payslip-who"><strong>{slip.name}</strong> ({slip.code})<br />{slip.designation || '—'}{slip.department ? ` · ${slip.department}` : ''}<br />Pay period: {longDate(period.from)} to {longDate(period.to)}</p>
-    <section>
-      {line('BASIC PAY', slip.basic + (slip.noPay || 0))}
-      {(slip.noPay || 0) > 0 && line(noPayLabel(slip), slip.noPay!, true)}
-      {slip.allowances.map((item) => line(item.name.toUpperCase(), item.amount))}
-      {slip.ot > 0 && line('OVERTIME', slip.ot)}{slip.restPh > 0 && line('REST DAY / PUBLIC HOLIDAY', slip.restPh)}
-      {line('EMPLOYEE EPF', slip.kwspEmployee, true)}{line('EMPLOYEE EIS', slip.eisEmployee, true)}{line('EMPLOYEE SOCSO', slip.socsoEmployee, true)}
-      {slip.skbbk > 0 && line('SKBBK', slip.skbbk, true)}{slip.pcb > 0 && line('MTD/PCB', slip.pcb, true)}
-    </section>
-    <section>
-      {line('GROSS WAGES', slip.gross, false, true)}{line('NETT WAGES', slip.net, false, true)}
-      {line('Employer EPF', slip.kwspEmployer)}{line('Employer EIS', slip.eisEmployer)}{line('Employer SOCSO', slip.socsoEmployer)}
-      {line('Pay so far this year', slip.ytdWages)}{line('PCB so far this year', slip.ytdPcb)}
-      {slip.leave && <><div className="payslip-line"><span>AL taken / balance / this year</span><span>{leaveText(slip.leave.al)}</span></div><div className="payslip-line"><span>ML taken / balance / this year</span><span>{leaveText(slip.leave.ml)}</span></div></>}
-    </section>
-    <p className="payslip-bank">Salary credited to: BANK GIRO<br />Bank account: {slip.bankName || '—'}{slip.bankAccountEnd ? ` · •••• ${slip.bankAccountEnd}` : ''}<br />Paid on: 26 {MONTHS[slip.month - 1]} {slip.year}</p>
-    <p className="payslip-note">This is a system generated payslip and does not require signature.</p>
-  </div>;
-}
 
 // Opening, printing or sharing a payslip asks for the person's own AraOffice password each time, as Infotech does. The password is
 // checked by the server and is only kept in this box until it is sent.
@@ -97,81 +43,53 @@ function PasswordPrompt({ title, note, busy, error, onSubmit, onCancel }: { titl
 export default function MyPayslips() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [incentives, setIncentives] = useState<Incentive[]>([]);
-  const [slip, setSlip] = useState<Slip | null>(null);
+  const [slip, setSlip] = useState<HRSlip | null>(null);
+  const [reveal, setReveal] = useState(false); // the IC, tax, SOCSO, EPF and bank numbers stay hidden until asked for, as on HR's preview
+  const sheet = useRef<HTMLDivElement>(null);
   const [original, setOriginal] = useState(''); // the Infotech payslip (base64 PDF) of the open month, when there is one
   const [error, setError] = useState('');
   const [asking, setAsking] = useState<null | { kind: 'open'; item: Item } | { kind: 'print' } | { kind: 'pdf' }>(null);
   const [busy, setBusy] = useState(false);
   const [printing, setPrinting] = useState(false);
-  usePayslipPrint(printing, slip ? `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` : 'Payslip', () => setPrinting(false));
+  useSlipPrint(printing, slip ? `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` : 'Payslip', () => setPrinting(false));
   useEffect(() => { assessmentFetch('action=my_payslips').then((result: { payslips: Item[]; incentives?: Incentive[] }) => { setItems(result.payslips); setIncentives(result.incentives || []); }).catch((cause: Error) => { setError(cause.message); setItems([]); }); }, []);
   const post = (action: string, body: Record<string, unknown>) => assessmentFetch(`action=${action}`, { method: 'POST', body: JSON.stringify(body) });
   const answer = async (password: string) => {
     if (!asking) return;
     setBusy(true); setError('');
     try {
-      if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setSlip(result.payslip); setOriginal(result.infotech || ''); setAsking(null); }
+      if (asking.kind === 'open') { const result = await post('my_payslip', { year: asking.item.year, month: asking.item.month, password }); setReveal(false); setSlip(result.payslip); setOriginal(result.infotech || ''); setAsking(null); }
       else if (asking.kind === 'print') { await post('verify_password', { password }); setAsking(null); if (original) await printInfotech(original); else setPrinting(true); }
       else if (slip) {
         // The PDF is locked with the same password. On a phone the share sheet offers WhatsApp; elsewhere the file is downloaded.
-        // For an Infotech month the locked copy is made here from the original, once the password is confirmed; otherwise the server makes the locked PDF.
-        let result: { file: string }, bytes: Uint8Array;
-        if (original) {
-          await post('verify_password', { password });
-          result = { file: `Payslip_${slip.code}_${slip.year}-${String(slip.month).padStart(2, '0')}.pdf` };
-          bytes = await lockInfotechPdf(new Blob([infotechBytes(original)], { type: 'application/pdf' }), password, slip.code);
-        } else {
-          const made = await post('my_payslip_pdf', { year: slip.year, month: slip.month, password });
-          result = made; bytes = infotechBytes(made.pdf);
+        // The locked copy is made here, once the password is confirmed: from the Infotech original, or from the payslip as shown.
+        await post('verify_password', { password });
+        const name = `Payslip_${slip.code}_${slip.year}-${String(slip.month).padStart(2, '0')}.pdf`;
+        let bytes: Uint8Array;
+        if (original) bytes = await lockInfotechPdf(new Blob([infotechBytes(original)], { type: 'application/pdf' }), password, slip.code);
+        else {
+          const page = sheet.current?.querySelector<HTMLElement>('[data-pdf-page]');
+          const locked = await pagesToPdfBlob(page ? [page] : [], false, { userPassword: password, ownerPassword: `${password}-owner-${slip.code}`, userPermissions: ['print'] });
+          bytes = new Uint8Array(await locked.arrayBuffer());
         }
-        const file = new File([bytes], result.file, { type: 'application/pdf' });
+        const file = new File([bytes], name, { type: 'application/pdf' });
         setAsking(null);
-        if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` }); } catch { /* the share sheet was closed */ } }
-        else downloadBlob([file], result.file, file.type);
+        // If the share sheet cannot open (not just closed by the person), the file is downloaded instead.
+        if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: `Payslip ${MONTHS[slip.month - 1]} ${slip.year}` }); } catch (cause) { if ((cause as Error)?.name !== 'AbortError') downloadBlob([file], name, file.type); } }
+        else downloadBlob([file], name, file.type);
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'That did not work. Try again.'); }
     finally { setBusy(false); }
   };
   if (slip) {
-    const company = COMPANY[slip.company] || { name: slip.company, address: '' };
-    const period = slipPeriod(slip.year, slip.month, slip.resignDate);
     return <div className="space-y-3">
-      {printing && createPortal(<PayslipDocument slip={slip} />, document.body)}
+      {printing && createPortal(<div className="hrslip-print"><HRPayslipSheet slip={slip} reveal={reveal} /></div>, document.body)}
       <div className="flex items-center justify-between print:hidden"><button type="button" onClick={() => setSlip(null)} className="inline-flex items-center gap-1 text-sm font-semibold text-[#0b587b]"><ChevronLeft className="h-4 w-4" />All payslips</button><span className="flex gap-2"><button type="button" onClick={() => { setError(''); setAsking({ kind: 'print' }); }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#0b587b]"><Printer className="h-4 w-4" />Print</button><button type="button" onClick={() => { setError(''); setAsking({ kind: 'pdf' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#0b587b] px-3 py-2 text-sm font-semibold text-white"><Share2 className="h-4 w-4" />Share / PDF</button></span></div>
       {asking && asking.kind !== 'open' && <PasswordPrompt title={asking.kind === 'print' ? 'Enter your password to print' : 'Enter your password to get the PDF'} note={asking.kind === 'pdf' ? 'The PDF is locked with this same password, so anyone you send it to (for example on WhatsApp) needs it to open the file.' : undefined} busy={busy} error={error} onSubmit={(value) => void answer(value)} onCancel={() => setAsking(null)} />}
-      {original ? <InfotechSlip pdf={original} remark={infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)} /> : <article className="payslip-print rounded-2xl bg-white p-5 shadow-[0_8px_25px_rgba(20,35,59,0.06)]">
-        <div className="mb-4 flex items-start gap-3 border-b border-slate-100 pb-3"><img src="/ara-logo.png" alt="Klinik ARA 24 Jam" className="h-12 w-12 shrink-0 object-contain" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#14233b]">{company.name}</p><p className="text-[11px] leading-4 text-slate-500">{company.address}</p></div></div>
-        <h2 className="text-base font-semibold text-[#3b5da8]">{slip.name} ({slip.code})</h2>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-          <Field label="Department" value={slip.department} /><Field label="Designation" value={slip.designation} />
-          <Field label="Company Name" value={company.name} /><Field label="Address" value={company.address} />
-        </div>
-        <div className="mt-3"><Field label="Pay Period" value={`${longDate(period.from)} to ${longDate(period.to)}`} /></div>
-        <div className="mt-4 rounded-xl border border-slate-200 px-4 py-2">
-          <Row label="BASIC PAY" value={slip.basic + (slip.noPay || 0)} />
-          {(slip.noPay || 0) > 0 && <Row label={noPayLabel(slip)} value={slip.noPay!} minus />}
-          {slip.allowances.map((item) => <Row key={item.name} label={item.name.toUpperCase()} value={item.amount} />)}
-          {slip.ot > 0 && <Row label="OVERTIME" value={slip.ot} />}{slip.restPh > 0 && <Row label="REST DAY / PUBLIC HOLIDAY" value={slip.restPh} />}
-          <Row label="EMPLOYEE EPF" value={slip.kwspEmployee} minus /><Row label="EMPLOYEE EIS" value={slip.eisEmployee} minus /><Row label="EMPLOYEE SOCSO" value={slip.socsoEmployee} minus />
-          {slip.skbbk > 0 && <Row label="SKBBK" value={slip.skbbk} minus />}{slip.pcb > 0 && <Row label="MTD/PCB" value={slip.pcb} minus />}
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-slate-200 p-4">
-          <Pair label="Gross Wages" value={slip.gross} /><Pair label="Nett Wages" value={slip.net} />
-          <Pair label="Employer EPF" value={slip.kwspEmployer} /><Pair label="EMPLOYEE EPF" value={slip.kwspEmployee} />
-          <Pair label="Employer EIS" value={slip.eisEmployer} /><Pair label="EMPLOYEE EIS" value={slip.eisEmployee} />
-          <Pair label="Employer SOCSO" value={slip.socsoEmployer} /><Pair label="EMPLOYEE SOCSO" value={slip.socsoEmployee} />
-          <Pair label="Zakat" value={0} /><Pair label="MTD/PCB" value={slip.pcb} />
-          {slip.skbbk > 0 && <Pair label="SKBBK" value={slip.skbbk} />}
-          <Pair label="Pay so far this year" value={slip.ytdWages} /><Pair label="PCB so far this year" value={slip.ytdPcb} />
-          {slip.leave && <><Field label="AL taken / balance / this year" value={leaveText(slip.leave.al)} /><Field label="ML taken / balance / this year" value={leaveText(slip.leave.ml)} /></>}
-        </div>
-        <div className="mt-4 space-y-1.5 text-sm">
-          <p className="flex gap-3"><span className="w-36 text-slate-500">Salary Credited To</span><span className="font-semibold text-[#3b5da8]">: BANK GIRO</span></p>
-          <p className="flex gap-3"><span className="w-36 text-slate-500">Bank account</span><span className="font-semibold text-[#3b5da8]">: {slip.bankName || '—'}{slip.bankAccountEnd ? ` · •••• ${slip.bankAccountEnd}` : ''}</span></p>
-          <p className="flex gap-3"><span className="w-36 text-slate-500">Paid on</span><span className="font-semibold text-[#3b5da8]">: 26 {MONTHS[slip.month - 1]} {slip.year}</span></p>
-        </div>
-        <p className="mt-4 text-center text-[11px] text-slate-400">This is a system generated payslip and does not require signature.</p>
-      </article>}
+      {original ? <InfotechSlip pdf={original} remark={infotechRemark(slip.year, slip.month, slip.ot > 0 || slip.restPh > 0)} /> : <>
+        <button type="button" onClick={() => setReveal(!reveal)} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 print:hidden">{reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{reveal ? 'Hide IC, tax and bank numbers' : 'Show IC, tax and bank numbers'}</button>
+        <div ref={sheet}><ReportPreviewFrame portrait><HRPayslipSheet slip={slip} reveal={reveal} /></ReportPreviewFrame></div>
+      </>}
     </div>;
   }
   if (items === null) return <p className="text-sm text-slate-500">Loading…</p>;

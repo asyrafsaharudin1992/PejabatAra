@@ -7,8 +7,7 @@ import { officeFetch } from './lib/officeApi';
 import { PeriodPicker, type Period } from './PeriodPicker';
 import { PrintMenu } from './PrintMenu';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
-import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
-import { useSlipPrint } from './HRPayslips';
+import { HRPayslipSheet, useSlipPrint, type HRSlip } from './HRPayslipSheet';
 import { MONTHS } from './MyPayslips';
 
 // Reports > Payslips: every payslip of a payroll period or month, laid out as the A4 payslip (Infotech's layout), one after the other on the page like the other reports.

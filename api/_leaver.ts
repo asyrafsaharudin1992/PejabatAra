@@ -5,7 +5,7 @@ import { payPeriod } from '../src/lib/payrollRun.js';
 // Staff who have left. After the last working day the sign-in stays open for what they still need (their forms and payslips); every other part is closed.
 // The sign-in is switched off by itself once their forms are filled and the last payslip has been out for 14 days.
 export const PAYSLIP_DAYS = 14;
-export const LEAVER_ACTIONS = /^(me|set_password|my_photo|my_payslips|my_payslip|my_payslip_pdf|verify_password|announcements|announcement_read|pdfform_[a-z_]+|flu_form[a-z_]*)$/;
+export const LEAVER_ACTIONS = /^(me|set_password|my_photo|my_payslips|my_payslip|verify_password|announcements|announcement_read|pdfform_[a-z_]+|flu_form[a-z_]*)$/;
 type Person = { id: string; status: string; resign_date: string | null };
 const malaysiaToday = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 export const hasLeft = (person: { status: string; resign_date: string | null }, today = malaysiaToday()) => person.status === 'Inactive' || Boolean(person.resign_date && person.resign_date < today);

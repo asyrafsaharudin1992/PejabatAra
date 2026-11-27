@@ -1,9 +1,24 @@
+import { useEffect } from 'react';
 import { COMPANY, fmt, leaveText, MONTHS, type Slip, type SlipLeave } from './MyPayslips';
 import { slipPeriod, infotechRemark } from './lib/payrollRun';
 
-// HR's payslip, laid out like the Infotech Employee Payslip Report (A4): the clinic and address, the staff member's details, Earnings and Deductions side by side
+// The payslip, laid out like the Infotech Employee Payslip Report (A4), the same for HR and for the staff member: the clinic and address, the staff member's details, Earnings and Deductions side by side
 // with the totals, then the employer's share, the nett wages and the bank. The identity and bank numbers show only when HR has chosen to (`reveal`).
 export type HRSlip = Slip & { ic: string; taxNo: string; socsoNo: string; epfNo: string; joinDate: string; resignDate?: string; bankAccount: string; annualLeaveDeduction: number; otherDeduction: number; adjustments?: { type: string; amount: number; note: string }[]; leave?: SlipLeave; increment?: number; otLines?: { heading: string; rows: { label: string; hours: number; amount: number }[] }[]; otFrom?: string; otTo?: string };
+// Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
+export function useSlipPrint(active: boolean, title: string, onDone: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    document.body.classList.add('hrslip-printing');
+    const previous = document.title; document.title = title;
+    const done = () => { document.body.classList.remove('hrslip-printing'); document.title = previous; onDone(); };
+    window.addEventListener('afterprint', done, { once: true });
+    let cancelled = false;
+    const timer = window.setTimeout(() => { void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.hrslip-print img'), (image) => image.decode().catch(() => undefined))]).then(() => { if (!cancelled) window.print(); }); }, 80);
+    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('hrslip-printing'); document.title = previous; };
+  }, [active]);
+}
+
 const two = (value: number) => fmt(Number(value) || 0);
 const dmy = (iso: string) => iso ? iso.split('-').reverse().join('-') : '';
 const mask = (value: string, reveal: boolean) => !value ? '' : reveal || value.length <= 4 ? value : `${'•'.repeat(value.length - 4)}${value.slice(-4)}`;

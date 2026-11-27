@@ -1,16 +1,32 @@
 import { downloadBlob } from './downloadBlob';
 import { fixUnsupportedColors } from './colorFix';
 
+// On the payslip sheet html2canvas runs words together, and draws text too low: it measures text with a small picture in the live page, which the app's styles
+// turn into a block. The first is put right in the copy it draws from; for the second a rule is added to the page while the sheet is drawn.
+function spacePayslipWords(copy: Document) {
+  const style = copy.createElement('style');
+  style.textContent = '.hrslip-sheet, .hrslip-sheet * { letter-spacing: 0.01px; }';
+  copy.head.appendChild(style);
+}
+function fixPayslipBaseline(page: HTMLElement) {
+  if (!page.querySelector('.hrslip-sheet')) return () => {};
+  const style = document.createElement('style');
+  style.textContent = 'body > div > img { display: inline-block !important; }';
+  document.head.appendChild(style);
+  return () => style.remove();
+}
+
 // "Save PDF" for a report that is already drawn on screen: every element marked data-pdf-page inside the container is one page. Each is drawn at its own size
 // (any scaling the preview applied to fit the window is removed), then put on an A4 page, so what is saved is the report as it was previewed, not a screenshot of the window.
 // html2canvas and jsPDF are loaded only when Save is pressed.
-export async function pagesToPdfBlob(pages: HTMLElement[], landscape: boolean): Promise<Blob> {
+export async function pagesToPdfBlob(pages: HTMLElement[], landscape: boolean, encryption?: { userPassword: string; ownerPassword: string; userPermissions: ('print')[] }): Promise<Blob> {
   if (!pages.length) throw new Error('There is nothing to save yet.');
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
-  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait', compress: true });
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait', compress: true, ...(encryption ? { encryption } : {}) });
   const width = landscape ? 297 : 210, height = landscape ? 210 : 297;
   for (let index = 0; index < pages.length; index++) {
-    const canvas = await html2canvas(pages[index], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, onclone: (_document, element) => { element.style.transform = 'none'; element.style.left = '0'; element.style.top = '0'; fixUnsupportedColors(element); } });
+    const restore = fixPayslipBaseline(pages[index]);
+    const canvas = await html2canvas(pages[index], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, onclone: (_document, element) => { element.style.transform = 'none'; element.style.left = '0'; element.style.top = '0'; fixUnsupportedColors(element); if (element.querySelector('.hrslip-sheet')) spacePayslipWords(_document); } }).finally(restore);
     // The picture is fitted to the page width; a taller one (several sheets in one block) continues on the next pages, a slice of one page each.
     const sliceHeight = Math.floor(canvas.width * height / width), count = Math.max(1, Math.ceil(canvas.height / sliceHeight - 0.08));
     for (let part = 0; part < count; part++) {

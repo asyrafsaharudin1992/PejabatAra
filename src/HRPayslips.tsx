@@ -7,7 +7,7 @@ import { officeFetch } from './lib/officeApi';
 import { infotechRemark, payPeriod } from './lib/payrollRun';
 import { fmt, longDate, MONTHS } from './MyPayslips';
 import { PrintMenu } from './PrintMenu';
-import { HRPayslipSheet, type HRSlip } from './HRPayslipSheet';
+import { HRPayslipSheet, useSlipPrint, type HRSlip } from './HRPayslipSheet';
 import { ReportPreviewFrame } from './ReportPreviewFrame';
 import { InfotechSlip, infotechBytes, printInfotech } from './InfotechSlip';
 import { downloadBlob } from './lib/downloadBlob';
@@ -19,20 +19,6 @@ type Line = { id: string; code: string; name: string; company: string; designati
 const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
 // Payroll months from January 2026 to a few months ahead.
 const OPTIONS = (() => { const out: { year: number; month: number }[] = []; for (let y = 2026; y <= 2027; y++) for (let m = 1; m <= 12; m++) out.push({ year: y, month: m }); return out.filter((item) => monthKey(item.year, item.month) <= '2027-06'); })();
-
-// Printing: the sheet is drawn once more in its own A4 document (the app around it is hidden while the print window is open).
-export function useSlipPrint(active: boolean, title: string, onDone: () => void) {
-  useEffect(() => {
-    if (!active) return;
-    document.body.classList.add('hrslip-printing');
-    const previous = document.title; document.title = title;
-    const done = () => { document.body.classList.remove('hrslip-printing'); document.title = previous; onDone(); };
-    window.addEventListener('afterprint', done, { once: true });
-    let cancelled = false;
-    const timer = window.setTimeout(() => { void Promise.all([document.fonts.ready, ...Array.from(document.querySelectorAll<HTMLImageElement>('.hrslip-print img'), (image) => image.decode().catch(() => undefined))]).then(() => { if (!cancelled) window.print(); }); }, 80);
-    return () => { cancelled = true; window.clearTimeout(timer); window.removeEventListener('afterprint', done); document.body.classList.remove('hrslip-printing'); document.title = previous; };
-  }, [active]);
-}
 
 // The payslip in the Infotech layout (A4), with a Print button. The IC, tax, SOCSO, EPF and bank numbers stay hidden until HR chooses to show them (and print as shown).
 function Preview({ slip, status, infotech, onClose }: { slip: HRSlip; status: string; infotech: string; onClose: () => void }) {
