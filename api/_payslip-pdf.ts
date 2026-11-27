@@ -3,7 +3,7 @@ import { slipPeriod } from '../src/lib/payrollRun.js';
 import { ARA_LOGO_PNG } from './_ara-logo.js';
 
 // A password-protected PDF of one payslip, laid out like the Infotech payslip. The staff member opens it with their AraOffice password.
-export type PayslipData = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } } };
+export type PayslipData = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } } };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const COMPANY: Record<string, { name: string; address: string }> = {
   KJ: { name: 'KJ- HSO Healthcare Sdn Bhd', address: 'D-13-GA Jalan Prima Saujana 2/F, Taman Prima Saujana, 43000 Kajang, Selangor' },
@@ -18,7 +18,7 @@ export function payslipPdf(slip: PayslipData, password: string): Buffer {
   const period = slipPeriod(slip.year, slip.month, slip.resignDate);
   const left = 18, right = 192;
   // Always one page: the line spacing shrinks a little when a payslip has many allowances.
-  const lines = 17 + slip.allowances.length + (slip.ot > 0 ? 1 : 0) + (slip.restPh > 0 ? 1 : 0) + (slip.skbbk > 0 ? 1 : 0) + (slip.pcb > 0 ? 1 : 0);
+  const lines = 17 + ((slip.noPay || 0) > 0 ? 1 : 0) + slip.allowances.length + (slip.ot > 0 ? 1 : 0) + (slip.restPh > 0 ? 1 : 0) + (slip.skbbk > 0 ? 1 : 0) + (slip.pcb > 0 ? 1 : 0);
   const step = Math.min(6.5, 205 / lines);
   let y = 18;
   // Letterhead: logo and company.
@@ -33,7 +33,8 @@ export function payslipPdf(slip: PayslipData, password: string): Buffer {
   doc.text(`${slip.designation || '-'}${slip.department ? ` · ${slip.department}` : ''}`, left, y); y += 5.5;
   doc.text(`Pay period: ${longDate(period.from)} to ${longDate(period.to)}`, left, y); y += 9;
   doc.setDrawColor(180); doc.line(left, y - 4, right, y - 4);
-  line('BASIC PAY', fmt(slip.basic));
+  line('BASIC PAY', fmt(slip.basic + (slip.noPay || 0)));
+  if ((slip.noPay || 0) > 0) line(`TOTAL NO PAY${slip.unpaidDays ? ` (UNPAID LEAVE ${slip.unpaidDays.toFixed(2)} DAYS)` : ''}`, `-${fmt(slip.noPay!)}`);
   for (const item of slip.allowances) line(item.name.toUpperCase(), fmt(item.amount));
   if (slip.ot > 0) line('OVERTIME', fmt(slip.ot));
   if (slip.restPh > 0) line('REST DAY / PUBLIC HOLIDAY', fmt(slip.restPh));

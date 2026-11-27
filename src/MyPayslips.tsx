@@ -9,7 +9,7 @@ import { downloadBlob } from './lib/downloadBlob';
 // Only the signed-in person's own. Pay is on the 26th; the pay period is the 20th of the month before to the 19th.
 type Item = { year: number; month: number };
 type Incentive = { claimMonth: string; amount: number; paidOn: string; procedures: number };
-export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
+export type Slip = { year: number; month: number; name: string; code: string; company: string; designation: string; department: string; noPay?: number; unpaidDays?: number; basic: number; allowances: { name: string; amount: number }[]; ot: number; restPh: number; gross: number; kwspEmployee: number; kwspEmployer: number; socsoEmployee: number; socsoEmployer: number; eisEmployee: number; eisEmployer: number; skbbk: number; pcb: number; deductions: number; net: number; ytdWages: number; ytdPcb: number; bankName: string; bankAccountEnd: string; resignDate?: string; leave?: SlipLeave };
 // The leave summary under the pay: days taken in the pay period / balance at the end of it / days taken so far this year. Annual Leave includes Emergency Leave.
 export type SlipLeave = { al: { period: number; balance: number | null; ytd: number }; ml: { period: number; balance: number | null; ytd: number } };
 export const leaveText = (item: SlipLeave['al']) => `${item.period.toFixed(2)} / ${item.balance === null ? '-' : item.balance.toFixed(2)} / ${item.ytd.toFixed(2)}`;
@@ -50,6 +50,8 @@ export function usePayslipPrint(active: boolean, title: string, onDone: () => vo
   }, [active]);
 }
 
+export const noPayLabel = (slip: { unpaidDays?: number }) => `TOTAL NO PAY${slip.unpaidDays ? ` (UNPAID LEAVE ${slip.unpaidDays.toFixed(2)} DAYS)` : ''}`;
+
 export function PayslipDocument({ slip }: { slip: Slip }) {
   const company = COMPANY[slip.company] || { name: slip.company, address: '' };
   const period = slipPeriod(slip.year, slip.month, slip.resignDate);
@@ -59,7 +61,8 @@ export function PayslipDocument({ slip }: { slip: Slip }) {
     <h1>Payslip · {MONTHS[slip.month - 1]} {slip.year}</h1>
     <p className="payslip-who"><strong>{slip.name}</strong> ({slip.code})<br />{slip.designation || '—'}{slip.department ? ` · ${slip.department}` : ''}<br />Pay period: {longDate(period.from)} to {longDate(period.to)}</p>
     <section>
-      {line('BASIC PAY', slip.basic)}
+      {line('BASIC PAY', slip.basic + (slip.noPay || 0))}
+      {(slip.noPay || 0) > 0 && line(noPayLabel(slip), slip.noPay!, true)}
       {slip.allowances.map((item) => line(item.name.toUpperCase(), item.amount))}
       {slip.ot > 0 && line('OVERTIME', slip.ot)}{slip.restPh > 0 && line('REST DAY / PUBLIC HOLIDAY', slip.restPh)}
       {line('EMPLOYEE EPF', slip.kwspEmployee, true)}{line('EMPLOYEE EIS', slip.eisEmployee, true)}{line('EMPLOYEE SOCSO', slip.socsoEmployee, true)}
@@ -134,7 +137,8 @@ export default function MyPayslips() {
         </div>
         <div className="mt-3"><Field label="Pay Period" value={`${longDate(period.from)} to ${longDate(period.to)}`} /></div>
         <div className="mt-4 rounded-xl border border-slate-200 px-4 py-2">
-          <Row label="BASIC PAY" value={slip.basic} />
+          <Row label="BASIC PAY" value={slip.basic + (slip.noPay || 0)} />
+          {(slip.noPay || 0) > 0 && <Row label={noPayLabel(slip)} value={slip.noPay!} minus />}
           {slip.allowances.map((item) => <Row key={item.name} label={item.name.toUpperCase()} value={item.amount} />)}
           {slip.ot > 0 && <Row label="OVERTIME" value={slip.ot} />}{slip.restPh > 0 && <Row label="REST DAY / PUBLIC HOLIDAY" value={slip.restPh} />}
           <Row label="EMPLOYEE EPF" value={slip.kwspEmployee} minus /><Row label="EMPLOYEE EIS" value={slip.eisEmployee} minus /><Row label="EMPLOYEE SOCSO" value={slip.socsoEmployee} minus />

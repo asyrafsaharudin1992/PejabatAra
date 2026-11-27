@@ -15,6 +15,7 @@ import { ADJUSTMENT_TYPES, calculatePayslip, hourlyRate, NO_INPUTS, payPeriod, p
 import { epcbFile, epfFormA, socsoFile } from '../src/lib/payrollFiles.js';
 import { fluFormHr, fluFormOpen } from './_staff-forms.js';
 import { pdfFormHrAction } from './_pdf-forms.js';
+import { noPayOf } from './_nopay.js';
 import { changeLines, joinLine, type CareerLine } from '../src/lib/careerAuto.js';
 import { locumInterviewDelete, locumInterviewList, locumInterviewSave } from './_locum-interview.js';
 import { cleanValue, patchFrom, REQUEST_SELECT, same as profileSame } from './_profile-requests.js';
@@ -2316,7 +2317,7 @@ export async function hrHandler(req: any, res: any) {
         if (member.payslip?.status === 'locked') throw fail(409, `${member.fullName}'s payslip for this month is already locked.`);
         const num = (value: unknown) => Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
         const inputs: PayInputs = { ...NO_INPUTS, ot: num(item.inputs?.ot), restPh: num(item.inputs?.restPh), shiftAllowance: num(item.inputs?.shiftAllowance), unpaidLeave: num(item.inputs?.unpaidLeave), otherAllowance: num(item.inputs?.otherAllowance), otherDeduction: num(item.inputs?.otherDeduction), ot10: num(item.inputs?.ot10), ot15: num(item.inputs?.ot15), ot20: num(item.inputs?.ot20), ot30: num(item.inputs?.ot30), restDays: num(item.inputs?.restDays), phDays: num(item.inputs?.phDays), unpaidDays: num(item.inputs?.unpaidDays), annualLeaveDeduction: num(item.inputs?.annualLeaveDeduction), adjustments: cleanAdjustments(item.inputs?.adjustments) };
-        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate }, inputs, member.ytd, year, month);
+        const result = calculatePayslip({ basicSalary: member.basicSalary, fixedAllowances: member.fixedAllowances, maritalStatus: member.maritalStatus, spouseWorking: member.spouseWorking, children: member.children, settings: member.settings, joinDate: member.joinDate, resignDate: member.resignDate, salaryChanges: member.salaryChanges }, inputs, member.ytd, year, month);
         // Locking keeps the leave summary of that moment on the payslip, so the balance shown later is the one at the end of the pay period.
         const saved: any = lock ? { ...result, leave: await payslipLeave(db, member.id, year, month) } : result;
         rows.push({ employee_id: member.id, year, month, status: lock ? 'locked' : 'draft', inputs, result: saved, locked_at: lock ? now : null, updated_at: now });
@@ -2422,7 +2423,7 @@ export async function hrHandler(req: any, res: any) {
         bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4),
         // For HR's A4 payslip (the Infotech layout): the identity and bank numbers (shown only when HR chooses), the join date and what HR typed that month.
         ic: me.ic_no || '', taxNo: me.tax_no || '', socsoNo: me.socso_no || '', epfNo: me.epf_no || '', joinDate: me.join_date || '', resignDate: me.resign_date || '', bankAccount: me.bank_account || '',
-        annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) } });
+        ...(await noPayOf(db, id, slip, Number((me as any).basic_salary) || 0)), annualLeaveDeduction: Number(slip.inputs?.annualLeaveDeduction) || 0, otherDeduction: Number(slip.inputs?.otherDeduction) || 0, adjustments: cleanAdjustments(slip.inputs?.adjustments), leave: r.leave || await payslipLeave(db, id, slip.year, slip.month) } });
     }
 
     // Maybank2U bulk payment file for one company's pay of a month, in the layout Infotech produces (checked against the October file).

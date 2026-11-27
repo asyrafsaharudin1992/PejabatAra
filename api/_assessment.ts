@@ -1,5 +1,6 @@
 import { joinYearEarned, resignationEarned } from '../src/lib/annualLeaveProration.js';
 import { hiddenPayslips, monthKey } from './_payslip-hidden.js';
+import { noPayOf } from './_nopay.js';
 import { calendarAccessFor } from './_leave-calendar-access.js';
 import { individualPreviewAdmin } from './_individual-preview.js';
 import { careAction, careWaitingCount, isCooTitle } from './_care.js';
@@ -711,7 +712,7 @@ async function staffAction(req: any, res: any, action: string, body: any) {
   // The signed-in person's own payslips. Only a month HR has locked is shown, and only to the person it belongs to.
   // Opening one, and printing or sharing it, needs the person's own password again (as in Infotech): checked here, never trusted from the page.
   if (action === 'my_payslips' || action === 'my_payslip' || action === 'my_payslip_pdf' || action === 'verify_password') {
-    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account,resign_date').eq('assessment_staff_id', staff.id).maybeSingle();
+    const { data: me, error: meError } = await db.from('hr_employees').select('id,full_name,employee_code,company,designation,department,bank_name,bank_account,resign_date,basic_salary').eq('assessment_staff_id', staff.id).maybeSingle();
     if (meError) throw meError;
     if (!me) throw fail(403, 'Your sign-in is not linked to your staff record yet. Ask HR.');
     if (action === 'my_payslips') {
@@ -727,12 +728,12 @@ async function staffAction(req: any, res: any, action: string, body: any) {
     if (action === 'verify_password') return res.status(200).json({ success: true });
     const year = Math.round(Number(body.year)), month = Math.round(Number(body.month));
     if ((await hiddenPayslips(db)).has(monthKey(year, month))) throw fail(404, 'That payslip is not available.');
-    const { data, error } = await db.from('hr_payslips').select('year,month,result,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
+    const { data, error } = await db.from('hr_payslips').select('year,month,result,inputs,locked_at').eq('employee_id', me.id).eq('status', 'locked').eq('year', year).eq('month', month).maybeSingle();
     if (error) throw error;
     if (!data) throw fail(404, 'That payslip is not available.');
     const r = data.result || {};
     const payslip = { year: data.year, month: data.month, name: me.full_name, code: me.employee_code, company: me.company, designation: me.designation, department: me.department,
-      basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
+      ...(await noPayOf(db, me.id, data, Number(me.basic_salary) || 0)), basic: r.basic, allowances: r.allowances || [], ot: r.ot, restPh: r.restPh, gross: r.gross, kwspEmployee: r.kwspEmployee, kwspEmployer: r.kwspEmployer, socsoEmployee: r.socsoEmployee, socsoEmployer: r.socsoEmployer,
       eisEmployee: r.eisEmployee, eisEmployer: r.eisEmployer, skbbk: r.skbbk, pcb: r.pcb, deductions: r.deductions, net: r.net, ytdWages: r.ytdAfter?.wages, ytdPcb: r.ytdAfter?.pcbPaid,
       bankName: me.bank_name || '', bankAccountEnd: String(me.bank_account || '').replace(/\D/g, '').slice(-4), resignDate: me.resign_date || '', leave: r.leave || await payslipLeave(db, me.id, data.year, data.month) };
     if (action === 'my_payslip') return res.status(200).json({ payslip });
