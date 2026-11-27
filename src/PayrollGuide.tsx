@@ -19,6 +19,7 @@ export function PayrollGuide() {
   const [hours, setHours] = useState({ ot10: '0', ot15: '3', ot20: '0', ot30: '0' });
   const [days, setDays] = useState({ restDays: '0', phDays: '0', unpaidDays: '0' });
   const [other, setOther] = useState('0');
+  const [normalHours, setNormalHours] = useState('208'); // 26 days of 8 hours, the basis of the daily and hourly rates
   const [skbbkOn, setSkbbkOn] = useState(false), [hrdfOn, setHrdfOn] = useState(false), [rate, setRate] = useState('11');
   // The family, for the tax (PCB): married or single, whether the spouse works, and the children under 18.
   const [marital, setMarital] = useState<'Single' | 'Married'>('Single'), [spouseWorks, setSpouseWorks] = useState(true), [kids, setKids] = useState('0');
@@ -78,6 +79,26 @@ export function PayrollGuide() {
       </div>
       {result ? <div className="overflow-x-auto"><table className="no-stack w-full min-w-[560px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Step</th><th className="pr-4">How</th><th className="text-right">RM</th></tr></thead>
         <tbody>{steps.map(([step, how, value]) => <tr key={step} className={`border-b border-slate-50 ${/^(GROSS|NET PAY)$/.test(step) ? 'bg-[#f4fafd] font-bold text-[#0b587b]' : ''}`}><td className="py-2 pr-4 font-semibold">{step}</td><td className="pr-4 text-slate-500">{how}</td><td className="whitespace-nowrap text-right tabular-nums">{value}</td></tr>)}</tbody></table></div> : <p className="text-sm text-slate-500">Type a basic salary above.</p>}
+      {result && (() => {
+        // What the staff member costs the company: the gross pay and the employer's own contributions, for the month typed above and for twelve such months.
+        const { out } = result, rows: [string, number][] = [['Gross pay', out.gross], ['Employer KWSP', out.kwspEmployer], ['Employer PERKESO', out.socsoEmployer], ['Employer EIS', out.eisEmployer], ['Employer HRDF', out.hrdf]];
+        const total = Math.round(rows.reduce((sum, [, value]) => sum + value, 0) * 100) / 100, year = (value: number) => Math.round(value * 12 * 100) / 100;
+        // Hours at work in the month: the normal hours, plus OT and rest / holiday days worked, less unpaid days (a day is 8 hours).
+        const { inputs } = result, otHours = (inputs.ot10 || 0) + (inputs.ot15 || 0) + (inputs.ot20 || 0) + (inputs.ot30 || 0), extraHours = ((inputs.restDays || 0) + (inputs.phDays || 0)) * 8, awayHours = (inputs.unpaidDays || 0) * 8;
+        const hours = Math.max(0, Math.round((n(normalHours) + otHours + extraHours - awayHours) * 100) / 100), perHour = hours > 0 ? total / hours : 0;
+        return <div className="space-y-2 rounded-2xl border border-slate-200 p-4">
+          <h4 className="text-sm font-semibold text-[#14233b]">Total cost to the company for this staff</h4>
+          <div className="overflow-x-auto"><table className="no-stack w-full min-w-[420px] text-left text-sm"><thead><tr className="border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-400"><th className="py-2 pr-4">Item</th><th className="pr-4 text-right">A month (RM)</th><th className="text-right">A year (RM)</th></tr></thead>
+            <tbody>{rows.map(([name, value]) => <tr key={name} className="border-b border-slate-50"><td className="py-2 pr-4 font-semibold text-slate-700">{name}</td><td className="pr-4 text-right tabular-nums">{fmt(value)}</td><td className="text-right tabular-nums">{fmt(year(value))}</td></tr>)}
+              <tr className="bg-[#f4fafd] font-bold text-[#0b587b]"><td className="py-2 pr-4">TOTAL SPENT BY THE COMPANY</td><td className="pr-4 text-right tabular-nums">{fmt(total)}</td><td className="text-right tabular-nums">{fmt(year(total))}</td></tr></tbody></table></div>
+          <div className="grid gap-3 pt-2 sm:grid-cols-3">
+            {num('normalHours', normalHours, setNormalHours, 'Normal working hours a month')}
+            <div className="rounded-xl bg-[#f4fafd] p-3"><p className="text-xs font-semibold text-slate-500">Total hours in the month</p><p className="text-lg font-bold tabular-nums text-[#0b587b]">{fmt(hours)}</p><p className="text-[11px] text-slate-400">{fmt(n(normalHours))} normal + {fmt(otHours)} OT + {fmt(extraHours)} rest/PH − {fmt(awayHours)} unpaid · {fmt(hours * 12)} a year</p></div>
+            <div className="rounded-xl bg-[#f4fafd] p-3"><p className="text-xs font-semibold text-slate-500">Cost to the company per hour</p><p className="text-lg font-bold tabular-nums text-[#0b587b]">{hours > 0 ? `RM ${fmt(perHour)}` : '—'}</p><p className="text-[11px] text-slate-400">{fmt(total)} ÷ {fmt(hours)} hours</p></div>
+          </div>
+          <p className="text-xs text-slate-400">The year is twelve months the same as the one above, so OT, rest day pay or unpaid leave typed there are counted every month. Bonus, incentives and other benefits are not included.</p>
+        </div>;
+      })()}
       <p className="text-xs text-slate-400">The PCB here assumes the same pay is earned in every month of the year. In the real pay run it uses what the person actually earned and paid in the earlier months of the year, and the family details in their profile (marital status, spouse working or not, children).</p>
     </section>
 
